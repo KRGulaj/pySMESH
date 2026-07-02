@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<PaCO_Interface_description>
+<Module>
+ <Name>SALOME</Name>
+ <Interface>
+  <Name>GenericObj</Name>
+ </Interface>
+</Module>
+</PaCO_Interface_description>
+

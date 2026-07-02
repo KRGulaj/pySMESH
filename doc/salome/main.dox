@@ -1,0 +1,77 @@
+/*!
+
+\mainpage  SALOME KERNEL Reference Documentation
+\image html icon_about.png
+
+Welcome to the %SALOME KERNEL documentation !
+Following your kind of usage of %SALOME, you will find some specific
+introductory documentation, listed below.
+
+\section S2_main End user
+
+-# <b>How to configure a %SALOME application</b>\n
+    The end user may have to configure his own %SALOME application by selecting a
+    subset of available %SALOME modules. He may also want to install his
+    application on several computers.
+    See \subpage SALOME_Application to define your own configuration of %SALOME and run it
+    on one or several computers. This is the recommended way of configuration.
+-# <b>How to launch %SALOME</b>\n
+    Use the python \subpage salome_command.
+-# <b>How to use KERNEL services in Python scripts</b>\n
+    The %SALOME KERNEL offers a list of services available in Python. See \subpage KERNEL_Services.
+-# <b>How to use KERNEL services from a C++ context</b>\n
+    The %SALOME KERNEL provides you with helper functions to
+    manipulate the %SALOME KERNEL services from a C++ programming
+    context. See \subpage KERNEL_Services_CppHelpers.
+
+\section S3_main Application Integrator
+
+Applications integrators are in charge of configuration and installation of
+specific %SALOME applications over a local network. Application Integrators
+built %SALOME modules binaries from sources tarballs.
+
+-# <b>How to install %SALOME</b>\n
+    See \subpage INSTALL for general information on required configuration and
+    prerequisites, compilation procedure, setting environment principles.
+-# <b>How to configure a %SALOME application</b>\n
+    See \ref SALOME_Application to define your own configuration of %SALOME and run it
+    on one or several computers. This is the recommended way of configuration.
+
+\section S4_main Module maintainer
+
+Module maintainers are in charge of the development and debug of the %SALOME
+modules. Each %SALOME module is stored in a CVS base. CVS bases are organised
+in separate branches for developments and debug. All official or development
+releases are identified by a CVS tag.
+
+-# <b>Source code structuration and Unit Tests</b>\n
+    See \subpage UnitTests for general information on code directories structure,
+    unit tests associated to the different kind of classes, and how to run
+    the unit tests.
+-# <b>Some development utilities</b> \n
+    See \subpage kernel_resources for information on basic utilities for C++ and Python
+    development, like trace and debug, exceptions, singleton.
+
+\section S5_main SALOME programming model
+
+You will find in the next pages information about
+specific points of %SALOME Kernel :
+
+- \subpage kernel_salome
+- \subpage dsc_page : DSC documentation page.
+- \subpage salome_file_page : Salome_file documentation page.
+- \subpage python_documentation : The package salome.kernel provides
+  logging tools, high-level functions to handle items in Salome study, and other utilities.
+
+
+\section S6_main SALOME KERNEL module Developer Documentation
+
+To browse the \b SALOME KERNEL module Developer Documentation, follow the links below or use navigation menu at the top of the page:
+<ul>
+<li> <a href="namespaces.html">Namespaces</a> - list of KERNEL namespaces and scripts.</li>
+<li> <a href="annotated.html">Data Structures</a> - list of all data structures and classes with brief descriptions.</li>
+<li> <a href="files.html">Files</a> - list of all files with brief descriptions.</li>
+</ul>
+
+*/
+

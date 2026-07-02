@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<PaCO_Interface_description>
+<Module>
+ <Name>Engines</Name>
+ <Interface>
+  <Name>Container</Name>
+  <Method>
+   <Name>ping</Name>
+   <Type>distributed</Type>
+  </Method>
+ </Interface>
+ <Interface>
+  <Name>EngineComponent</Name>
+  <Method>
+   <Name>ping</Name>
+   <Type>distributed</Type>
+  </Method>
+  <Method>
+   <Name>destroy</Name>
+   <Type>distributed</Type>
+  </Method>
+  <Method>
+   <Name>setInputFileToService</Name>
+   <Type>distributed</Type>
+  </Method>
+  <Method>
+   <Name>setOutputFileToService</Name>
+   <Type>distributed</Type>
+  </Method>
+ </Interface>
+ <Interface>
+  <Name>fileTransfer</Name>
+ </Interface>
+ <Interface>
+  <Name>Salome_file</Name>
+ </Interface>
+</Module>
+</PaCO_Interface_description>

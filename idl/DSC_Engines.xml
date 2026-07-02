@@ -1,0 +1,24 @@
+<?xml version="1.0"?>
+<PaCO_Interface_description>
+<Module>
+ <Name>Engines</Name>
+ <Interface>
+  <Name>DSC</Name>
+  <Method>
+   <Name>connect_provides_port</Name>
+   <Type>distributed</Type>
+ </Method>
+ <Method>
+   <Name>connect_uses_port</Name>
+   <Type>distributed</Type>
+ </Method>
+ </Interface>
+ <Interface>
+   <Name>Superv_Component</Name>
+   <Method>
+     <Name>init_service</Name>
+     <Type>distributed</Type>
+   </Method>
+ </Interface>
+</Module>
+</PaCO_Interface_description>

@@ -1,0 +1,203 @@
+// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+//
+// Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
+// CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
+//
+// See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
+//
+
+#ifndef _SALOME_RESOURCESMANAGER_IDL_
+#define _SALOME_RESOURCESMANAGER_IDL_
+
+#include "SALOME_Exception.idl"
+
+/*! \file SALOME_ResourcesManager.idl \brief interfaces for %SALOME Resources Manager service
+*/
+
+module Engines
+{
+
+//!  Type to transmit list of resources.
+typedef sequence<string> ResourceList;
+//! components list
+typedef sequence<string> CompoList;
+typedef sequence<long> IntegerList;
+  
+//! Type to describe required properties of a resource
+struct ResourceParameters
+{
+  //! resource name - manual selection
+  /*! If a name is provided, the resource will be imposed.
+      If the name is an empty string, the resource will be chosen to match
+      the other parameters.
+  */
+  string name;
+
+  //! host name
+  string hostname;
+  //! if true select only resources that can launch batch jobs
+  boolean can_launch_batch_jobs;
+  //! if true select only resources that can run containers
+  boolean can_run_containers;
+  //! if given required operating system 
+  string OS;
+  //! if given, list of components that could be loaded on a container.
+  /*! Ignored if no resources are found with this constraint.*/
+  CompoList componentList;
+
+  // Permits to order resources
+  //! required number of processors
+  /*! This parameter must be specified explicitly, because it is not provided
+      by the resource definition.
+  */
+  long nb_proc;
+
+  //! required memory size
+  /*! This parameter must be specified explicitly, because it is not provided
+      by the resource definition.
+
+      The parameter specifies the maximum memory value that could be allocated
+      for executing the job. This takes into account not only the data that
+      could be loaded by the batch process but also the linked dynamic library.
+      A possible problem, for example in the case where you use the ssh
+      emulation of a batch system, is to get an error message as below
+      when libBatch tries to run the ssh command:
+\verbatim
+/usr/bin/ssh: error while loading shared libraries: libcrypto.so.0.9.8: failed
+to map segment from shared object: Cannot allocate memory
+\endverbatim
+      In this example, the mem_mb was set to 1MB, value that is not
+      sufficient to load the dynamic libraries linked to the ssh
+      executable (libcrypto.so in the error message).
+      So, even in the case of a simple test shell script, you should
+      set this value at least to a standard threshold as 500MB.
+  */
+  long mem_mb;
+  //! required frequency
+  long cpu_clock;
+  //! required number of nodes. Can be used when submitting slurm jobs.
+  long nb_node;
+  //! required number of proc per node
+  long nb_proc_per_node;
+
+  // Permits to configure SALOME resource management
+  //! resource management policy : first, cycl, altcycl or best (can be extended)
+  string policy;
+  //! restricted list of resources to search in
+  ResourceList resList;
+};
+
+//!  Type to describe a resource
+struct ResourceDefinition
+{
+  //! name 
+  string name;
+  //! hostname 
+  string hostname;
+  //! Type of the resource ("cluster" or "single_machine")
+  string type;
+  //! protocol to connect to the resource and to start a remote container
+  //! Possible values:
+  //!   "rsh"   : uses rsh and rcp
+  //!   "ssh"   : uses ssh and scp
+  //!   "rsync" : uses ssh and rsync
+  string protocol;
+  //! login name to use to start a remote container
+  string username;
+  //! salome application to use to start a remote container
+  string applipath;
+  //! list of available components.
+  //! An empty list means every component is available.
+  CompoList componentList;
+
+  //! operating system 
+  string OS;
+  //! memory size per node
+  long mem_mb;
+  //! frequency
+  long cpu_clock;
+  //! number of node
+  long nb_node;
+  //! number of proc per node
+  long nb_proc_per_node;
+  //! batch system
+  string batch;
+  //! MPI implementation
+  string mpiImpl;
+  //! if the resource is a cluster:
+  //! internal protocol to use to start a remote container (ssh or rsh) on the cluster
+  string iprotocol;
+
+  //! Specify if the resource can launch batch jobs
+  boolean can_launch_batch_jobs;
+  //! Specify if the resource can run containers
+  boolean can_run_containers;
+
+  //! Predefined working directory on the resource
+  string working_directory;
+};
+
+/*! \brief Interface of the %resourcesManager
+    This interface is used for interaction with the unique instance
+    of ResourcesManager
+*/
+interface ResourcesManager
+{
+  //!  Find first available resource in a resources list
+  string FindFirst(in ResourceList possibleResources);
+
+  //!  Find best available computer according to policy in a computers list
+  string Find(in string policy, in ResourceList possibleResources);
+
+  //!  Get a list of resources that are best suited to launch a container given constraints 
+  /*! 
+       The constraints are resource constraints (params) and components constraints (componentList)
+  */
+  ResourceList GetFittingResources(in ResourceParameters params) raises (SALOME::SALOME_Exception);
+
+  //!  Get definition of a resource
+  ResourceDefinition GetResourceDefinition(in string name) raises (SALOME::SALOME_Exception);
+
+  //! Add a new resource to the resource_manager
+  /*!
+      write -> true, resource manager will add it into a xml_file
+      xml_file -> could be empty, in this case if write is true, resource manager will write
+      the resource in its first ResourceCatalog file
+    */
+  void AddResource(in ResourceDefinition new_resource, in boolean write, in string xml_file) 
+    raises (SALOME::SALOME_Exception);
+
+  //! Remove a new resource to the resource_manager
+  /*!
+      write -> true, resource manager will write a new xml_file
+      xml_file -> could be empty, in this case if write is true, resource manager will write
+      the resource in its first ResourceCatalog file
+    */
+  void RemoveResource(in string resource_name, in boolean write, in string xml_file) 
+    raises (SALOME::SALOME_Exception);
+
+  //! Create a machine file for PaCO container
+  string getMachineFile(in string resource_name, in long nb_procs, in string parallelLib)
+    raises (SALOME::SALOME_Exception);
+
+  //! Return list of resources available (regarding content of CatalogResources.xml). And for each resource the number of proc available of it.
+  void ListAllAvailableResources(out ResourceList machines, out IntegerList nbProcsOfMachines) raises (SALOME::SALOME_Exception);
+};
+
+};
+  
+#endif

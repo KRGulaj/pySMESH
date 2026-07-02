@@ -1,0 +1,148 @@
+# Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+#
+# Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
+# CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
+#
+# See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
+#
+
+# generic rule to put in top module Makefile 
+# (for example with module SALOME, SALOME/Makefile.in and SALOME/src/Makefile.in)
+# build all lib in all subdir
+#
+lib:$(SUBDIRS:%=lib_%)
+
+$(SUBDIRS:%=lib_%):lib_%:%
+	cd $< ; $(MAKE) lib
+
+# build all bin in all subdir
+bin:
+	@@SETX@; for d in $(SUBDIRS); do 	\
+	   (cd $$d && $(MAKE) $@) || exit 1; 	\
+	done
+
+# launch check in all subdir
+check: tests
+tests:
+	@@SETX@; for d in $(SUBDIRS); do 	\
+	   (cd $$d && $(MAKE) $@) || exit 1; 	\
+	done
+
+# copy all header files in common directory
+inc:
+	@@SETX@; for d in $(SUBDIRS); do 	\
+	   (cd $$d && $(MAKE) $@) || exit 1; 	\
+	done
+
+exportinc:
+	@@SETX@; for d in $(SUBDIRS); do 	\
+	   (cd $$d && $(MAKE) $@) || exit 1; 	\
+	done
+
+# copy all idl files in common directory
+idl:
+	@@SETX@; for d in $(SUBDIRS); do 	\
+	   (cd $$d && $(MAKE) $@) || exit 1; 	\
+	done
+
+dep: depend
+
+depend:
+	@@SETX@; for d in $(SUBDIRS); do 	\
+	   (cd $$d && $(MAKE) $@) || exit 1; 	\
+	done
+
+# copy all resources files in common directory
+RESOURCES_FILES_ALL := $(notdir $(wildcard $(srcdir)/resources/*))
+RESOURCES_FILES_ALL := $(filter-out CVS, $(RESOURCES_FILES_ALL))
+RESOURCES_FILES_ALL := $(filter-out %.po, $(RESOURCES_FILES_ALL))
+RESOURCES_FILES_ALL := $(filter-out %.in, $(RESOURCES_FILES_ALL))
+RESOURCES_FILES ?= $(RESOURCES_FILES_ALL)
+
+resources: resources-cp
+	@@SETX@; for d in $(SUBDIRS); do 	\
+	   (cd $$d && $(MAKE) $@) || exit 1; 	\
+	done
+
+resources-cp: $(RESOURCES_FILES:%=$(top_builddir)/share/salome/resources/$(MODULE_NAME)/%)
+
+$(RESOURCES_FILES:%=$(top_builddir)/share/salome/resources/$(MODULE_NAME)/%): $(top_builddir)/share/salome/resources/$(MODULE_NAME)/% : %
+	cp -fr $< $@;
+
+#data:
+#	@if test "X$(top_builddir)" = "X."; then							 \
+#	((cd examples && $(MAKE) $@) || exit 1);			 \
+#	fi;
+# Commented because we need not to make docs when we make BUILD 	
+# docs:	
+#	@if test "X$(top_builddir)" = "X."; then \
+#	((cd doc && $(MAKE) $@) || exit 1); \
+#	fi;	
+
+install: install-resources
+	@@SETX@; for d in $(SUBDIRS); do 	\
+	   (cd $$d && $(MAKE) $@) || exit 1; 	\
+	done
+	@if test "X$(top_builddir)" = "X."; then 	\
+	   $(LT) --mode=finish $(libdir) ; 		\
+	fi
+
+uninstall: uninstall-resources
+	@@SETX@; for d in $(SUBDIRS); do 	\
+	   (cd $$d && $(MAKE) $@) || exit 1; 	\
+	done
+
+cleandep:
+	@@SETX@; for d in $(SUBDIRS); do 	\
+	   (cd $$d && $(MAKE) $@) || exit 1; 	\
+	done
+
+mostlyclean:
+	@@SETX@; for d in $(SUBDIRS); do 	\
+	   (cd $$d && $(MAKE) $@) || exit 1; 	\
+	done
+
+clean:
+	@@SETX@; for d in $(SUBDIRS); do 	\
+	   (cd $$d && $(MAKE) $@) || exit 1; 	\
+	done
+	-$(RM) .depend *~ *% core *.core *.bak *.new *.old
+
+distclean: clean
+	@@SETX@; for d in $(SUBDIRS); do 	\
+	   (cd $$d && $(MAKE) $@) || exit 1; 	\
+	done
+	-$(RM) $(RESOURCES_FILES:%=$(top_builddir)/share/salome/resources/$(MODULE_NAME)/%)
+	-$(RM) Makefile
+
+install-resources: resources-cp
+# one resources directory for all salome modules
+	$(INSTALL) -d $(datadir)/resources/$(MODULE_NAME)
+	@for f in X $(RESOURCES_FILES:%=$(top_builddir)/share/salome/resources/$(MODULE_NAME)/%); do \
+	   if test $$f != X; then							 \
+	     ($(INSTALL_DATA) $$f $(datadir)/resources/$(MODULE_NAME)/. || exit 1);			 \
+	   fi; 										 \
+	done
+
+# Uninstall resources files
+uninstall-resources:
+	@for f in X $(RESOURCES_FILES); do 	      \
+	   if test $$f != X; then					      \
+	     $(LT_UNINSTALL) $(datadir)/resources/$(MODULE_NAME)/$$f ;			      \
+	   fi; 								      \
+	done
+

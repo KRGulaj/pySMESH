@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<PaCO_Interface_description>
+<Module>
+ <Name>Engines</Name>
+ <Interface>
+  <Name>Parallel_Component</Name>
+  <Method>
+   <Name>send_parallel_proxy_object</Name>
+   <Type>distributed</Type>
+  </Method>
+ </Interface>
+ <Interface>
+  <Name>PACO_Container</Name>
+   <Method>
+     <Name>updateInstanceNumber</Name>
+     <Type>distributed</Type>
+   </Method>
+ </Interface>
+ <Interface>
+   <Name>Parallel_DSC</Name>
+   <Method>
+     <Name>set_paco_proxy</Name>
+     <Type>distributed</Type>
+   </Method>
+ </Interface>
+ <Interface>
+  <Name>Parallel_Salome_file</Name>
+ </Interface>
+</Module>
+</PaCO_Interface_description>
+
