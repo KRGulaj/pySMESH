@@ -1,0 +1,29 @@
+name: flux-pysmesh2-build
+# =============================================================================
+# pySMESH2 — build-only conda environment (conda-forge ONLY)
+#
+# Purpose: compile _core.pyd (SMESH + OCCT + Boost static, VTK dynamic).
+#
+# =============================================================================
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.13
+  # --- THE PIN — exact match to flux's vtk ---
+  - vtk=9.6.2
+  # --- static-linked into _core.pyd: free to resolve ---
+  - occt=8.0.0
+  - libboost-devel
+  # --- build toolchain ---
+  - cmake>=3.27
+  - ninja
+  - pybind11
+  - scikit-build-core
+  # --- vendoring / patching ---
+  - python-patch
+  - git
+  # --- testing ---
+  - pytest
+  - hypothesis
+  - numpy
