@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<PaCO_Interface_description>
+<Module>
+ <Name>Ports</Name>
+ <Interface>
+  <Name>Port</Name>
+ </Interface>
+ <Interface>
+  <Name>Control_Port</Name>
+ </Interface>
+ <Interface>
+  <Name>Data_Port</Name>
+ </Interface>
+</Module>
+</PaCO_Interface_description>

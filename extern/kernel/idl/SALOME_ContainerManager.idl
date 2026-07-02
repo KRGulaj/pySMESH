@@ -1,0 +1,87 @@
+// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+//
+// Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
+// CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
+//
+// See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
+//
+
+#ifndef _SALOME_CONTAINERMANAGER_IDL_
+#define _SALOME_CONTAINERMANAGER_IDL_
+
+#include "SALOME_Exception.idl"
+#include "SALOME_Component.idl"
+#include "SALOME_ResourcesManager.idl"
+
+/*! \file SALOME_ContainerManager.idl \brief interfaces for %SALOME Container Manager service
+*/
+
+module Engines
+{
+
+//! Type to describe required properties of a container
+struct ContainerParameters
+{
+  //! container name if given else automatic
+  string container_name;
+
+  //! creation mode for GiveContainer if given else automatic 
+  /*! List of possible values:
+   * "find" : search the first container whose name is container_name on
+   *          resources listed in resource_params.resList.
+   *          Return nil if none found.
+   * "findorstart" : same as "find", but start a new container if none found.
+   * "start" : create a new container. If there is already a container with the
+   *           same name on the chosen resource, it will be shut down.
+   * "get" : search an existing container on the best fitting resource.
+   * "getorstart" : same as "get", but start a new container if none found.
+   */
+  string mode;
+
+  //! container working directory if given else automatic
+  string workingdir;
+
+  // Parallel part
+  //! Number of proc of a parallel container
+  long nb_proc;
+  //! if true start a MPI container
+  boolean isMPI;
+  //! PaCO specific information
+  string parallelLib;
+
+  //! Parameters to choose a resource
+  ResourceParameters resource_params;
+};
+
+/*! \brief Interface of the %containerManager
+    This interface is used for interaction with the unique instance
+    of ContainerManager
+*/
+interface ContainerManager
+{
+  //! GiveContainer - use mode parameter of ContainerParameters to configure
+  //! how this method works
+  //! Currently: get, start, getorstart, findorstart, find
+  Container GiveContainer(in ContainerParameters params) raises (SALOME::SALOME_Exception);
+
+  //!  Shutdown all containers that have been launched by the container manager
+  void ShutdownContainers();
+} ;
+
+};
+  
+#endif

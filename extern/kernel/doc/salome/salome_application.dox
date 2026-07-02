@@ -1,0 +1,95 @@
+/*!
+  \page SALOME_Application Salome Application Concept
+
+
+The following explains how to configure your own application with your list of
+modules, how to define and run this application on one or more computers.
+You can choose one of the following approaches:
+-# use an \ref sec_salome_profile
+-# use a \ref sec_virtual_appli
+
+\section S1_sal_appl General principles
+
+%A %SALOME application is defined by:
+- a set of modules (GEOM, SMESH, ASTER...)
+- a set of informatic resources (images, documentation, tests...) binding the modules together, also called profile.
+- a launcher: a python script that creates a context (set of environment variables usable by the %SALOME modules) and runs an instance of %SALOME.
+
+%A %SALOME user can define several %SALOME applications. These applications are
+runnable from the same user account. These applications may share the same
+KERNEL and modules. Thus, the application configuration is independent of
+KERNEL and must not be put in KERNEL_ROOT_DIR.
+
+Furthermore, prerequisites may not be the same on all the applications.
+
+%A %SALOME session can run on a several computers.
+
+Binary modules and prerequisites are installed on the different computers.
+There is no need to have all the modules on each computer (the minimum is
+KERNEL).
+
+There is no need of standardization or centralised information on the details
+of configuration on each computer (PATH, LD_LIBRARY_PATH, environment
+variables) provided the application modules are version - compatible. Details
+of configuration stay private to the computer, and are held by scripts on each
+computer.
+
+There is no hierarchy between the computers (for example only one master
+computer used to launch application).
+
+The %SALOME user has an account on all the computers. Access between
+account@computer is via rsh or ssh and must be configured for use without
+password (key exchange for ssh). Account may be different on each
+computer.
+
+
+\section sec_salome_profile Application profile
+
+The user can generate a default profile for its application using the following command:
+\code
+python ${KERNEL_ROOT_DIR}/bin/salome/app-quickstart.py --prefix=<generation directory> --name=<application's name> --modules=<list,of,modules>
+\endcode
+
+Likely, the user would like to personalize its application's profile. Then, the profile
+can be compiled using the standard cmake procedure:
+
+\code
+cmake
+make
+make install
+\endcode
+
+This profile can be used within a python launcher - like the \subpage salome_command - by setting
+context variable <b>SalomeAppConfig</b> to the path where the profile is installed.
+
+
+\section sec_virtual_appli Virtual application
+
+First, the user must create a %SALOME application configuration file by modifying a
+copy of ${KERNEL_ROOT_DIR}/bin/salome/config_appli.xml.
+The file describes the list of %SALOME modules used in the application, with
+their respective installation path. The configuration file also defines the
+path of an existing script which sets the %SALOME prerequisites (tag "prerequisites"),
+and optionally, the path of samples directory (SAMPLES_SRC) (tag "samples")
+and the path of a catalog of resources (tag "resources").
+
+The following command:
+
+\code
+python <KERNEL_ROOT_DIR>/bin/salome/appli_gen.py --prefix=<install directory> --config=<configuration file>
+\endcode
+
+creates a %SALOME application in the application directory given by the prefix option (local directory
+by default) with the configuration file given by the config option (config_appli.xml by default).
+
+Providing an existing script for %SALOME prerequisites (the same one
+used for modules compilation, or given with the modules installation), the
+installation works without further modification for a single computer (unless
+some modules needs a special environment not defined in the above script).
+
+For a distributed application (several computers), one must copy and adapt
+CatalogResources.xml from ${KERNEL_ROOT_DIR}/bin/salome/appliskel (see below).
+
+The application directory contains the elements required to run %SALOME, for example the \ref salome_command, and some context files in env.d directory.
+
+*/

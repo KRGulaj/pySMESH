@@ -1,0 +1,14 @@
+
+import batchmode_salome
+#import SALOMEDS
+
+aStudy = batchmode_salome.myStudy    
+
+#Add new component 'User data'
+aBuilder = aStudy.NewBuilder()
+aComponent = aBuilder.NewComponent("User data")
+anAttr = aBuilder.FindOrCreateAttribute(aComponent, "AttributeName")
+anAttrName = anAttr._narrow(SALOMEDS.AttributeName) 
+anAttrName.SetValue("User data")
+
+

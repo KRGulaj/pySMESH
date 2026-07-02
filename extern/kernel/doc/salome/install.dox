@@ -1,0 +1,326 @@
+/*!
+  \page INSTALL Installation instructions
+
+<b>NOT UP TO DATE AND INCOMPLETE DOCUMENT BUT CAN BE HELPFUL</b>
+
+You'll find here generic instructions for installing the SALOME platform.
+
+\section Summary
+
+-# \ref S1_install
+-# \ref S2_install
+-# \ref S3_install
+-# \ref S4_install
+-# \ref S5_install
+-# \ref S6_install
+-# \ref S7_install
+-# \ref S8_install
+
+\section S1_install Quick Overview
+
+First of all, you have to check (or install if needed) the dependent
+software programs on your system. These programs are:
+
+- common development tools as gcc, CMake tool.
+- third party software used in %SALOME building or runtime process
+  (python, OCC, VTK, ...)
+
+Further details can be found in sections \ref S2_install and \ref S3_install.
+
+If the dependencies are installed on your system, then you have to set
+your shell environment to get access to the software components
+(cf. \ref S4_install).
+
+The next step is to install the KERNEL (cf. \ref S5_install):
+
+\code
+$ mkdir <kernel_build>
+$ mkdir <kernel_install>
+$ cd <kernel_build>
+$ cmake -DCMAKE_BUILD_TYPE=<Mode> -DCMAKE_INSTALL_PREFIX=<kernel_install> ../<kernel_src>
+$ make
+$ make install
+\endcode
+
+Where <Mode> is build mode (Release or Debug), <kernel_install> 
+is a destination folder to install KERNEL module of SALOME.
+
+Then, the %SALOME components GEOM, MED, VISU, ... can be installed
+with a similar procedure (cf. \ref S6_install).
+
+Eventually, the platform can be run by executing the shell script
+%runSalome (cf. \ref S7_install). Here, somme additional variables have to be set
+to describe the %SALOME runtime configuration (<COMPONENT>_ROOT_DIR,
+OMNIORB_CONFIG)
+
+The following provides you with specific instructions for each step.
+
+
+\section S2_install System configuration
+
+%SALOME is compiled and tested on different platforms with native packages:
+- Debian sarge
+- Mandrake 10.1
+- ...
+
+If you have another platform, we suggest the following configuration
+for building process:
+
+- gcc-3.3.x or 3.4.x
+- CMake-2.8.8 or more
+
+remarks:
+
+- This is the minimum level of CMake, if you need
+  to compile all the third party software (included OpenCascade 5.2.x).
+
+\section S3_install Third-party dependencies
+
+The %SALOME platform relies on a set of third-party software. The
+current version depends on the following list
+(versions given here are from Debian Sarge, except OpenCascade, VTK and MED,
+which are not Debian packages):
+
+- CAS-5.2.4		OpenCascade (try binaries,a source patch is needed)
+- VTK-4.2.6		VTK 3D-viewer
+- PyQt-3.13		Python-Qt Wrapper
+- Python-2.3.5		Python interpreter
+- SWIG-1.3.24		SWIG library
+- boost-1_32_0		C++ library (only include templates are used)
+- hdf5-1.6.2		Files Database library
+- med-2.2.2		MED Data Format support for file records
+- omniORB-4.0.5		ORB used in %SALOME
+- qt-x11-free-3.3.3	Qt library
+- qwt-4.2		Graph components for Qt
+- sip4-4.1.1		language binding software
+
+And, in order to build the documentation:
+
+- doxygen-1.4.2
+- graphviz-2.2.1
+
+
+Additional software may be installed for optional features:
+
+- netgen4.3 + patch
+- tix8.1.4
+- openpbs-2.3.16
+- lsf-???
+
+<b>To Do</b>
+
+- Instructions for installing these software programs can be found in a
+  special note doc/configuration_examples/install-prerequis.
+- Installation shell scripts are also provided.
+  These scripts have to be adapted to your own configuration.
+
+- See doc/configuration_examples/*
+
+In the following, we assume that all the third-party software are
+installed in the same root directory, named <salomeroot>/prerequis.
+Then, your file system should probably look like:
+
+\code
+<salomeroot>/prerequis/Python-2.2.2
+<salomeroot>/prerequis/omniORB-3.0.5
+<salomeroot>/prerequis/qt-x11-free-3.0.5
+...
+\endcode
+
+\section S4_install Preparing the shell environment
+
+Some variables have to be set to get access to third-party software
+components (include files, executable, library, ...) during building
+process and runtime.
+
+The shell file prerequis.sh, embedded in the KERNEL source package,
+provides a template for setting those variables. In this example, all the
+software are supposed to be installed in the same root directory,
+named here INSTALLROOT.
+
+Copy the prerequis.sh in a working directory and adjust the settings
+to your own configuration. To get the shell prepared, just
+execute the following command in the building shell:
+
+\code
+$ source prerequis.sh
+\endcode
+
+(we assume here a ksh or bash mode)
+
+
+\section S5_install Installing the KERNEL component
+
+We use here the notation <kernel_src> to specify the source directory
+of the KERNEL component. The shell environment is supposed to have
+been set (cf. \ref S4_install).
+
+Installing the KERNEL from a source package needs three directories:
+
+- the source directory, denoted here by <kernel_src>.
+
+- the build directory, denoted by <kernel_build> in the following. This
+  directory can't be the same directory as <kernel_src>.
+
+- the install directory, denoted by <kernel_install> in the following. This
+  directory can't be the same directory as <kernel_src> or
+  <kernel_build>.
+
+The installing process is:
+
+<b>STEP 1:</b>
+  preparing directories
+
+  create the <kernel_build> and the <kernel_install> directories:
+
+  \code
+$ mkdir <kernel_build>
+$ mkdir <kernel_install>
+\endcode
+
+  go to the build directory
+  
+  \code
+$ cd <kernel_build>
+  \endcode
+
+<b>STEP 2:</b>
+  configure the building process
+
+  \code
+$ cmake -DCMAKE_BUILD_TYPE=<Mode> -DCMAKE_INSTALL_PREFIX=<kernel_install> ../<kernel_src>
+  \endcode
+
+  Where <Mode> is build mode(Release or Debug), <kernel_install>
+  is a destination folder to install KERNEL module of SALOME.
+  Note that <kernel_install> must be an absolute path.
+
+  When the configure process is complete, check the status of cmake build.
+  You should not have the errors and warnings. All dependent products and packages must be found.
+  
+  If a software get a status "not found", then it is not "seen" in the system:
+
+- the software is not installed, or
+- the shell environment is not set correctly.
+
+<b>STEP 3 :</b>
+  Building the binary files
+
+  Execute make in the <kernel_build> directory:
+
+  \code
+$ make
+  \endcode
+
+<b>STEP 4:</b>
+  Installing binary files, scripts and documentation
+
+  Execute install target in the <kernel_install> directory:
+
+  \code
+$ make install
+  \endcode
+
+\section S6_install Installing the SALOME components
+
+Installing a component <COMPONENT> is done by following the same
+instructions as given for the KERNEL, replacing KERNEL by
+<COMPONENT>.
+
+You just have to be aware of the dependencies between components:
+
+- MED    depends on KERNEL
+- GEOM   depends on KERNEL
+- SMESH  depends on KERNEL, MED, GEOM
+- VISU   depends on KERNEL, MED
+- YACS depends on KERNEL
+
+For example, installing the component SMESH needs the previous
+installation of the KERNEL component, and then the GEOM and MED components.
+
+The building process uses the variables <COMPONENT>_ROOT_DIR to
+localize the dependent components. The variables must be set to the
+install path directory of the components <COMPONENT> (ex:
+KERNEL_ROOT_DIR=<kernel_install>). 
+ 
+In the above example, the three variables KERNEL_ROOT_DIR,
+GEOM_ROOT_DIR and MED_ROOT_DIR have to be set before configuring the
+building process of the SMESH component (STEP 3).
+
+
+\section S7_install Runtime
+
+See \ref SALOME_Application to define your own configuration of %SALOME and run it
+on one or several computers. This is the recommended way of configuration.
+
+The following explains the general principles.
+
+To run the %SALOME platform, the procedure is:
+
+- set the shell environment to get access to third-party software:
+  \code
+$ source prerequis.sh
+  \endcode
+
+- define the %SALOME configuration by setting the whole set of
+  variables <COMPONENT>_ROOT_DIR. Here, you just have to set the
+  kernel and the components you need:
+  \code
+$ export KERNEL_ROOT_DIR=<kernel_install>
+$ export MED_ROOT_DIR=<med_install>
+$ ...
+  \endcode
+
+- define the CORBA configuration file by setting the variable
+  OMNIORB_CONFIG. This variable must be set to a writable file
+  path. The file may be arbitrary chosen and doesn't need to exist
+  before running. We suggest:
+  \code
+$ export OMNIORB_CONFIG=$HOME/.omniORB.cfg
+  \endcode
+
+- run the %SALOME platform by executing the script %runSalome:
+  \code
+$KERNEL_ROOT_DIR/bin/salome/runSalome
+  \endcode
+
+\section S8_install Suggestions and advices
+
+For convenience or customization, we suggest the following organisation:
+
+- choose and create a root directory for the %SALOME platform, say
+  <salomeroot>.
+
+- install the third-party software in a sub-directory "prerequis"
+
+- install the %SALOME components in a sub-directory "SALOME2"
+
+- make personal copies of the files prerequis.sh and %runSalome in
+  <salomeroot>:
+  \code
+$ cp <kernel_src>/prerequis.sh <rundir>/.
+$ cp <kernel_install>/bin/salome/runSalome <rundir>/.
+  \endcode
+  Edit the file prerequis.sh and adjust it to your own configuration.
+
+- define the SALOME2 configuration\n
+  This step consists in setting the KERNEL_ROOT_DIR, the whole set of
+  variables <COMPONENT>_ROOT_DIR you need, and the OMNIORB_CONFIG
+  variable.
+  \n
+  We suggest to create a shell file envSalome.sh containing those
+  settings. Then the configuration consists in loading envSalome.sh in
+  the runtime shell:
+  \code
+$ source envSalome.sh
+  \endcode
+
+- When installed with this file organisation, running %SALOME is done
+  with the following shell commands:
+  \code
+    $ source <salomeroot>/prerequis.sh
+    $ source <salomeroot>/envSalome.sh
+    $ ./runSalome
+  \endcode
+
+*/

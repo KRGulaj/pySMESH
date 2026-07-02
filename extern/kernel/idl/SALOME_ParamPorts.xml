@@ -1,0 +1,30 @@
+<?xml version="1.0"?>
+<PaCO_Interface_description>
+<Module>
+ <Name>Ports</Name>
+ <Interface>
+  <Name>Param_Double_Port</Name>
+  <Method>
+   <Name>put</Name>
+   <Type>distributed</Type>
+   <Argument>
+    <Name>param_data</Name>
+    <TypeDis>
+     <Distributed>BasicBC</Distributed>
+    </TypeDis>
+   </Argument>
+  </Method>
+  <Method>
+   <Name>get_results</Name>
+   <Type>distributed</Type>
+   <Argument>
+    <Name>param_results</Name>
+    <TypeDis>
+     <Distributed>GaBro</Distributed>
+    </TypeDis>
+   </Argument>
+  </Method>
+ </Interface>
+</Module>
+</PaCO_Interface_description>
+

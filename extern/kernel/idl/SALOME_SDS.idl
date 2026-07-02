@@ -1,0 +1,185 @@
+// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
+//
+// See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
+//
+
+// Author : Anthony GEAY (EDF R&D)
+
+#ifndef __SALOME_SDS_IDL__
+#define __SALOME_SDS_IDL__
+
+#include "SALOME_GenericObj.idl"
+#include "SALOME_Exception.idl"
+#include "SALOME_CommonTypes.idl"
+
+module SALOME
+{
+  typedef sequence<ByteVec> SeqOfByteVec;
+  
+  interface DataScopeServer;
+
+  interface BasicDataServer : GenericObj
+  {
+    DataScopeServer getMyDataScopeServer();
+    string getVarName();
+    string getScopeName();
+    long getRCValue();
+  };
+
+  interface PickelizedPyObjServer : BasicDataServer
+  {
+    ByteVec fetchSerializedContent() raises (SALOME::SALOME_Exception);
+  };
+
+  interface PickelizedPyObjRdOnlyServer : PickelizedPyObjServer
+  {
+  };
+
+  interface PickelizedPyObjRdExtBaseServer : PickelizedPyObjServer
+  {
+  };
+
+  interface PickelizedPyObjRdExtServer : PickelizedPyObjRdExtBaseServer
+  {
+    PickelizedPyObjRdExtServer invokePythonMethodOn(in string method, in ByteVec args) raises (SALOME::SALOME_Exception);
+  };
+
+  interface PickelizedPyObjRdExtInitServer : PickelizedPyObjRdExtBaseServer
+  {
+  };
+
+  interface PickelizedPyObjRdWrServer : PickelizedPyObjServer
+  {
+    void setSerializedContent(in ByteVec newValue) raises (SALOME::SALOME_Exception);
+    PickelizedPyObjRdWrServer invokePythonMethodOn(in string method, in ByteVec args) raises (SALOME::SALOME_Exception);
+  };
+
+  interface DataServerManager;
+
+  interface DataScopeKiller
+  {
+    void shutdown();
+  };
+
+  interface RequestSwitcherBase
+  {
+    void holdRequests();
+    void activeRequests();
+  };
+  
+  interface RequestSwitcher : RequestSwitcherBase
+  {
+    StringVec listVars();
+    ByteVec fetchSerializedContent(in string varName) raises (SALOME::SALOME_Exception);
+    void fetchAndGetAccessOfVar(in string varName, out string access, out ByteVec data) raises (SALOME::SALOME_Exception);
+  };
+
+  interface DataScopeServerTransaction;
+  
+  interface RequestSwitcherDSM : RequestSwitcherBase
+  {
+    StringVec listScopes();
+    DataScopeServerTransaction giveADataScopeTransactionCalled(in string scopeName, out boolean isCreated) raises (SALOME::SALOME_Exception);
+  };
+
+  interface DataScopeServerBase
+  {
+    void ping();
+    string getScopeName();
+    StringVec listVars();
+    boolean existVar(in string varName) raises (SALOME::SALOME_Exception);
+    void deleteVar(in string varName) raises (SALOME::SALOME_Exception);
+    boolean shutdownIfNotHostedByDSM(out DataScopeKiller killer) raises (SALOME::SALOME_Exception);
+    ByteVec fetchSerializedContent(in string varName) raises (SALOME::SALOME_Exception);
+    SeqOfByteVec getAllKeysOfVarWithTypeDict(in string varName) raises (SALOME::SALOME_Exception);
+    ByteVec getValueOfVarWithTypeDict(in string varName, in ByteVec constKey) raises (SALOME::SALOME_Exception);
+    void takeANap(in double napDurationInSec) raises (SALOME::SALOME_Exception);
+  };
+
+  interface DataScopeServer : DataScopeServerBase
+  {
+    BasicDataServer retrieveVar(in string varName) raises (SALOME::SALOME_Exception);
+    PickelizedPyObjRdOnlyServer createRdOnlyVar(in string varName, in ByteVec constValue) raises (SALOME::SALOME_Exception);
+    PickelizedPyObjRdExtServer createRdExtVar(in string varName, in ByteVec constValue) raises (SALOME::SALOME_Exception);
+  };
+
+  interface Transaction
+  {
+  };
+
+  interface TransactionRdWrAccess : Transaction
+  {
+    PickelizedPyObjRdWrServer getVar() raises (SALOME::SALOME_Exception);
+  };
+
+  interface TransactionMultiKeyAddSession : Transaction
+  {
+    void addKeyValueInVarErrorIfAlreadyExistingNow(in SALOME::ByteVec keyValue, in ByteVec constValue) raises (SALOME::SALOME_Exception);
+  };
+
+  typedef sequence<Transaction> ListOfTransaction;
+
+  interface KeyWaiter
+  {
+    void waitFor() raises (SALOME::SALOME_Exception);
+  };
+
+  interface DataScopeServerTransaction : DataScopeServerBase
+  {
+    string getAccessOfVar(in string varName) raises (SALOME::SALOME_Exception);
+    void fetchAndGetAccessOfVar(in string varName, out string access, out ByteVec data) raises (SALOME::SALOME_Exception);
+    Transaction createRdOnlyVarTransac(in string varName, in ByteVec constValue) raises (SALOME::SALOME_Exception);
+    Transaction createRdExtVarTransac(in string varName, in ByteVec constValue) raises (SALOME::SALOME_Exception);
+    Transaction createRdExtVarFreeStyleTransac(in string varName, in ByteVec constValue, in string compareFuncContent) raises (SALOME::SALOME_Exception);
+    Transaction createRdExtInitVarTransac(in string varName, in ByteVec constValue) raises (SALOME::SALOME_Exception);
+    Transaction createRdWrVarTransac(in string varName, in ByteVec constValue) raises (SALOME::SALOME_Exception);
+    Transaction addKeyValueInVarHard(in string varName, in ByteVec keyValue, in ByteVec constValue) raises (SALOME::SALOME_Exception);
+    Transaction addKeyValueInVarErrorIfAlreadyExisting(in string varName, in ByteVec keyValue, in ByteVec constValue) raises (SALOME::SALOME_Exception);
+    TransactionMultiKeyAddSession addMultiKeyValueSession(in string varName) raises (SALOME::SALOME_Exception);
+    Transaction removeKeyInVarErrorIfNotAlreadyExisting(in string varName, in ByteVec keyValue) raises (SALOME::SALOME_Exception);
+    TransactionRdWrAccess createWorkingVarTransac(in string varName, in ByteVec constValue) raises (SALOME::SALOME_Exception);
+    Transaction killVarTransac(in string varName) raises (SALOME::SALOME_Exception);
+    KeyWaiter waitForKeyInVar(in string varName, in ByteVec keyVal) raises (SALOME::SALOME_Exception);
+    KeyWaiter waitForKeyInVarAndKillIt(in string varName, in ByteVec keyVal, out Transaction transac) raises (SALOME::SALOME_Exception);
+    void atomicApply(in ListOfTransaction transactions) raises (SALOME::SALOME_Exception);
+    ByteVec waitForMonoThrRev(in KeyWaiter kw) raises (SALOME::SALOME_Exception);
+    ByteVec waitForAndKill(in KeyWaiter kw) raises (SALOME::SALOME_Exception);
+    RequestSwitcher getRequestSwitcher();
+  };
+
+  interface DataServerManager
+  {
+    StringVec listScopes();
+    StringVec listAliveAndKickingScopes() raises (SALOME::SALOME_Exception);
+    DataScopeServer getDefaultScope() raises (SALOME::SALOME_Exception);
+    boolean isAliveAndKicking(in string scopeName) raises (SALOME::SALOME_Exception);
+    //
+    DataScopeServer createDataScope(in string scopeName) raises (SALOME::SALOME_Exception);
+    DataScopeServer giveADataScopeCalled(in string scopeName, out boolean isCreated) raises (SALOME::SALOME_Exception);
+    //
+    DataScopeServerTransaction createDataScopeTransaction(in string scopeName) raises (SALOME::SALOME_Exception);
+    DataScopeServerTransaction giveADataScopeTransactionCalled(in string scopeName, out boolean isCreated) raises (SALOME::SALOME_Exception);
+    //
+    DataScopeServerBase retriveDataScope(in string scopeName) raises (SALOME::SALOME_Exception);
+    void removeDataScope(in string scopeName) raises (SALOME::SALOME_Exception);
+    void cleanScopesInNS();
+    void shutdownScopes() raises (SALOME::SALOME_Exception);
+    RequestSwitcherDSM getRequestSwitcher();
+  };
+};
+
+#endif
