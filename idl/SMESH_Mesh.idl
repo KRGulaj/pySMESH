@@ -1,0 +1,1108 @@
+// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+//
+// Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
+// CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
+//
+// See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
+//
+
+//  File   : SMESH_Mesh.idl
+//  Author : Paul RASCLE, EDF
+//
+#ifndef _SMESH_MESH_IDL_
+#define _SMESH_MESH_IDL_
+
+#include "SALOME_Exception.idl"
+#include "SALOME_GenericObj.idl"
+#include "GEOM_Gen.idl"
+#include "SMESH_smIdType.idl"
+
+module SMESH
+{
+  interface SMESH_Hypothesis;
+  typedef sequence<SMESH_Hypothesis> ListOfHypothesis;
+  interface SMESH_GroupBase;
+  typedef sequence<SMESH_GroupBase> ListOfGroups;
+  interface SMESH_IDSource;
+  typedef sequence<SMESH_IDSource> ListOfIDSources;
+
+  typedef sequence<double    > double_array ;
+  typedef sequence<long      > long_array ;
+  typedef sequence<smIdType  > smIdType_array ;
+  typedef sequence<string    > string_array ;
+  typedef sequence<long_array> array_of_long_array ;
+
+  enum log_command
+    {
+      ADD_NODE,
+      ADD_EDGE,
+      ADD_TRIANGLE,
+      ADD_QUADRANGLE,
+      ADD_POLYGON,
+      ADD_TETRAHEDRON,
+      ADD_PYRAMID,
+      ADD_PRISM,
+      ADD_HEXAHEDRON,
+      ADD_POLYHEDRON,
+      REMOVE_NODE,
+      REMOVE_ELEMENT,
+      MOVE_NODE,
+      CHANGE_ELEMENT_NODES,
+      CHANGE_POLYHEDRON_NODES,
+      RENUMBER,
+      CLEAR_MESH,
+      ADD_QUADEDGE,
+      ADD_QUADTRIANGLE,
+      ADD_QUADQUADRANGLE,
+      ADD_QUADPOLYGON,
+      ADD_QUADTETRAHEDRON,
+      ADD_QUADPYRAMID,
+      ADD_QUADPENTAHEDRON,
+      ADD_QUADHEXAHEDRON,
+      ADD_ELEM0D,
+      ADD_BIQUAD_TRIANGLE,
+      ADD_BIQUAD_QUADRANGLE,
+      ADD_TRIQUAD_HEXA,
+      ADD_HEXAGONAL_PRISM,
+      ADD_BALL
+    };
+
+  struct log_block
+  {
+    long commandType;
+    long number;
+    double_array coords;
+    long_array indexes;
+  };
+  typedef sequence<log_block> log_array;
+
+  struct PointStruct { double x;
+                       double y;
+                       double z; };
+
+  typedef sequence<PointStruct> nodes_array;
+
+  struct DirStruct   { PointStruct PS; };          // analog to OCCT gp_Vec
+
+  struct AxisStruct  { double x;
+                       double y;
+                       double z;
+                       double vx;
+                       double vy;
+                       double vz; };
+  /*!
+   * Node location on a shape
+   */
+  struct NodePosition {
+    long             shapeID;
+    GEOM::shape_type shapeType;
+    double_array     params; // [U] on EDGE, [U,V] on FACE, [] on the rest shapes
+  };
+
+  /*!
+   * Element location on a shape
+   */
+  struct ElementPosition {
+    long             shapeID;
+    GEOM::shape_type shapeType;
+  };
+
+  /*!
+   * Enumeration for element type, like in SMDS
+   */
+  enum ElementType
+  {
+    ALL,
+    NODE,
+    EDGE,
+    FACE,
+    VOLUME,
+    ELEM0D,
+    BALL,
+    NB_ELEMENT_TYPES
+  };
+  typedef sequence<ElementType> array_of_ElementType;
+
+  /*!
+   * Enumeration for element geometry type, like SMDSAbs_GeometryType in SMDSAbs_ElementType.hxx
+   */
+  enum GeometryType
+  {
+    Geom_POINT,
+    Geom_EDGE,
+    Geom_TRIANGLE,
+    Geom_QUADRANGLE, // when a new GeometryType is added, please
+    Geom_POLYGON,    // update a corresponding list in SMESH_2smeshpy.cxx, ln 665
+    Geom_TETRA,
+    Geom_PYRAMID,
+    Geom_HEXA,
+    Geom_PENTA,
+    Geom_HEXAGONAL_PRISM,
+    Geom_POLYHEDRA,
+    Geom_BALL,
+    Geom_LAST
+  };
+  
+  /*!
+   * ElementOrder points out entities of what order are requested
+   */
+  enum ElementOrder {
+    ORDER_ANY,          /*! entities of any order */
+    ORDER_LINEAR,       /*! entities of 1st order */
+    ORDER_QUADRATIC     /*! entities of 2nd order */
+  };
+
+  /*!
+   * Enumeration of entity type used in mesh info array,
+   * it should be synchronised with enum SMDSAbs_EntityType
+   */
+  enum EntityType
+  {
+    Entity_Node,
+    Entity_0D,
+    Entity_Edge,
+    Entity_Quad_Edge,
+    Entity_Triangle,
+    Entity_Quad_Triangle,
+    Entity_BiQuad_Triangle,
+    Entity_Quadrangle,
+    Entity_Quad_Quadrangle,
+    Entity_BiQuad_Quadrangle,
+    Entity_Polygon,
+    Entity_Quad_Polygon,
+    Entity_Tetra,
+    Entity_Quad_Tetra,
+    Entity_Pyramid,
+    Entity_Quad_Pyramid,
+    Entity_Hexa,
+    Entity_Quad_Hexa,
+    Entity_TriQuad_Hexa,
+    Entity_Penta,
+    Entity_Quad_Penta,
+    Entity_BiQuad_Penta,
+    Entity_Hexagonal_Prism,
+    Entity_Polyhedra,
+    Entity_Quad_Polyhedra,
+    Entity_Ball,
+    Entity_Last
+  };
+
+  /*!
+   * Enumeration for hypothesis status (used by AddHypothesis() and RemoveHypothesis() methods)
+   */
+  enum Hypothesis_Status // in the order of severity
+  {
+    HYP_OK,
+    HYP_MISSING,      // algo misses a hypothesis
+    HYP_CONCURRENT,   // several applicable hypotheses
+    HYP_BAD_PARAMETER,// hypothesis has a bad parameter value
+    HYP_HIDDEN_ALGO,  // an algo is hidden by an upper dim algo generating all-dim elements
+    HYP_HIDING_ALGO,  // an algo hides lower dim algos by generating all-dim elements
+    HYP_UNKNOWN_FATAL,//  --- all statuses below should be considered as fatal
+                      //      for Add/RemoveHypothesis operations
+    HYP_INCOMPATIBLE, // hypothesis does not fit algo
+    HYP_NOTCONFORM,   // not conform mesh is produced applying a hypothesis
+    HYP_ALREADY_EXIST,// such hypothesis already exist
+    HYP_BAD_DIM,      // bad dimension
+    HYP_BAD_SUBSHAPE, // shape is neither the main one, nor its sub-shape, nor a group
+    HYP_BAD_GEOMETRY, // geometry mismatches algorithm's expectation
+    HYP_NEED_SHAPE,   // algorithm can work on shape only
+    HYP_INCOMPAT_HYPS // several additional hypotheses are incompatible one with other
+  };
+
+  /*!
+   * Enumeration for mesh read status (used by SMESH_Gen::CreateMeshesFrom*() methods)
+   */
+  enum DriverMED_ReadStatus // in the order of severity
+  {
+    DRS_OK,
+    DRS_EMPTY,           // a file contains no mesh with the given name
+    DRS_WARN_RENUMBER,   // a MED file has overlapped ranges of element numbers,
+                         // so the numbers from the file are ignored
+    DRS_WARN_SKIP_ELEM,  // some elements were skipped due to incorrect file data
+    DRS_WARN_DESCENDING, // some elements were skipped due to descending connectivity
+    DRS_FAIL             // general failure (exception etc.)
+  };
+
+  /*! 
+   * \brief A structure containing information about MED file
+   */
+  struct MedFileInfo
+  {
+    string fileName; //!< name of file
+    long   fileSize; //!< size of file
+    long   major, minor, release; //!< MED file version
+  };
+
+  /*!
+   * Enumeration for CreateDimGroup()
+   */
+  enum NB_COMMON_NODES_ENUM
+  {
+    ALL_NODES, MAIN, AT_LEAST_ONE, MAJORITY
+  };
+
+  /*!
+   * Auxiliary flags for advanced extrusion.
+   * BOUNDARY: create or not boundary for result of extrusion
+   * SEW:      try to use existing nodes or create new nodes in any case
+   */
+  const long EXTRUSION_FLAG_BOUNDARY = 1;
+  const long EXTRUSION_FLAG_SEW = 2;
+  
+  /*!
+   * Structure used in mesh edit preview data (MeshPreviewStruct)
+   */
+  struct ElementSubType { ElementType SMDS_ElementType;
+                          boolean     isPoly;
+                          short       nbNodesInElement; };
+
+  typedef sequence<ElementSubType> types_array;
+
+  /*!
+   * Structure containing mesh edit preview data
+   */
+  struct MeshPreviewStruct { nodes_array nodesXYZ;
+                             long_array  elementConnectivities;
+                             types_array elementTypes; };
+
+  interface SMESH_Mesh;
+
+  interface SMESH_IDSource : SALOME::GenericObj
+  {
+    /*!
+     * Returns a sequence of all element IDs
+     */
+    smIdType_array GetIDs();
+
+    /*!
+     * Returns number of mesh elements of each \a EntityType
+     * @return array of number of elements per \a EntityType
+     */
+    smIdType_array GetMeshInfo();
+
+    /*!
+     * Returns number of mesh elements of each \a ElementType
+     * @return array of number of elements per \a ElementType
+     */
+    smIdType_array GetNbElementsByType();
+
+    /*!
+     * Returns types of elements it contains.
+     * It's empty if the SMESH_IDSource contains no IDs
+     */
+    array_of_ElementType GetTypes();
+
+    /*!
+     * Returns the mesh
+     */
+    SMESH_Mesh GetMesh();
+
+    /*!
+     * Returns false if GetMeshInfo() returns incorrect information that may
+     * happen if mesh data is not yet fully loaded from the file of study.
+     */
+    boolean IsMeshInfoCorrect();
+
+    /*!
+     * Returns mesh unstructed grid information.
+     */
+    SALOMEDS::TMPFile GetVtkUgStream();
+  };
+
+  interface SMESH_Group;
+  interface SMESH_GroupOnGeom;
+  interface Filter;
+  interface SMESH_GroupOnFilter;
+  interface SMESH_subMesh;
+  interface SMESH_MeshEditor;
+
+  typedef sequence<SMESH_subMesh>     submesh_array;
+  typedef sequence<submesh_array>     submesh_array_array;
+
+  interface SMESH_Mesh : SMESH_IDSource
+  {
+    /*!
+     * Return true if there is a geometry to be meshed
+     */
+    boolean HasShapeToMesh()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Get geom shape to mesh. A result should not be nil. Use HasShapeToMesh()
+     * to know if a returned shape 
+     */
+    GEOM::GEOM_Object GetShapeToMesh()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Replaces a shape in the mesh
+     */
+    void ReplaceShape(in GEOM::GEOM_Object theNewGeom)
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Return false if the mesh is not yet fully loaded from the study file
+     */
+    boolean IsLoaded()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Load full mesh data from the study file
+     */
+    void Load()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Remove all nodes and elements
+     */
+    void Clear()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     *  Get the list of sub-meshes existing in the mesh
+     */
+    submesh_array GetSubMeshes()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Remove all nodes and elements of submesh
+     */
+    void ClearSubMesh(in long ShapeID)
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Get the subMesh object associated to a Sub-shape. The subMesh object
+     * gives access to nodes and elements IDs.
+     * SubMesh will be used instead of Sub-shape in a next idl version to
+     * address a specific subMesh...
+     */
+    SMESH_subMesh GetSubMesh(in GEOM::GEOM_Object aSubObject, in string name)
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Remove a submesh
+     */
+    void RemoveSubMesh(in SMESH_subMesh aSubMesh)
+      raises (SALOME::SALOME_Exception);
+
+
+    /*!
+     * Create a group
+     */
+    SMESH_Group CreateGroup( in ElementType elem_type,
+                             in string      name )
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Create a group from geometry
+     */
+    SMESH_GroupOnGeom CreateGroupFromGEOM( in ElementType       elemType,
+                                           in string            name,
+                                           in GEOM::GEOM_Object geomObject )
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Create a group from filter
+     */
+    SMESH_GroupOnFilter CreateGroupFromFilter( in ElementType   elemType,
+                                               in string        name,
+                                               in SMESH::Filter filter )
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Remove a group
+     */
+    void RemoveGroup(in SMESH_GroupBase aGroup)
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     *  Remove group with its contents
+     */
+    void RemoveGroupWithContents( in SMESH_GroupBase aGroup )
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     *  Get the list of groups existing in the mesh
+     */
+    ListOfGroups GetGroups()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     *  Get number of groups existing in the mesh
+     */
+    long NbGroups()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Union of two groups
+     *    New group is created. All mesh elements that are
+     *    present in initial groups are added to the new one
+     */
+    SMESH_Group UnionGroups (in SMESH_GroupBase aGroup1,
+                             in SMESH_GroupBase aGroup2,
+                             in string          name )
+      raises (SALOME::SALOME_Exception);
+      
+    /*!
+     * Union of list of groups
+     * New group is created. All mesh elements that are
+     * present in initial groups are added to the new one
+     */
+    SMESH_Group UnionListOfGroups (in ListOfGroups aListOfGroups,
+                                   in string       name )
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     *  Intersection of two groups
+     *  New group is created. All mesh elements that are
+     *  present in both initial groups are added to the new one.
+     */
+    SMESH_Group IntersectGroups (in SMESH_GroupBase aGroup1,
+                                 in SMESH_GroupBase aGroup2,
+                                 in string          name )
+      raises (SALOME::SALOME_Exception);
+      
+    /*!
+     *  Intersection of list of groups
+     *  New group is created. All mesh elements that are
+     *  present in all initial groups simultaneously are added to the new one.
+     */
+    SMESH_Group IntersectListOfGroups (in ListOfGroups aListOfGroups,
+                                       in string       name)
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     *  Cut of two groups
+     *  New group is created. All mesh elements that are present in
+     *  main group but do not present in tool group are added to the new one
+     */
+    SMESH_Group CutGroups (in SMESH_GroupBase aMainGroup,
+                           in SMESH_GroupBase aToolGroup,
+                           in string          name )
+      raises (SALOME::SALOME_Exception);
+      
+    /*!
+     *  Cut of lists of groups
+     *  New group is created. All mesh elements that are present in
+     *  main groups but do not present in tool groups are added to the new one
+     */
+    SMESH_Group CutListOfGroups (in ListOfGroups aMainGroups,
+                                 in ListOfGroups aToolGroups,
+                                 in string       name)
+      raises (SALOME::SALOME_Exception);
+      
+    /*!
+     *  Create a group of entities basing on nodes of other groups.
+     *  \param [in] aListOfGroups - list of either groups, sub-meshes or filters.
+     *  \param [in] anElemType - a type of elements to include to the new group.
+     *  \param [in] name - a name of the new group.
+     *  \param [in] nbCommonNodes - criterion of inclusion of an element to the new group.
+     *  \param [in] underlyingOnly - if \c True, an element is included to the 
+     *         new group provided that it is based on nodes of an element of
+     *         \a aListOfGroups
+     *  \return SMESH_Group - the created group
+     */
+    SMESH_Group CreateDimGroup( in ListOfIDSources      aListOfGroups,
+                                in ElementType          anElemType,
+                                in string               name,
+                                in NB_COMMON_NODES_ENUM nbCommonNodes,
+                                in boolean              underlyingOnly )
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Distribute all faces of the mesh among groups using sharp edges and optionally
+     * existing 1D elements as group boundaries.
+     *  \param [in] sharpAngle - edge is considered sharp if an angle between normals of
+     *              adjacent faces is more than \a sharpAngle in degrees.
+     *  \param [in] createEdges - to create 1D elements for detected sharp edges.
+     *  \param [in] useExistingEdges - to use existing edges as group boundaries
+     *  \return ListOfGroups - the created groups
+     */
+    ListOfGroups FaceGroupsSeparatedByEdges( in double  sharpAngle,
+                                             in boolean createEdges,
+                                             in boolean useExistingEdges )
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Convert group on geometry or on filter into standalone group
+     */
+    SMESH_Group ConvertToStandalone( in SMESH_GroupBase theGroupOn )
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Add hypothesis to the mesh, under a particular sub-shape
+     * (or the main shape itself)
+     * This method is only used to prepare the build of the mesh and store
+     * the algorithms and associated parameters.
+     * Actual job of meshing the shape is done by SMESH_Gen::Compute()
+     * @params
+     * - aSubObject : sub-shape obtained by a shape explode in GEOM
+     *   (or main shape)
+     * - anHyp : an hypothesis object
+     * @return
+     * - An enum item explaining what's up
+     * - anErrorText: an optional textual description of a problem (if any)
+     */
+    Hypothesis_Status AddHypothesis(in GEOM::GEOM_Object aSubObject,
+                                    in SMESH_Hypothesis  anHyp,
+                                    out string           anErrorText)
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Remove an hypothesis previously added with AddHypothesis.
+     */
+    Hypothesis_Status RemoveHypothesis(in GEOM::GEOM_Object aSubObject,
+                                       in SMESH_Hypothesis anHyp)
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Get the list of hypothesis added on a sub-shape
+     */
+    ListOfHypothesis GetHypothesisList(in GEOM::GEOM_Object aSubObject)
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Get the log of nodes and elements added or removed since previous
+     * clear of the log.
+     * @params
+     * - clearAfterGet : log is emptied after Get (safe if concurrents access)
+     */
+    log_array GetLog(in boolean clearAfterGet)
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Clear the log of nodes and elements added or removed since previous
+     * clear. Must be used immediately after GetLog if clearAfterGet is false.
+     */
+    void ClearLog()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Toggle auto color mode on the object.
+     * @params
+     * - theAutoColor : flag which toggles auto color mode.
+     */
+    void SetAutoColor(in boolean theAutoColor)
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Get flag of object's auto color mode.
+     */
+    boolean GetAutoColor()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Get the internal Id
+     */
+    long GetId();
+
+    /*!
+     * Obtain instance of SMESH_MeshEditor
+     */
+    SMESH_MeshEditor GetMeshEditor()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Return SMESH_MeshEditor that would not modify the mesh but
+     * fill MeshPreviewStruct
+     */
+    SMESH_MeshEditor GetMeshEditPreviewer()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Return true if the mesh has been edited since a total re-compute
+     * and those modifications may prevent successful partial re-compute
+     */
+    boolean HasModificationsToDiscard()
+      raises (SALOME::SALOME_Exception);
+
+    /*! Check group names for duplications.
+     *  Consider maximum group name length stored in MED file.
+     */
+    boolean HasDuplicatedGroupNamesMED();
+
+    /*!
+     * Export a Mesh to MED file.
+     * @params
+     * - fileName : name of the MED file
+     * - auto_groups : boolean parameter for creating/not creating
+     *                 the groups Group_On_All_Nodes, Group_On_All_Faces, ... ;
+     *                 the typical use is auto_groups=false.
+     * - overwrite : boolean parameter for overwriting/not overwriting the file, if it exists
+     * - version : define the version of MED file format, coded with major and minor digits (release digit not used)
+     *           for instance med 3.2.1 is coded 3*10+2 = 32, med 4.0.0 is coded 4*10+0 = 40.
+     *           The rules of compatibility to write a mesh in an older version than the current version
+     *           depend on the current version. For instance, with med 4.0 it is possible to write/append
+     *           med files in 4.0.0 (default format) or 3.2.1 or 3.3.1 formats.
+     *           The minor must be between 0 and the current minor version of MED file library.
+     *           If version is equal to -1, the version is not changed (default).
+     * - autoDimension : if @c true, a space dimension of a MED mesh can be either
+     *         - 1D if all mesh nodes lie on OX coordinate axis, or
+     *         - 2D if all mesh nodes lie on XOY coordinate plane, or
+     *         - 3D in the rest cases.
+     *         If @a autoDimension is @c false, the space dimension is always 3.
+     */
+    void ExportMED( in string  fileName,
+		    in boolean auto_groups,
+		    in long    version,
+		    in boolean overwrite,
+		    in boolean autoDimension) raises (SALOME::SALOME_Exception);
+
+    long long ExportMEDCoupling(in boolean auto_groups,
+                                in boolean autoDimension) raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Export a [part of] Mesh into a MED file
+     * @params
+     * - meshPart : a part of mesh to store
+     * - fileName : name of the MED file
+     * - overwrite : boolean parameter for overwriting/not overwriting the file, if it exists
+     * - version : define the version of MED file format, coded with major and minor digits (release digit not used)
+     *           for instance med 3.2.1 is coded 3*10+2 = 32, med 4.0.0 is coded 4*10+0 = 40.
+     *           The rules of compatibility to write a mesh in an older version than the current version
+     *           depend on the current version. For instance, with med 4.0 it is possible to write/append
+     *           med files in 4.0.0 (default format) or 3.2.1 or 3.3.1 formats.
+     *           The minor must be between 0 and the current minor version of MED file library.
+     *           If version is equal to -1, the version is not changed (default).
+     * - autoDimension : if @c True, a space dimension for export is defined by mesh 
+     *                 configuration; for example a planar mesh lying on XOY plane
+     *                 will be exported as a mesh in 2D space. 
+     *                 If @a autoDimension == @c False, the space dimension is 3.
+     * - fields : list of GEOM fields defined on the shape to mesh.
+     * - geomAssocFields : each character of this string means a need to export a 
+     *         corresponding field; correspondence between fields and characters is following:
+     *         - 'v' stands for _vertices_ field;
+     *         - 'e' stands for _edges_ field;
+     *         - 'f' stands for _faces_ field;
+     *         - 's' stands for _solids_ field.
+     * - ZTolerance : tolerance in Z direction. If Z coordinate of a node is close to zero
+     *                within a given tolerance, the coordinate is set to zero.
+     *                If @a ZTolerance is negative, the node coordinates are kept as is.
+     * - saveNumbers : enable saving numbers of nodes and cells.
+     */
+    void ExportPartToMED( in SMESH_IDSource     meshPart,
+                          in string             fileName,
+                          in boolean            auto_groups,
+                          in long               version,
+                          in boolean            overwrite,
+                          in boolean            autoDimension,
+                          in GEOM::ListOfFields fields,
+                          in string             geomAssocFields,
+                          in double             ZTolerance,
+                          in boolean            saveNumbers) raises (SALOME::SALOME_Exception);
+
+    long long ExportPartToMEDCoupling( in SMESH_IDSource     meshPart,
+                                       in boolean            auto_groups,
+                                       in boolean            autoDimension,
+                                       in GEOM::ListOfFields fields,
+                                       in string             geomAssocFields,
+                                       in double             ZTolerance,
+                                       in boolean            saveNumbers) raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Return string representation of a MED file version comprising nbDigits
+     */
+    string GetVersionString(in long minor, in short nbDigits);
+
+    /*!
+     *  Return the list of med versions compatibles for write/append,
+     *  encoded in 10*major+minor (for instance, code for med 3.2.1 is 32)
+     */
+    long_array GetMEDVersionsCompatibleForAppend();
+    
+    /*!
+     * Export Mesh to different Formats
+     * (UNV supported version is I-DEAS 10)
+     */
+    void ExportDAT( in string  file,
+                    in boolean renumer) raises (SALOME::SALOME_Exception);
+    void ExportUNV( in string  file,
+                    in boolean renumer ) raises (SALOME::SALOME_Exception);
+    void ExportSTL( in string  file,
+                    in boolean isascii ) raises (SALOME::SALOME_Exception);
+    void ExportCGNS( in SMESH_IDSource meshPart, 
+                     in string         file,
+                     in boolean        overwrite,
+                     in boolean        groupElemsByType) raises (SALOME::SALOME_Exception);
+    void ExportGMF( in SMESH_IDSource  meshPart, 
+                    in string          file,
+                    in boolean         withRequiredGroups) raises (SALOME::SALOME_Exception);
+    void ExportPartToDAT( in SMESH_IDSource meshPart, 
+                          in string         file,
+                          in boolean        renumer ) raises (SALOME::SALOME_Exception);
+    void ExportPartToUNV( in SMESH_IDSource meshPart, 
+                          in string         file,
+                          in boolean        renumer ) raises (SALOME::SALOME_Exception);
+    void ExportPartToSTL( in SMESH_IDSource meshPart,
+                          in string         file,
+                          in boolean        isascii ) raises (SALOME::SALOME_Exception);
+    /*!
+     * Return computation progress [0.,1]
+     */
+    double GetComputeProgress();
+
+    /*!
+     * Get information about mesh contents
+     */
+    smIdType NbNodes()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbElements()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType Nb0DElements()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbBalls()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbEdges()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbEdgesOfOrder(in ElementOrder order)
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbFaces()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbFacesOfOrder(in ElementOrder order)
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbTriangles()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbTrianglesOfOrder(in ElementOrder order)
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbBiQuadTriangles()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbQuadrangles()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbQuadranglesOfOrder(in ElementOrder order)
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbBiQuadQuadrangles()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbPolygons()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbPolygonsOfOrder(in ElementOrder order)
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbVolumes()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbVolumesOfOrder(in ElementOrder order)
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbTetras()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbTetrasOfOrder(in ElementOrder order)
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbHexas()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbHexasOfOrder(in ElementOrder order)
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbTriQuadraticHexas()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbPyramids()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbPyramidsOfOrder(in ElementOrder order)
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbPrisms()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbPrismsOfOrder(in ElementOrder order)
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbHexagonalPrisms()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbPolyhedrons()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType NbSubMesh()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType_array GetElementsId()
+      raises (SALOME::SALOME_Exception);
+
+    smIdType_array GetElementsByType( in ElementType theType )
+      raises (SALOME::SALOME_Exception);
+
+    smIdType_array GetNodesId()
+      raises (SALOME::SALOME_Exception);
+    
+    /*!
+     * Returns type of mesh element
+     */    
+    ElementType GetElementType( in smIdType id, in boolean iselem )
+      raises (SALOME::SALOME_Exception);
+
+    EntityType GetElementGeomType( in smIdType id )
+      raises (SALOME::SALOME_Exception);
+
+    GeometryType GetElementShape( in smIdType id )
+      raises (SALOME::SALOME_Exception);
+
+    smIdType_array GetSubMeshElementsId(in long ShapeID)
+      raises (SALOME::SALOME_Exception);
+
+    smIdType_array GetSubMeshNodesId(in long ShapeID, in boolean all )
+      raises (SALOME::SALOME_Exception);
+    
+    ElementType GetSubMeshElementType(in long ShapeID)
+      raises (SALOME::SALOME_Exception);
+
+
+    /*!
+     * Methods to set meshing order of submeshes
+     */
+
+    /*!
+     * \brief Return \c true if a meshing order not yet set for a concurrent sub-mesh
+     */
+    boolean IsUnorderedSubMesh(in long submeshID);
+
+    /*!
+     * \brief Return submesh objects list in meshing order
+     */
+    submesh_array_array GetMeshOrder();
+
+    /*!
+     * \brief Set submesh object order
+     */
+    boolean SetMeshOrder(in submesh_array_array theSubMeshArray);
+
+
+    /*!
+     * Get mesh description
+     */
+    string Dump();
+
+    /*!
+     * Get mesh pointer
+     */
+    long long GetMeshPtr();
+
+    /*!
+     * Get XYZ coordinates of node as list of double
+     * If there is not node for given ID - returns empty list
+     */
+    double_array GetNodeXYZ(in smIdType id);
+
+    /*!
+     * For given node returns list of IDs of inverse elements
+     * If there is not node for given ID - returns empty list
+     */
+    smIdType_array GetNodeInverseElements(in smIdType id, in ElementType elemType);
+
+    /*!
+     * \brief Return position of a node on shape
+     */
+    NodePosition GetNodePosition(in smIdType NodeID);
+
+    /*!
+     * \brief Return position of an element on shape
+     */
+    ElementPosition GetElementPosition(in smIdType ElemID);
+
+    /*!
+     * If given element is node returns IDs of shape from position
+     * If there is not node for given ID - returns -1
+     */
+    long GetShapeID(in smIdType id);
+
+    /*!
+     * For given element returns ID of result shape after 
+     * ::FindShape() from SMESH_MeshEditor
+     * If there is not element for given ID - returns -1
+     */
+    long GetShapeIDForElem(in smIdType id);
+
+    /*!
+     * Returns number of nodes for given element
+     * If there is not element for given ID - returns -1
+     */
+    short GetElemNbNodes(in smIdType id);
+
+    /*!
+     * Returns IDs of nodes of given element
+     */
+    smIdType_array GetElemNodes(in smIdType id);
+
+    /*!
+     * Returns ID of node by given index for given element
+     * If there is not element for given ID - returns -1
+     * If there is not node for given index - returns -2
+     */
+    smIdType GetElemNode(in smIdType id, in short index);
+
+    /*!
+     * Returns true if given node is medium node
+     * in given quadratic element
+     */
+    boolean IsMediumNode(in smIdType ide, in smIdType idn);
+
+    /*!
+     * Returns true if given node is medium node
+     * in one of quadratic elements
+     */
+    boolean IsMediumNodeOfAnyElem(in smIdType idn, in ElementType elem_type);
+
+    /*!
+     * Returns number of edges for given element
+     */
+    long ElemNbEdges(in smIdType id);
+
+    /*!
+     * Returns number of faces for given element
+     */
+    long ElemNbFaces(in smIdType id);
+
+    /*!
+     * Returns nodes of given face (counted from zero) for given volumic element.
+     */
+    smIdType_array GetElemFaceNodes(in smIdType elemId, in short faceIndex);
+
+    /*!
+     * Returns three components of normal of given mesh face (or an empty array in KO case)
+     */
+    double_array GetFaceNormal(in long faceId, in boolean normalized);
+
+    /*!
+     * Returns an element based on all given nodes.
+     */
+    smIdType FindElementByNodes(in smIdType_array nodes);
+
+    /*!
+     * Return elements including all given nodes.
+     */
+    smIdType_array GetElementsByNodes(in smIdType_array nodes, in ElementType elem_type);
+
+    /*!
+     * Returns true if given element is polygon
+     */
+    boolean IsPoly(in smIdType id);
+
+    /*!
+     * Returns true if given element is quadratic
+     */
+    boolean IsQuadratic(in smIdType id);
+
+    /*!
+     * Returns diameter of a ball discrete element or zero in case of an invalid \a id
+     */
+    double GetBallDiameter(in smIdType id);
+
+    /*!
+     * Returns XYZ coordinates of bary center for given element
+     * as list of double
+     * If there is not element for given ID - returns empty list
+     */
+    double_array BaryCenter(in smIdType id);
+
+    /*! Gets information about imported MED file */
+    MedFileInfo GetMEDFileInfo();
+
+    /*!
+     *  Sets list of notebook variables used for Mesh operations separated by ":" symbol
+     *  \param theParameters is a string containing the notebook variables
+     */
+    void SetParameters (in string theParameters);
+
+    /*!
+     *  Returns list of notebook variables used for Mesh operations separated by ":" symbol
+     */
+    string GetParameters();
+
+    /*!
+     *  Returns list of notebook variables used for last Mesh operation
+     */
+    string_array GetLastParameters();
+  };
+
+  interface SMESH_subMesh : SMESH_IDSource
+  {
+    /*!
+     *
+     */
+    smIdType GetNumberOfElements()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     *
+     */
+    smIdType GetNumberOfNodes( in boolean all )
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     *
+     */
+    smIdType_array GetElementsId()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     *
+     */
+    smIdType_array GetElementsByType( in ElementType theType )
+      raises (SALOME::SALOME_Exception);
+    
+    /*!
+     * Returns type of mesh element (same as SMESH_Mesh::GetElementType() )
+     */
+    ElementType GetElementType( in smIdType id, in boolean iselem )
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     *
+     */
+    smIdType_array GetNodesId()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Get geom shape the submesh is dedicated to
+     */
+    GEOM::GEOM_Object GetSubShape()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Get SMESH_Mesh which stores nodes coordinates & elements definition
+     */
+    SMESH_Mesh GetFather()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Get the internal persisten Id
+     */
+    long GetId();
+  };
+
+};
+
+#endif

@@ -1,0 +1,190 @@
+// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+//
+// Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
+// CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
+//
+// See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
+//
+
+//  File   : SMESH_Group.idl
+//  Author : Sergey ANIKIN, OCC
+//  $Header$
+//
+#ifndef _SMESH_GROUP_IDL_
+#define _SMESH_GROUP_IDL_
+
+#include "SALOME_Exception.idl"
+#include "SALOME_GenericObj.idl"
+#include "SALOMEDS_Attributes.idl"
+
+#include "SMESH_Mesh.idl"
+#include "SMESH_smIdType.idl"
+
+module SMESH
+{
+  interface Predicate;
+  interface Filter;
+
+  /*!
+   * SMESH_Group: base interface of group object
+   */
+  interface SMESH_GroupBase : SMESH_IDSource
+  {
+    /*!
+     * Sets group name
+     */
+    void SetName( in string name );
+
+    /*!
+     * Returns group name
+     */
+    string GetName();
+
+    /*!
+     * Returns group type (type of elements in the group)
+     */
+    ElementType GetType();
+
+    /*!
+     * Returns the number of elements in the group
+     */
+    smIdType Size();
+
+    /*!
+     * Returns true if the group does not contain any elements
+     */
+    boolean IsEmpty();
+
+    /*!
+     * returns true if the group contains an element with ID == <elem_id> 
+     */
+    boolean Contains( in smIdType elem_id );
+
+    /*!
+     * Returns ID of an element at position <elem_index> counted from 1
+     */
+    smIdType GetID( in smIdType elem_index );
+
+    /*!
+     * Returns a sequence of all element IDs in the group
+     */
+    smIdType_array GetListOfID();
+
+    /*!
+     * Get the number of nodes of cells included to the group
+     * For a nodal group returns the same value as Size() function
+     */
+    smIdType GetNumberOfNodes();
+
+    /*!
+     * Get IDs of nodes of cells included to the group
+     * For a nodal group returns result of GetListOfID() function
+     */
+    smIdType_array GetNodeIDs();
+
+    /*!
+     * Return true if GetNumberOfNodes() won't take a long time for computation
+     */
+    boolean IsNodeInfoAvailable();
+
+    /*!
+     * Sets group color
+     */
+    void SetColor(in SALOMEDS::Color theColor);
+
+    /*!
+     * Returns group color
+     */
+    SALOMEDS::Color GetColor();
+
+    /*!
+     * Sets group color number
+     * (corresponds to the "hue" parameter of the color - must be in range [0, 360])
+     */
+    void SetColorNumber( in long color );
+
+    /*!
+     * Returns group color number (obsolete - use GetColor instead)
+     * (corresponds to the "hue" parameter of the color - must be in range [0, 360])
+     */
+    long GetColorNumber();
+
+    /*!
+     * Returns \c true if \c this group depends on the \a other via
+     * FT_BelongToMeshGroup predicate or vice versa
+     */
+    boolean IsInDependency( in SMESH_GroupBase other );
+  };
+
+  /*!
+   * SMESH_Group: interface of a standalone group object
+   */
+  interface SMESH_Group : SMESH_GroupBase
+  {
+    /*!
+     * Clears the group's contents
+     */
+    void Clear();
+
+    /*!
+     * Adds elements or nodes with specified identifiers to the group
+     */
+    smIdType Add( in smIdType_array elem_ids );
+    /*!
+     * Adds elements or nodes that match specified predicate to the group
+     */
+    smIdType AddByPredicate( in Predicate thePredicate );
+    /*!
+     * Add all elements or nodes from the specified source to the group
+     */
+    smIdType AddFrom( in SMESH_IDSource theSource );
+
+    /*!
+     * Removes elements or nodes with specified identifiers from the group
+     */
+    smIdType Remove( in smIdType_array elem_ids );
+    /*!
+     * Removes elements or nodes that match specified predicate from the group
+     */
+    smIdType RemoveByPredicate( in Predicate thePredicate );
+
+  };
+
+  /*!
+   * SMESH_GroupOnGeom: interface of a group object linked to geometry
+   */
+  interface SMESH_GroupOnGeom : SMESH_GroupBase
+  {
+    GEOM::GEOM_Object GetShape();
+  };
+
+  /*!
+   * SMESH_GroupOnFilter: interface of a group object defined by filter
+   */
+  interface SMESH_GroupOnFilter : SMESH_GroupBase
+  {
+    void   SetFilter( in Filter theFilter) raises (SALOME::SALOME_Exception); 
+    Filter GetFilter();
+
+    //! @return True if group contents is computed
+    boolean IsUpToDate();
+  };
+
+};
+
+
+#endif

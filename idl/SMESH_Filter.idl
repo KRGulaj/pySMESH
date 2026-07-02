@@ -1,0 +1,674 @@
+// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+//
+// Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
+// CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
+//
+// See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
+//
+
+//  File   : SMESH_Filter.idl
+//  Author : Alexey Petrov, OCC
+//
+#ifndef _SMESH_FILTER_IDL_
+#define _SMESH_FILTER_IDL_
+
+#include "SALOME_Exception.idl"
+#include "SALOME_GenericObj.idl"
+#include "GEOM_Gen.idl"
+#include "SMESH_Mesh.idl"
+#include "SMESH_smIdType.idl"
+
+module SMESH
+{
+
+  /*!
+  * Enumeration of functor types
+  */
+  enum FunctorType
+  {
+    FT_AspectRatio,
+    FT_AspectRatio3D,
+    FT_Warping,   
+    FT_MinimumAngle,
+    FT_Taper,       
+    FT_Skew,         
+    FT_Area,          
+    FT_Volume3D,          
+    FT_MaxElementLength2D,
+    FT_MaxElementLength3D,
+    FT_FreeBorders,
+    FT_FreeEdges,
+    FT_FreeNodes,
+    FT_FreeFaces,
+    FT_EqualNodes,  // IMPORTANT: when a new item is added, don't forget to
+    FT_EqualEdges,  // 1) update getFunctNames() in SMESH_Filter_i.cxx: line 3910
+    FT_EqualFaces,  // 2) update fixFunctorType() in SMESH_2smeshpy.cxx: line 234
+    FT_EqualVolumes,
+    FT_MultiConnection,
+    FT_MultiConnection2D,
+    FT_Length,
+    FT_Length2D,
+    FT_Length3D,
+    FT_Deflection2D,
+    FT_NodeConnectivityNumber,
+    FT_BelongToMeshGroup,
+    FT_BelongToGeom,
+    FT_BelongToPlane,
+    FT_BelongToCylinder,
+    FT_BelongToGenSurface,
+    FT_LyingOnGeom,
+    FT_RangeOfIds,
+    FT_BadOrientedVolume,
+    FT_BareBorderVolume,
+    FT_BareBorderFace,
+    FT_OverConstrainedVolume,
+    FT_OverConstrainedFace,
+    FT_LinearOrQuadratic,
+    FT_GroupColor,
+    FT_ElemGeomType,
+    FT_EntityType,
+    FT_CoplanarFaces,
+    FT_BallDiameter,
+    FT_ConnectedElements,
+    FT_LessThan,
+    FT_MoreThan,
+    FT_EqualTo,
+    FT_LogicalNOT,
+    FT_LogicalAND,
+    FT_LogicalOR,
+    FT_Undefined
+  };
+
+  /*!
+  * Parameters of a reclangle of histogram
+  */
+  struct HistogramRectangle
+  {
+    long nbEvents;
+    double min;
+    double max;
+  };
+  typedef sequence<HistogramRectangle> Histogram;
+
+
+  /*!
+  * Base interface for all functors ( i.e. numerical functors and predicates )
+  */
+  interface Functor: SALOME::GenericObj
+  {
+    void            SetMesh( in SMESH_Mesh theMesh );
+    FunctorType     GetFunctorType();
+    ElementType     GetElementType();
+  };
+
+  /*!
+  * Numerical functors are intended for calculating value by Id of mesh entity
+  */
+  interface NumericalFunctor: Functor
+  {
+    double  GetValue    ( in smIdType theElementId );
+    boolean IsApplicable( in smIdType theElementId );
+
+    Histogram GetHistogram     ( in short nbIntervals, in boolean isLogarithmic );
+    Histogram GetLocalHistogram( in short nbIntervals, in boolean isLogarithmic,
+                                 in SMESH::SMESH_IDSource obj );
+    /*!
+    * Set precision for calculation. It is a position after point which is
+    * used to functor value after calculation.
+    */
+    void   SetPrecision( in long thePrecision );
+    long   GetPrecision();
+  };
+  interface MinimumAngle    : NumericalFunctor{};
+  interface AspectRatio     : NumericalFunctor{};
+  interface AspectRatio3D   : NumericalFunctor{};
+  interface Warping         : NumericalFunctor{};
+  interface Taper           : NumericalFunctor{};
+  interface Skew            : NumericalFunctor{};
+  interface Area            : NumericalFunctor{};
+  interface Volume3D        : NumericalFunctor{};
+  interface MaxElementLength2D : NumericalFunctor{};
+  interface MaxElementLength3D : NumericalFunctor{};
+  interface Length          : NumericalFunctor{};
+  interface Length2D        : NumericalFunctor
+  {
+    struct Value
+    {
+      double myLength;
+      long myPnt1, myPnt2;
+    };
+    typedef sequence<Value> Values;
+    Values GetValues();
+  };
+  interface Length3D          : NumericalFunctor{};
+  interface Deflection2D      : NumericalFunctor{};
+  interface MultiConnection   : NumericalFunctor{};
+  interface MultiConnection2D : NumericalFunctor
+  {
+    struct Value
+    {
+      long myNbConnects;
+      long myPnt1, myPnt2;
+    };
+    
+    typedef sequence<Value> Values;
+    Values GetValues();
+  };
+  interface BallDiameter    : NumericalFunctor{};
+  interface NodeConnectivityNumber : NumericalFunctor{};
+  
+
+  /*!
+  * Predicates are intended for verification of criteria,
+  *            they return bool value by mesh id
+  */
+  interface Predicate: Functor
+  {
+    boolean IsSatisfy( in long thEntityId );
+    long    NbSatisfying( in SMESH::SMESH_IDSource obj );
+  };
+
+  /*!
+   * Logical functor (predicate) "Bad Oriented Volume".
+   * Verify whether a mesh volume is incorrectly oriented from
+   * the point of view of MED convention
+   */
+  interface BadOrientedVolume: Predicate {};
+
+  /*!
+   * Logical functor (predicate) "Volumes with bare border".
+   * Verify whether a mesh volume has a free facet without a mesh face on it
+   */
+  interface BareBorderVolume: Predicate {};
+  /*!
+   * Logical functor (predicate) "Faces with bare border".
+   * Verify whether a mesh face has a side not shared with another face
+   * and without a mesh edge on it
+   */
+  interface BareBorderFace: Predicate {};
+
+  /*!
+   * Logical functor (predicate) "Over-constrained Volume"
+   * Verify whether a mesh volume has only one facet shared with other volumes
+   */
+  interface OverConstrainedVolume: Predicate {};
+  /*!
+   * Logical functor (predicate) "Over-constrained Face".
+   * Verify whether a mesh face has only one border shared with other faces
+   */
+  interface OverConstrainedFace: Predicate {};
+
+  /*!
+   * Logical functor (predicate) "Equal Nodes".
+   * Verify whether there is another mesh node with same coordinates
+   */
+  interface EqualNodes: Predicate 
+  {
+    void    SetTolerance( in double theToler );
+    double  GetTolerance();
+  };
+  /*!
+   * Logical functor (predicate) "Equal Edges".
+   * Verify whether there is another mesh edge basing on the same nodes
+   */
+  interface EqualEdges: Predicate {};
+  /*!
+   * Logical functor (predicate) "Equal Faces".
+   * Verify whether there is another mesh face basing on the same nodes
+   */
+  interface EqualFaces: Predicate {};
+  /*!
+   * Logical functor (predicate) "Equal Volumes".
+   * Verify whether there is another mesh volumes basing on the same nodes
+   */
+  interface EqualVolumes: Predicate {};
+
+  /*!
+  * Logical functor (predicate) "Belong To Mesh Group".
+  * Verify whether a mesh element is included into a mesh group
+  */
+  interface BelongToMeshGroup: Predicate
+  {
+    void SetGroup( in SMESH::SMESH_GroupBase theGroup );
+    void SetGroupID( in string theID ); // IOR or StoreName
+    SMESH::SMESH_GroupBase GetGroup();
+  };
+
+  /*!
+   * Logical functor (predicate) "Belong To Geometry".
+   * Verify whether mesh element or node belong to pointed Geom Object
+   */
+  interface BelongToGeom: Predicate
+  {
+    void SetGeom( in GEOM::GEOM_Object theGeom );
+    void SetElementType( in ElementType theType );
+
+    /*! The tolerance is used only if there is no submesh on the shape
+     */
+    void    SetTolerance( in double theToler );
+    double  GetTolerance();
+
+    void   SetShapeName( in string theName );
+    void   SetShape( in string theID, in string theName );
+    string GetShapeName();
+    string GetShapeID();
+  };
+
+  /*!
+  * Logical functor (predicate) "Belong To Surface".
+  * Base interface for "belong to plane" and "belong to cylinder"
+  * and "Belong To Generic Surface" interfaces
+  */
+  interface BelongToSurface: Predicate
+  {
+    void    SetTolerance( in double theToler );
+    double  GetTolerance();
+    void    SetShapeName( in string theName, in ElementType theType );
+    void    SetShape( in string theID, in string theName, in ElementType theType );
+    string  GetShapeName();
+    string  GetShapeID();
+    /*!
+    * Limit surface extent to bounding box of boundaries (edges)
+    * in surface parametric space. Boundaries are ignored by default
+    */
+    void    SetUseBoundaries( in boolean theUseBndRestrictions );
+    boolean GetUseBoundaries();
+  };
+
+  /*!
+  * Logical functor (predicate) "Belong To Plane".
+  * Verify whether mesh element lie on pointed Geom planar object
+  */
+  interface BelongToPlane: BelongToSurface
+  {
+    void   SetPlane( in GEOM::GEOM_Object theGeom, in ElementType theType );
+  };
+
+  /*!
+  * Logical functor (predicate) "Belong To Cylinder".
+  * Verify whether mesh element lie on pointed Geom cylindrical object
+  */
+  interface BelongToCylinder: BelongToSurface
+  {
+    void   SetCylinder( in GEOM::GEOM_Object theGeom, in ElementType theType );
+  };
+
+  /*!
+  * Logical functor (predicate) "Belong To Generic Surface".
+  * Verify whether mesh element lie in pointed Geom cylindrical object
+  */
+  interface BelongToGenSurface: BelongToSurface
+  {
+    void   SetSurface( in GEOM::GEOM_Object theGeom, in ElementType theType );
+  };
+
+  /*!
+  * Logical functor (predicate) "Lying On Geometry".
+  * Verify whether mesh element or node lying or partially lying on the pointed Geom Object
+  */
+  interface LyingOnGeom: Predicate
+  {
+    void SetGeom( in GEOM::GEOM_Object theGeom );
+    void SetElementType( in ElementType theType );
+
+    /*! The tolerance is used only if there is no submesh on the shape
+     */
+    void    SetTolerance( in double theToler );
+    double  GetTolerance();
+
+    void   SetShapeName( in string theName );
+    void   SetShape( in string theID, in string theName );
+    string GetShapeName();    
+    string GetShapeID(); 
+  };
+ 
+  /*!
+  * Logical functor (predicate) "Free borders".
+  * Verify whether 1D mesh element is free ( i.e. connected to one face only )
+  */
+  interface FreeBorders: Predicate {};
+
+  /*!
+  * Logical functor (predicate) "Free edges".
+  * Verify whether 2D mesh element has free edges( i.e. edges connected to one face only )
+  */
+  interface FreeEdges: Predicate
+  {
+    struct Border
+    {
+      long myElemId;
+      long myPnt1, myPnt2;
+    };
+    typedef sequence<Border> Borders;
+    Borders GetBorders();
+  };
+
+  /*!
+  * Logical functor (predicate) "Free nodes".
+  * Verify whether mesh has free nodes( i.e. nodes are not connected to any element )
+  */
+  interface FreeNodes: Predicate {};
+ 
+  /*!
+  * Logical functor (predicate) "Free faces".
+  * Verify whether 2D mesh element is free ( i.e. connected to one volume only )
+  */
+  interface FreeFaces: Predicate {};
+
+  /*!
+  * Abstract logical functor (predicate) "RangeOfIds".
+  * Verify whether an Entity Id belongs to defined sequence of id's
+  */
+  interface RangeOfIds: Predicate
+  {
+    void            SetRange( in smIdType_array theIds );
+    boolean         SetRangeStr( in string theRange );
+    string          GetRangeStr();
+
+    void            SetElementType( in ElementType theType );
+  };
+
+  /*!
+  * Comparator. Predicate for compare value calculated
+  *             by numerical functor with threshold value
+  */
+  interface Comparator: Predicate
+  {
+    void    SetMargin( in double theValue );
+    void    SetNumFunctor( in NumericalFunctor theFunct );
+    double  GetMargin();
+  };
+  interface LessThan: Comparator{};
+  interface MoreThan: Comparator{};
+  interface EqualTo : Comparator
+  {
+    void    SetTolerance( in double theToler );
+    double  GetTolerance();
+  };
+
+  /*!
+  * Logical predicates are intended for compose predicates using boolean operations
+  */
+  interface Logical: Predicate {};
+
+  interface LogicalNOT: Logical
+  {
+    void SetPredicate(in Predicate thePredicate);
+  };
+
+  interface LogicalBinary: Logical
+{
+    void SetPredicate1( in Predicate thePredicate );
+    void SetPredicate2( in Predicate thePredicate );
+  };
+
+  interface LogicalAND: LogicalBinary{};
+  interface LogicalOR : LogicalBinary{};
+
+  /*!
+   * Logical functor (predicate) "Is element Linear or Quadratic".
+   * Verify whether a mesh element is linear
+   */
+  interface LinearOrQuadratic: Predicate {
+    void            SetElementType( in ElementType theType );
+  };
+
+  /*!
+  * Predicate "Group Color"
+  * Returns color of group to which mesh element belongs to
+  */
+  interface GroupColor : Predicate {
+    void            SetElementType( in ElementType theType );
+    void            SetColorStr( in string theColor );
+    string          GetColorStr();
+  };
+
+  /*!
+  * Predicate "Element geometry type"
+  * Returns is element has indicated geometry type
+  */
+  interface ElemGeomType : Predicate {
+    void            SetElementType ( in ElementType  theType );
+    void            SetGeometryType( in GeometryType theType );
+  };
+
+  /*!
+  * Predicate "Element entity type"
+  * Returns is element has indicated entity type
+  */
+  interface ElemEntityType : Predicate {
+    void            SetElementType ( in ElementType  theType );
+    void            SetEntityType( in EntityType theSetEntityType );
+  };
+
+  /*!
+  * Predicate "Coplanar faces"
+  * Returns true if a mesh face is a coplanar neighbour to a given one. It checks
+  * if normal of a face has angle with the threshold face less than a tolerance.
+  */
+  interface CoplanarFaces : Predicate {
+    void            SetFace ( in long theFaceID );
+    void            SetTolerance( in double theToler );
+  };
+
+  /*!
+  * Predicate "Connected Elements"
+  * Returns true if an element is connected via other elements to the element 
+  * located at a given point.
+  */
+  interface ConnectedElements : Predicate {
+    enum ThresholdType { POINT, VERTEX, NODE, NONE };
+    void            SetElementType( in ElementType type );
+    void            SetPoint      ( in double x, in double y, in double z );
+    void            SetVertex     ( in GEOM::GEOM_Object vertex );
+    void            SetNode       ( in smIdType nodeID );
+    string          GetThreshold  ( out ThresholdType type );
+    void            SetThreshold  ( in string threshold, in ThresholdType type ) 
+      raises (SALOME::SALOME_Exception);
+  };
+
+  /*!
+  *  Filter
+  */
+  interface Filter: SMESH_IDSource
+  {
+    /*!
+    * Structure containing information about one criterion
+    *   Type          - FT_Taper, FT_Skew ...
+    *   Compare       - FT_LessThan, FT_MoreThan, FT_EqualTo
+    *   Threshold     - threshold value
+    *   UnaryOp       - unary logical operation: FT_LogicalNOT or FT_Undefined
+    *   BinaryOp      - binary logical operation FT_LogicalAND, FT_LogicalOR or
+    *                   (FT_Undefined must be for the last criterion)
+    *   ThresholdStr  - Threshold value defined as string. Used for:
+    *                   1. Diapason of identifiers. Example: "1,2,3,5-10,12,27-29".
+    *                   2. Storing name of shape.
+    *                   3. Storing group color "0.2;0;0.5".
+    *                   4. Storing point coordinates.
+    *   ThresholdID   - One more threshold value defined as string. Used for:
+    *                   1. Storing id of shape
+    *   Tolerance     - Tolerance is used for 
+    *                   1. Comparison of real values.
+    *                   2. Detection of geometrical coincidence.
+    *   TypeOfElement - type of element SMESH::NODE, SMESH::FACE etc.
+    *   Precision     - Precision of numerical functors
+    */
+    struct Criterion
+    {
+      long        Type;
+      long        Compare;
+      double      Threshold;
+      string      ThresholdStr;
+      string      ThresholdID;
+      long        UnaryOp;
+      long        BinaryOp;
+      double      Tolerance;
+      ElementType TypeOfElement;
+      long        Precision;
+    };
+
+    typedef sequence<Criterion> Criteria;
+
+    void           SetPredicate( in Predicate thePredicate );
+    void           SetMesh( in SMESH_Mesh theMesh );
+
+    smIdType_array GetElementsId( in SMESH_Mesh theMesh );
+    smIdType_array GetElementsIdFromParts( in ListOfIDSources theParts );
+    ElementType    GetElementType();
+    Predicate      GetPredicate();
+
+    boolean        GetCriteria( out Criteria theCriteria );
+    boolean        SetCriteria( in Criteria theCriteria );
+  };
+
+
+  /*!
+  *  Interface for working with library of filters
+  */
+  interface FilterLibrary : SALOME::GenericObj
+  {
+    /*!
+    *  Copy filter from library by name (new filter is created)
+    */
+    Filter        Copy( in string theFilterName );
+
+    /*!
+    * Methods for editing library
+    */
+    boolean       Add     ( in string theFilterName, in Filter theFilter );
+    boolean       AddEmpty( in string theFilterName, in ElementType theType ); // add empty filter
+    boolean       Delete  ( in string theFilterName );
+    boolean       Replace ( in string theFilterName, in string theNewName, in Filter theFilter );
+
+    /*!
+    *  Save library on disk
+    */
+    boolean       Save();
+    boolean       SaveAs( in string aFileName );
+
+    /*!
+    * Query methods
+    */
+    boolean       IsPresent( in string aFilterName );
+    long          NbFilters( in ElementType aType );
+    string_array  GetNames( in ElementType aType );
+    string_array  GetAllNames();
+    void          SetFileName( in string aFilterName );
+    string        GetFileName();
+  };
+
+
+  /*!
+  * Interface of Filter manager
+  */
+  interface FilterManager: SALOME::GenericObj
+  {
+    /*!
+    *  Create numerical functors
+    */
+    MinimumAngle       CreateMinimumAngle();
+    AspectRatio        CreateAspectRatio();
+    AspectRatio3D      CreateAspectRatio3D();
+    Warping            CreateWarping();
+    Taper              CreateTaper();
+    Skew               CreateSkew();
+    Area               CreateArea();
+    Volume3D           CreateVolume3D();
+    MaxElementLength2D CreateMaxElementLength2D();
+    MaxElementLength3D CreateMaxElementLength3D();
+    Length             CreateLength();
+    Length2D           CreateLength2D();
+    Length3D           CreateLength3D();
+    Deflection2D       CreateDeflection2D();
+    MultiConnection    CreateMultiConnection();
+    MultiConnection2D  CreateMultiConnection2D();
+    BallDiameter       CreateBallDiameter();
+    NodeConnectivityNumber CreateNodeConnectivityNumber();
+    /*!
+     *  Create logical functors ( predicates )
+     */
+    BelongToMeshGroup  CreateBelongToMeshGroup();
+    BelongToGeom       CreateBelongToGeom();
+    BelongToPlane      CreateBelongToPlane();
+    BelongToCylinder   CreateBelongToCylinder();
+    BelongToGenSurface CreateBelongToGenSurface();
+
+    LyingOnGeom        CreateLyingOnGeom();
+
+    FreeBorders        CreateFreeBorders();
+    FreeEdges          CreateFreeEdges();
+    FreeNodes          CreateFreeNodes();
+    FreeFaces          CreateFreeFaces();
+
+    EqualNodes         CreateEqualNodes();
+    EqualEdges         CreateEqualEdges();
+    EqualFaces         CreateEqualFaces();
+    EqualVolumes       CreateEqualVolumes();
+
+    RangeOfIds         CreateRangeOfIds();
+
+    BadOrientedVolume  CreateBadOrientedVolume();
+    BareBorderVolume   CreateBareBorderVolume();
+    BareBorderFace     CreateBareBorderFace();
+    OverConstrainedVolume CreateOverConstrainedVolume();
+    OverConstrainedFace   CreateOverConstrainedFace();
+    LinearOrQuadratic  CreateLinearOrQuadratic();
+
+    GroupColor         CreateGroupColor();
+    ElemGeomType       CreateElemGeomType();
+    ElemEntityType     CreateElemEntityType();
+    CoplanarFaces      CreateCoplanarFaces();
+    ConnectedElements  CreateConnectedElements();
+
+    /*!
+     *  Create comparators ( predicates )
+     */
+    LessThan          CreateLessThan();
+    MoreThan          CreateMoreThan();
+    EqualTo           CreateEqualTo();
+
+    /*!
+    *  Create boolean operations ( predicates )
+    */
+    LogicalNOT        CreateLogicalNOT();
+    LogicalAND        CreateLogicalAND();
+    LogicalOR         CreateLogicalOR();
+
+    /*!
+    *  Create filter
+    */
+    Filter            CreateFilter();
+
+    /*!
+    *  Load filter library. If library does not exist it is created
+    */
+    FilterLibrary     LoadLibrary( in string aFileName );
+
+    /*!
+    *  Create new library
+    */
+    FilterLibrary     CreateLibrary();
+
+    /*!
+    *  Delete library
+    */
+    boolean           DeleteLibrary( in string aFileName );
+  };
+};
+
+
+#endif

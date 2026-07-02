@@ -1,0 +1,597 @@
+// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+//
+// Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
+// CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
+//
+// See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
+//
+//  File   : SMESH_Gen.idl
+//  Author : Paul RASCLE, EDF
+
+#ifndef _SMESH_GEN_IDL_
+#define _SMESH_GEN_IDL_
+
+#include "SALOME_Exception.idl"
+#include "SALOME_Component.idl"
+#include "SALOMEDS.idl"
+
+#include "GEOM_Gen.idl"
+
+#include "SMESH_Mesh.idl"
+#include "SMESH_Hypothesis.idl"
+#include "SMESH_smIdType.idl"
+
+module SMESHHOMARD
+{
+  interface HOMARD_Gen;
+};
+
+module SMESH
+{
+  typedef sequence<SALOMEDS::SObject> sobject_list;
+  typedef sequence<GEOM::GEOM_Object> object_array;
+  typedef sequence<SMESH_Mesh>        mesh_array;
+
+  interface FilterManager;
+  interface SMESH_Pattern;
+  interface Measurements;
+  interface MG_ADAPT;
+  interface MG_ADAPT_OBJECT;
+
+  /*!
+   * Tags definition
+   */
+  // Top level
+  const long Tag_HypothesisRoot = 1; // hypotheses root
+  const long Tag_AlgorithmsRoot = 2; // algorithms root
+  const long Tag_FirstMeshRoot  = 3; // first mesh root
+  // Mesh/Submesh
+  const long Tag_RefOnShape             = 1; // references to shape
+  const long Tag_RefOnAppliedHypothesis = 2; // applied hypotheses root
+  const long Tag_RefOnAppliedAlgorithms = 3; // applied algorithms root
+  // Mesh only: sub-meshes roots by type
+  const long Tag_FirstSubMesh           =  4;
+  const long Tag_SubMeshOnVertex        =  4;
+  const long Tag_SubMeshOnEdge          =  5;
+  const long Tag_SubMeshOnWire          =  6;
+  const long Tag_SubMeshOnFace          =  7;
+  const long Tag_SubMeshOnShell         =  8;
+  const long Tag_SubMeshOnSolid         =  9;
+  const long Tag_SubMeshOnCompound      = 10;
+  const long Tag_LastSubMesh            = 10;
+  // Mesh only: group roots by type
+  const long Tag_FirstGroup             = 11;
+  const long Tag_NodeGroups             = 11;
+  const long Tag_EdgeGroups             = 12;
+  const long Tag_FaceGroups             = 13;
+  const long Tag_VolumeGroups           = 14;
+  const long Tag_0DElementsGroups       = 15;
+  const long Tag_BallElementsGroups     = 16;
+  const long Tag_LastGroup              = 16;
+
+  /*!
+   * Hypothesis definition error
+   */
+  struct AlgoStateError
+  {
+    Hypothesis_Status  state;
+    string             algoName;
+    long               algoDim;
+    boolean            isGlobalAlgo;
+  };
+  typedef sequence<AlgoStateError> algo_error_array;
+
+  /*!
+   * Mesh computation error
+   */
+  enum ComputeErrorName
+  {
+    COMPERR_OK            ,
+    COMPERR_BAD_INPUT_MESH,  // wrong mesh on lower submesh
+    COMPERR_STD_EXCEPTION ,  // some std exception raised
+    COMPERR_OCC_EXCEPTION ,  // OCC exception raised
+    COMPERR_SLM_EXCEPTION ,  // SALOME exception raised
+    COMPERR_EXCEPTION     ,  // other exception raised
+    COMPERR_MEMORY_PB     ,  // memory allocation problem
+    COMPERR_ALGO_FAILED   ,  // computation failed
+    COMPERR_BAD_SHAPE     ,  // bad geometry
+    COMPERR_WARNING       ,  // algo reports error but sub-mesh is computed anyway
+    COMPERR_CANCELED      ,  // compute canceled
+    COMPERR_NO_MESH_ON_SHAPE,// no mesh elements assigned to sub-mesh
+    COMPERR_BAD_PARMETERS    // incorrect hypotheses parameters
+  };
+  struct ComputeError
+  {
+    short   code;       // ComputeErrorName or, if negative, algo specific code
+    string  comment;    // textual problem description
+    string  algoName;
+    long    subShapeID; // id of sub-shape of a shape to mesh
+    boolean hasBadMesh; // there are elements preventing computation available for visualization
+  };
+  typedef sequence<ComputeError> compute_error_array;
+
+  /*!
+   * Way to initialize hypothesis
+   */
+  struct HypInitParams
+  {
+    short   way; // 0 - by mesh, 1 - by geometry size + preferred parameters, 2 - by averageLength
+    double  averageLength;
+    boolean quadDominated;
+  };
+
+  interface SMESH_Gen : Engines::EngineComponent, SALOMEDS::Driver
+  {
+    //GEOM::GEOM_Gen SetGeomEngine( in string containerLoc );
+    void SetGeomEngine( in GEOM::GEOM_Gen geomcompo );
+
+    FilterManager CreateFilterManager();
+
+    SMESH_Pattern GetPattern();
+
+    Measurements  CreateMeasurements();
+
+    /*!
+      Set the current mode
+     */
+    void SetEmbeddedMode( in boolean theMode );
+
+    /*!
+      Get the current mode
+     */
+    boolean IsEmbeddedMode();
+
+    /*!
+      Update the study
+     */
+    void UpdateStudy();
+    
+    /*!
+      Set enable publishing in the study
+     */
+    void SetEnablePublish( in boolean theIsEnablePublish );
+    
+    /*!
+      Get enable publishing in the study
+     */
+    boolean IsEnablePublish();
+
+    /*!
+     * Create a hypothesis that can be shared by different parts of the mesh.
+     * An hypothesis is either:
+     * - a method used to generate or modify a part of the mesh (algorithm).
+     * - a parameter or a law used by an algorithm.
+     * Algorithms are 1D, 2D or 3D.
+     */
+    SMESH_Hypothesis CreateHypothesis( in string theHypName,
+                                       in string theLibName )
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Create a hypothesis and initialize it by average length
+     */
+    SMESH_Hypothesis CreateHypothesisByAverageLength( in string  theHypName,
+                                                      in string  theLibName,
+                                                      in double  theAverageLength,
+                                                      in boolean theQuadDominated)
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Return a hypothesis holding parameter values corresponding either to the mesh
+     * existing on the given geometry or to size of the geometry.
+     * The returned hypothesis may be the one existing in a study and used
+     * to compute the mesh, or a temporary one created just to pass parameter
+     * values.
+     */
+    SMESH_Hypothesis GetHypothesisParameterValues( in string            theHypName,
+                                                   in string            theLibName,
+                                                   in SMESH_Mesh        theMesh,
+                                                   in GEOM::GEOM_Object theGeom,
+                                                   in HypInitParams     theWay)
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Returns \c True if a hypothesis is assigned to a sole sub-mesh in a current Study
+     *  \param [in] theHyp - the hypothesis of interest
+     *  \param [out] theMesh - the sole mesh using \a theHyp
+     *  \param [out] theShape - the sole geometry \a theHyp is assigned to
+     *  \return boolean - \c True if \a theMesh and \a theShape are sole using \a theHyp
+     */
+    boolean GetSoleSubMeshUsingHyp( in SMESH_Hypothesis   theHyp,
+                                    out SMESH_Mesh        theMesh,
+                                    out GEOM::GEOM_Object theShape);
+
+    /*!
+     * Sets number of segments per diagonal of boundary box of geometry by which
+     * default segment length of appropriate 1D hypotheses is defined
+     */
+    void SetBoundaryBoxSegmentation( in long theNbSegments ) raises ( SALOME::SALOME_Exception );
+    /*!
+     * \brief Sets default number of segments per edge
+     */
+    void SetDefaultNbSegments( in long theNbSegments) raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Set the object name
+     */
+    void SetName( in string theObjectIOR,
+                  in string theObjectName )
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Create a Mesh object, given a geometry shape.
+     * Mesh is created empty (no points, no elements).
+     * Shape is explored via GEOM_Client to create local copies.
+     * of TopoDS_Shapes and bind CORBA references of shape & subshapes
+     * with TopoDS_Shapes
+     */
+    SMESH_Mesh CreateMesh( in GEOM::GEOM_Object theObject )
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Create an empty mesh object
+     */
+    SMESH_Mesh CreateEmptyMesh()
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Create Mesh object importing data from given UNV file
+     * (UNV supported version is I-DEAS 10)
+     */
+    SMESH_Mesh CreateMeshesFromUNV( in string theFileName )
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Create Mesh object(s) importing data from given MED file
+     */
+    mesh_array CreateMeshesFromMED( in string theFileName,
+                                    out SMESH::DriverMED_ReadStatus theStatus )
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Create Mesh object importing data from given STL file
+     */
+    SMESH_Mesh CreateMeshesFromSTL( in string theFileName )
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Create Mesh object(s) importing data from given CGNS file
+     */
+    mesh_array CreateMeshesFromCGNS( in string theFileName,
+                                     out SMESH::DriverMED_ReadStatus theStatus )
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Create Mesh object importing data from given GMF file
+     *  \param theFileName - a name of file to import
+     *  \param theMakeRequiredGroups - if true, groups of required entities will be created
+     */
+    SMESH_Mesh CreateMeshesFromGMF( in string               theFileName,
+                                    in boolean              theMakeRequiredGroups,
+                                    out SMESH::ComputeError theError)
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Create a mesh by copying a part of another mesh
+     *  \param meshPart - a part of mesh to copy
+     *  \param meshName - a name of the new mesh
+     *  \param toCopyGroups - to create in the new mesh groups
+     *                        the copied elements belongs to
+     *  \param toKeepIDs - to preserve IDs of the copied elements or not
+     */
+    SMESH_Mesh CopyMesh(in SMESH_IDSource meshPart,
+                        in string         meshName,
+                        in boolean        toCopyGroups,
+                        in boolean        toKeepIDs)
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Create a mesh by copying definitions of another mesh to a given geometry
+     *  \param sourceMesh - a mesh to copy
+     *  \param newGeometry - a new geometry
+     *  \param meshName - a name of the new mesh
+     *  \param toCopyGroups - to create groups in the new mesh
+     *  \param toReuseHypotheses - if True, existing hypothesis will be used by the new mesh, 
+     *         otherwise new hypotheses with the same parameters will be created for the new mesh.
+     *  \param toCopyElements - to copy mesh elements of same sub-shapes of the two geometries
+     *  \param newMesh - return a new mesh
+     *  \param newGroups - return new groups
+     *  \param newSubmeshes - return new sub-meshes
+     *  \param newHypotheses - return new algorithms and hypotheses
+     *  \param invalidEntries - return study entries of objects whose
+     *         counterparts are not found in the newGeometry, followed by entries
+     *         of mesh sub-objects that are invalid because they depend on a not found
+     *         preceding sub-shape
+     */
+    boolean CopyMeshWithGeom( in SMESH_Mesh        sourceMesh,
+                              in GEOM::GEOM_Object newGeometry,
+                              in string            meshName,
+                              in boolean           toCopyGroups,
+                              in boolean           toReuseHypotheses,
+                              in boolean           toCopyElements,
+                              out SMESH_Mesh       newMesh,
+                              out ListOfGroups     newGroups,
+                              out submesh_array    newSubmeshes,
+                              out ListOfHypothesis newHypotheses,
+                              out string_array     invalidEntries)
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Concatenate the given meshes or groups into one mesh,
+     * optionally to theMeshToAppendTo.
+     * Union groups with the same name and type if
+     * theUniteIdenticalGroups flag is true.
+     * Merge coincident nodes and elements if
+     * theMergeNodesAndElements flag is true.
+     */
+    SMESH_Mesh Concatenate(in ListOfIDSources theMeshesArray,
+                           in boolean         theUniteIdenticalGroups,
+                           in boolean         theMergeNodesAndElements,
+                           in double          theMergeTolerance,
+                           in SMESH_Mesh      theMeshToAppendTo)
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Concatenate the given meshes into one mesh,
+     * optionally to theMeshToAppendTo.
+     * Union groups with the same name and type if
+     * theUniteIdenticalGroups flag is true.
+     * Merge coincident nodes and elements if
+     * theMergeNodesAndElements flag is true.
+     * Create the groups of all elements from initial meshes.
+     */
+    SMESH_Mesh ConcatenateWithGroups(in ListOfIDSources theMeshesArray,
+                                     in boolean         theUniteIdenticalGroups,
+                                     in boolean         theMergeNodesAndElements,
+                                     in double          theMergeTolerance,
+                                     in SMESH_Mesh      theMeshToAppendTo)
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Mesh a subShape.
+     * First, verify list of hypothesis associated with the Sub-shape,
+     * return NOK if hypothesis are not sufficient
+     */
+    boolean Compute( in SMESH_Mesh        theMesh,
+                     in GEOM::GEOM_Object theSubObject )
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Cancel a computation.
+     */
+    void CancelCompute( in SMESH_Mesh        theMesh,
+			in GEOM::GEOM_Object theSubObject );
+
+    /*!
+     * Return true if hypotheses are defined well
+     */
+    boolean IsReadyToCompute( in SMESH_Mesh        theMesh,
+                              in GEOM::GEOM_Object theSubObject )
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Evaluates size of prospective mesh on a shape
+     */
+    smIdType_array  Evaluate(in SMESH_Mesh        theMesh,
+                             in GEOM::GEOM_Object theSubObject)
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Calculate Mesh as preview till indicated dimension
+     * First, verify list of hypothesis associated with the Sub-shape.
+     * Return mesh preview structure
+     */
+    MeshPreviewStruct Precompute( in SMESH_Mesh        theMesh,
+                                  in GEOM::GEOM_Object theSubObject,
+                                  in Dimension         theDimension,
+                                  inout long_array    theShapesId )
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Return errors of hypotheses definition
+     * algo_error_array is empty if everything is OK
+     */
+    algo_error_array GetAlgoState( in SMESH_Mesh        theMesh,
+                                   in GEOM::GEOM_Object theSubObject )
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Return errors of mesh computation
+     * compute_error_array is empty if everything is OK
+     */
+    compute_error_array GetComputeErrors( in SMESH_Mesh        theMesh,
+                                          in GEOM::GEOM_Object theSubObject )
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Return mesh elements preventing computation of a sub-shape
+     */
+    MeshPreviewStruct GetBadInputElements( in SMESH_Mesh theMesh,
+                                           in short      theSubShapeID )
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Create groups of elements preventing computation of a sub-shape
+     */
+    SMESH::ListOfGroups MakeGroupsOfBadInputElements( in SMESH_Mesh theMesh,
+                                                      in short      theSubShapeID,
+                                                      in string     theGroupName)
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Return indices of faces, edges and vertices of given sub-shapes
+     * within theMainObject
+     */
+    long_array GetSubShapesId( in GEOM::GEOM_Object theMainObject,
+                               in object_array      theListOfSubObjects )
+       raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Return geometrical object the given element is built on.
+     * The returned geometrical object, if not nil, is either found in the
+     * study or is published by this method with the given name
+     */
+    GEOM::GEOM_Object GetGeometryByMeshElement( in SMESH_Mesh theMesh,
+                                                in smIdType   theElementID,
+                                                in string     theGeomName)
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Return geometrical object the given element is built on.
+     * The returned geometrical object not published in study by this method.
+     */
+    GEOM::GEOM_Object FindGeometryByMeshElement( in SMESH_Mesh theMesh,
+                                                 in smIdType   theElementID)
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * \brief Return id of object, registered in current study context
+     *
+     * Can be used to check if the object was created in the same container, as this engine.
+     */
+    long GetObjectId(in Object theObject);
+
+    /*!
+     * \brief Get version of MED format being used.
+     */
+    string GetMEDFileVersion();
+
+    /*!
+     * \brief Get MED version of the file by its name.
+     */
+    string GetMEDVersion(in string theFileName);
+
+    /*!
+     * \brief Check compatibility of file with MED format being used, for read only.
+     */
+    boolean CheckCompatibility(in string theFileName);
+
+    /*!
+     * \brief Check compatibility of file with MED format being used, for append on write.
+     */
+    boolean CheckWriteCompatibility(in string theFileName);
+
+    /*!
+     * \brief Get names of meshes defined in file with the specified name.
+     */
+    string_array GetMeshNames(in string theFileName);
+
+    /*!
+     * \brief Moves objects to the specified position
+     *  \param what objects being moved
+     *  \param where parent object where objects are moved to
+     *  \param row position in the parent object's children list at which objects are moved
+     *
+     * This function is used in the drag-n-drop functionality.
+     */
+    void Move( in sobject_list what,
+	       in SALOMEDS::SObject where,
+	       in long row );
+    /*!
+     * Returns true if algorithm can be used to mesh a given geometry
+     *  \param theAlgoType - the algorithm type
+     *  \param theLibName - a name of the Plug-in library implementing the algorithm
+     *  \param theShapeObject - the geometry to mesh
+     *  \param toCheckAll - if \c True, returns \c True if all shapes are meshable,
+     *         else, returns \c True if at least one shape is meshable
+     */
+    boolean IsApplicable( in string             theAlgoType,
+                          in string             theLibName,
+                          in GEOM::GEOM_Object  theShapeObject,
+                          in boolean            toCheckAll );
+
+
+    /*!
+     * Return indices of elements, which are located inside the sphere
+     *  \param theSource - mesh, sub-mesh or group
+     *  \param theElemType - mesh element type
+     *  \param theX - x coordinate of the center of the sphere
+     *  \param theY - y coordinate of the center of the sphere
+     *  \param theZ - y coordinate of the center of the sphere
+     *  \param theR - radius of the sphere
+     */
+    long_array GetInsideSphere( in SMESH_IDSource theSource,
+				in ElementType    theElemType,
+				in double theX, 
+				in double theY, 
+				in double theZ,
+				in double theR );    
+
+    /*!
+     * Return indices of elements, which are located inside the box
+     *  \param theSource - mesh, sub-mesh or group
+     *  \param theElemType - mesh element type
+     *  \param theX1 - x coordinate of the first opposite point
+     *  \param theY1 - y coordinate of the first opposite point
+     *  \param theZ1 - y coordinate of the first opposite point
+     *  \param theX2 - x coordinate of the second opposite point
+     *  \param theY2 - y coordinate of the second opposite point
+     *  \param theZ2 - y coordinate of the second opposite point
+     */
+    long_array GetInsideBox( in SMESH_IDSource theSource,
+			     in ElementType    theElemType,
+			     in double theX1, 
+			     in double theY1, 
+			     in double theZ1,
+			     in double theX2,
+			     in double theY2,
+			     in double theZ2);    
+    /*!
+     * Return indices of elements, which are located inside the box
+     *  \param theSource - mesh, sub-mesh or group
+     *  \param theElemType - mesh element type
+     *  \param theX - x coordinate of the cented of the bottom face
+     *  \param theY - y coordinate of the cented of the bottom face
+     *  \param theZ - y coordinate of the cented of the bottom face
+     *  \param theDX - x coordinate of the cented of the base vector
+     *  \param theDY - y coordinate of the cented of the base vector
+     *  \param theDZ - z coordinate of the cented of the base vector
+     *  \param theH - height of the cylinder
+     *  \param theR - radius of the cylinder
+     */
+    long_array GetInsideCylinder( in SMESH_IDSource theSource,
+				  in ElementType    theElemType,
+				  in double theX, 
+				  in double theY, 
+				  in double theZ,
+				  in double theDX,
+				  in double theDY,
+				  in double theDZ,
+				  in double theH,
+				  in double theR );    
+    /*!
+     * Return indices of elements, which are located inside the geometry
+     *  \param theSource - mesh, sub-mesh or group
+     *  \param theElemType - mesh element type
+     *  \param theGeom - geometrical object
+     *  \param theTolerance - tolerance for selection.
+     */
+    long_array GetInside( in SMESH_IDSource theSource,
+			  in ElementType    theElemType,
+			  in GEOM::GEOM_Object theGeom,
+			  in double theTolerance );    
+
+    MG_ADAPT CreateMG_ADAPT();
+    SMESHHOMARD::HOMARD_Gen CreateHOMARD_ADAPT() raises ( SALOME::SALOME_Exception );
+    //MG_ADAPT_OBJECT Adaptation(in string adaptType);
+    SALOME::GenericObj Adaptation(in string adaptType) raises ( SALOME::SALOME_Exception );
+    MG_ADAPT CreateAdaptationHypothesis();
+  };
+
+};
+
+#endif
