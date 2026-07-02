@@ -1,0 +1,144 @@
+// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+//
+// Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
+// CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
+//
+// This library is free software; you can redistribute it and/or
+// modify it under the terms of the GNU Lesser General Public
+// License as published by the Free Software Foundation; either
+// version 2.1 of the License, or (at your option) any later version.
+//
+// This library is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+// Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public
+// License along with this library; if not, write to the Free Software
+// Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
+//
+// See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
+//
+
+//  File   : SMESH_Hypothesis.idl
+//  Author : Paul RASCLE, EDF
+//
+#ifndef _SMESH_HYPOTHESIS_IDL_
+#define _SMESH_HYPOTHESIS_IDL_
+
+#include "SALOME_Exception.idl"
+#include "SALOME_GenericObj.idl"
+
+module SMESH
+{
+  enum Dimension
+  {
+    DIM_0D,
+    DIM_1D,
+    DIM_2D,
+    DIM_3D
+  };
+  
+  typedef sequence<string> ListOfParameters;
+
+  interface SMESH_Hypothesis : SALOME::GenericObj
+  {
+    
+    /*!
+     * Get the Hypothesis typeName 
+     */
+    string GetName();
+
+    /*!
+     * Get the Hypothesis plugin library Name 
+     */
+    string GetLibName();
+
+    /*!
+     * Get the internal Id 
+     */
+    short GetId();
+
+    /*!
+     *  Set the variable parameter
+     *  \param parameter is a string containing the notebook variable
+     *         used for Hypothesis creation
+     *  \param method is a name of Hypothesis method setting this parameter
+     *
+     *  This method must be called before calling method()
+     */
+    void SetVarParameter (in string parameter, in string method);
+
+    /*!
+     *  Return the variable parameter used for Hypothesis creation by name of method
+     *  setting this parameter
+     */
+    string GetVarParameter (in string methodName);
+
+    /*!
+     * \brief Store a hypothesis wrapping this not published one.
+     *
+     * This hyp, which has no own parameters but is published, is used to store variables
+     * defining parameters of this hypothesis.
+     */
+    void SetHolderHypothesis(in SMESH::SMESH_Hypothesis hyp);
+
+    /*!
+     * Verify whether hypothesis supports given entity type 
+     */
+    boolean IsDimSupported( in Dimension type );
+
+    /*!
+     * Return true if a hypothesis has parameters.
+     *
+     * This method is intended for GUI to know if "Edit" menu item should be available
+     */
+    boolean HasParameters();
+  };
+
+  typedef sequence<string> ListOfHypothesisName;
+
+  interface SMESH_Algo : SMESH_Hypothesis
+  {
+    /*!
+     * Get list of hypothesis that can be used with this algorithm
+     */
+    ListOfHypothesisName GetCompatibleHypothesis();
+
+  };
+
+  interface SMESH_0D_Algo : SMESH_Algo
+  {
+    /*!
+     * 
+     */
+  };
+
+  interface SMESH_1D_Algo : SMESH_Algo
+  {
+    /*!
+     * 
+     */
+  };
+
+  interface SMESH_2D_Algo : SMESH_Algo
+  {
+    /*!
+     * 
+     */
+  };
+
+  interface SMESH_3D_Algo : SMESH_Algo
+  {
+    /*!
+     * 
+     */
+  };
+};
+
+  // -----------------------------------------------------------------
+  // Specific Algorithms in separate idl file
+  // -----------------------------------------------------------------
+
+
+#endif
