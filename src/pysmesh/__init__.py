@@ -59,13 +59,23 @@ from ._core import (  # noqa: E402 - must follow the VTK check
     VertexInfo,
     load_brep,
 )
+from .viscous import (  # noqa: E402 - must follow the VTK check (imports _core)
+    ExtrusionMethod,
+    VLParams,
+    VLResult,
+    compute_viscous_layers,
+)
 
 __all__ = [
     "EdgeInfo",
+    "ExtrusionMethod",
     "FaceInfo",
     "Mesh",
     "PysmeshError",
     "Shape",
+    "VLParams",
+    "VLResult",
     "VertexInfo",
+    "compute_viscous_layers",
     "load_brep",
 ]

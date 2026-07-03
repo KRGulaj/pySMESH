@@ -12,6 +12,7 @@ namespace pysmesh {
 
 void bind_shape(py::module_& m);
 void bind_mesh(py::module_& m);
+void bind_viscous(py::module_& m);
 
 namespace {
 
@@ -50,4 +51,5 @@ PYBIND11_MODULE(_core, m) {
   pysmesh::register_error_type(m);
   pysmesh::bind_shape(m);
   pysmesh::bind_mesh(m);
+  pysmesh::bind_viscous(m);
 }

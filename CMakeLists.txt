@@ -117,7 +117,8 @@ include(${CMAKE_SOURCE_DIR}/cmake/SMESH/CMakeLists.txt)
 pybind11_add_module(_core
     src/bindings/module.cpp
     src/bindings/shape.cpp
-    src/bindings/mesh.cpp)
+    src/bindings/mesh.cpp
+    src/bindings/viscous.cpp)
 target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
 target_link_libraries(_core PRIVATE
     ${SMESH_STATIC_LIBS} Geom Kernel
@@ -166,5 +167,5 @@ option(PYSMESH_BUILD_FIXTURE_GEN "Build the OCCT BREP fixture generator" OFF)
 if(PYSMESH_BUILD_FIXTURE_GEN)
     add_executable(generate_fixtures tests/fixtures/generate_fixtures.cpp)
     target_link_libraries(generate_fixtures PRIVATE
-        TKernel TKMath TKBRep TKG2d TKG3d TKGeomBase TKGeomAlgo TKTopAlgo TKPrim TKBRep)
+        TKernel TKMath TKBRep TKG2d TKG3d TKGeomBase TKGeomAlgo TKTopAlgo TKPrim TKMesh)
 endif()

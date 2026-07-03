@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <SMDS_ElemIterator.hxx>
+#include <SMDS_MeshEdge.hxx>
 #include <SMDS_MeshElement.hxx>
 #include <SMDS_MeshNode.hxx>
 #include <SMDS_Position.hxx>
@@ -17,6 +18,7 @@
 #include <SMESHDS_Mesh.hxx>
 #include <SMESHDS_SubMesh.hxx>
 #include <SMESH_Gen.hxx>
+#include <SMESH_Hypothesis.hxx>
 #include <SMESH_Mesh.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
@@ -97,6 +99,32 @@ class Mesh {
   void classify_on_vertex(std::int64_t node_id, int vertex_id) {
     ensure_open();
     meshDS_->SetNodeOnVertex(find_node(node_id), data_->vertex(vertex_id));
+  }
+
+  // Add M segments (node-id pairs) bound to the edge's submesh. Viscous layers require
+  // 1-D elements on the edges bounding the wall faces (StdMeshers_ViscousLayers.cxx:4392
+  // errors "Not meshed EDGE" on an edge submesh with zero elements); classification of the
+  // edge nodes alone is not sufficient. A real 2-D surface mesh (e.g. from Gmsh) always
+  // carries these edge segments, so injection must too.
+  void add_segments(const py::object& conn_obj, int edge_id) {
+    ensure_open();
+    const TopoDS_Edge& edge = data_->edge(edge_id);
+    Array2i conn = conn_obj.cast<Array2i>();
+    if (conn.ndim() != 2 || conn.shape(1) != 2) {
+      throw PysmeshError("conn must have shape (M, 2)");
+    }
+    const py::ssize_t m = conn.shape(0);
+    const std::int64_t* c = conn.data();
+    for (py::ssize_t i = 0; i < m; ++i) {
+      const SMDS_MeshNode* n0 = find_node(c[2 * i]);
+      const SMDS_MeshNode* n1 = find_node(c[2 * i + 1]);
+      SMDS_MeshEdge* elem = meshDS_->AddEdge(n0, n1);
+      if (elem == nullptr) {
+        throw PysmeshError("Failed to add segment " + std::to_string(i) + " on edge_id " +
+                            std::to_string(edge_id));
+      }
+      meshDS_->SetMeshElementOnShape(elem, edge);
+    }
   }
 
   // Add M triangles (node-id triples) bound to the face's submesh.
@@ -188,9 +216,31 @@ class Mesh {
     }
     meshDS_ = nullptr;
     gen_.reset();
+    // Free adopted VL hypotheses LAST: ~SMESH_Gen has now NullifyGen()'d them, so
+    // ~SMESH_Hypothesis won't touch the freed gen. Deleting them earlier (while the gen and
+    // mesh still hold the VL shrink state that references them) corrupts the heap.
+    owned_hyps_.clear();
   }
 
   bool is_open() const { return mesh_ != nullptr; }
+
+  // Internals seam for viscous.cpp (see common.hpp). All three assert the mesh is open.
+  SMESH_Mesh& smesh() {
+    ensure_open();
+    return *mesh_;
+  }
+  SMESH_Gen& gen() {
+    ensure_open();
+    return *gen_;
+  }
+  std::shared_ptr<ShapeData> shape_data() const {
+    if (mesh_ == nullptr) {
+      throw PysmeshError("Mesh has been released");
+    }
+    return data_;
+  }
+  int next_hyp_id() const { return static_cast<int>(owned_hyps_.size()) + 1; }
+  void adopt_hypothesis(SMESH_Hypothesis* hyp) { owned_hyps_.emplace_back(hyp); }
 
  private:
   void ensure_open() const {
@@ -219,9 +269,26 @@ class Mesh {
   std::unique_ptr<SMESH_Gen> gen_;
   SMESH_Mesh* mesh_ = nullptr;      // owned by gen_
   SMESHDS_Mesh* meshDS_ = nullptr;  // owned by mesh_
+  // VL algo/hyp created by compute_viscous_layers; freed in release() after gen_ (see there).
+  std::vector<std::unique_ptr<SMESH_Hypothesis>> owned_hyps_;
 };
 
 }  // namespace
+
+// Internals seam (declared in common.hpp) — hand viscous.cpp the SMESH objects a Mesh owns.
+SMESH_Mesh& mesh_smesh(const py::object& mesh_obj) {
+  return mesh_obj.cast<Mesh&>().smesh();
+}
+SMESH_Gen& mesh_gen(const py::object& mesh_obj) { return mesh_obj.cast<Mesh&>().gen(); }
+std::shared_ptr<ShapeData> mesh_shape_data(const py::object& mesh_obj) {
+  return mesh_obj.cast<Mesh&>().shape_data();
+}
+int mesh_next_hyp_id(const py::object& mesh_obj) {
+  return mesh_obj.cast<Mesh&>().next_hyp_id();
+}
+void mesh_adopt_hypothesis(const py::object& mesh_obj, SMESH_Hypothesis* hyp) {
+  mesh_obj.cast<Mesh&>().adopt_hypothesis(hyp);
+}
 
 void bind_mesh(py::module_& m) {
   py::class_<MeshStats>(m, "MeshStats")
@@ -254,6 +321,9 @@ void bind_mesh(py::module_& m) {
            "Classify nodes onto an edge with per-node curve parameter t.")
       .def("classify_on_vertex", &Mesh::classify_on_vertex, py::arg("node_id"),
            py::arg("vertex_id"), "Classify a single node onto a vertex.")
+      .def("add_segments", &Mesh::add_segments, py::arg("conn"), py::arg("edge_id"),
+           "Add (M,2) segments (node-id pairs) bound to the edge submesh. Required on "
+           "edges bounding wall faces for viscous layers.")
       .def("add_triangles", &Mesh::add_triangles, py::arg("conn"), py::arg("face_id"),
            "Add (M,3) triangles (node-id triples) bound to the face submesh.")
       .def("validate", &Mesh::validate,

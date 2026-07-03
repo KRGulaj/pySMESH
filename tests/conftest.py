@@ -34,5 +34,34 @@ def fixtures_dir() -> Path:
 
 @pytest.fixture(scope="session")
 def box_brep(fixtures_dir: Path) -> bytes:
-    """Raw BREP bytes for the unit box fixture (see ``tests/fixtures/generate.py``)."""
+    """Raw BREP bytes for the unit box fixture (see ``generate_fixtures.cpp``)."""
     return (fixtures_dir / "box.brep").read_bytes()
+
+
+@pytest.fixture(scope="session")
+def box_mesh(fixtures_dir: Path) -> dict[str, "np.ndarray"]:
+    """Classified structured surface mesh of ``box.brep`` (see ``generate_fixtures.cpp``).
+
+    Keys are the ``box_mesh/*.npy`` basenames. Node ids in the arrays are 0-based
+    fixture-local indices into ``nodes``; ``face_ids``/``edge_ids``/``vertex_ids`` are
+    pySMESH's 1-based TopExp ordinals.
+    """
+    import numpy as np
+
+    d = fixtures_dir / "box_mesh"
+    return {p.stem: np.load(p) for p in d.glob("*.npy")}
+
+
+@pytest.fixture(scope="session")
+def sphere_brep(fixtures_dir: Path) -> bytes:
+    """Raw BREP bytes for the unit sphere fixture (curved, see ``generate_fixtures.cpp``)."""
+    return (fixtures_dir / "sphere.brep").read_bytes()
+
+
+@pytest.fixture(scope="session")
+def sphere_mesh(fixtures_dir: Path) -> dict[str, "np.ndarray"]:
+    """Classified BRepMesh surface mesh of ``sphere.brep`` (doubly-curved, one wall face)."""
+    import numpy as np
+
+    d = fixtures_dir / "sphere_mesh"
+    return {p.stem: np.load(p) for p in d.glob("*.npy")}

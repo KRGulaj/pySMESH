@@ -8,6 +8,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -114,5 +115,29 @@ inline Array2d as_2d_f64(const py::object& obj, const char* name, int ncols) {
   }
   return arr;
 }
+
+}  // namespace pysmesh
+
+// ---- Cross-file Mesh internals seam ----------------------------------------------- //
+// viscous.cpp needs the SMESH_Mesh / SMESH_Gen / ShapeData held by a Python Mesh object.
+// These accessors are defined in mesh.cpp (where the Mesh class is visible) and mirror
+// shape.cpp's shape_data_of. Forward-declare the SMESH types at global scope to avoid
+// pulling their heavy headers into every translation unit that includes common.hpp.
+class SMESH_Mesh;
+class SMESH_Gen;
+class SMESH_Hypothesis;
+
+namespace pysmesh {
+
+SMESH_Mesh& mesh_smesh(const py::object& mesh_obj);
+SMESH_Gen& mesh_gen(const py::object& mesh_obj);
+std::shared_ptr<ShapeData> mesh_shape_data(const py::object& mesh_obj);
+
+// Hypothesis ownership: viscous.cpp creates the throwaway VL algo/hyp on the heap and hands
+// them to the Mesh, which frees them at release() AFTER its SMESH_Gen is gone (SMESH's own
+// contract — ~SMESH_Gen only NullifyGen()s hyps, never deletes them). next id is 1-based and
+// unique within the Mesh's gen.
+int mesh_next_hyp_id(const py::object& mesh_obj);
+void mesh_adopt_hypothesis(const py::object& mesh_obj, SMESH_Hypothesis* hyp);
 
 }  // namespace pysmesh
