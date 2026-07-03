@@ -1,6 +1,6 @@
 """Stage and patch vendored SMESH/KERNEL/GEOM sources into a build tree.
 
-pySMESH2 vendors pristine upstream sources as git subtrees/slices under ``extern/``
+pySMESH vendors pristine upstream sources as git subtrees/slices under ``extern/``
 (``extern/smesh``, ``extern/kernel``, ``extern/geom``, ``extern/mefisto2``). Those trees
 are never modified. ``prepare.py`` copies the pieces we compile into ``staged/`` in the
 directory layout that SALOME/looooo's patch series expects, then applies the patches:

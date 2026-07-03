@@ -1,6 +1,6 @@
-name: flux-pysmesh2-build
+name: flux-pysmesh-build
 # =============================================================================
-# pySMESH2 — build-only conda environment (conda-forge ONLY)
+# pySMESH — build-only conda environment (conda-forge ONLY)
 #
 # Purpose: compile _core.pyd (SMESH + OCCT + Boost static, VTK dynamic).
 #

@@ -1,4 +1,4 @@
-# pySMESH2 — static SMESH/KERNEL/GEOM linked into a pybind11 extension (_core).
+# pySMESH — static SMESH/KERNEL/GEOM linked into a pybind11 extension (_core).
 #
 # Layout:
 #   extern/{smesh,kernel,geom,mefisto2,pthread}  pristine vendored upstream (never edited)
@@ -10,7 +10,7 @@
 # host env and MUST NOT be bundled into the wheel; OCCT + Boost DLLs are bundled at repair.
 
 cmake_minimum_required(VERSION 3.27)
-project(pysmesh2 LANGUAGES C CXX)
+project(pysmesh LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -114,10 +114,57 @@ include(${CMAKE_SOURCE_DIR}/cmake/SMESH/CMakeLists.txt)
 # --------------------------------------------------------------------------- #
 # Python extension module
 # --------------------------------------------------------------------------- #
-pybind11_add_module(_core src/bindings/module.cpp)
+pybind11_add_module(_core
+    src/bindings/module.cpp
+    src/bindings/shape.cpp
+    src/bindings/mesh.cpp)
+target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
 target_link_libraries(_core PRIVATE
     ${SMESH_STATIC_LIBS} Geom Kernel
     VTK::CommonCore VTK::CommonDataModel VTK::FiltersVerdict
     ${Boost_LIBRARIES})
 
-install(TARGETS _core DESTINATION pysmesh2)
+# --------------------------------------------------------------------------- #
+# _build_info.py — dependency versions + provenance. VTK_VERSION is the ONLY value
+# checked at import (see src/pysmesh/__init__.py); the rest are informational.
+# --------------------------------------------------------------------------- #
+if(NOT DEFINED PYSMESH_VTK_VERSION)
+    set(PYSMESH_VTK_VERSION "${VTK_VERSION}")
+endif()
+if(NOT DEFINED PYSMESH_OCCT_VERSION)
+    set(PYSMESH_OCCT_VERSION "${OpenCASCADE_VERSION}")
+endif()
+if(NOT DEFINED PYSMESH_BOOST_VERSION)
+    set(PYSMESH_BOOST_VERSION "${Boost_VERSION}")
+endif()
+if(NOT DEFINED PYSMESH_GIT_SHA)
+    set(PYSMESH_GIT_SHA "unknown")
+endif()
+string(TIMESTAMP PYSMESH_BUILD_DATE "%Y-%m-%dT%H:%M:%SZ" UTC)
+if(NOT DEFINED PYSMESH_WITH_NETGEN)
+    set(PYSMESH_WITH_NETGEN "False")
+endif()
+
+# Local-dev / in-tree layout: the pybind extension and the generated _build_info.py must
+# sit INSIDE the pysmesh package dir for the package's relative imports (`from ._core
+# import ...`) to resolve. Generate _build_info.py there and copy _core.pyd there after
+# each build. Both are git-ignored. (B4 reconciles this with the wheel packaging path.)
+set(PKG_DIR ${CMAKE_SOURCE_DIR}/src/pysmesh)
+configure_file(${PKG_DIR}/_build_info.py.in ${PKG_DIR}/_build_info.py @ONLY)
+add_custom_command(TARGET _core POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:_core> ${PKG_DIR}/$<TARGET_FILE_NAME:_core>
+    COMMENT "Copying _core into src/pysmesh for in-place import")
+
+install(TARGETS _core DESTINATION pysmesh)
+
+# --------------------------------------------------------------------------- #
+# Fixture generator (dev-only, OFF by default). Emits tests/fixtures/*.brep via OCCT.
+# Not part of the wheel and not run by CI — the committed *.brep files are the fixtures.
+# --------------------------------------------------------------------------- #
+option(PYSMESH_BUILD_FIXTURE_GEN "Build the OCCT BREP fixture generator" OFF)
+if(PYSMESH_BUILD_FIXTURE_GEN)
+    add_executable(generate_fixtures tests/fixtures/generate_fixtures.cpp)
+    target_link_libraries(generate_fixtures PRIVATE
+        TKernel TKMath TKBRep TKG2d TKG3d TKGeomBase TKGeomAlgo TKTopAlgo TKPrim TKBRep)
+endif()

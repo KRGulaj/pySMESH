@@ -1,4 +1,4 @@
-# SMESH static libraries for pySMESH2.
+# SMESH static libraries for pySMESH.
 #
 # Adapted from looooo/SMESH/cmake/SMESH/CMakeLists.txt. Differences:
 #   * STATIC libraries (looooo builds SHARED) — everything is linked into _core.pyd.

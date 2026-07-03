@@ -131,7 +131,7 @@ Utils/Utils_ExceptHandlers.cxx
 plus all headers (`*.h*`) in those same three directories.
 
 **`plan.md`'s "Current Repo State" table and B1 plan do not mention vendoring KERNEL at
-all** — they only track `extern/smesh/`. This is a real gap: pySMESH2 needs a new
+all** — they only track `extern/smesh/`. This is a real gap: pySMESH needs a new
 `extern/kernel/` (or `third_party/kernel/`) vendor tree containing exactly this file list,
 sourced from SALOME KERNEL at a tag compatible with SMESH `V9_9_0` (needs its own version
 check — KERNEL and SMESH are versioned together upstream, so pull KERNEL tag `V9_9_0` to

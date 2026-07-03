@@ -62,7 +62,7 @@ reorder).
    `_ViscousBuilder::Compute` (`StdMeshers_ViscousLayers.cxx:2018`), which returns an
    error immediately if `theShape` has no SOLID (`"No SOLID's in theShape"`). The shape
    passed to `compute_viscous_layers` must be (or contain) a 3D solid, not a bare shell —
-   confirm this at the Python API boundary and raise `Pysmesh2Error` early with a clear
+   confirm this at the Python API boundary and raise `PysmeshError` early with a clear
    message if the loaded `Shape` has no solids, rather than letting the opaque upstream
    error surface.
 
@@ -85,7 +85,7 @@ reorder).
    **Binding implication:** after `Compute()` returns a null `Ptr`, `viscous.cpp` must
    walk `TopExp_Explorer(shape, TopAbs_SOLID)`, call
    `theMesh.GetSubMesh(exp.Current())->GetComputeError()` for each solid, and collect
-   every non-OK `myComment` string into `Pysmesh2Error.details`. `plan.md`'s B3 task 2
+   every non-OK `myComment` string into `PysmeshError.details`. `plan.md`'s B3 task 2
    ("collect `SMESH_ComputeError` messages") is correct in intent but must be implemented
    via per-solid submesh lookup, not via any field on the returned `ProxyMesh::Ptr`.
 

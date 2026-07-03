@@ -1,8 +1,8 @@
-# pySMESH2 — Implementation Plan v0.1.0
+# pySMESH — Implementation Plan v0.1.0
 
 **open-source · LGPL-2.1 · cp313-win_amd64**
 
-- **Target:** `pysmesh2-0.1.0-cp313-win_amd64.whl`
+- **Target:** `pysmesh-0.1.0-cp313-win_amd64.whl`
 - **VTK pin:** `9.6.2`
 - **OCCT:** `8.0.0` (static)
 - **Boost:** `libboost-devel` (static)
@@ -83,7 +83,7 @@ Create the full directory skeleton:
 ```
 cmake/
 patches/
-src/pysmesh2/
+src/pysmesh/
 src/bindings/
 tests/fixtures/
 examples/
@@ -93,7 +93,7 @@ docs/upstream_notes/
 
 ### pyproject.toml
 
-Write `pyproject.toml`: scikit-build-core backend, pybind11 build dependency, package metadata (`name=pysmesh2`, `version=0.1.0`, `license=LGPL-2.1-only`, Python ≥3.13, `platforms=win_amd64`). Include `[tool.scikit-build] cmake.build-type = "Release"` and the `py.typed` marker in `package-data`.
+Write `pyproject.toml`: scikit-build-core backend, pybind11 build dependency, package metadata (`name=pysmesh`, `version=0.1.0`, `license=LGPL-2.1-only`, Python ≥3.13, `platforms=win_amd64`). Include `[tool.scikit-build] cmake.build-type = "Release"` and the `py.typed` marker in `package-data`.
 
 ### Root CMakeLists.txt
 
@@ -113,7 +113,7 @@ Write `pyproject.toml`: scikit-build-core backend, pybind11 build dependency, pa
 
 4. **pybind11 extension:** `pybind11_add_module(_core src/bindings/module.cpp ...)`
    - Link: all 5 SMESH static targets + `VTK::CommonCore VTK::CommonDataModel` (dynamic)
-   - Add options: `PYSMESH2_WITH_NETGEN OFF`, `PYSMESH2_DEV_ASSERTS ON` (in CI builds)
+   - Add options: `PYSMESH_WITH_NETGEN OFF`, `PYSMESH_DEV_ASSERTS ON` (in CI builds)
 
 ### cmake/ — Per-Module Build Scripts
 
@@ -144,15 +144,15 @@ Write `pyproject.toml`: scikit-build-core backend, pybind11 build dependency, pa
 
 **Effort:** 4–6 days
 
-**Exit Criterion:** Full §6 API implemented. `test_shape.py` and `test_mesh_injection.py` green. `import pysmesh2` passes VTK check and type stubs are mypy-clean.
+**Exit Criterion:** Full §6 API implemented. `test_shape.py` and `test_mesh_injection.py` green. `import pysmesh` passes VTK check and type stubs are mypy-clean.
 
 ### src/bindings/module.cpp
 
-`PYBIND11_MODULE(_core, m)` entry. Register `Pysmesh2Error` exception with `.details` and `.face_ids` attributes. Install OCCT Handle<> holder type declaration: `PYBIND11_DECLARE_HOLDER_TYPE(T, opencascade::handle<T>, true)` — copy the exact pattern from `ref-trelau-pysmesh/inc/pySMESH_Common.hxx`. Aggregate submodule bindings from `shape.cpp`, `mesh.cpp`, `viscous.cpp`.
+`PYBIND11_MODULE(_core, m)` entry. Register `PysmeshError` exception with `.details` and `.face_ids` attributes. Install OCCT Handle<> holder type declaration: `PYBIND11_DECLARE_HOLDER_TYPE(T, opencascade::handle<T>, true)` — copy the exact pattern from `ref-trelau-pysmesh/inc/pySMESH_Common.hxx`. Aggregate submodule bindings from `shape.cpp`, `mesh.cpp`, `viscous.cpp`.
 
 ### src/bindings/shape.cpp
 
-1. **`load_brep(bytes) → Shape`:** `BRepTools::Read` from a `std::istringstream`. Raise `Pysmesh2Error` on parse failure or null shape. Reference: `ref-trelau-pysmesh/src/SMESH.cxx` OCC wrapping patterns.
+1. **`load_brep(bytes) → Shape`:** `BRepTools::Read` from a `std::istringstream`. Raise `PysmeshError` on parse failure or null shape. Reference: `ref-trelau-pysmesh/src/SMESH.cxx` OCC wrapping patterns.
 
 2. **`Shape.faces() → list[FaceInfo]`:** `TopExp_Explorer` over the shape for `TopAbs_FACE`. Per face: 1-based id, area+centroid via `GProp_GProps`/`BRepGProp::SurfaceProperties`, bbox via `Bnd_Box`/`BRepBndLib::Add`, uv_bounds via `BRep_Tool::Surface` + `GeomLib::GetKnotSequence` or face parameter range.
 
@@ -168,13 +168,13 @@ Write `pyproject.toml`: scikit-build-core backend, pybind11 build dependency, pa
 
 3. **`Mesh.classify_on_face(node_ids, face_id, uv(N,2))`:** Call `SMESHDS_Mesh::SetNodeOnFace(node, face_id, u, v)` per node. `classify_on_edge(node_ids, edge_id, t(N,))`: `SetNodeOnEdge(node, edge_id, t)`. `classify_on_vertex(node_id, vertex_id)`: `SetNodeOnVertex(node, vertex_id)`.
 
-4. **`Mesh.add_triangles(conn(M,3) i64, face_id)`:** For each row, resolve node pointers by ID (`SMESHDS_Mesh::FindNode`), call `AddFaceWithID(n0,n1,n2,face_id)` + `SetMeshElementOnShape(elem, face_id)`. Raise `Pysmesh2Error` if any node ID is not found (name the offender).
+4. **`Mesh.add_triangles(conn(M,3) i64, face_id)`:** For each row, resolve node pointers by ID (`SMESHDS_Mesh::FindNode`), call `AddFaceWithID(n0,n1,n2,face_id)` + `SetMeshElementOnShape(elem, face_id)`. Raise `PysmeshError` if any node ID is not found (name the offender).
 
 5. **`Mesh.validate()`:** Walk all nodes and check every node has been classified (`GetPosition()->GetTypeOfPosition() != SMDS_TOP_UNSPEC`). Walk all wall face submeshes and check each has elements. Raise listing every gap — never silently pass an invalid mesh.
 
 6. **`Mesh.stats() → MeshStats`:** `SMESHDS_Mesh::NbNodes()`, `NbFaces()`, per-face element counts. `Mesh.release()`: explicit destructor call. Wire `__exit__` and `__del__` to the same path.
 
-### src/pysmesh2/__init__.py
+### src/pysmesh/__init__.py
 
 1. **DLL directory setup:** `os.add_dll_directory(Path(sys.prefix) / "Library" / "bin")` when detectable (belt-and-suspenders for VTK DLLs in conda + Nuitka). Then VTK version check: `import vtk; assert vtk.VTK_VERSION == _build_info.VTK_VERSION` — raise `ImportError` with both versions in the message on mismatch. Then `from ._core import ...` re-exports.
 
@@ -184,7 +184,7 @@ Write `pyproject.toml`: scikit-build-core backend, pybind11 build dependency, pa
 
 ### Tests
 
-1. **Write `tests/test_shape.py`:** box faces = 6, total area = 6·a² (analytic, cite in docstring). `face_distance` = 0.0 for a point on the face surface; = d (computed independently) for a point off-surface. Degenerate: empty bytes → `Pysmesh2Error`.
+1. **Write `tests/test_shape.py`:** box faces = 6, total area = 6·a² (analytic, cite in docstring). `face_distance` = 0.0 for a point on the face surface; = d (computed independently) for a point off-surface. Degenerate: empty bytes → `PysmeshError`.
 
 2. **Write `tests/test_mesh_injection.py`:** node+element count round-trip. `validate()` raises naming an unclassified node ID. `validate()` raises naming a face_id that has no elements. Bad `face_id` in `add_triangles` raises with the id.
 
@@ -202,7 +202,7 @@ Write `pyproject.toml`: scikit-build-core backend, pybind11 build dependency, pa
 
 1. **VLParams → SMESH setters:** Construct `StdMeshers_ViscousLayers`. Call setters: `SetTotalThickness`, `SetNumberLayers`, `SetStretchFactor`, `SetFaces(ids, isToIgnore)`, `SetMethod(ExtrusionMethod)`, `SetGroupName`. Exact method names and enum values from the B0 header audit. Reference: `ref-trelau-pysmesh/src/StdMeshers.cxx` — the VL binding block starting around line 280 is a near-complete working answer to this task.
 
-2. **Compute + ProxyMesh:** Call `Compute(SMESH_Mesh&, TopoDS_Shape&)` → `SMESH_ProxyMesh::Ptr`. **Release the GIL for the entire call.** On failure, collect `SMESH_ComputeError` messages and surface them as `Pysmesh2Error.details`. Distinguish complete failure (raise) from partial failure (populate `failed_face_ids` in the result).
+2. **Compute + ProxyMesh:** Call `Compute(SMESH_Mesh&, TopoDS_Shape&)` → `SMESH_ProxyMesh::Ptr`. **Release the GIL for the entire call.** On failure, collect `SMESH_ComputeError` messages and surface them as `PysmeshError.details`. Distinguish complete failure (raise) from partial failure (populate `failed_face_ids` in the result).
 
 3. **Prism harvest:** Find the named group (`params.group_name`) in `SMESH_Mesh::GetGroups()`. Iterate its elements (type `SMDSAbs_Volume`). For each 6-node prism element, read node IDs in VTK wedge order (nodes 0–2 = bottom triangle, 3–5 = top, same winding). Build `prism_connectivity(K,6) int32`.
 
@@ -210,7 +210,7 @@ Write `pyproject.toml`: scikit-build-core backend, pybind11 build dependency, pa
 
 5. **Node extraction:** Walk all nodes in the post-compute mesh: `SMESHDS_Mesh::GetMeshIterator` over nodes → build `node_coords(P,3) f64` and `node_ids(P,) i64` in the same row order.
 
-6. **Dev assertions** (compiled in when `PYSMESH2_DEV_ASSERTS=ON`): verify prism node ordering against VTK wedge convention. Catches ordering bugs at CI time without shipping the check.
+6. **Dev assertions** (compiled in when `PYSMESH_DEV_ASSERTS=ON`): verify prism node ordering against VTK wedge convention. Catches ordering bugs at CI time without shipping the check.
 
 ### Wing Fixture
 
@@ -229,7 +229,7 @@ Write `pyproject.toml`: scikit-build-core backend, pybind11 build dependency, pa
 
 2. **Wing sub-test:** zero inverted prisms — compute scalar triple products via NumPy vectorized cross product. Assert `np.all(volumes > 0)`. Coverage: ≥98% of wall faces have layer elements, or listed in `failed_face_ids`.
 
-3. **Degenerate inputs:** `total_thickness ≤ 0` raises `Pysmesh2Error`. `n_layers ≤ 0` raises. `stretch_factor ≤ 1.0` raises. Invalid `face_ids` raises naming the bad ids.
+3. **Degenerate inputs:** `total_thickness ≤ 0` raises `PysmeshError`. `n_layers ≤ 0` raises. `stretch_factor ≤ 1.0` raises. Invalid `face_ids` raises naming the bad ids.
 
 4. **Write `examples/box_bl.py`** end-to-end smoke test: load box BREP → inject a surface mesh → `compute_viscous_layers` → print stats. This doubles as the CI smoke test and the README quickstart example.
 
@@ -239,23 +239,23 @@ Write `pyproject.toml`: scikit-build-core backend, pybind11 build dependency, pa
 
 **Effort:** 1–2 days
 
-**Exit Criterion:** DoD checklist fully verified. GitHub Release published with `pysmesh2-0.1.0-cp313-win_amd64.whl`. Repo public under LGPL-2.1.
+**Exit Criterion:** DoD checklist fully verified. GitHub Release published with `pysmesh-0.1.0-cp313-win_amd64.whl`. Repo public under LGPL-2.1.
 
 ### .github/workflows/ci.yml
 
 1. Single job, `windows-latest` runner. Steps:
-   - (1) micromamba env from `ci/environment.yml` → `flux-pysmesh2-build`
+   - (1) micromamba env from `ci/environment.yml` → `flux-pysmesh-build`
    - (2) `python prepare.py`
    - (3) `python -m build --wheel` via scikit-build-core
    - (4) `pytest tests/ -v`
    - (5) upload wheel as artifact
-   - Add `PYSMESH2_DEV_ASSERTS=ON` as a CMake flag in CI only.
+   - Add `PYSMESH_DEV_ASSERTS=ON` as a CMake flag in CI only.
 
 2. **VTK-pin-drift check:** a small CI step reads flux's `environment.yml` for the `vtk>=` resolved version (or reads `flux-vtk-version.txt` if published) and fails with a diff if `ci/environment.yml`'s `vtk=` pin has drifted. This is the only cross-repo coupling point.
 
 ### Documentation
 
-1. **Write `README.md`** (English): what pySMESH2 is and why it exists (the flux VTK/OCCT env-conflict incident), quickstart install snippet, `examples/box_bl.py` walkthrough, build-from-source instructions (`conda create` + `prepare.py` + `pip install`), the flux relationship, and a note on binary size (static OCCT baked in → tens of MB; this is expected, not a build error).
+1. **Write `README.md`** (English): what pySMESH is and why it exists (the flux VTK/OCCT env-conflict incident), quickstart install snippet, `examples/box_bl.py` walkthrough, build-from-source instructions (`conda create` + `prepare.py` + `pip install`), the flux relationship, and a note on binary size (static OCCT baked in → tens of MB; this is expected, not a build error).
 
 2. **Write `NOTICE.md`:** the five-row table from phase_1.md §2 — SMESH (LGPL-2.1, static), OCCT (LGPL-2.1 + exception, static), Boost (BSL-1.0, static), VTK (BSD-3, dynamic), pybind11 (BSD-3, header-only). Add any discovered stubs from the B1 link audit.
 
@@ -265,12 +265,12 @@ Write `pyproject.toml`: scikit-build-core backend, pybind11 build dependency, pa
 
 Before tagging v0.1.0, verify each item:
 
-- [ ] Install wheel into the unmodified flux env → `import pysmesh2` passes VTK check → `examples/box_bl.py` runs to completion
-- [ ] `conda list --explicit` diff before/after wheel install: exactly one new line (`pysmesh2` pip entry) — no `occt`, no `boost`, no downgraded `vtk`/`pyside6`/`mkl`
+- [ ] Install wheel into the unmodified flux env → `import pysmesh` passes VTK check → `examples/box_bl.py` runs to completion
+- [ ] `conda list --explicit` diff before/after wheel install: exactly one new line (`pysmesh` pip entry) — no `occt`, no `boost`, no downgraded `vtk`/`pyside6`/`mkl`
 - [ ] All tests green in CI on `windows-latest`; wing fixture produces zero inverted prisms
 - [ ] `LICENSE` (LGPL-2.1), `NOTICE.md`, `PROVENANCE.md` complete — every patch has a source reference
 - [ ] `_core.pyi` type stubs ship in the wheel; `mypy --strict` passes against them on an import
-- [ ] Phase 2 `install_pysmesh2.py` can consume the GitHub Release URL (VTK-pin check passes; smoke test passes)
+- [ ] Phase 2 `install_pysmesh.py` can consume the GitHub Release URL (VTK-pin check passes; smoke test passes)
 
 ---
 
@@ -282,10 +282,10 @@ Before tagging v0.1.0, verify each item:
 | Hidden link dependency drags in MED/Driver libs | B1 | B1 exit criterion forces the discovery early; stub + record in PROVENANCE |
 | VL `Compute()` API differs from the assumed signature | B0→B3 | B0 reads and vendors the header before any binding code is written |
 | OCCT static build has CMake export quirks | B1 | `BUILD_LIBRARY_TYPE=Static` is an officially supported OCCT mode; budget one extra day in B1 |
-| flux bumps VTK after a pySMESH2 release | B4+ | Import-time hard check fails loud; rebuild is one CI run against the new pin — no OCCT/Boost impact (static) |
+| flux bumps VTK after a pySMESH release | B4+ | Import-time hard check fails loud; rebuild is one CI run against the new pin — no OCCT/Boost impact (static) |
 | `_core.pyd` binary size surprises (static OCCT) | B4 | Documented in README; tens of MB is the correct outcome — still smaller than shipping OCCT DLLs + transitive deps |
 
 ---
 
-**pySMESH2 v0.1.0 plan · 2026-07-02**  
+**pySMESH v0.1.0 plan · 2026-07-02**  
 target: cp313-win_amd64 · vtk=9.6.2 pin · LGPL-2.1

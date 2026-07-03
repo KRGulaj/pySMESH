@@ -3,7 +3,7 @@ requires = ["scikit-build-core>=0.10", "pybind11>=2.12"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "pysmesh2"
+name = "pysmesh"
 version = "0.1.0"
 description = "Python bindings to SALOME SMESH ViscousLayers for boundary-layer prism meshing"
 readme = "README.md"
@@ -13,7 +13,7 @@ authors = [{ name = "Kajetan R. Gulaj" }]
 keywords = ["mesh", "cfd", "viscous-layers", "smesh", "occt", "prism"]
 # NOTE: VTK is intentionally NOT a dependency. It is resolved at runtime from the host
 # environment (e.g. flux's VTK 9.6.2) and its version is hard-checked at import; bundling or
-# pip-installing a second VTK would defeat the whole purpose of pySMESH2.
+# pip-installing a second VTK would defeat the whole purpose of pySMESH.
 dependencies = ["numpy>=1.26"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -25,8 +25,8 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/KRGulaj/pysmesh2"
-Source = "https://github.com/KRGulaj/pysmesh2"
+Homepage = "https://github.com/KRGulaj/pySMESH"
+Source = "https://github.com/KRGulaj/pySMESH"
 
 [tool.scikit-build]
 minimum-version = "0.10"
@@ -38,4 +38,4 @@ build-dir = "build/{wheel_tag}"
 
 [tool.scikit-build.wheel]
 py-api = "cp313"
-packages = ["src/pysmesh2"]
+packages = ["src/pysmesh"]

@@ -1,6 +1,6 @@
 # Provenance
 
-pySMESH2 is built on top of the SALOME Platform's meshing stack. This file lists everything
+pySMESH is built on top of the SALOME Platform's meshing stack. This file lists everything
 we pulled in from outside the project — where it came from, at what commit, and why — so
 anyone auditing the license (LGPL-2.1) or the build can trace every file back to its source.
 Nothing here is invented; where we had to write something ourselves to bridge a gap, that's
