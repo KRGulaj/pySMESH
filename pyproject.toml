@@ -1,0 +1,41 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "pysmesh2"
+version = "0.1.0"
+description = "Python bindings to SALOME SMESH ViscousLayers for boundary-layer prism meshing"
+readme = "README.md"
+requires-python = ">=3.13"
+license = "LGPL-2.1-only"
+authors = [{ name = "Kajetan R. Gulaj" }]
+keywords = ["mesh", "cfd", "viscous-layers", "smesh", "occt", "prism"]
+# NOTE: VTK is intentionally NOT a dependency. It is resolved at runtime from the host
+# environment (e.g. flux's VTK 9.6.2) and its version is hard-checked at import; bundling or
+# pip-installing a second VTK would defeat the whole purpose of pySMESH2.
+dependencies = ["numpy>=1.26"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "License :: OSI Approved :: GNU Lesser General Public License v2 (LGPLv2)",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: C++",
+    "Topic :: Scientific/Engineering",
+]
+
+[project.urls]
+Homepage = "https://github.com/KRGulaj/pysmesh2"
+Source = "https://github.com/KRGulaj/pysmesh2"
+
+[tool.scikit-build]
+minimum-version = "0.10"
+cmake.version = ">=3.27"
+cmake.build-type = "Release"
+build-dir = "build/{wheel_tag}"
+# prepare.py (source staging + patching) must be run before the build; CI does this as an
+# explicit step (see .github/workflows/ci.yml). It is not re-run by the build backend.
+
+[tool.scikit-build.wheel]
+py-api = "cp313"
+packages = ["src/pysmesh2"]
