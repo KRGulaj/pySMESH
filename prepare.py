@@ -15,9 +15,6 @@ directory layout that SALOME/looooo's patch series expects, then applies the pat
 NETGEN is disabled, so NETGEN/NETGENPlugin sources and the ``0005-occt-8.0-netgen`` patch
 are intentionally excluded (see docs/reports/B0.md and PROVENANCE.md).
 
-Source of the sequencing and per-patch roots: ``third_party_ref/looooo_SMESH/prepare.py``
-and ``third_party_ref/conda_smesh/recipe/recipe.yaml``.
-
 Idempotent: re-running is a no-op once ``staged/.prepared`` exists unless ``--force`` is
 given. ``staged/`` is git-ignored.
 
@@ -185,7 +182,7 @@ def _apply_smds_mesh_vtk_alloc() -> None:
     """VTK 9: pre-allocate vtkPoints to avoid an InsertPoint crash on Windows.
 
     ``SetNumberOfPoints`` allocates the array; ``Allocate`` alone only reserves capacity.
-    Source: third_party_ref/looooo_SMESH/prepare.py :: _apply_smds_mesh_vtk_alloc.
+    Source: looooo/SMESH/prepare.py :: _apply_smds_mesh_vtk_alloc.
     """
     target = STAGED / "src/SMESH/src/SMDS/SMDS_Mesh.cxx"
     old = "  points->SetNumberOfPoints( 0 );\n  myGrid->SetPoints( points );"
@@ -279,7 +276,7 @@ def _apply_geomutils_occt_fix() -> None:
     robust to the 1-line context skew between GEOM ``V9_9_0`` tag (`b6f0965`, what we vendor)
     and looooo's Geom submodule pin (`71b630d7`). ``ConvertClickToPoint`` is a headless-unused
     GUI helper, but the whole .cxx must still compile, so the removed type must resolve.
-    Source of the edits: third_party_ref/looooo_SMESH/patch/GEOMUtils.patch.
+    Source of the edits: looooo/SMESH/patch/GEOMUtils.patch.
     """
     target = STAGED / "src/Geom/src/GEOMUtils/GEOMUtils.cxx"
     content = target.read_text(encoding="utf-8", errors="surrogateescape")

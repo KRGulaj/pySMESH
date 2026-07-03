@@ -72,12 +72,13 @@ diff didn't line up byte-for-byte.
 
 ## Reference-only repositories
 
-`third_party_ref/` holds several other SMESH-adjacent projects we read for guidance but never
-copy code from directly: `trelau/SMESH`, `trelau/pySMESH` (the closest thing to a prior
-pybind11 binding for this library — useful for cross-checking API names), `pyOCCT`,
-SalomePlatform's `shaper` and `geom` (Phase 2, unrelated to the current milestones), and a
-sparse FreeCAD checkout kept only for one older NETGENPlugin file used to confirm an API
-usage pattern. None of it ships in the wheel.
+Several other SMESH-adjacent projects were used for guidance but never copied from directly:
+[trelau/SMESH](https://github.com/trelau/SMESH), [trelau/pySMESH](https://github.com/trelau/pySMESH)
+(the closest thing to a prior pybind11 binding for this library — useful for cross-checking API names),
+[trelau/pyOCCT](https://github.com/trelau/pyOCCT), SalomePlatform's [shaper](https://github.com/SalomePlatform/shaper)
+and [geom](https://github.com/SalomePlatform/geom) (Phase 2, unrelated to the current milestones), and
+[FreeCAD/FreeCAD](https://github.com/FreeCAD/FreeCAD) (kept only for one older NETGENPlugin file used to
+confirm an API usage pattern). None of it ships in the wheel.
 
 ## License
 

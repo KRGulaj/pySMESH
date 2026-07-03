@@ -17,7 +17,7 @@
 | `extern/smesh/` | ⚠️ needs patching | SALOME SMESH 9.9.0 — git subtree, raw upstream (full-platform CMakeLists) |
 | `ci/environment.yml` | ✓ complete | python=3.13, vtk=9.6.2 (pinned), occt=8.0.0, full toolchain |
 | `pyproject.toml / CMakeLists.txt / PROVENANCE.md` | ⚠️ empty stubs | created but not filled |
-| `third_party_ref/` | ✓ ready | 9 reference repos cloned locally: `ref-trelau-smesh`, `ref-trelau-pysmesh`, `looooo_SMESH`, `conda_smesh`, `Salome_shaper`, `Salome_geom`, `pyOCCT`, `ref-freecad-smesh`, `montylab3d_smesh` |
+| Reference sources | ✓ ready | [trelau/SMESH](https://github.com/trelau/SMESH), [trelau/pySMESH](https://github.com/trelau/pySMESH), [looooo/SMESH](https://github.com/looooo/SMESH), [conda-forge/smesh-feedstock](https://github.com/conda-forge/smesh-feedstock), [SalomePlatform/shaper](https://github.com/SalomePlatform/shaper), [SalomePlatform/geom](https://github.com/SalomePlatform/geom), [trelau/pyOCCT](https://github.com/trelau/pyOCCT), [FreeCAD/FreeCAD](https://github.com/FreeCAD/FreeCAD), [montylab3d/smesh](https://github.com/montylab3d/smesh) |
 
 ---
 
@@ -214,7 +214,7 @@ Write `pyproject.toml`: scikit-build-core backend, pybind11 build dependency, pa
 
 ### Wing Fixture
 
-1. Copy `lhs_wing.brep` from `third_party_ref/ref-trelau-pysmesh/examples/models/` into `tests/fixtures/`. Check the license terms before redistributing — if restricted, generate a synthetic swept NACA profile with OCCT (`BRepOffsetAPI_ThruSections`) instead, and note the substitution in `PROVENANCE.md`.
+1. Copy `lhs_wing.brep` from [trelau/pySMESH](https://github.com/trelau/pySMESH) `examples/models/` into `tests/fixtures/`. Check the license terms before redistributing — if restricted, generate a synthetic swept NACA profile with OCCT (`BRepOffsetAPI_ThruSections`) instead, and note the substitution in `PROVENANCE.md`.
 
 2. Generate the matching surface mesh `wing_surface.npz` with classification tables (`face_id`, `uv`, `edge_id`, `t`). Document the generation script and its invocation in the file's module docstring. The generation script is *not* run by CI — the committed `.npz` is the fixture.
 

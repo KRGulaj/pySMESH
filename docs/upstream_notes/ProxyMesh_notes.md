@@ -45,7 +45,7 @@ route unsubstituted faces into `failed_face_ids` rather than dereferencing a nul
 `extern/smesh/src/NETGENPlugin/` **does not exist in this repo's `extern/smesh/`
 subtree** (NETGENPlugin is a separate SALOME module, not vendored here). `plan.md`'s B0
 task 3 named `NETGENPlugin_Mesher.cpp` as the cross-reference source; that exact file is
-only available locally in `third_party_ref/ref-freecad-smesh/src/3rdParty/salomesmesh/src/NETGENPlugin/NETGENPlugin_Mesher.cpp`
+available in [FreeCAD/FreeCAD](https://github.com/FreeCAD/FreeCAD) `src/3rdParty/salomesmesh/src/NETGENPlugin/NETGENPlugin_Mesher.cpp`
 (FreeCAD's vendored copy, SMESH ~7.7.1-era). This is a *different* viscous-layers variant
 (`StdMeshers_ViscousLayers2D`, 2D/BRepMesh-side, not the 3D solid-prism algorithm this
 project binds) but it confirms the same access idiom used throughout SMESH/NETGENPlugin
@@ -87,6 +87,6 @@ either.
 
 ## Sources
 - `extern/smesh/src/SMESH/SMESH_ProxyMesh.hxx` (full read)
-- `third_party_ref/ref-freecad-smesh/src/3rdParty/salomesmesh/src/NETGENPlugin/NETGENPlugin_Mesher.cpp`
+- [FreeCAD/FreeCAD](https://github.com/FreeCAD/FreeCAD) `src/3rdParty/salomesmesh/src/NETGENPlugin/NETGENPlugin_Mesher.cpp`
   lines 2838-2943 (grep + targeted read) — confirms the idiom but is a 2D-VL / older-SMESH
   reference only; do not copy its API calls verbatim, only the access pattern.

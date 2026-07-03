@@ -1,6 +1,6 @@
 # SMESH static libraries for pySMESH2.
 #
-# Adapted from third_party_ref/looooo_SMESH/cmake/SMESH/CMakeLists.txt. Differences:
+# Adapted from looooo/SMESH/cmake/SMESH/CMakeLists.txt. Differences:
 #   * STATIC libraries (looooo builds SHARED) — everything is linked into _core.pyd.
 #   * per-target ``-D<MODULE>_EXPORTS`` COMPILE_FLAGS are dropped; the root CMakeLists
 #     instead defines *every* module's ``*_EXPORTS`` macro globally so the SMESH export

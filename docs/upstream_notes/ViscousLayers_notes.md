@@ -123,7 +123,7 @@ this fallback path entirely.
 - `extern/smesh/src/StdMeshers/StdMeshers_ViscousLayers.hxx` (full read)
 - `extern/smesh/src/StdMeshers/StdMeshers_ViscousLayers.cxx` lines 1290-1480, 1900-1960,
   2018-2091, 10650-10670 (targeted read via grep + Read)
-- Cross-check for the VL binding pattern: `third_party_ref/ref-trelau-pysmesh/src/StdMeshers.cxx`
+- Cross-check for the VL binding pattern: [trelau/pySMESH](https://github.com/trelau/pySMESH) `src/StdMeshers.cxx`
   (VL binding block from line ~280) — note this reference binds an **older** SMESH
   (8.3.0.4) where `SetBndShapes` may have been named differently; verify against this
   file's actual call before copying signatures, don't assume it matches 9.9.0 verbatim.

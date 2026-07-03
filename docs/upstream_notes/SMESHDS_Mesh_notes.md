@@ -101,16 +101,16 @@ Cheap to build (store during `__init__`, same explorer pass `Shape` already did)
 `SMESHDS_Mesh.hxx` and `SMESH_ProxyMesh.hxx` both `#include <smIdType.hxx>`. This header
 is **not part of SMESH** — it is generated from SALOME KERNEL's
 `Basics/smIdType.hxx.in` via `configure_file()`. Confirmed in both reference builds'
-Kernel CMake scripts, e.g. `third_party_ref/looooo_SMESH/cmake/Kernel/CMakeLists.txt:42`:
+Kernel CMake scripts, e.g. [looooo/SMESH](https://github.com/looooo/SMESH) `cmake/Kernel/CMakeLists.txt:42`:
 
 ```cmake
 configure_file(${Kernel_SRC_DIR}/Basics/smIdType.hxx.in ${Kernel_SRC_DIR}/Basics/smIdType.hxx)
 ```
 
-Both `looooo_SMESH` and `ref-trelau-smesh` resolve `Kernel_SRC_DIR` to a **git submodule**
-checkout of SALOME KERNEL (`external/Kernel` / `src/Kernel` pointing at
-`git.salome-platform.org`'s or a fork's KERNEL repo) that was **not fetched** in this
-project's local `third_party_ref` clones (submodules present as empty directories only).
+Both [looooo/SMESH](https://github.com/looooo/SMESH) and [trelau/SMESH](https://github.com/trelau/SMESH)
+resolve `Kernel_SRC_DIR` to a **git submodule** checkout of SALOME KERNEL (`external/Kernel` / `src/Kernel`
+pointing at `git.salome-platform.org`'s or a fork's KERNEL repo) that was **not fetched** in upstream clones
+(submodules present as empty directories only).
 The Kernel `CMakeLists.txt` in both reference repos compiles a *minimal* slice of KERNEL —
 not the whole module (which pulls CORBA/ORB) — specifically:
 
@@ -161,7 +161,7 @@ project actually has on disk.
 - `extern/smesh/src/SMDS/SMDS_Mesh.hxx` (smIdType include, line 46)
 - `extern/smesh/idl/SMESH_smIdType.idl.in` (confirms `smIdType` is a KERNEL-provided
   configured typedef, `@SMESH_ID_TYPE@`)
-- `third_party_ref/looooo_SMESH/cmake/Kernel/CMakeLists.txt` lines 3-47 (KERNEL minimal
+- [looooo/SMESH](https://github.com/looooo/SMESH) `cmake/Kernel/CMakeLists.txt` lines 3-47 (KERNEL minimal
   file list + `smIdType.hxx.in` configure_file mechanism)
-- `third_party_ref/ref-trelau-smesh/cmake/Kernel/CMakeLists.txt` (cross-check, same
+- [trelau/SMESH](https://github.com/trelau/SMESH) `cmake/Kernel/CMakeLists.txt` (cross-check, same
   pattern)
