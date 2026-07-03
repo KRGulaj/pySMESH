@@ -1,0 +1,14 @@
+--- a/src/SMESH/SMESH_MesherHelper.cxx	2026-03-07 21:33:23.154545480 +0100
++++ b/src/SMESH/SMESH_MesherHelper.cxx	2026-03-07 21:33:33.522544869 +0100
+@@ -4953,9 +4953,9 @@
+       }
+     }
+     // fix nodes on geom faces
++    int nbfaces = 0;
+ #ifdef _DEBUG_
+-    int nbfaces = nbSolids;
+-    nbfaces = faces.Extent(); /*avoid "unused varianbles": */ nbfaces++, nbfaces--; 
++    nbfaces = faces.Extent();
+ #endif
+     for ( TopTools_MapIteratorOfMapOfShape fIt( faces ); fIt.More(); fIt.Next() ) {
+       MESSAGE("FIX FACE " << nbfaces-- << " #" << GetMeshDS()->ShapeToIndex(fIt.Key()));

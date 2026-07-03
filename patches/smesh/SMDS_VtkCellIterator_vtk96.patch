@@ -1,0 +1,28 @@
+--- a/src/SMDS/SMDS_VtkCellIterator.cxx
++++ b/src/SMDS/SMDS_VtkCellIterator.cxx
+@@ -22,6 +22,8 @@
+ 
+ #include <vtkCell.h>
+ #include <vtkIdList.h>
++#include <vtkNew.h>
++#include <vtkVersionMacros.h>
+ 
+ _GetVtkNodes::_GetVtkNodes( TVtkIdList&        vtkIds,
+                             SMDS_Mesh*         mesh,
+@@ -141,9 +143,16 @@
+   {
+   case SMDSEntity_Polyhedra:
+   {
++#if VTK_VERSION_NUMBER >= VTK_VERSION_CHECK(9,6,0)
++    vtkNew<vtkIdList> faceStreamList;
++    grid->GetFaceStream(vtkCellId, faceStreamList);
++    vtkIdType nFaces = faceStreamList->GetId(0);
++    vtkIdType const *ptIds = faceStreamList->GetPointer(1);
++#else
+     vtkIdType nFaces = 0;
+     vtkIdType const *ptIds(nullptr);
+     grid->GetFaceStream( vtkCellId, nFaces, ptIds );
++#endif
+     int id = 0, nbNodesInFaces = 0;
+     for ( int i = 0; i < nFaces; i++ )
+     {

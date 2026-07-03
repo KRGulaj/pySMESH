@@ -1,0 +1,35 @@
+--- a/src/Utils/Utils_Mutex.cxx	2026-03-07 20:59:32.298665220 +0100
++++ b/src/Utils/Utils_Mutex.cxx	2026-03-07 20:59:43.022664587 +0100
+@@ -45,11 +45,7 @@
+ {
+   pthread_mutex_lock( &myHelperMutex );
+ 
+-#ifndef WIN32 
+   if ( myCount > 0 && myThread == pthread_self() ) {
+-#else
+-  if ( myCount > 0 && myThread.p == pthread_self().p ) {
+-#endif
+     myCount++;
+   }
+   else {
+@@ -59,7 +55,7 @@
+     myCount = 1;
+     myThread = pthread_self();
+   }
+-  
++
+   pthread_mutex_unlock( &myHelperMutex );
+ }
+ 
+@@ -67,11 +63,7 @@
+ {
+   pthread_mutex_lock( &myHelperMutex );
+ 
+-#ifndef WIN32  
+   if ( myThread == pthread_self() ) {
+-#else
+-  if ( myThread.p == pthread_self().p ) {
+-#endif
+     if ( myCount && (--myCount) < 1 ) {
+       myCount = 0;
+       pthread_mutex_unlock( &myMutex );   

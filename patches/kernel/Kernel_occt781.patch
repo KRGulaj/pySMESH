@@ -1,0 +1,27 @@
+diff --git a/src/Basics/smIdType.hxx.in b/src/Basics/smIdType.hxx.in
+index 9d62cca..9a71e9a 100644
+--- a/src/Basics/smIdType.hxx.in
++++ b/src/Basics/smIdType.hxx.in
+@@ -26,6 +26,7 @@
+ #cmakedefine SALOME_USE_64BIT_IDS
+ 
+ #include <cinttypes>
++#include <cstddef>
+ #include <limits>
+ 
+ #ifndef SALOME_USE_64BIT_IDS
+@@ -45,6 +46,14 @@ struct smIdHasher
+   {
+     return id1 == id2;
+   }
++  size_t operator()(const smIdType theValue) const
++  {
++    return static_cast<size_t> (theValue & std::numeric_limits<smIdType>::max());
++  }
++  bool operator()(const smIdType& theValue1, const smIdType& theValue2) const
++  {
++    return theValue1 == theValue2;
++  }
+ };
+ 
+ template <class T> inline smIdType ToSmIdType(T val)

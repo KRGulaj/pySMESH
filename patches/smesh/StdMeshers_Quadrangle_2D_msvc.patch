@@ -1,0 +1,13 @@
+--- a/src/StdMeshers/StdMeshers_Quadrangle_2D.cxx	2026-03-07 21:47:48.554494456 +0100
++++ b/src/StdMeshers/StdMeshers_Quadrangle_2D.cxx	2026-03-07 21:47:55.710494034 +0100
+@@ -67,6 +67,10 @@
+ #include <boost/container/flat_set.hpp>
+ #include <boost/intrusive/circular_list_algorithms.hpp>
+ 
++#ifdef _MSC_VER
++#undef near
++#endif
++
+ typedef NCollection_Array2<const SMDS_MeshNode*> StdMeshers_Array2OfNode;
+ 
+ typedef gp_XY         gp_UV;

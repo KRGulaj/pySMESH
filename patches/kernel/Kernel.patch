@@ -1,0 +1,47 @@
+diff --git a/src/Basics/Basics_Utils.hxx b/src/Basics/Basics_Utils.hxx
+--- a/src/Basics/Basics_Utils.hxx
++++ b/src/Basics/Basics_Utils.hxx
+@@ -34,6 +34,7 @@
+ #else
+ #include <windows.h>
+ #pragma comment(lib,"winmm.lib")
++#pragma comment(lib,"Ws2_32.lib")
+ #pragma warning (disable : 4251)
+ #endif
+
+diff --git a/src/Utils/Utils_ExceptHandlers.cxx b/src/Utils/Utils_ExceptHandlers.cxx
+--- a/src/Utils/Utils_ExceptHandlers.cxx
++++ b/src/Utils/Utils_ExceptHandlers.cxx
+@@ -26,11 +26,12 @@
+ //              <ota@localhost.localdomain>
+ //
+ #include "Utils_ExceptHandlers.hxx"
+-#include "Utils_CorbaException.hxx"
++// #include "Utils_CorbaException.hxx"
+ #include "Utils_SALOME_Exception.hxx"
+ 
+ #include <sstream>
+ #ifdef WIN32
++#include <windows.h>
+ #include "DbgHelp.h"
+ #include <WinBase.h>
+ #pragma comment(lib, "Dbghelp.lib")
+@@ -40,8 +41,8 @@
+ #include <cxxabi.h>
+ #endif
+ 
+-#include <SALOMEconfig.h>
+-#include CORBA_SERVER_HEADER(SALOME_Exception)
++// #include <SALOMEconfig.h>
++// #include CORBA_SERVER_HEADER(SALOME_Exception)
+ 
+ //#define NBLINES_BACKTRACE 64
+ #ifdef WIN32
+@@ -142,6 +143,6 @@ void SALOME_SalomeException()
+   txt << "INTERNAL_ERROR, backtrace stack:" << nbLines << std::endl;
+   printBacktrace(stacklines, nbLines, txt);
+ #endif
+-  THROW_SALOME_CORBA_EXCEPTION(txt.str().c_str(), SALOME::INTERNAL_ERROR);
++  // THROW_SALOME_CORBA_EXCEPTION(txt.str().c_str(), SALOME::INTERNAL_ERROR);
+ }
+ 

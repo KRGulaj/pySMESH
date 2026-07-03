@@ -1,0 +1,101 @@
+--- a/src/SMDS/SMDS_UnstructuredGrid.cxx
++++ b/src/SMDS/SMDS_UnstructuredGrid.cxx
+@@ -30,8 +30,11 @@
+ #include <vtkCellData.h>
+ #include <vtkCellLinks.h>
+ #include <vtkDoubleArray.h>
++#include <vtkIdList.h>
+ #include <vtkIdTypeArray.h>
++#include <vtkNew.h>
+ #include <vtkUnsignedCharArray.h>
++#include <vtkVersionMacros.h>
+ 
+ #include <list>
+ #include <climits>
+@@ -248,7 +251,11 @@
+   vtkIdType newConnectivitySize = this->Connectivity->GetNumberOfConnectivityEntries();
+   if ( newCellSize != oldCellSize )
+     for ( vtkIdType i = 0; i < oldCellSize - 1; ++i )
++#if VTK_VERSION_NUMBER >= VTK_VERSION_CHECK(9,6,0)
++      if ( static_cast<unsigned char>(this->Types->GetTuple1( i )) == VTK_EMPTY_CELL )
++#else
+       if ( this->Types->GetValue( i ) == VTK_EMPTY_CELL )
++#endif
+         newConnectivitySize -= this->Connectivity->GetCellSize( i );
+ 
+   vtkCellArray *newConnectivity = vtkCellArray::New();
+@@ -284,6 +291,54 @@
+     }
+   }
+ 
++#if VTK_VERSION_NUMBER >= VTK_VERSION_CHECK(9,6,0)
++  if (this->FaceLocations)
++  {
++    vtkNew<vtkIdList> faceStream;
++    vtkIdTypeArray *newFaceLocations = vtkIdTypeArray::New();
++    newFaceLocations->Initialize();
++    newFaceLocations->Allocate(newTypes->GetSize());
++    vtkIdTypeArray *newFaces = vtkIdTypeArray::New();
++    newFaces->Initialize();
++    for ( vtkIdType newCellID = 0; newCellID < newCellSize; newCellID++ )
++    {
++      if ( newTypes->GetValue( newCellID ) == VTK_POLYHEDRON )
++      {
++        smIdType oldCellId = idCellsNewToOld[ newCellID ];
++        newFaceLocations->InsertNextValue( newFaces->GetMaxId()+1 );
++        this->GetFaceStream( FromSmIdType<vtkIdType>(oldCellId), faceStream );
++        vtkIdType nCellFaces = faceStream->GetId(0);
++        newFaces->InsertNextValue( nCellFaces );
++        vtkIdType idx = 1;
++        for ( vtkIdType n = 0; n < nCellFaces; n++ )
++        {
++          vtkIdType nptsInFace = faceStream->GetId(idx++);
++          newFaces->InsertNextValue( nptsInFace );
++          for ( vtkIdType k = 0; k < nptsInFace; k++ )
++          {
++            vtkIdType oldpt = faceStream->GetId(idx++);
++            newFaces->InsertNextValue( idNodesOldToNew[ oldpt ]);
++          }
++        }
++      }
++      else
++      {
++        newFaceLocations->InsertNextValue(-1);
++      }
++    }
++    newFaceLocations->Squeeze();
++    newFaces->Squeeze();
++    this->SetCells( newTypes, newConnectivity, newFaceLocations, newFaces );
++    this->CellLocations = newLocations;
++    newFaceLocations->Delete();
++    newFaces->Delete();
++  }
++  else
++  {
++    this->SetCells( static_cast<vtkDataArray*>(newTypes), newConnectivity );
++    this->CellLocations = newLocations;
++  }
++#else
+   if (this->FaceLocations)
+   {
+     vtkIdTypeArray *newFaceLocations = vtkIdTypeArray::New();
+@@ -329,6 +384,7 @@
+     this->SetCells( newTypes, newLocations, newConnectivity, FaceLocations, Faces );
+     this->CellLocations = newLocations;
+   }
++#endif
+ 
+   newTypes->Delete();
+   newLocations->Delete();
+@@ -361,7 +417,11 @@
+   for ( size_t iNew = 0; iNew < idCellsNewToOld.size(); iNew++ )
+   {
+     vtkIdType iOld = idCellsNewToOld[ iNew ];
++    #if VTK_VERSION_NUMBER >= VTK_VERSION_CHECK(9,6,0)
++    newTypes->SetValue( iNew, static_cast<unsigned char>(this->Types->GetTuple1( iOld )));
++#else
+     newTypes->SetValue( iNew, this->Types->GetValue( iOld ));
++#endif
+ 
+     vtkIdType oldLoc = ((vtkIdTypeArray *)(this->Connectivity->GetOffsetsArray()))->GetValue( iOld );
+     vtkIdType nbpts;

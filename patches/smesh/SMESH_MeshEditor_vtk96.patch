@@ -1,0 +1,34 @@
+--- a/src/SMESH/SMESH_MeshEditor.cxx
++++ b/src/SMESH/SMESH_MeshEditor.cxx
+@@ -101,6 +101,7 @@
+ #include "SMESH_TryCatch.hxx" // include after OCCT headers!
+ 
+ #include <smIdType.hxx>
++#include <vtkVersionMacros.h>
+ 
+ #define cast2Node(elem) static_cast<const SMDS_MeshNode*>( elem )
+ 
+@@ -11260,7 +11261,11 @@
+       {
+         int oldId = *itn;
+         //MESSAGE("     node " << oldId);
++        #if VTK_VERSION_NUMBER >= VTK_VERSION_CHECK(9,6,0)
++        vtkCellLinks::Link l = (static_cast<vtkCellLinks *>(grid->GetLinks()))->GetLink(oldId);
++#else
+         vtkCellLinks::Link l = (static_cast <vtkCellLinks *>(grid->GetCellLinks()))->GetLink(oldId);
++#endif
+         for (int i=0; i<l.ncells; i++)
+         {
+           int vtkId = l.cells[i];
+@@ -11618,7 +11623,11 @@
+     {
+       int oldId = itnod->first;
+       //MESSAGE("     node " << oldId);
++      #if VTK_VERSION_NUMBER >= VTK_VERSION_CHECK(9,6,0)
++      vtkCellLinks::Link l = (static_cast<vtkCellLinks *>(grid->GetLinks()))->GetLink(oldId);
++#else
+       vtkCellLinks::Link l = (static_cast< vtkCellLinks *>(grid->GetCellLinks()))->GetLink(oldId);
++#endif
+       for (int i = 0; i < l.ncells; i++)
+       {
+         int vtkId = l.cells[i];

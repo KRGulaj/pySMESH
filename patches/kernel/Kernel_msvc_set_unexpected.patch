@@ -1,0 +1,18 @@
+--- a/src/Utils/Utils_ExceptHandlers.hxx	2026-03-07 21:09:10.254631143 +0100
++++ b/src/Utils/Utils_ExceptHandlers.hxx	2026-03-07 21:09:22.986630393 +0100
+@@ -38,9 +38,14 @@
+ class UTILS_EXPORT Unexpect { //save / retrieve unexpected exceptions treatment
+   PVF old;
+   public :
++#ifdef _MSC_VER
++    Unexpect( PVF f ) { (void)f; old = nullptr; }
++    ~Unexpect() { }
++#else
+     Unexpect( PVF f )
+       { old = std::set_unexpected(f); }
+-  ~Unexpect() { std::set_unexpected(old); }
++    ~Unexpect() { std::set_unexpected(old); }
++#endif
+ };
+ 
+ class UTILS_EXPORT Terminate {//save / retrieve terminate function

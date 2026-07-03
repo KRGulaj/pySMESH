@@ -1,0 +1,20 @@
+--- a/src/SMESHUtils/SMESH_File.cxx
++++ b/src/SMESHUtils/SMESH_File.cxx
+@@ -149,7 +149,7 @@
+     _pos = _end = 0;
+     _size = -1;
+   }
+-  else if ( _file >= 0 )
++  else
+   {
+ #ifdef WIN32
+     if(_file != INVALID_HANDLE_VALUE) {
+@@ -157,7 +157,7 @@
+       _file = INVALID_HANDLE_VALUE;
+     }
+ #else
+-    if(_file != -1) {
++    if(_file >= 0) {
+       ::close(_file);
+       _file = -1;
+     }

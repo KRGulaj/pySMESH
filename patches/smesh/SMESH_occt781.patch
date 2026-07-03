@@ -1,0 +1,390 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index d0b520c..65a806d 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -51,7 +51,7 @@ install(FILES ${DriverGMF_INCLUDES} DESTINATION "include/smesh/DriverGMF")
+ # DriverSTL
+ file(GLOB DriverSTL_SRC ${SMESH_SRC_DIR}/DriverSTL/*.cxx)
+ add_library(DriverSTL ${DriverSTL_SRC})
+-target_link_libraries(DriverSTL Driver SMDS SMESHUtils TKernel TKSTL TKTopAlgo TKMesh)
++target_link_libraries(DriverSTL Driver SMDS SMESHUtils TKernel TKTopAlgo TKMesh)
+ target_include_directories(DriverSTL PUBLIC
+   $<BUILD_INTERFACE:${SMESH_SRC_DIR}/DriverSTL>
+   $<INSTALL_INTERFACE:include/smesh/DriverSTL>
+diff --git a/src/Controls/SMESH_Controls.cxx b/src/Controls/SMESH_Controls.cxx
+index 0429f94..eb04364 100644
+--- a/src/Controls/SMESH_Controls.cxx
++++ b/src/Controls/SMESH_Controls.cxx
+@@ -3293,7 +3293,7 @@ void CoplanarFaces::SetMesh( const SMDS_Mesh* theMesh )
+       return;
+ 
+     const double cosTol = Cos( myToler * M_PI / 180. );
+-    NCollection_Map< SMESH_TLink, SMESH_TLink > checkedLinks;
++    NCollection_Map< SMESH_TLink, SMESH_TLinkHasher > checkedLinks;
+ 
+     std::list< std::pair< const SMDS_MeshElement*, gp_Vec > > faceQueue;
+     faceQueue.push_back( std::make_pair( face, myNorm ));
+diff --git a/src/DriverGMF/DriverGMF.cxx b/src/DriverGMF/DriverGMF.cxx
+index a087bda..9f402ca 100644
+--- a/src/DriverGMF/DriverGMF.cxx
++++ b/src/DriverGMF/DriverGMF.cxx
+@@ -55,7 +55,7 @@ namespace DriverGMF
+ 
+   bool isExtensionCorrect( const std::string& fileName )
+   {
+-    std::string ext  = boost::filesystem::extension(fileName);
++    std::string ext = boost::filesystem::path(fileName).extension().string();
+     switch ( ext.size() ) {
+     case 5: return ( ext == ".mesh" || ext == ".solb" );
+     case 6: return ( ext == ".meshb" );
+diff --git a/src/DriverSTL/DriverSTL_R_SMDS_Mesh.cxx b/src/DriverSTL/DriverSTL_R_SMDS_Mesh.cxx
+index ca6f393..4d9abee 100644
+--- a/src/DriverSTL/DriverSTL_R_SMDS_Mesh.cxx
++++ b/src/DriverSTL/DriverSTL_R_SMDS_Mesh.cxx
+@@ -37,12 +37,7 @@ namespace
+ {
+   struct Hasher
+   {
+-    //=======================================================================
+-    //function : HashCode
+-    //purpose  :
+-    //=======================================================================
+-    inline static Standard_Integer HashCode
+-    (const gp_Pnt& point,  Standard_Integer Upper)
++    size_t operator()(const gp_Pnt& point) const noexcept
+     {
+       union
+       {
+@@ -51,15 +46,9 @@ namespace
+       } U;
+ 
+       point.Coord( U.R[0], U.R[1], U.R[2] );
+-
+-      return ::HashCode(U.I[0]/23+U.I[1]/19+U.I[2]/17+U.I[3]/13+U.I[4]/11+U.I[5]/7,Upper);
++      return std::hash<Standard_Integer>{}(U.I[0]/23+U.I[1]/19+U.I[2]/17+U.I[3]/13+U.I[4]/11+U.I[5]/7);
+     }
+-    //=======================================================================
+-    //function : IsEqual
+-    //purpose  :
+-    //=======================================================================
+-    inline static Standard_Boolean IsEqual
+-    (const gp_Pnt& point1, const gp_Pnt& point2)
++    size_t operator()(const gp_Pnt& point1, const gp_Pnt& point2) const noexcept
+     {
+       static Standard_Real tab1[3], tab2[3];
+       point1.Coord(tab1[0],tab1[1],tab1[2]);
+diff --git a/src/MeshVSLink/SMESH_MeshVSLink.hxx b/src/MeshVSLink/SMESH_MeshVSLink.hxx
+index cdad7ab..9aaca97 100644
+--- a/src/MeshVSLink/SMESH_MeshVSLink.hxx
++++ b/src/MeshVSLink/SMESH_MeshVSLink.hxx
+@@ -39,7 +39,7 @@
+ #include <Standard_Boolean.hxx>
+ #include <Standard_Integer.hxx>
+ #include <MeshVS_EntityType.hxx>
+-#include <Standard_Address.hxx>
++// #include <Standard_Address.hxx>
+ #include <TColStd_HArray1OfInteger.hxx>
+ #include <Standard_Real.hxx>
+ #include <Standard_Version.hxx>
+diff --git a/src/SMESH/SMESH_MeshEditor.cxx b/src/SMESH/SMESH_MeshEditor.cxx
+index f97e645..a5b1648 100644
+--- a/src/SMESH/SMESH_MeshEditor.cxx
++++ b/src/SMESH/SMESH_MeshEditor.cxx
+@@ -4307,7 +4307,7 @@ void SMESH_MeshEditor::sweepElement(const SMDS_MeshElement*               elem,
+         std::swap( itNN[0],    itNN[1] );
+         std::swap( prevNod[0], prevNod[1] );
+         std::swap( nextNod[0], nextNod[1] );
+-        std::swap( isSingleNode[0], isSingleNode[1] );
++        std::vector<bool>::swap( isSingleNode[0], isSingleNode[1] );
+         if ( nbSame > 0 )
+           sames[0] = 1 - sames[0];
+         iNotSameNode = 1 - iNotSameNode;
+@@ -7459,6 +7459,8 @@ bool SMESH_MeshEditor::applyMerge( const SMDS_MeshElement* elem,
+ // purpose : allow comparing elements basing on their nodes
+ // ========================================================
+ 
++struct ComparableElementHasher;
++
+ class ComparableElement : public boost::container::flat_set< smIdType >
+ {
+   typedef boost::container::flat_set< smIdType >  int_set;
+@@ -7467,6 +7469,8 @@ class ComparableElement : public boost::container::flat_set< smIdType >
+   smIdType                mySumID;
+   mutable int             myGroupID;
+ 
++  friend ComparableElementHasher;
++
+ public:
+ 
+   ComparableElement( const SMDS_MeshElement* theElem ):
+@@ -7496,15 +7500,19 @@ public:
+     myGroupID = src.myGroupID;
+   }
+ 
+-  static int HashCode(const ComparableElement& se, int limit )
++};
++
++struct ComparableElementHasher
++{
++  size_t operator()(const ComparableElement& se) const
+   {
+-    return ::HashCode( FromSmIdType<int>(se.mySumID), limit );
++    return static_cast<size_t>(FromSmIdType<int>(se.mySumID));
+   }
+-  static Standard_Boolean IsEqual(const ComparableElement& se1, const ComparableElement& se2 )
++
++  bool operator()(const ComparableElement& se1, const ComparableElement& se2) const
+   {
+     return ( se1 == se2 );
+   }
+-
+ };
+ 
+ //=======================================================================
+@@ -7522,7 +7530,7 @@ void SMESH_MeshEditor::FindEqualElements( TIDSortedElemSet &        theElements,
+   if ( theElements.empty() ) elemIt = GetMeshDS()->elementsIterator();
+   else                       elemIt = SMESHUtils::elemSetIterator( theElements );
+ 
+-  typedef NCollection_Map< ComparableElement, ComparableElement > TMapOfElements;
++  typedef NCollection_Map< ComparableElement, ComparableElementHasher > TMapOfElements;
+   typedef std::list<smIdType>                                     TGroupOfElems;
+   TMapOfElements               mapOfElements;
+   std::vector< TGroupOfElems > arrayOfGroups;
+diff --git a/src/SMESHDS/SMESHDS_DataMapOfShape.hxx b/src/SMESHDS/SMESHDS_DataMapOfShape.hxx
+index ac47dfc..2f817c3 100644
+--- a/src/SMESHDS/SMESHDS_DataMapOfShape.hxx
++++ b/src/SMESHDS/SMESHDS_DataMapOfShape.hxx
+@@ -42,7 +42,15 @@ struct SMESHDS_Hasher
+   static inline Standard_Integer HashCode(const TopoDS_Shape& S,
+                                           const Standard_Integer Upper)
+   {
+-    return ::HashCode( S, Upper);
++    size_t hash_value = std::hash<TopoDS_Shape>{}(S);
++    return hash_value % Upper;
++  }
++
++  size_t operator()(const TopoDS_Shape& S) const noexcept {
++    return std::hash<TopoDS_Shape>{}(S);
++  }
++  size_t operator()(const TopoDS_Shape& S1, const TopoDS_Shape& S2) const noexcept {
++    return S1.IsSame(S2);
+   }
+ };
+ 
+diff --git a/src/SMESHUtils/SMESH_FreeBorders.cxx b/src/SMESHUtils/SMESH_FreeBorders.cxx
+index 7fecc53..56baa84 100644
+--- a/src/SMESHUtils/SMESH_FreeBorders.cxx
++++ b/src/SMESHUtils/SMESH_FreeBorders.cxx
+@@ -444,7 +444,7 @@ void SMESH_MeshAlgos::FindCoincidentFreeBorders(SMDS_Mesh&              mesh,
+                                                 CoincidentFreeBorders & foundFreeBordes)
+ {
+   // find free links
+-  typedef NCollection_DataMap<SMESH_TLink, const SMDS_MeshElement*, SMESH_TLink > TLink2FaceMap;
++  typedef NCollection_DataMap<SMESH_TLink, const SMDS_MeshElement*, SMESH_TLinkHasher > TLink2FaceMap;
+   TLink2FaceMap linkMap;
+   int nbSharedLinks = 0;
+   SMDS_FaceIteratorPtr faceIt = mesh.facesIterator();
+@@ -840,7 +840,7 @@ void SMESH_MeshAlgos::FindFreeBorders(SMDS_Mesh&       theMesh,
+   bool isManifold = true;
+ 
+   // find free links
+-  typedef NCollection_DataMap<SMESH_TLink, const SMDS_MeshElement*, SMESH_TLink > TLink2FaceMap;
++  typedef NCollection_DataMap<SMESH_TLink, const SMDS_MeshElement*, SMESH_TLinkHasher > TLink2FaceMap;
+   TLink2FaceMap linkMap;
+   int nbSharedLinks = 0;
+   SMDS_FaceIteratorPtr faceIt = theMesh.facesIterator();
+diff --git a/src/SMESHUtils/SMESH_MeshAlgos.cxx b/src/SMESHUtils/SMESH_MeshAlgos.cxx
+index fb42862..0fc5ccf 100644
+--- a/src/SMESHUtils/SMESH_MeshAlgos.cxx
++++ b/src/SMESHUtils/SMESH_MeshAlgos.cxx
+@@ -1984,8 +1984,8 @@ SMESH_MeshAlgos::FindSharpEdges( SMDS_Mesh* theMesh,
+   std::vector< Edge > resultEdges;
+   if ( !theMesh ) return resultEdges;
+ 
+-  typedef std::pair< bool, const SMDS_MeshNode* >                            TIsSharpAndMedium;
+-  typedef NCollection_DataMap< SMESH_TLink, TIsSharpAndMedium, SMESH_TLink > TLinkSharpMap;
++  typedef std::pair< bool, const SMDS_MeshNode* >                                  TIsSharpAndMedium;
++  typedef NCollection_DataMap< SMESH_TLink, TIsSharpAndMedium, SMESH_TLinkHasher > TLinkSharpMap;
+ 
+   TLinkSharpMap linkIsSharp;
+   Standard_Integer nbBuckets = FromSmIdType<Standard_Integer>( theMesh->NbFaces() );
+@@ -2096,8 +2096,8 @@ SMESH_MeshAlgos::SeparateFacesByEdges( SMDS_Mesh* theMesh, const std::vector< Ed
+ 
+   // build map of face edges (SMESH_TLink) and their faces
+ 
+-  typedef std::vector< const SMDS_MeshElement* >                    TFaceVec;
+-  typedef NCollection_DataMap< SMESH_TLink, TFaceVec, SMESH_TLink > TFacesByLinks;
++  typedef std::vector< const SMDS_MeshElement* >                          TFaceVec;
++  typedef NCollection_DataMap< SMESH_TLink, TFaceVec, SMESH_TLinkHasher > TFacesByLinks;
+   TFacesByLinks facesByLink;
+   Standard_Integer nbBuckets = FromSmIdType<Standard_Integer>( theMesh->NbFaces() );
+   if ( nbBuckets > 0 )
+diff --git a/src/SMESHUtils/SMESH_Offset.cxx b/src/SMESHUtils/SMESH_Offset.cxx
+index 6d30cf6..be9df15 100644
+--- a/src/SMESHUtils/SMESH_Offset.cxx
++++ b/src/SMESHUtils/SMESH_Offset.cxx
+@@ -43,7 +43,7 @@ namespace
+   const int theMaxNbFaces = 256; // max number of faces sharing a node
+ 
+   typedef NCollection_DataMap< const SMDS_MeshNode*, const SMDS_MeshNode*, SMESH_Hasher > TNNMap;
+-  typedef NCollection_Map< SMESH_Link, SMESH_Link >                                       TLinkMap;
++  typedef NCollection_Map< SMESH_Link, SMESH_TLinkHasher >                                TLinkMap;
+ 
+   //--------------------------------------------------------------------------------
+   /*!
+@@ -75,16 +75,16 @@ namespace
+     const SMDS_MeshNode* IntNode() const { return myIntNode.Node(); }
+     const SMDS_MeshNode* Node1() const { return myNode[ myReverse ]; }
+     const SMDS_MeshNode* Node2() const { return myNode[ !myReverse ]; }
+-
+-    static Standard_Integer HashCode(const CutLink&         link,
+-                                     const Standard_Integer upper)
++  };
++  struct CutLinkHasher
++  {
++    size_t operator()(const CutLink& link) const
+     {
+-      Standard_Integer n = ( link.myNode[0]->GetID() +
+-                             link.myNode[1]->GetID() +
+-                             link.myIndex );
+-      return ::HashCode( n, upper );
++      return size_t( link.myNode[0]->GetID() +
++                     link.myNode[1]->GetID() +
++                     link.myIndex );
+     }
+-    static Standard_Boolean IsEqual(const CutLink& link1, const CutLink& link2 )
++    bool operator()(const CutLink& link1, const CutLink& link2 ) const
+     {
+       return ( link1.myNode[0] == link2.myNode[0] &&
+                link1.myNode[1] == link2.myNode[1] &&
+@@ -92,7 +92,7 @@ namespace
+     }
+   };
+ 
+-  typedef NCollection_Map< CutLink, CutLink > TCutLinkMap;
++  typedef NCollection_Map< CutLink, CutLinkHasher > TCutLinkMap;
+ 
+   //--------------------------------------------------------------------------------
+   /*!
+@@ -274,23 +274,27 @@ namespace
+                       TLinkMap&                    theCutOffCoplanarLinks) const;
+     void InitLinks() const;
+     bool IsCoplanar( const EdgePart* edge ) const;
++    void Dump() const;
++
++
++    private:
++      EdgePart* getTwin( const EdgePart* edge ) const;
++    };
+ 
+-    static Standard_Integer HashCode(const CutFace& f, const Standard_Integer upper)
++  struct CutFaceHasher
++  {
++    size_t operator()(const CutFace& f) const
+     {
+-      return ::HashCode( FromSmIdType<int>(f.myInitFace->GetID()), upper );
++      return FromSmIdType<int>(f.myInitFace->GetID());
+     }
+-    static Standard_Boolean IsEqual(const CutFace& f1, const CutFace& f2 )
++
++    bool operator()(const CutFace& f1, const CutFace& f2) const
+     {
+       return f1.myInitFace == f2.myInitFace;
+     }
+-    void Dump() const;
+-
+-  private:
+-
+-    EdgePart* getTwin( const EdgePart* edge ) const;
+   };
+ 
+-  typedef NCollection_Map< CutFace, CutFace > TCutFaceMap;
++  typedef NCollection_Map< CutFace, CutFaceHasher > TCutFaceMap;
+ 
+   //--------------------------------------------------------------------------------
+   /*!
+diff --git a/src/SMESHUtils/SMESH_TypeDefs.hxx b/src/SMESHUtils/SMESH_TypeDefs.hxx
+index a682b89..ea2cc3c 100644
+--- a/src/SMESHUtils/SMESH_TypeDefs.hxx
++++ b/src/SMESHUtils/SMESH_TypeDefs.hxx
+@@ -27,6 +27,8 @@
+ #ifndef __SMESH_TypeDefs_HXX__
+ #define __SMESH_TypeDefs_HXX__
+ 
++#include <Basics_OCCTVersion.hxx>
++
+ #include "SMESH_Utils.hxx"
+ 
+ #include "SMDS_SetIterator.hxx"
+@@ -36,6 +38,7 @@
+ 
+ #include <gp_XYZ.hxx>
+ #include <gp_XY.hxx>
++#include <NCollection_Sequence.hxx>
+ 
+ #include <map>
+ #include <list>
+@@ -165,6 +168,18 @@ struct SMESH_TLink: public NLink
+     return ( l1.node1() == l2.node1() && l1.node2() == l2.node2() );
+   }
+ };
++// a hasher in NCollection maps
++struct SMESH_TLinkHasher
++{
++  size_t operator()(const SMESH_TLink& link) const
++  {
++  return smIdHasher()( link.node1()->GetID() + link.node2()->GetID() );
++  }
++  bool operator()(const SMESH_TLink& l1, const SMESH_TLink& l2) const
++  {
++    return ( l1.node1() == l2.node1() && l1.node2() == l2.node2() );
++  }
++};
+ typedef SMESH_TLink SMESH_Link;
+ 
+ //=======================================================================
+@@ -225,6 +240,14 @@ struct SMESH_Hasher
+   {
+     return ( e1 == e2 );
+   }
++  size_t operator()(const SMDS_MeshElement* e) const
++  {
++    return smIdHasher()( e->GetID() );
++  }
++  bool operator()(const SMDS_MeshElement* e1, const SMDS_MeshElement* e2) const
++  {
++    return ( e1 == e2 );
++  }
+ };
+ 
+ //--------------------------------------------------
+@@ -261,8 +284,17 @@ typedef std::vector< const SMDS_MeshElement* > SMESH_SequenceOfElemPtr;
+ 
+ // --------------------------------------------------------------------------------
+ // class SMESH_SequenceOfNode
++
++#include <Standard_Version.hxx>
++#if OCC_VERSION_HEX >= 0x060703
++#include <NCollection_Sequence.hxx>
++#else
+ #include <NCollection_DefineSequence.hxx>
++#endif
++
+ typedef const SMDS_MeshNode* SMDS_MeshNodePtr;
++#define DEFINE_SEQUENCE(_ClassName_, _BaseCollection_, TheItemType)            \
++typedef NCollection_Sequence<TheItemType > _ClassName_;
+ 
+ DEFINE_SEQUENCE(SMESH_SequenceOfNode,
+                 SMESH_BaseCollectionNodePtr, SMDS_MeshNodePtr)
+diff --git a/src/StdMeshers/StdMeshers_Quadrangle_2D.cxx b/src/StdMeshers/StdMeshers_Quadrangle_2D.cxx
+index 914eebf..393c312 100644
+--- a/src/StdMeshers/StdMeshers_Quadrangle_2D.cxx
++++ b/src/StdMeshers/StdMeshers_Quadrangle_2D.cxx
+@@ -49,7 +49,6 @@
+ #include <Bnd_Box.hxx>
+ #include <GeomAPI_ProjectPointOnSurf.hxx>
+ #include <Geom_Surface.hxx>
+-#include <NCollection_DefineArray2.hxx>
+ #include <Precision.hxx>
+ #include <ShapeAnalysis.hxx>
+ #include <TColStd_SequenceOfInteger.hxx>
