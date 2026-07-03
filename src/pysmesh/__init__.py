@@ -59,6 +59,11 @@ from ._core import (  # noqa: E402 - must follow the VTK check
     VertexInfo,
     load_brep,
 )
+from .unify import (  # noqa: E402 - must follow the VTK check (imports _core)
+    UnifyParams,
+    UnifyResult,
+    unify_same_domain,
+)
 from .viscous import (  # noqa: E402 - must follow the VTK check (imports _core)
     ExtrusionMethod,
     VLParams,
@@ -73,9 +78,12 @@ __all__ = [
     "Mesh",
     "PysmeshError",
     "Shape",
+    "UnifyParams",
+    "UnifyResult",
     "VLParams",
     "VLResult",
     "VertexInfo",
     "compute_viscous_layers",
     "load_brep",
+    "unify_same_domain",
 ]

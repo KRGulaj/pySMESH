@@ -66,9 +66,10 @@ jobs:
           # Run tests against the INSTALLED package, not the source tree.
           pytest tests/ -q --import-mode=importlib -o addopts="" -p no:cacheprovider
           python examples/box_bl.py
+          python examples/split_box_unify.py
 
       - name: mypy --strict against the shipped stubs
-        run: mypy --strict src/pysmesh/viscous.py src/pysmesh/_core.pyi
+        run: mypy --strict src/pysmesh/viscous.py src/pysmesh/unify.py src/pysmesh/_core.pyi
 
       - name: VTK pin-drift check (only cross-repo coupling)
         run: python ci/check_vtk_pin.py

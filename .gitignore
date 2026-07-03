@@ -59,7 +59,8 @@ env/
 .idea/
 
 # Project Specific
-agent/
+.agents/
+AGENTS.md
 third_party_ref/
 lib_refs/
 *.pt

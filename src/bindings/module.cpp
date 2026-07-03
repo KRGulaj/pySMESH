@@ -1,8 +1,8 @@
-// pySMESH _core extension module — Tier-1 (B2): geometry query (Shape) + surface-mesh
-// injection (Mesh). Viscous-layer bindings land in B3.
+// pySMESH _core extension module: geometry query (Shape), surface-mesh injection (Mesh),
+// viscous prism layers (compute_viscous_layers), and same-domain healing (unify_same_domain).
 //
-// Aggregates the per-file binders (bind_shape, bind_mesh) and installs the typed
-// exception (PysmeshError) with its .details / .face_ids attributes.
+// Aggregates the per-file binders (bind_shape, bind_mesh, bind_viscous, bind_unify) and
+// installs the typed exception (PysmeshError) with its .details / .face_ids attributes.
 
 #include <exception>
 
@@ -13,6 +13,7 @@ namespace pysmesh {
 void bind_shape(py::module_& m);
 void bind_mesh(py::module_& m);
 void bind_viscous(py::module_& m);
+void bind_unify(py::module_& m);
 
 namespace {
 
@@ -52,4 +53,5 @@ PYBIND11_MODULE(_core, m) {
   pysmesh::bind_shape(m);
   pysmesh::bind_mesh(m);
   pysmesh::bind_viscous(m);
+  pysmesh::bind_unify(m);
 }

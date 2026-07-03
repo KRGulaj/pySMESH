@@ -85,3 +85,11 @@ def compute_viscous_layers(
     method: int,
     group_name: str,
 ) -> dict[str, object]: ...
+def unify_same_domain(
+    brep: bytes,
+    unify_faces: bool,
+    unify_edges: bool,
+    concat_bsplines: bool,
+    linear_tol: float,
+    angular_tol_rad: float,
+) -> dict[str, object]: ...

@@ -59,6 +59,14 @@ def box_mesh(fixtures_dir: Path) -> dict[str, "np.ndarray"]:
 
 
 @pytest.fixture(scope="session")
+def split_box_brep(fixtures_dir: Path) -> bytes:
+    """BREP bytes for two fused cubes: 10 faces (4 coplanar seam pairs) that
+    ``unify_same_domain`` heals back to a canonical 6-face box (see ``generate_fixtures.cpp``).
+    """
+    return (fixtures_dir / "split_box.brep").read_bytes()
+
+
+@pytest.fixture(scope="session")
 def sphere_brep(fixtures_dir: Path) -> bytes:
     """Raw BREP bytes for the unit sphere fixture (curved, see ``generate_fixtures.cpp``)."""
     return (fixtures_dir / "sphere.brep").read_bytes()

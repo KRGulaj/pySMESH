@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 
+#include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
@@ -425,12 +426,33 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // split_box: two BOX_EDGE cubes fused along x = BOX_EDGE. Fuse does NOT unify same-domain
+  // geometry, so the four face pairs coplanar across the seam (top, bottom, front, back) stay
+  // as separate faces meeting at an artificial seam edge — 10 faces for a shape that is a
+  // plain 2*BOX_EDGE x BOX_EDGE x BOX_EDGE block. unify_same_domain should heal it back to
+  // the canonical 6-face box. This is the over-segmented-STEP case in miniature.
+  const TopoDS_Shape box_a = BRepPrimAPI_MakeBox(BOX_EDGE, BOX_EDGE, BOX_EDGE).Shape();
+  const TopoDS_Shape box_b =
+      BRepPrimAPI_MakeBox(gp_Pnt(BOX_EDGE, 0.0, 0.0), BOX_EDGE, BOX_EDGE, BOX_EDGE).Shape();
+  BRepAlgoAPI_Fuse fuse(box_a, box_b);
+  fuse.Build();
+  if (!fuse.IsDone()) {
+    std::fprintf(stderr, "fuse for split_box failed\n");
+    return 1;
+  }
+  if (!BRepTools::Write(fuse.Shape(), (out_dir + "/split_box.brep").c_str())) {
+    std::fprintf(stderr, "failed to write split_box.brep\n");
+    return 1;
+  }
+
   std::printf("box_mesh:\n");
   write_structured_mesh(box, BOX_GRID_N, out_dir + "/box_mesh");
   std::printf("sphere_mesh:\n");
   write_brepmesh_mesh(sphere, SPHERE_DEFLECTION, out_dir + "/sphere_mesh");
 
-  std::printf("wrote box.brep, cylinder.brep, sphere.brep, box_mesh + sphere_mesh to %s\n",
-              out_dir.c_str());
+  std::printf(
+      "wrote box.brep, cylinder.brep, sphere.brep, split_box.brep, box_mesh + sphere_mesh "
+      "to %s\n",
+      out_dir.c_str());
   return 0;
 }

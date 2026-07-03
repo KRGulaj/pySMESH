@@ -118,11 +118,16 @@ pybind11_add_module(_core
     src/bindings/module.cpp
     src/bindings/shape.cpp
     src/bindings/mesh.cpp
-    src/bindings/viscous.cpp)
+    src/bindings/viscous.cpp
+    src/bindings/unify.cpp)
 target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
+# TKShHealing (ShapeUpgrade_UnifySameDomain) is already pulled in transitively via the SMESH
+# static libs, but unify.cpp calls it directly, so link it explicitly rather than lean on a
+# transitive edge. OCCT toolkits are dynamic (bundled at wheel-repair time), not in SMESH_*.
 target_link_libraries(_core PRIVATE
     ${SMESH_STATIC_LIBS} Geom Kernel
     VTK::CommonCore VTK::CommonDataModel VTK::FiltersVerdict
+    TKShHealing
     ${Boost_LIBRARIES})
 
 # --------------------------------------------------------------------------- #
@@ -183,6 +188,7 @@ install(FILES ${PKG_DIR}/_build_info.py DESTINATION pysmesh)
 option(PYSMESH_BUILD_FIXTURE_GEN "Build the OCCT BREP fixture generator" OFF)
 if(PYSMESH_BUILD_FIXTURE_GEN)
     add_executable(generate_fixtures tests/fixtures/generate_fixtures.cpp)
+    # TKBO: BRepAlgoAPI_Fuse for the split_box fixture (two coplanar-topped half-boxes fused).
     target_link_libraries(generate_fixtures PRIVATE
-        TKernel TKMath TKBRep TKG2d TKG3d TKGeomBase TKGeomAlgo TKTopAlgo TKPrim TKMesh)
+        TKernel TKMath TKBRep TKG2d TKG3d TKGeomBase TKGeomAlgo TKTopAlgo TKPrim TKMesh TKBO)
 endif()

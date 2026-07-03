@@ -4,8 +4,8 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "pysmesh"
-version = "0.1.0"
-description = "Python bindings to SALOME SMESH ViscousLayers for boundary-layer prism meshing"
+version = "0.2.0"
+description = "Python bindings to SALOME SMESH ViscousLayers (boundary-layer prisms) + OCCT same-domain healing"
 readme = "README.md"
 requires-python = ">=3.13"
 license = "LGPL-2.1-only"
