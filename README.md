@@ -9,11 +9,18 @@ boundary-layer (prism) meshing — packaged as a self-contained `cp313-win_amd64
 
 ## Why this exists
 
-SMESH's viscous-layer engine is a mature, production-grade 3-D boundary-layer mesher, but it
-comes with Open CASCADE (OCCT) and Boost as dependencies. Installing `occt`/`boost` directly
-into a host application's environment can trigger a dependency solver cascade that downgrades
-unrelated packages (VTK, Qt bindings, MKL, etc.) — a real risk for any app with a carefully
-pinned scientific-Python stack. pySMESH exists to make that impossible by construction:
+SALOME SMESH's `StdMeshers_ViscousLayers` is a mature, production-grade 3-D boundary-layer
+(prism) mesher, but it has no standalone Python wrapper: SMESH ships as part of the full
+SALOME platform, wrapped through CORBA/SWIG and pulling in the entire SALOME GUI/KERNEL
+stack just to reach one meshing algorithm. pySMESH strips SMESH down to the minimum static
+library set the viscous-layer algorithm needs and exposes it as a plain, pip-installable
+Python module — no SALOME platform, no CORBA, no GUI.
+
+Doing that standalone strip also solves a second, more mundane problem: SMESH pulls in Open
+CASCADE (OCCT) and Boost as dependencies, and installing `occt`/`boost` directly into a host
+application's environment can trigger a dependency solver cascade that downgrades unrelated
+packages (VTK, Qt bindings, MKL, etc.) — a real risk for any app with a carefully pinned
+scientific-Python stack. pySMESH's build makes that impossible by construction:
 
 - **SMESH + KERNEL are statically linked** into a single `_core.pyd`.
 - **OCCT and Boost are private** to that binary — their DLLs are **bundled into the wheel**,
@@ -106,12 +113,8 @@ python examples/box_bl.py
 - **Fail loud.** Every failure is a typed `pysmesh.PysmeshError` carrying the underlying
   SMESH/OCCT message and, where applicable, the offending face ids — never a silent
   best-effort fallback.
-- **One version pin, not three.** OCCT and Boost are build-time concerns only; VTK is the
-  sole cross-environment coupling, and it is enforced at import, not discovered at runtime.
 
 ## Provenance & licensing
 
 Every vendored source and patch is traced in [PROVENANCE.md](PROVENANCE.md); the third-party
-component table is in [NOTICE.md](NOTICE.md). Because the wheel statically links LGPL SMESH
-and bundles LGPL OCCT, the complete corresponding source — this repository — is public so the
-relinking right is always available.
+component table is in [NOTICE.md](NOTICE.md).
