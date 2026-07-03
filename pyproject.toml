@@ -17,7 +17,8 @@ keywords = ["mesh", "cfd", "viscous-layers", "smesh", "occt", "prism"]
 dependencies = ["numpy>=1.26"]
 classifiers = [
     "Development Status :: 3 - Alpha",
-    "License :: OSI Approved :: GNU Lesser General Public License v2 (LGPLv2)",
+    # License is declared via the SPDX `license` field above (PEP 639); a `License ::`
+    # classifier here would conflict with it.
     "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: C++",

@@ -70,6 +70,42 @@ NCollection/hasher requirements, one renamed OCCT toolkit). Nothing there is a d
 decision of ours; it's the same fix looooo already made, just written by hand because the
 diff didn't line up byte-for-byte.
 
+### Patch index
+
+Source key: **L** = `looooo/SMESH` patch series (the Windows/MSVC standalone-SMESH fork
+conda-forge builds from); **C** = `conda-forge/smesh-feedstock` recipe. `prepare.py` applies
+these with `patch -N --fuzz=2`, so files already satisfied by our `V9_9_0` tag are skipped
+and logged (not silently ignored). MinGW/gcc-only patches are no-ops under our MSVC build.
+
+| Patch | Src | What it fixes |
+|---|---|---|
+| `geom/GEOMUtils.patch` | L | Build `GEOMUtils.cxx` standalone (the one GEOM file SMESH needs). |
+| `kernel/Kernel.patch` | L | KERNEL standalone base (Basics/trace/Utils; CORBA severed). |
+| `kernel/Kernel_mingw_gcc15.patch` | L | MinGW/gcc-15 fix (skipped under MSVC). |
+| `kernel/Kernel_msvc_pthread.patch` | L | `pthread_self()` comparison against the Win32 pthread shim. |
+| `kernel/Kernel_msvc_set_unexpected.patch` | L | `std::set_unexpected`/`set_terminate` removed in C++17 MSVC. |
+| `kernel/Kernel_occt781.patch` | L | OCCT 7.8.1 API deltas in KERNEL. |
+| `occt8/0003-boost-regex-str-enum.patch` | C | Boost regex `str(ENUM)` → `str(int(ENUM))`. |
+| `occt8/0004-occt-8.0-compat.patch` | C | The OCCT-8.0 pass (streams, `::Raise()`→`throw`, NCollection). |
+| `smesh/SMDS_UnstructuredGrid_vtk94.patch` | L | VTK ≥9.4 `vtkCellArray`/cell-type accessor changes. |
+| `smesh/SMDS_MeshVolume_vtk96.patch` | L | VTK ≥9.6 `GetFaceStream()` signature (`vtkIdList*`). |
+| `smesh/SMDS_VtkCellIterator_vtk96.patch` | L | VTK ≥9.6 `GetFaceStream()` on the cell-iterator path. |
+| `smesh/SMESH_MeshEditor_vtk96.patch` | L | VTK ≥9.6 `GetCellLinks()`→`GetLinks()` rename. |
+| `smesh/SMESH_Mesh.patch` | L | MED export made conditional (build without libMED/HDF5). |
+| `smesh/SMESH_SMDS.patch` | L | SMDS standalone build fixups. |
+| `smesh/SMESH_MeshAlgos.patch` | L | `SMESH_MeshAlgos` build fixups. |
+| `smesh/SMESH_Controls.patch` | L | `SMESH_Controls` fixups (partly superseded by the tag). |
+| `smesh/SMESH_ControlPnt.patch` | L | `SMESH_ControlPnt` build fixups. |
+| `smesh/SMESH_Slot.patch` | L | `SMESH_Slot` build fixups. |
+| `smesh/SMESH_File_mingw.patch` | L | MinGW file I/O fix (skipped under MSVC). |
+| `smesh/SMESH_MesherHelper_msvc.patch` | L | MSVC `_DEBUG_`-only variable-order warning. |
+| `smesh/SMESH_occt781.patch` | L | OCCT 7.8.1 API deltas in SMESH core. |
+| `smesh/StdMeshers_Quadrangle_2D_msvc.patch` | L | `<windows.h>` `#define near` collision in the 2D mesher. |
+| `smesh/StdMeshers_Adaptive1D.patch` | L | `StdMeshers_Adaptive1D` build fixups. |
+| `smesh/StdMeshers_Projection_2D.patch` | L | `StdMeshers_Projection_2D` build fixups. |
+| `smesh/StdMeshers_ViscousLayers.patch` | L | ViscousLayers build fixups (the payload algorithm). |
+| `smesh/mefisto.patch` | L | Wire the f2c `trte.c` into the MEFISTO2 target. |
+
 ## Reference-only repositories
 
 Several other SMESH-adjacent projects were used for guidance but never copied from directly:
@@ -79,10 +115,3 @@ Several other SMESH-adjacent projects were used for guidance but never copied fr
 and [geom](https://github.com/SalomePlatform/geom) (Phase 2, unrelated to the current milestones), and
 [FreeCAD/FreeCAD](https://github.com/FreeCAD/FreeCAD) (kept only for one older NETGENPlugin file used to
 confirm an API usage pattern). None of it ships in the wheel.
-
-## License
-
-Everything vendored here is LGPL-2.1 (or LGPL-2.1-or-later), same as this project. Static
-linking a LGPL library into a closed-source application is fine under LGPL-2.1 as long as the
-LGPL portions remain replaceable and their source stays available — which is the entire
-reason this project is a separate open-source wheel rather than code embedded in flux.

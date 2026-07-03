@@ -1,0 +1,83 @@
+name: build-test-wheel
+
+# Builds the cp313-win_amd64 wheel, bundles OCCT/Boost (excluding VTK), runs the test suite,
+# and uploads the wheel. On a version tag, the wheel is attached to a GitHub Release.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash -el {0} # login shell so the micromamba env is active
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSVC (v143, x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Create build env (conda-forge; vtk PINNED, occt/boost free)
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: ci/environment.yml
+          cache-environment: true
+
+      - name: Stage + patch vendored sources
+        run: python prepare.py
+
+      - name: Build wheel
+        env:
+          PYSMESH_DEV_ASSERTS: "ON" # extra input validation in CI only
+        run: pip wheel . --no-build-isolation --no-deps -w dist
+
+      - name: Bundle OCCT/Boost DLLs, EXCLUDE VTK
+        # delvewheel vendors _core.pyd's DLL deps into the wheel. vtk*.dll is excluded on
+        # purpose: it is resolved at runtime from the host env (the one shared dependency).
+        run: |
+          for whl in dist/*.whl; do
+            delvewheel repair \
+              --add-path "$CONDA_PREFIX/Library/bin" \
+              --exclude "vtk*.dll" \
+              -w dist/repaired "$whl"
+          done
+
+      - name: Assert the repaired wheel bundles OCCT/Boost but not VTK
+        run: python ci/check_wheel.py dist/repaired/*.whl
+
+      - name: Install repaired wheel + run tests
+        run: |
+          pip install --no-deps --force-reinstall dist/repaired/*.whl
+          # Run tests against the INSTALLED package, not the source tree.
+          pytest tests/ -q --import-mode=importlib -o addopts="" -p no:cacheprovider
+          python examples/box_bl.py
+
+      - name: mypy --strict against the shipped stubs
+        run: mypy --strict src/pysmesh/viscous.py src/pysmesh/_core.pyi
+
+      - name: VTK pin-drift check (only cross-repo coupling)
+        run: python ci/check_vtk_pin.py
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pysmesh-wheel
+          path: dist/repaired/*.whl
+
+      - name: Attach wheel to GitHub Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/repaired/*.whl

@@ -139,7 +139,20 @@ if(NOT DEFINED PYSMESH_BOOST_VERSION)
     set(PYSMESH_BOOST_VERSION "${Boost_VERSION}")
 endif()
 if(NOT DEFINED PYSMESH_GIT_SHA)
+    # Best-effort short commit for provenance; "unknown" outside a git checkout.
     set(PYSMESH_GIT_SHA "unknown")
+    find_package(Git QUIET)
+    if(Git_FOUND)
+        execute_process(
+            COMMAND ${GIT_EXECUTABLE} rev-parse --short HEAD
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            OUTPUT_VARIABLE _pysmesh_git_sha
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+        if(_pysmesh_git_sha)
+            set(PYSMESH_GIT_SHA "${_pysmesh_git_sha}")
+        endif()
+    endif()
 endif()
 string(TIMESTAMP PYSMESH_BUILD_DATE "%Y-%m-%dT%H:%M:%SZ" UTC)
 if(NOT DEFINED PYSMESH_WITH_NETGEN)
@@ -158,6 +171,10 @@ add_custom_command(TARGET _core POST_BUILD
     COMMENT "Copying _core into src/pysmesh for in-place import")
 
 install(TARGETS _core DESTINATION pysmesh)
+# The generated _build_info.py is git-ignored, so scikit-build-core's `packages` collection
+# skips it; install it explicitly (CMake install is not filtered by .gitignore) so the wheel
+# carries it. Without this, `import pysmesh` fails at `from . import _build_info`.
+install(FILES ${PKG_DIR}/_build_info.py DESTINATION pysmesh)
 
 # --------------------------------------------------------------------------- #
 # Fixture generator (dev-only, OFF by default). Emits tests/fixtures/*.brep via OCCT.

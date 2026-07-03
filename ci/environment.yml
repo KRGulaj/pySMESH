@@ -20,6 +20,9 @@ dependencies:
   - ninja
   - pybind11
   - scikit-build-core
+  - pip
+  # --- wheel build + DLL bundling (OCCT/Boost in, VTK excluded) ---
+  - delvewheel
   # --- vendoring / patching ---
   - python-patch
   - git
@@ -27,3 +30,5 @@ dependencies:
   - pytest
   - hypothesis
   - numpy
+  # --- typing (stubs are part of the DoD) ---
+  - mypy

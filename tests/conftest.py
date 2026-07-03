@@ -17,9 +17,15 @@ from pathlib import Path
 
 import pytest
 
+# Prefer an installed ``pysmesh`` (the repaired wheel, exercised in CI) over the source tree.
+# Only fall back to ``src`` for a local dev build (CMake copies ``_core``/``_build_info`` into
+# ``src/pysmesh``). This lets the same test suite validate both layouts.
 _repo_src = Path(__file__).resolve().parent.parent / "src"
-if str(_repo_src) not in sys.path:
-    sys.path.insert(0, str(_repo_src))
+try:
+    import pysmesh  # noqa: F401
+except ImportError:
+    if str(_repo_src) not in sys.path:
+        sys.path.insert(0, str(_repo_src))
 
 _dll_dir = Path(sys.prefix) / "Library" / "bin"
 if _dll_dir.is_dir() and hasattr(os, "add_dll_directory"):
