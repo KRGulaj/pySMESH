@@ -1,7 +1,10 @@
-"""pySMESH — standalone SMESH ViscousLayers bindings.
+"""pySMESH — standalone SMESH ViscousLayers + OCCT same-domain healing bindings.
 
-Public surface (Tier-1): :func:`load_brep`, :class:`Shape`, :class:`Mesh`, the per-entity
-info types, and :class:`PysmeshError`. Viscous-layer bindings arrive in a later release.
+Public surface: :func:`load_brep`, :class:`Shape`, :class:`Mesh`, and the per-entity info
+types for geometry query and surface-mesh injection; :func:`compute_viscous_layers` (with
+:class:`VLParams` / :class:`VLResult` / :class:`ExtrusionMethod`) for boundary-layer prism
+generation; :func:`unify_same_domain` (with :class:`UnifyParams` / :class:`UnifyResult`) for
+B-rep same-domain face/edge merging; and :class:`PysmeshError` for every library failure.
 
 Import-time contract: ``_core`` links VTK dynamically against whatever VTK the host
 process provides. The build was compiled against a specific VTK version; importing into an
