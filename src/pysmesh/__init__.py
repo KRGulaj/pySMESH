@@ -62,6 +62,11 @@ from ._core import (  # noqa: E402 - must follow the VTK check
     VertexInfo,
     load_brep,
 )
+from .distance import (  # noqa: E402 - must follow the VTK check (imports _core)
+    ShapeDistanceResult,
+    free_boundary_edges,
+    shape_distance,
+)
 from .offset import (  # noqa: E402 - must follow the VTK check (imports _core)
     OffsetParams,
     OffsetResult,
@@ -96,6 +101,7 @@ __all__ = [
     "OffsetResult",
     "PysmeshError",
     "Shape",
+    "ShapeDistanceResult",
     "TessellateParams",
     "TessellateResult",
     "ThickSolidParams",
@@ -106,9 +112,11 @@ __all__ = [
     "VLResult",
     "VertexInfo",
     "compute_viscous_layers",
+    "free_boundary_edges",
     "load_brep",
     "make_thick_solid",
     "offset_shape",
+    "shape_distance",
     "tessellate",
     "unify_same_domain",
 ]

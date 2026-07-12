@@ -85,3 +85,17 @@ def sphere_mesh(fixtures_dir: Path) -> dict[str, "np.ndarray"]:
 def cylinder_brep(fixtures_dir: Path) -> bytes:
     """Raw BREP bytes for the unit cylinder fixture (two flat caps + one curved wall)."""
     return (fixtures_dir / "cylinder.brep").read_bytes()
+
+
+@pytest.fixture(scope="session")
+def open_box_shell_brep(fixtures_dir: Path) -> bytes:
+    """BREP bytes for the box with one face removed: a 5-face open shell whose opening is
+    bounded by exactly four naked (free-boundary) edges (see ``generate_fixtures.cpp``)."""
+    return (fixtures_dir / "open_box_shell.brep").read_bytes()
+
+
+@pytest.fixture(scope="session")
+def box_far_brep(fixtures_dir: Path) -> bytes:
+    """BREP bytes for a second unit box translated to x in [5, 7]; its minimum distance to
+    ``box.brep`` (x in [0, 2]) is exactly 3.0 along +x (see ``generate_fixtures.cpp``)."""
+    return (fixtures_dir / "box_far.brep").read_bytes()

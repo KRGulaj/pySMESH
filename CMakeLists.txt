@@ -121,7 +121,8 @@ pybind11_add_module(_core
     src/bindings/viscous.cpp
     src/bindings/unify.cpp
     src/bindings/tessellate.cpp
-    src/bindings/offset.cpp)
+    src/bindings/offset.cpp
+    src/bindings/distance.cpp)
 target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
 # TKShHealing (ShapeUpgrade_UnifySameDomain) is already pulled in transitively via the SMESH
 # static libs, but unify.cpp calls it directly, so link it explicitly rather than lean on a

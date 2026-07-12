@@ -35,6 +35,7 @@
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
 #include <BRepTools.hxx>
+#include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
 #include <Geom_Curve.hxx>
@@ -53,6 +54,7 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
+#include <TopoDS_Shell.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Pnt2d.hxx>
@@ -445,14 +447,42 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // open_box_shell: the box with one face (the first TopExp face) removed -> a 5-face open
+  // shell. The four edges bordering the removed face now touch only one face each, so they
+  // are naked/free boundary edges (the leak-detection positive case for free_boundary_edges);
+  // the box's other eight edges still touch two faces. Exactly four free edges.
+  TopTools_IndexedMapOfShape box_faces;
+  TopExp::MapShapes(box, TopAbs_FACE, box_faces);
+  BRep_Builder shell_builder;
+  TopoDS_Shell open_shell;
+  shell_builder.MakeShell(open_shell);
+  for (int i = 2; i <= box_faces.Extent(); ++i) {  // skip face 1 -> the opening
+    shell_builder.Add(open_shell, TopoDS::Face(box_faces.FindKey(i)));
+  }
+  if (!BRepTools::Write(open_shell, (out_dir + "/open_box_shell.brep").c_str())) {
+    std::fprintf(stderr, "failed to write open_box_shell.brep\n");
+    return 1;
+  }
+
+  // box_far: a second BOX_EDGE cube whose min corner sits at x = 5, so it spans x in [5, 7]
+  // while box spans x in [0, 2] (both share y, z in [0, BOX_EDGE]). The exact minimum
+  // distance to box is therefore 5 - BOX_EDGE = 3.0, purely along +x — the analytical case
+  // for shape_distance.
+  const TopoDS_Shape box_far =
+      BRepPrimAPI_MakeBox(gp_Pnt(5.0, 0.0, 0.0), BOX_EDGE, BOX_EDGE, BOX_EDGE).Shape();
+  if (!BRepTools::Write(box_far, (out_dir + "/box_far.brep").c_str())) {
+    std::fprintf(stderr, "failed to write box_far.brep\n");
+    return 1;
+  }
+
   std::printf("box_mesh:\n");
   write_structured_mesh(box, BOX_GRID_N, out_dir + "/box_mesh");
   std::printf("sphere_mesh:\n");
   write_brepmesh_mesh(sphere, SPHERE_DEFLECTION, out_dir + "/sphere_mesh");
 
   std::printf(
-      "wrote box.brep, cylinder.brep, sphere.brep, split_box.brep, box_mesh + sphere_mesh "
-      "to %s\n",
+      "wrote box.brep, cylinder.brep, sphere.brep, split_box.brep, open_box_shell.brep, "
+      "box_far.brep, box_mesh + sphere_mesh to %s\n",
       out_dir.c_str());
   return 0;
 }
