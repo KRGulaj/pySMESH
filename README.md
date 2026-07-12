@@ -58,12 +58,26 @@ nothing else — no `occt`, no `boost`, no VTK downgrade.
 
 ## Install
 
+pySMESH is not on PyPI. Download the wheel from the
+[GitHub Releases page](https://github.com/KRGulaj/pySMESH/releases), then install it
+alongside its one shared dependency:
+
 ```bash
+# 1. VTK 9.6.2 must be present in the target environment (exact version, checked at import)
+pip install "vtk==9.6.2"
+# or, if you manage the environment with conda:
+# conda install -c conda-forge vtk==9.6.2
+
+# 2. Install the downloaded wheel (OCCT and Boost are bundled — no other deps needed)
 pip install pysmesh-1.0.0-cp313-win_amd64.whl
 ```
 
-The host environment must already provide **VTK 9.6.2** (the version pySMESH was built
-against). `import pysmesh` verifies this and fails loudly otherwise.
+**Platform:** Windows x64, CPython 3.13 only — there are no other wheels.
+
+**VTK coupling:** pySMESH links against the host's VTK at runtime. `import pysmesh` checks
+the exact version and raises `ImportError` on a mismatch rather than risking a silent ABI
+crash. If your project pins a different VTK version, pySMESH cannot be used in the same
+environment.
 
 ## Quickstart
 
