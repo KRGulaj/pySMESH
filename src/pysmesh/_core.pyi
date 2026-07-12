@@ -22,6 +22,7 @@ class PysmeshError(RuntimeError):
 class FaceInfo:
     id: int
     area: float
+    surface_type: str  # Plane/Cylinder/Cone/Sphere/Torus/BSpline/...
     @property
     def centroid(self) -> NDArray[np.float64]: ...  # (3,)
     @property
@@ -49,6 +50,10 @@ class Shape:
     def face_distance(
         self, face_id: int, points: NDArray[np.float64]
     ) -> NDArray[np.float64]: ...
+    def face_adjacency(self) -> list[tuple[int, int, int]]: ...
+    def match_faces(
+        self, centroids: NDArray[np.float64], tol: float
+    ) -> NDArray[np.int32]: ...
 
 class MeshStats:
     n_nodes: int

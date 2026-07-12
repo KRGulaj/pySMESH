@@ -2,20 +2,30 @@
 // face_distance. See src/bindings/common.hpp for ShapeData (the id -> TopoDS_* source of
 // truth) and PysmeshError.
 
+#include <algorithm>
 #include <array>
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <tuple>
 #include <vector>
 
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
+#include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
 #include <GProp_GProps.hxx>
+#include <GeomAbs_SurfaceType.hxx>
+#include <TopExp.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <gp_Pnt.hxx>
 
 #include "common.hpp"
@@ -30,6 +40,37 @@ py::array_t<double> vec1d(const double* data, std::size_t n) {
   return out;
 }
 
+// Canonical name of a face's underlying geometry (BRepAdaptor_Surface::GetType). Feeds
+// flux's feature-recognition defeature ("remove all cylindrical holes < 3 mm" needs the
+// type, not just sqrt(area)). The set mirrors GeomAbs_SurfaceType exactly.
+const char* surface_type_name(GeomAbs_SurfaceType t) {
+  switch (t) {
+    case GeomAbs_Plane:
+      return "Plane";
+    case GeomAbs_Cylinder:
+      return "Cylinder";
+    case GeomAbs_Cone:
+      return "Cone";
+    case GeomAbs_Sphere:
+      return "Sphere";
+    case GeomAbs_Torus:
+      return "Torus";
+    case GeomAbs_BezierSurface:
+      return "Bezier";
+    case GeomAbs_BSplineSurface:
+      return "BSpline";
+    case GeomAbs_SurfaceOfRevolution:
+      return "Revolution";
+    case GeomAbs_SurfaceOfExtrusion:
+      return "Extrusion";
+    case GeomAbs_OffsetSurface:
+      return "Offset";
+    case GeomAbs_OtherSurface:
+      return "Other";
+  }
+  return "Other";
+}
+
 // ---- Per-entity info structs (returned by Shape.faces()/.edges()/.vertices()) ------ //
 struct FaceInfo {
   int id;
@@ -37,6 +78,7 @@ struct FaceInfo {
   std::array<double, 3> centroid;
   std::array<double, 6> bbox;       // xmin, ymin, zmin, xmax, ymax, zmax
   std::array<double, 4> uv_bounds;  // umin, umax, vmin, vmax
+  std::string surface_type;         // Plane/Cylinder/Cone/Sphere/Torus/BSpline/...
 };
 struct EdgeInfo {
   int id;
@@ -75,7 +117,9 @@ class Shape {
       const gp_Pnt c = props.CentreOfMass();
       std::array<double, 4> uv{};
       BRepTools::UVBounds(f, uv[0], uv[1], uv[2], uv[3]);
-      out.push_back(FaceInfo{i, props.Mass(), {c.X(), c.Y(), c.Z()}, bbox_of(f), uv});
+      const BRepAdaptor_Surface surf(f);
+      out.push_back(FaceInfo{i, props.Mass(), {c.X(), c.Y(), c.Z()}, bbox_of(f), uv,
+                             surface_type_name(surf.GetType())});
     }
     return out;
   }
@@ -135,6 +179,94 @@ class Shape {
     return out;
   }
 
+  // Face pairs sharing an edge: (face_i, face_j, edge_id) with face_i < face_j, one row per
+  // shared edge (all ids 1-based, matching faces()/edges()). Built from the edge->face
+  // ancestor map so flux can walk fillet/tangent chains and remap markers in one native call
+  // instead of N Gmsh round-trips (report §7.1/§8.2). Degenerate edges (poles/apices) and seam
+  // edges (same face both sides -> no distinct pair) contribute nothing; a non-manifold edge
+  // (>2 faces) emits every unique face pair.
+  std::vector<std::tuple<int, int, int>> face_adjacency() const {
+    TopTools_IndexedDataMapOfShapeListOfShape edge_faces;
+    TopExp::MapShapesAndAncestors(data_->shape, TopAbs_EDGE, TopAbs_FACE, edge_faces);
+
+    std::vector<std::tuple<int, int, int>> out;
+    const int ne = data_->edges.Extent();
+    for (int ei = 1; ei <= ne; ++ei) {
+      const TopoDS_Edge& e = TopoDS::Edge(data_->edges.FindKey(ei));
+      if (BRep_Tool::Degenerated(e) || !edge_faces.Contains(e)) {
+        continue;
+      }
+      // Distinct 1-based face ids around this edge (a seam lists the same face twice).
+      std::vector<int> fids;
+      for (const TopoDS_Shape& fs : edge_faces.FindFromKey(e)) {
+        const int fid = data_->faces.FindIndex(fs);
+        if (fid >= 1 && std::find(fids.begin(), fids.end(), fid) == fids.end()) {
+          fids.push_back(fid);
+        }
+      }
+      std::sort(fids.begin(), fids.end());
+      for (std::size_t a = 0; a < fids.size(); ++a) {
+        for (std::size_t b = a + 1; b < fids.size(); ++b) {
+          out.emplace_back(fids[a], fids[b], ei);
+        }
+      }
+    }
+    return out;
+  }
+
+  // Nearest face (by centroid) for each of Q query points (Q,3): 1-based face id, or -1 where
+  // the nearest face centroid is farther than tol. Collapses flux's O(F*Q) ordinal<->tag
+  // matching loop into one native call and is the honest home for the centroid data faces()
+  // already exposes (report §4.5 persistent-naming fallback, §8.2 marker remap). GIL released
+  // for the numeric sweep.
+  py::array_t<std::int32_t> match_faces(const py::object& centroids_obj, double tol) const {
+    if (!(tol > 0.0)) {
+      throw PysmeshError("match_faces: tol must be > 0 (got " + std::to_string(tol) + ").");
+    }
+    Array2d centroids = as_2d_f64(centroids_obj, "centroids", 3);
+    const py::ssize_t q = centroids.shape(0);
+
+    // Precompute face centroids (OCCT calls stay under the GIL, ahead of the numeric loop).
+    const int nf = data_->faces.Extent();
+    std::vector<double> fc(static_cast<std::size_t>(nf) * 3);
+    for (int i = 1; i <= nf; ++i) {
+      const TopoDS_Face& f = TopoDS::Face(data_->faces.FindKey(i));
+      GProp_GProps props;
+      BRepGProp::SurfaceProperties(f, props);
+      const gp_Pnt c = props.CentreOfMass();
+      fc[3 * (i - 1) + 0] = c.X();
+      fc[3 * (i - 1) + 1] = c.Y();
+      fc[3 * (i - 1) + 2] = c.Z();
+    }
+
+    py::array_t<std::int32_t> out(q);
+    const double* qp = centroids.data();
+    std::int32_t* ids = out.mutable_data();
+    const double tol2 = tol * tol;
+    {
+      py::gil_scoped_release release;
+      for (py::ssize_t k = 0; k < q; ++k) {
+        const double x = qp[3 * k];
+        const double y = qp[3 * k + 1];
+        const double z = qp[3 * k + 2];
+        double best = std::numeric_limits<double>::infinity();
+        int best_id = -1;
+        for (int i = 0; i < nf; ++i) {
+          const double dx = x - fc[3 * i];
+          const double dy = y - fc[3 * i + 1];
+          const double dz = z - fc[3 * i + 2];
+          const double d2 = dx * dx + dy * dy + dz * dz;
+          if (d2 < best) {
+            best = d2;
+            best_id = i + 1;
+          }
+        }
+        ids[k] = (best <= tol2) ? static_cast<std::int32_t>(best_id) : -1;
+      }
+    }
+    return out;
+  }
+
  private:
   std::shared_ptr<ShapeData> data_;
 };
@@ -173,8 +305,9 @@ void bind_shape(py::module_& m) {
                              [](const FaceInfo& f) { return vec1d(f.bbox.data(), 6); })
       .def_property_readonly(
           "uv_bounds", [](const FaceInfo& f) { return vec1d(f.uv_bounds.data(), 4); })
+      .def_readonly("surface_type", &FaceInfo::surface_type)
       .def("__repr__", [](const FaceInfo& f) {
-        return "<FaceInfo id=" + std::to_string(f.id) +
+        return "<FaceInfo id=" + std::to_string(f.id) + " " + f.surface_type +
                " area=" + std::to_string(f.area) + ">";
       });
 
@@ -205,7 +338,14 @@ void bind_shape(py::module_& m) {
            "List every unique edge with id, length, bbox, curve-parameter bounds.")
       .def("vertices", &Shape::vertices, "List every unique vertex with id and xyz.")
       .def("face_distance", &Shape::face_distance, py::arg("face_id"), py::arg("points"),
-           "Exact minimum distance (N,) from each of N points (N,3) to the face.");
+           "Exact minimum distance (N,) from each of N points (N,3) to the face.")
+      .def("face_adjacency", &Shape::face_adjacency,
+           "Face pairs sharing an edge: list of (face_i, face_j, edge_id) with face_i<face_j, "
+           "one per shared edge (1-based ids). Degenerate and seam edges contribute none; a "
+           "non-manifold edge (>2 faces) emits every unique pair.")
+      .def("match_faces", &Shape::match_faces, py::arg("centroids"), py::arg("tol"),
+           "Nearest face by centroid for each of Q query points (Q,3): (Q,) int32 1-based face "
+           "ids, -1 where the nearest face centroid is farther than tol. tol must be > 0.");
 
   m.def("load_brep", &load_brep, py::arg("data"),
         "Read a BREP shape from in-memory bytes. Raises on parse failure or null shape.");
