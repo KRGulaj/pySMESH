@@ -62,6 +62,9 @@ from ._core import (  # noqa: E402 - must follow the VTK check
     VertexInfo,
     load_brep,
 )
+from .classify import (  # noqa: E402 - must follow the VTK check (imports _core)
+    point_in_solid,
+)
 from .distance import (  # noqa: E402 - must follow the VTK check (imports _core)
     ShapeDistanceResult,
     free_boundary_edges,
@@ -116,6 +119,7 @@ __all__ = [
     "load_brep",
     "make_thick_solid",
     "offset_shape",
+    "point_in_solid",
     "shape_distance",
     "tessellate",
     "unify_same_domain",

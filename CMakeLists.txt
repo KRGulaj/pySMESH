@@ -122,17 +122,20 @@ pybind11_add_module(_core
     src/bindings/unify.cpp
     src/bindings/tessellate.cpp
     src/bindings/offset.cpp
-    src/bindings/distance.cpp)
+    src/bindings/distance.cpp
+    src/bindings/classify.cpp)
 target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
-# TKShHealing (ShapeUpgrade_UnifySameDomain) is already pulled in transitively via the SMESH
-# static libs, but unify.cpp calls it directly, so link it explicitly rather than lean on a
-# transitive edge. OCCT toolkits are dynamic (bundled at wheel-repair time), not in SMESH_*.
+# TKShHealing (ShapeUpgrade_UnifySameDomain), TKOffset (BRepOffsetAPI_*), and TKTopAlgo
+# (BRepClass3d_SolidClassifier) are pulled in transitively via the SMESH static libs, but the
+# bindings call them directly, so link them explicitly rather than lean on a transitive edge.
+# OCCT toolkits are dynamic (bundled at wheel-repair time), not in SMESH_*.
 target_link_libraries(_core PRIVATE
     ${SMESH_STATIC_LIBS} Geom Kernel
     VTK::CommonCore VTK::CommonDataModel VTK::FiltersVerdict
     TKShHealing
     TKMesh
     TKOffset
+    TKTopAlgo
     ${Boost_LIBRARIES})
 
 # --------------------------------------------------------------------------- #
