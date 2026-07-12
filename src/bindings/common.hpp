@@ -25,6 +25,7 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
+#include <TopoDS_Solid.hxx>
 #include <TopoDS_Vertex.hxx>
 
 namespace pysmesh {
@@ -64,11 +65,13 @@ void register_error_type(py::module_& m);
 // face_id -> TopoDS_Face& through it and calls only the shape-reference overloads.
 struct ShapeData {
   TopoDS_Shape shape;
+  TopTools_IndexedMapOfShape solids;
   TopTools_IndexedMapOfShape faces;
   TopTools_IndexedMapOfShape edges;
   TopTools_IndexedMapOfShape vertices;
 
   explicit ShapeData(const TopoDS_Shape& s) : shape(s) {
+    TopExp::MapShapes(shape, TopAbs_SOLID, solids);
     TopExp::MapShapes(shape, TopAbs_FACE, faces);
     TopExp::MapShapes(shape, TopAbs_EDGE, edges);
     TopExp::MapShapes(shape, TopAbs_VERTEX, vertices);
@@ -76,6 +79,13 @@ struct ShapeData {
 
   // 1-based id -> TopoDS_* resolution. Raise PysmeshError naming the bad id on any
   // out-of-range access — never let an invalid id reach OCCT/SMESHDS.
+  const TopoDS_Solid& solid(int solid_id) const {
+    if (solid_id < 1 || solid_id > solids.Extent()) {
+      throw PysmeshError("Invalid solid_id " + std::to_string(solid_id) + " (shape has " +
+                          std::to_string(solids.Extent()) + " solids)");
+    }
+    return TopoDS::Solid(solids.FindKey(solid_id));
+  }
   const TopoDS_Face& face(int face_id) const {
     if (face_id < 1 || face_id > faces.Extent()) {
       throw PysmeshError("Invalid face_id " + std::to_string(face_id) + " (shape has " +

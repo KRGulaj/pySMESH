@@ -38,6 +38,19 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <Interface_Static.hxx>
+#include <Quantity_Color.hxx>
+#include <STEPCAFControl_Writer.hxx>
+#include <STEPControl_StepModelType.hxx>
+#include <TCollection_ExtendedString.hxx>
+#include <TDF_Label.hxx>
+#include <TDataStd_Name.hxx>
+#include <TDocStd_Document.hxx>
+#include <XCAFApp_Application.hxx>
+#include <XCAFDoc_ColorTool.hxx>
+#include <XCAFDoc_ColorType.hxx>
+#include <XCAFDoc_DocumentTool.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
 #include <Geom_Curve.hxx>
 #include <Geom_Surface.hxx>
 #include <Poly_PolygonOnTriangulation.hxx>
@@ -407,6 +420,42 @@ void write_brepmesh_mesh(const TopoDS_Shape& shape, double deflection,
            vmap.Extent());
 }
 
+// ---- labelled STEP fixtures (XDE: product name + per-face colour) ------------------ //
+// Writes a labelled cube to STEP with a chosen header length unit. `solid` is built in OCCT's
+// internal millimetres; OCCT converts to `unit` on write, so a 2000 mm cube written as "M"
+// yields a literal 2.0-in-metres cube. The two committed fixtures (named_box_mm.step: a 2 mm
+// cube in millimetres; named_box_m.step: a 2 m cube in metres) therefore share the same native
+// coordinate extent (2.0) but declare different units, exercising read_step_xde's length_unit
+// factor as well as name/colour extraction and ordinal alignment.
+void write_named_step(const TopoDS_Shape& solid, const char* unit, const std::string& path) {
+  Handle(XCAFApp_Application) app = XCAFApp_Application::GetApplication();
+  Handle(TDocStd_Document) doc;
+  app->NewDocument(TCollection_ExtendedString("MDTV-XCAF"), doc);
+  Handle(XCAFDoc_ShapeTool) st = XCAFDoc_DocumentTool::ShapeTool(doc->Main());
+  Handle(XCAFDoc_ColorTool) ct = XCAFDoc_DocumentTool::ColorTool(doc->Main());
+
+  const TDF_Label lab = st->AddShape(solid, Standard_False);  // simple shape, not assembly
+  TDataStd_Name::Set(lab, TCollection_ExtendedString("blade_solid"));
+
+  TopTools_IndexedMapOfShape faces;
+  TopExp::MapShapes(solid, TopAbs_FACE, faces);
+  const TopoDS_Shape face1 = faces.FindKey(1);  // 1-based TopExp ordinal 1 -> "inlet" colour
+  ct->SetColor(face1, Quantity_Color(1.0, 0.0, 0.0, Quantity_TOC_RGB), XCAFDoc_ColorSurf);
+
+  Interface_Static::SetCVal("write.step.unit", unit);
+  STEPCAFControl_Writer writer;
+  writer.SetColorMode(true);
+  writer.SetNameMode(true);
+  if (!writer.Transfer(doc, STEPControl_AsIs)) {
+    std::fprintf(stderr, "STEP transfer failed for %s\n", path.c_str());
+    std::exit(1);
+  }
+  if (writer.Write(path.c_str()) != IFSelect_RetDone) {
+    std::fprintf(stderr, "failed to write %s\n", path.c_str());
+    std::exit(1);
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -475,6 +524,14 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // Labelled STEP fixtures (XDE): named product + coloured face. named_box_mm is the BOX_EDGE
+  // cube written in millimetres; named_box_m is a BOX_EDGE-metre cube (built at BOX_EDGE*1000 mm
+  // internally, written in metres) so both have native extent BOX_EDGE but declare distinct units.
+  write_named_step(box, "MM", out_dir + "/named_box_mm.step");
+  const TopoDS_Shape box_metre =
+      BRepPrimAPI_MakeBox(BOX_EDGE * 1000.0, BOX_EDGE * 1000.0, BOX_EDGE * 1000.0).Shape();
+  write_named_step(box_metre, "M", out_dir + "/named_box_m.step");
+
   std::printf("box_mesh:\n");
   write_structured_mesh(box, BOX_GRID_N, out_dir + "/box_mesh");
   std::printf("sphere_mesh:\n");
@@ -482,7 +539,7 @@ int main(int argc, char** argv) {
 
   std::printf(
       "wrote box.brep, cylinder.brep, sphere.brep, split_box.brep, open_box_shell.brep, "
-      "box_far.brep, box_mesh + sphere_mesh to %s\n",
+      "box_far.brep, named_box_mm.step, named_box_m.step, box_mesh + sphere_mesh to %s\n",
       out_dir.c_str());
   return 0;
 }

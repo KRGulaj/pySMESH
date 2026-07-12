@@ -123,12 +123,18 @@ pybind11_add_module(_core
     src/bindings/tessellate.cpp
     src/bindings/offset.cpp
     src/bindings/distance.cpp
-    src/bindings/classify.cpp)
+    src/bindings/classify.cpp
+    src/bindings/step_xde.cpp)
 target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
 # TKShHealing (ShapeUpgrade_UnifySameDomain), TKOffset (BRepOffsetAPI_*), and TKTopAlgo
 # (BRepClass3d_SolidClassifier) are pulled in transitively via the SMESH static libs, but the
 # bindings call them directly, so link them explicitly rather than lean on a transitive edge.
-# OCCT toolkits are dynamic (bundled at wheel-repair time), not in SMESH_*.
+# B1 (read_step_xde) adds the OCCT DataExchange + OCAF/XDE stack — new to the link set:
+#   TKDESTEP  STEP reader/writer (OCCT-8.0 rename of TKSTEP; cf. the TKSTL->TKDESTL precedent)
+#   TKXCAF/TKVCAF  eXtended Data Exchange shape/colour/name tools (XCAFDoc_*)
+#   TKLCAF/TKCAF/TKCDF  OCAF document core (TDocStd_Document, TDataStd_*, application/session)
+#   TKXSBase  data-exchange base (Interface_Static, IFSelect_ReturnStatus)
+# All are dynamic (bundled at wheel-repair time); see NOTICE.md / PROVENANCE.md.
 target_link_libraries(_core PRIVATE
     ${SMESH_STATIC_LIBS} Geom Kernel
     VTK::CommonCore VTK::CommonDataModel VTK::FiltersVerdict
@@ -136,6 +142,13 @@ target_link_libraries(_core PRIVATE
     TKMesh
     TKOffset
     TKTopAlgo
+    TKDESTEP
+    TKXCAF
+    TKVCAF
+    TKLCAF
+    TKCAF
+    TKCDF
+    TKXSBase
     ${Boost_LIBRARIES})
 
 # --------------------------------------------------------------------------- #
@@ -197,6 +210,8 @@ option(PYSMESH_BUILD_FIXTURE_GEN "Build the OCCT BREP fixture generator" OFF)
 if(PYSMESH_BUILD_FIXTURE_GEN)
     add_executable(generate_fixtures tests/fixtures/generate_fixtures.cpp)
     # TKBO: BRepAlgoAPI_Fuse for the split_box fixture (two coplanar-topped half-boxes fused).
+    # TKDESTEP/TKXCAF/TKVCAF/TKLCAF/TKCAF/TKCDF/TKXSBase: labelled STEP fixture writer (B1).
     target_link_libraries(generate_fixtures PRIVATE
-        TKernel TKMath TKBRep TKG2d TKG3d TKGeomBase TKGeomAlgo TKTopAlgo TKPrim TKMesh TKBO)
+        TKernel TKMath TKBRep TKG2d TKG3d TKGeomBase TKGeomAlgo TKTopAlgo TKPrim TKMesh TKBO
+        TKDESTEP TKXCAF TKVCAF TKLCAF TKCAF TKCDF TKXSBase)
 endif()

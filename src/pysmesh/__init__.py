@@ -59,6 +59,7 @@ from ._core import (  # noqa: E402 - must follow the VTK check
     Mesh,
     PysmeshError,
     Shape,
+    SolidInfo,
     VertexInfo,
     load_brep,
 )
@@ -77,6 +78,12 @@ from .offset import (  # noqa: E402 - must follow the VTK check (imports _core)
     ThickSolidResult,
     make_thick_solid,
     offset_shape,
+)
+from .step import (  # noqa: E402 - must follow the VTK check (imports _core)
+    EntityLabel,
+    StepImport,
+    read_step_xde,
+    write_step_xde,
 )
 from .tessellate import (  # noqa: E402 - must follow the VTK check (imports _core)
     TessellateParams,
@@ -97,6 +104,7 @@ from .viscous import (  # noqa: E402 - must follow the VTK check (imports _core)
 
 __all__ = [
     "EdgeInfo",
+    "EntityLabel",
     "ExtrusionMethod",
     "FaceInfo",
     "Mesh",
@@ -105,6 +113,8 @@ __all__ = [
     "PysmeshError",
     "Shape",
     "ShapeDistanceResult",
+    "SolidInfo",
+    "StepImport",
     "TessellateParams",
     "TessellateResult",
     "ThickSolidParams",
@@ -120,7 +130,9 @@ __all__ = [
     "make_thick_solid",
     "offset_shape",
     "point_in_solid",
+    "read_step_xde",
     "shape_distance",
     "tessellate",
     "unify_same_domain",
+    "write_step_xde",
 ]

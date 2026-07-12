@@ -80,6 +80,12 @@ struct FaceInfo {
   std::array<double, 4> uv_bounds;  // umin, umax, vmin, vmax
   std::string surface_type;         // Plane/Cylinder/Cone/Sphere/Torus/BSpline/...
 };
+struct SolidInfo {
+  int id;
+  double volume;
+  std::array<double, 3> centroid;
+  std::array<double, 6> bbox;  // xmin, ymin, zmin, xmax, ymax, zmax
+};
 struct EdgeInfo {
   int id;
   double length;
@@ -120,6 +126,20 @@ class Shape {
       const BRepAdaptor_Surface surf(f);
       out.push_back(FaceInfo{i, props.Mass(), {c.X(), c.Y(), c.Z()}, bbox_of(f), uv,
                              surface_type_name(surf.GetType())});
+    }
+    return out;
+  }
+
+  std::vector<SolidInfo> solids() const {
+    std::vector<SolidInfo> out;
+    const int n = data_->solids.Extent();
+    out.reserve(n);
+    for (int i = 1; i <= n; ++i) {
+      const TopoDS_Solid& s = TopoDS::Solid(data_->solids.FindKey(i));
+      GProp_GProps props;
+      BRepGProp::VolumeProperties(s, props);
+      const gp_Pnt c = props.CentreOfMass();
+      out.push_back(SolidInfo{i, props.Mass(), {c.X(), c.Y(), c.Z()}, bbox_of(s)});
     }
     return out;
   }
@@ -311,6 +331,18 @@ void bind_shape(py::module_& m) {
                " area=" + std::to_string(f.area) + ">";
       });
 
+  py::class_<SolidInfo>(m, "SolidInfo")
+      .def_readonly("id", &SolidInfo::id)
+      .def_readonly("volume", &SolidInfo::volume)
+      .def_property_readonly(
+          "centroid", [](const SolidInfo& s) { return vec1d(s.centroid.data(), 3); })
+      .def_property_readonly("bbox",
+                             [](const SolidInfo& s) { return vec1d(s.bbox.data(), 6); })
+      .def("__repr__", [](const SolidInfo& s) {
+        return "<SolidInfo id=" + std::to_string(s.id) +
+               " volume=" + std::to_string(s.volume) + ">";
+      });
+
   py::class_<EdgeInfo>(m, "EdgeInfo")
       .def_readonly("id", &EdgeInfo::id)
       .def_readonly("length", &EdgeInfo::length)
@@ -332,6 +364,8 @@ void bind_shape(py::module_& m) {
       });
 
   py::class_<Shape>(m, "Shape")
+      .def("solids", &Shape::solids,
+           "List every unique solid with id (1-based), volume, centroid, bbox.")
       .def("faces", &Shape::faces,
            "List every unique face with id (1-based), area, centroid, bbox, uv_bounds.")
       .def("edges", &Shape::edges,

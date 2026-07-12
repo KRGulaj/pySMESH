@@ -30,6 +30,14 @@ class FaceInfo:
     @property
     def uv_bounds(self) -> NDArray[np.float64]: ...  # (4,) umin,umax,vmin,vmax
 
+class SolidInfo:
+    id: int
+    volume: float
+    @property
+    def centroid(self) -> NDArray[np.float64]: ...  # (3,)
+    @property
+    def bbox(self) -> NDArray[np.float64]: ...  # (6,) xmin,ymin,zmin,xmax,ymax,zmax
+
 class EdgeInfo:
     id: int
     length: float
@@ -44,6 +52,7 @@ class VertexInfo:
     def xyz(self) -> NDArray[np.float64]: ...  # (3,)
 
 class Shape:
+    def solids(self) -> list[SolidInfo]: ...
     def faces(self) -> list[FaceInfo]: ...
     def edges(self) -> list[EdgeInfo]: ...
     def vertices(self) -> list[VertexInfo]: ...
@@ -96,6 +105,13 @@ def free_boundary_edges(brep: bytes) -> NDArray[np.int32]: ...
 def point_in_solid(
     brep: bytes, points: NDArray[np.float64], tol: float
 ) -> NDArray[np.bool_]: ...
+def read_step_xde(data_or_path: bytes | str) -> dict[str, object]: ...
+def write_step_xde(
+    brep: bytes,
+    face_names: dict[int, str],
+    face_colors: dict[int, tuple[float, float, float]],
+    name: str,
+) -> bytes: ...
 def tessellate(
     brep: bytes,
     lin_defl: float,

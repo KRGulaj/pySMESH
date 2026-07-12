@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "pysmesh"
-version = "0.2.0"
+version = "1.0.0"
 description = "Python bindings to SALOME SMESH ViscousLayers (boundary-layer prisms) + OCCT same-domain healing"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -16,7 +16,7 @@ keywords = ["mesh", "cfd", "viscous-layers", "smesh", "occt", "prism"]
 # pip-installing a second VTK would defeat the whole purpose of pySMESH.
 dependencies = ["numpy>=1.26"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     # License is declared via the SPDX `license` field above (PEP 639); a `License ::`
     # classifier here would conflict with it.
     "Operating System :: Microsoft :: Windows",

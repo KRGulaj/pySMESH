@@ -99,3 +99,23 @@ def box_far_brep(fixtures_dir: Path) -> bytes:
     """BREP bytes for a second unit box translated to x in [5, 7]; its minimum distance to
     ``box.brep`` (x in [0, 2]) is exactly 3.0 along +x (see ``generate_fixtures.cpp``)."""
     return (fixtures_dir / "box_far.brep").read_bytes()
+
+
+@pytest.fixture(scope="session")
+def named_box_mm_step_path(fixtures_dir: Path) -> str:
+    """Path to the labelled STEP fixture: a 2 mm cube declared in millimetres, with product name
+    ``blade_solid`` and face 1 coloured pure red (see ``generate_fixtures.cpp``)."""
+    return str(fixtures_dir / "named_box_mm.step")
+
+
+@pytest.fixture(scope="session")
+def named_box_mm_step_bytes(fixtures_dir: Path) -> bytes:
+    """Raw bytes of the millimetre STEP fixture (for the bytes-input path)."""
+    return (fixtures_dir / "named_box_mm.step").read_bytes()
+
+
+@pytest.fixture(scope="session")
+def named_box_m_step_path(fixtures_dir: Path) -> str:
+    """Path to the metre-unit STEP fixture: a 2 m cube declared in metres (same native extent as
+    the mm fixture, but length_unit 1.0 vs 0.001) (see ``generate_fixtures.cpp``)."""
+    return str(fixtures_dir / "named_box_m.step")

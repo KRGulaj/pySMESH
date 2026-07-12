@@ -106,6 +106,21 @@ and logged (not silently ignored). MinGW/gcc-only patches are no-ops under our M
 | `smesh/StdMeshers_ViscousLayers.patch` | L | ViscousLayers build fixups (the payload algorithm). |
 | `smesh/mefisto.patch` | L | Wire the f2c `trte.c` into the MEFISTO2 target. |
 
+## OCCT toolkits linked & bundled
+
+`_core.pyd` links OCCT dynamically; the wheel bundles (at delvewheel-repair time) every OCCT
+toolkit it needs directly or transitively. All are conda-forge `occt=8.0.0`, LGPL-2.1 with the
+exception (see [NOTICE.md](NOTICE.md)); this records *which* toolkits and *why*, not a new source.
+
+- Modelling / meshing (present since B2–B3): TKernel, TKMath, TKG2d, TKG3d, TKGeomBase,
+  TKGeomAlgo, TKBRep, TKTopAlgo, TKPrim, TKBO, TKMesh, TKShHealing, TKOffset, plus the
+  DataExchange STL toolkit **TKDESTL** (the OCCT-8.0 rename of TKSTL — see the patch note above).
+- **DataExchange + OCAF/XDE (added for B1 `read_step_xde`/`write_step_xde`)**: **TKDESTEP**
+  (STEP reader/writer; OCCT-8.0 rename of TKSTEP, mirroring the TKSTL→TKDESTL precedent),
+  **TKXCAF**/**TKVCAF** (XDE shape/colour/name tools), **TKLCAF**/**TKCAF**/**TKCDF** (OCAF
+  document core), **TKXSBase** (data-exchange base). Explicitly listed in the root
+  `CMakeLists.txt` `_core` link block. `ci/check_wheel.py` asserts these are bundled.
+
 ## Reference-only repositories
 
 Several other SMESH-adjacent projects were used for guidance but never copied from directly:

@@ -14,6 +14,10 @@ import sys
 import zipfile
 from glob import glob
 
+# OCCT DataExchange + OCAF/XDE toolkits the B1 STEP-import feature links; delvewheel may
+# name-mangle the DLLs (e.g. ``tkdestep-<hash>.dll``), so match on the toolkit stem as a prefix.
+_B1_XDE_TOOLKITS = ("tkdestep", "tkxcaf", "tklcaf", "tkcaf", "tkcdf", "tkxsbase")
+
 
 def _check(wheel: str) -> None:
     with zipfile.ZipFile(wheel) as zf:
@@ -26,6 +30,9 @@ def _check(wheel: str) -> None:
     has_occt = any(n.startswith("tk") for n in dll_names)  # OCCT toolkits: TKernel, TKMath...
     has_boost = any("boost" in n for n in dll_names)
     vtk_bundled = [n for n in dll_names if n.startswith("vtk")]
+    missing_xde = [
+        tk for tk in _B1_XDE_TOOLKITS if not any(n.startswith(tk) for n in dll_names)
+    ]
 
     problems: list[str] = []
     if not has_occt:
@@ -34,6 +41,10 @@ def _check(wheel: str) -> None:
         problems.append("no Boost DLLs bundled")
     if vtk_bundled:
         problems.append(f"VTK DLLs must NOT be bundled, found: {sorted(vtk_bundled)}")
+    if missing_xde:
+        problems.append(
+            "B1 STEP-import (XDE) toolkits missing from the bundle: " + ", ".join(missing_xde)
+        )
 
     if problems:
         raise SystemExit(f"{wheel}: " + "; ".join(problems))

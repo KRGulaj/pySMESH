@@ -19,6 +19,23 @@ Full upstream URLs, commits, and the patch index are in [PROVENANCE.md](PROVENAN
 | **pybind11 3.0.3** | BSD-3-Clause | header-only (compile time) | Notice only; this entry is the notice. |
 | **NumPy** | BSD-3-Clause | runtime (pip dependency) | Notice only. |
 
+## OCCT toolkits bundled
+
+OCCT ships as many per-domain toolkit DLLs; pySMESH bundles those its `_core.pyd` links
+(directly or transitively) at wheel-repair time. All are the same component and licence as the
+OCCT row above (LGPL-2.1 with the exception) — this list is enumeration, not a new obligation.
+Beyond the modelling/meshing toolkits (TKernel, TKMath, TKBRep, TKG2d/TKG3d, TKGeomBase,
+TKGeomAlgo, TKTopAlgo, TKPrim, TKBO, TKMesh, TKShHealing, TKOffset, …), the **B1 STEP-import
+feature** (`read_step_xde` / `write_step_xde`) adds the OCCT **DataExchange + OCAF/XDE** stack:
+
+- **TKDESTEP** — STEP reader/writer (OCCT-8.0 rename of the former TKSTEP).
+- **TKXCAF**, **TKVCAF** — eXtended Data Exchange shape/colour/name tools.
+- **TKLCAF**, **TKCAF**, **TKCDF** — OCAF document core (document, attributes, storage driver).
+- **TKXSBase** — data-exchange base (interface model, static parameters).
+
+These DLLs are added to the wheel (a few MB) with no new licence text; the relinking right holds
+as for all OCCT toolkits because pySMESH is fully open and rebuildable from this repo.
+
 ## Why VTK is treated differently from OCCT/Boost
 
 OCCT and Boost are private implementation details of `_core.pyd`: their DLLs are bundled

@@ -8,6 +8,10 @@ inside the full SALOME platform, packaged as a self-contained `cp313-win_amd64` 
 - **`unify_same_domain`** — Open CASCADE's `ShapeUpgrade_UnifySameDomain`, B-rep healing
   that merges adjacent same-surface faces (and collinear edges) to remove the artificial
   seams over-segmented STEP imports carry.
+- **A suite of standalone OCCT geometry operations** — STEP XDE import/export, tessellation,
+  offsets/thick-solids, proximity & leak diagnostics, point-in-solid classification, and
+  geometry-query enrichment (surface type, adjacency, solids, centroid matching). See
+  [Geometry operations](#geometry-operations-occt) below.
 
 Meta:
 
@@ -55,7 +59,7 @@ nothing else — no `occt`, no `boost`, no VTK downgrade.
 ## Install
 
 ```bash
-pip install pysmesh-0.2.0-cp313-win_amd64.whl
+pip install pysmesh-1.0.0-cp313-win_amd64.whl
 ```
 
 The host environment must already provide **VTK 9.6.2** (the version pySMESH was built
@@ -117,7 +121,99 @@ result.edge_map         # (n_before,) int32 — same for edges
 so a caller can re-tag boundary conditions from the pre-heal shape onto the healed one
 (merged faces are many-to-one; removed seams map to `-1`).
 
+`face_map` / `edge_map` use the same 1-based ids `Shape.faces()` / `Shape.edges()` return,
+so a caller can re-tag boundary conditions from the pre-heal shape onto the healed one
+(merged faces are many-to-one; removed seams map to `-1`).
+
 See `src/pysmesh/_core.pyi` for the full typed API. `mypy --strict` type-checks against it.
+
+## Geometry operations (OCCT)
+
+Beyond meshing, pySMESH exposes a suite of standalone Open CASCADE geometry operations. All
+are headless (no VTK, no SMESH), take and return BREP bytes and NumPy arrays, and key every
+result to the **same 1-based TopExp ordinals** `Shape.faces()` / `.edges()` / `.solids()` use,
+so ids compose across operations without translation.
+
+### STEP import/export with names, colours & units (`read_step_xde` / `write_step_xde`)
+
+Import a STEP file through OCCT's XDE stack, preserving what a plain B-rep import discards:
+product **names**, per-face **colours**, and the file's **length unit**. Geometry is returned
+in the file's native unit; `length_unit` is the metres-per-unit factor — so `mm` files no
+longer arrive silently mis-scaled.
+
+```python
+import pysmesh
+
+imp = pysmesh.read_step_xde("blade.step")         # bytes or path (str / Path)
+imp.brep            # bytes — geometry in the file's native unit (load via load_brep)
+imp.length_unit     # e.g. 0.001 for a millimetre file, 1.0 for a metre file (metres per unit)
+imp.solid_labels    # (EntityLabel(id, name, color), ...) — e.g. id=1 name="blade_solid"
+imp.face_labels     # (EntityLabel(id, name, color), ...) — e.g. id=1 color=(1.0, 0.0, 0.0)
+
+# ids are the ordinals load_brep reproduces:
+shape = pysmesh.load_brep(imp.brep)
+named = {lbl.id: lbl.name for lbl in imp.solid_labels}
+
+# round-trip: tag a shape and write STEP bytes
+step = pysmesh.write_step_xde(imp.brep, name="wing",
+                              face_names={2: "inlet"}, face_colors={1: (0.0, 1.0, 0.0)})
+```
+
+### Tessellation for rendering (`tessellate`)
+
+Fast render-ready triangulation of any BREP via `BRepMesh_IncrementalMesh`, with per-vertex
+surface normals for smooth shading.
+
+```python
+r = pysmesh.tessellate(brep, pysmesh.TessellateParams(lin_defl=0.05, ang_defl_deg=20.0))
+r.nodes         # (N,3) float64      r.tris          # (M,3) int32 (0-based)
+r.normals       # (N,3) float64      r.tri_face_id   # (M,)  int32 (1-based face ids)
+```
+
+### Offsets & thick solids (`offset_shape` / `make_thick_solid`)
+
+B-rep offset (`BRepOffsetAPI_MakeOffsetShape`) and hollowed thick-solid
+(`BRepOffsetAPI_MakeThickSolid`, removing chosen faces) operations; both return the new BREP.
+
+```python
+r = pysmesh.offset_shape(brep, pysmesh.OffsetParams(offset=0.5, tol=1e-3))
+r = pysmesh.make_thick_solid(brep, pysmesh.ThickSolidParams(
+        remove_face_ids=(1,), thickness=-0.2, tol=1e-3))
+r.brep          # bytes — the resulting shape
+```
+
+### Proximity & leak diagnostics (`shape_distance` / `free_boundary_edges`)
+
+Exact minimum distance between two shapes (with witness points), and the naked
+(single-face-bordered) edges that localise a hole in an open shell.
+
+```python
+d = pysmesh.shape_distance(brep_a, brep_b)
+d.distance, d.point_a, d.point_b            # float, (3,), (3,)
+
+leaks = pysmesh.free_boundary_edges(brep)   # (k,) int32 — 1-based edge ids, empty if watertight
+```
+
+### Point-in-solid classification (`point_in_solid`)
+
+Exact inside test against a solid (`BRepClass3d_SolidClassifier`) — e.g. to pick which candidate
+volume a seed point lies inside.
+
+```python
+mask = pysmesh.point_in_solid(brep, points, tol=1e-7)   # points (N,3) -> (N,) bool (strictly IN)
+```
+
+### Geometry-query enrichment (`Shape`)
+
+`Shape` reports per-entity metadata for feature recognition and robust marker remap:
+
+```python
+shape = pysmesh.load_brep(brep)
+shape.solids()                # [SolidInfo(id, volume, centroid, bbox), ...]
+shape.faces()[0].surface_type # "Plane" / "Cylinder" / "Cone" / "Sphere" / "Torus" / "BSpline" / ...
+shape.face_adjacency()        # [(face_i, face_j, edge_id), ...] — faces sharing an edge
+shape.match_faces(centroids, tol)   # (Q,3) query -> (Q,) int32 nearest face ids (-1 if none)
+```
 
 ## Build from source
 
