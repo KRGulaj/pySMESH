@@ -79,3 +79,9 @@ def sphere_mesh(fixtures_dir: Path) -> dict[str, "np.ndarray"]:
 
     d = fixtures_dir / "sphere_mesh"
     return {p.stem: np.load(p) for p in d.glob("*.npy")}
+
+
+@pytest.fixture(scope="session")
+def cylinder_brep(fixtures_dir: Path) -> bytes:
+    """Raw BREP bytes for the unit cylinder fixture (two flat caps + one curved wall)."""
+    return (fixtures_dir / "cylinder.brep").read_bytes()

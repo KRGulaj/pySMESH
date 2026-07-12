@@ -14,6 +14,8 @@ void bind_shape(py::module_& m);
 void bind_mesh(py::module_& m);
 void bind_viscous(py::module_& m);
 void bind_unify(py::module_& m);
+void bind_tessellate(py::module_& m);
+void bind_offset(py::module_& m);
 
 namespace {
 
@@ -54,4 +56,6 @@ PYBIND11_MODULE(_core, m) {
   pysmesh::bind_mesh(m);
   pysmesh::bind_viscous(m);
   pysmesh::bind_unify(m);
+  pysmesh::bind_tessellate(m);
+  pysmesh::bind_offset(m);
 }

@@ -75,6 +75,23 @@ class Mesh:
     def __exit__(self, *args: object) -> None: ...
 
 def load_brep(data: bytes) -> Shape: ...
+def make_thick_solid(
+    brep: bytes,
+    remove_face_ids: list[int],
+    thickness: float,
+    tol: float,
+) -> dict[str, object]: ...
+def offset_shape(
+    brep: bytes,
+    offset: float,
+    tol: float,
+) -> dict[str, object]: ...
+def tessellate(
+    brep: bytes,
+    lin_defl: float,
+    ang_defl: float,
+    relative: bool = ...,
+) -> dict[str, object]: ...
 def compute_viscous_layers(
     mesh: Mesh,
     face_ids: list[int],

@@ -62,6 +62,19 @@ from ._core import (  # noqa: E402 - must follow the VTK check
     VertexInfo,
     load_brep,
 )
+from .offset import (  # noqa: E402 - must follow the VTK check (imports _core)
+    OffsetParams,
+    OffsetResult,
+    ThickSolidParams,
+    ThickSolidResult,
+    make_thick_solid,
+    offset_shape,
+)
+from .tessellate import (  # noqa: E402 - must follow the VTK check (imports _core)
+    TessellateParams,
+    TessellateResult,
+    tessellate,
+)
 from .unify import (  # noqa: E402 - must follow the VTK check (imports _core)
     UnifyParams,
     UnifyResult,
@@ -79,8 +92,14 @@ __all__ = [
     "ExtrusionMethod",
     "FaceInfo",
     "Mesh",
+    "OffsetParams",
+    "OffsetResult",
     "PysmeshError",
     "Shape",
+    "TessellateParams",
+    "TessellateResult",
+    "ThickSolidParams",
+    "ThickSolidResult",
     "UnifyParams",
     "UnifyResult",
     "VLParams",
@@ -88,5 +107,8 @@ __all__ = [
     "VertexInfo",
     "compute_viscous_layers",
     "load_brep",
+    "make_thick_solid",
+    "offset_shape",
+    "tessellate",
     "unify_same_domain",
 ]

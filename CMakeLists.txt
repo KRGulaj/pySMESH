@@ -119,7 +119,9 @@ pybind11_add_module(_core
     src/bindings/shape.cpp
     src/bindings/mesh.cpp
     src/bindings/viscous.cpp
-    src/bindings/unify.cpp)
+    src/bindings/unify.cpp
+    src/bindings/tessellate.cpp
+    src/bindings/offset.cpp)
 target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
 # TKShHealing (ShapeUpgrade_UnifySameDomain) is already pulled in transitively via the SMESH
 # static libs, but unify.cpp calls it directly, so link it explicitly rather than lean on a
@@ -128,6 +130,8 @@ target_link_libraries(_core PRIVATE
     ${SMESH_STATIC_LIBS} Geom Kernel
     VTK::CommonCore VTK::CommonDataModel VTK::FiltersVerdict
     TKShHealing
+    TKMesh
+    TKOffset
     ${Boost_LIBRARIES})
 
 # --------------------------------------------------------------------------- #
