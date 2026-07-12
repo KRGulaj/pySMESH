@@ -58,7 +58,7 @@ nothing else — no `occt`, no `boost`, no VTK downgrade.
 
 ## Install
 
-pySMESH is not on PyPI. Download the wheel from the
+Download the wheel from the
 [GitHub Releases page](https://github.com/KRGulaj/pySMESH/releases), then install it
 alongside its one shared dependency:
 
