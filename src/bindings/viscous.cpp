@@ -55,7 +55,7 @@ namespace {
 // VL.Compute directly, not SMESH_Gen::Compute), so its meshing methods are stubs. Its name
 // must NOT be "Hexa_3D": VL special-cases that name as a "structured" algo (line ~2335,
 // notSupportAlgos) and takes a shrink path that corrupts the heap whenever a face has no
-// layers — exactly flux's normal case (farfield/symmetry faces). Any other name selects
+// layers — exactly the host application's normal case (farfield/symmetry faces). Any other name selects
 // VL's correct unstructured shrink path. Listing "ViscousLayers" as compatible makes
 // GetUsedHypothesis return the VL hyp.
 class VLHostAlgo : public SMESH_3D_Algo {

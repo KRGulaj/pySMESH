@@ -244,18 +244,18 @@ Write `pyproject.toml`: scikit-build-core backend, pybind11 build dependency, pa
 ### .github/workflows/ci.yml
 
 1. Single job, `windows-latest` runner. Steps:
-   - (1) micromamba env from `ci/environment.yml` → `flux-pysmesh-build`
+   - (1) micromamba env from `ci/environment.yml` → `pysmesh-build`
    - (2) `python prepare.py`
    - (3) `python -m build --wheel` via scikit-build-core
    - (4) `pytest tests/ -v`
    - (5) upload wheel as artifact
    - Add `PYSMESH_DEV_ASSERTS=ON` as a CMake flag in CI only.
 
-2. **VTK-pin-drift check:** a small CI step reads flux's `environment.yml` for the `vtk>=` resolved version (or reads `flux-vtk-version.txt` if published) and fails with a diff if `ci/environment.yml`'s `vtk=` pin has drifted. This is the only cross-repo coupling point.
+2. **VTK-pin-drift check:** a small CI step reads the host application's `environment.yml` for the `vtk>=` resolved version (or reads `host-vtk-version.txt` if published) and fails with a diff if `ci/environment.yml`'s `vtk=` pin has drifted. This is the only cross-repo coupling point.
 
 ### Documentation
 
-1. **Write `README.md`** (English): what pySMESH is and why it exists (the flux VTK/OCCT env-conflict incident), quickstart install snippet, `examples/box_bl.py` walkthrough, build-from-source instructions (`conda create` + `prepare.py` + `pip install`), the flux relationship, and a note on binary size (static OCCT baked in → tens of MB; this is expected, not a build error).
+1. **Write `README.md`** (English): what pySMESH is and why it exists (a VTK/OCCT connectivity incident with a host application), quickstart install snippet, `examples/box_bl.py` walkthrough, build-from-source instructions (`conda create` + `prepare.py` + `pip install`), the host-application relationship, and a note on binary size (static OCCT baked in → tens of MB; this is expected, not a build error).
 
 2. **Write `NOTICE.md`:** the five-row table from phase_1.md §2 — SMESH (LGPL-2.1, static), OCCT (LGPL-2.1 + exception, static), Boost (BSL-1.0, static), VTK (BSD-3, dynamic), pybind11 (BSD-3, header-only). Add any discovered stubs from the B1 link audit.
 
@@ -265,7 +265,7 @@ Write `pyproject.toml`: scikit-build-core backend, pybind11 build dependency, pa
 
 Before tagging v0.1.0, verify each item:
 
-- [ ] Install wheel into the unmodified flux env → `import pysmesh` passes VTK check → `examples/box_bl.py` runs to completion
+- [ ] Install wheel into the unmodified host application's env → `import pysmesh` passes VTK check → `examples/box_bl.py` runs to completion
 - [ ] `conda list --explicit` diff before/after wheel install: exactly one new line (`pysmesh` pip entry) — no `occt`, no `boost`, no downgraded `vtk`/`pyside6`/`mkl`
 - [ ] All tests green in CI on `windows-latest`; wing fixture produces zero inverted prisms
 - [ ] `LICENSE` (LGPL-2.1), `NOTICE.md`, `PROVENANCE.md` complete — every patch has a source reference
@@ -282,7 +282,7 @@ Before tagging v0.1.0, verify each item:
 | Hidden link dependency drags in MED/Driver libs | B1 | B1 exit criterion forces the discovery early; stub + record in PROVENANCE |
 | VL `Compute()` API differs from the assumed signature | B0→B3 | B0 reads and vendors the header before any binding code is written |
 | OCCT static build has CMake export quirks | B1 | `BUILD_LIBRARY_TYPE=Static` is an officially supported OCCT mode; budget one extra day in B1 |
-| flux bumps VTK after a pySMESH release | B4+ | Import-time hard check fails loud; rebuild is one CI run against the new pin — no OCCT/Boost impact (static) |
+| the host application bumps VTK after a pySMESH release | B4+ | Import-time hard check fails loud; rebuild is one CI run against the new pin — no OCCT/Boost impact (static) |
 | `_core.pyd` binary size surprises (static OCCT) | B4 | Documented in README; tens of MB is the correct outcome — still smaller than shipping OCCT DLLs + transitive deps |
 
 ---

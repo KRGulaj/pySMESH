@@ -15,7 +15,7 @@ Full upstream URLs, commits, and the patch index are in [PROVENANCE.md](PROVENAN
 | **MEFISTO2** `trte.c` (f2c) + **pthread** shim | LGPL-2.1 | **static** in `_core.pyd` | Source in `extern/mefisto2/`, `extern/pthread/` (via `looooo/SMESH`). |
 | **Open CASCADE Technology (OCCT) 8.0.0** | LGPL-2.1 **with the exception** | **dynamic**, DLLs **bundled into the wheel** | LGPL static-linking exception is not even relied on (OCCT is dynamic); the relinking right holds because pySMESH is fully open and rebuildable. Build recipe in PROVENANCE.md. |
 | **Boost 1.90** | BSL-1.0 | **dynamic**, DLLs **bundled into the wheel** | BSL-1.0 is permissive (notice only); this entry is the notice. |
-| **VTK 9.6.2** | BSD-3-Clause | **dynamic**, resolved from the **host** env — **never bundled** | The one runtime dependency shared with the host (flux): SMESH's SMDS is built on `vtkUnstructuredGrid`, so two VTK copies in one process is the hazard that must be avoided. The version is pinned and hard-checked at import. |
+| **VTK 9.6.2** | BSD-3-Clause | **dynamic**, resolved from the **host** env — **never bundled** | The one runtime dependency shared with the host application, for ABI connectivity: SMESH's SMDS is built on `vtkUnstructuredGrid`, so two VTK copies in one process is the hazard that must be avoided. The version is pinned and hard-checked at import. |
 | **pybind11 3.0.3** | BSD-3-Clause | header-only (compile time) | Notice only; this entry is the notice. |
 | **NumPy** | BSD-3-Clause | runtime (pip dependency) | Notice only. |
 

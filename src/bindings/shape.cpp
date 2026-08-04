@@ -41,7 +41,7 @@ py::array_t<double> vec1d(const double* data, std::size_t n) {
 }
 
 // Canonical name of a face's underlying geometry (BRepAdaptor_Surface::GetType). Feeds
-// flux's feature-recognition defeature ("remove all cylindrical holes < 3 mm" needs the
+// the host application's feature-recognition defeature ("remove all cylindrical holes < 3 mm" needs the
 // type, not just sqrt(area)). The set mirrors GeomAbs_SurfaceType exactly.
 const char* surface_type_name(GeomAbs_SurfaceType t) {
   switch (t) {
@@ -172,7 +172,7 @@ class Shape {
   }
 
   // Exact minimum distance from each of N points to the given face (BRepExtrema).
-  // Exists for flux's gmsh-tag <-> OCCT-face tie-break (Phase 2 §5). GIL released.
+  // Exists for the host application's gmsh-tag <-> OCCT-face tie-break (Phase 2 §5). GIL released.
   py::array_t<double> face_distance(int face_id, const py::object& points_obj) const {
     const TopoDS_Face face = data_->face(face_id);  // validates face_id
     Array2d points = as_2d_f64(points_obj, "points", 3);
@@ -201,7 +201,7 @@ class Shape {
 
   // Face pairs sharing an edge: (face_i, face_j, edge_id) with face_i < face_j, one row per
   // shared edge (all ids 1-based, matching faces()/edges()). Built from the edge->face
-  // ancestor map so flux can walk fillet/tangent chains and remap markers in one native call
+  // ancestor map so the host application can walk fillet/tangent chains and remap markers in one native call
   // instead of N Gmsh round-trips (report §7.1/§8.2). Degenerate edges (poles/apices) and seam
   // edges (same face both sides -> no distinct pair) contribute nothing; a non-manifold edge
   // (>2 faces) emits every unique face pair.
@@ -235,7 +235,7 @@ class Shape {
   }
 
   // Nearest face (by centroid) for each of Q query points (Q,3): 1-based face id, or -1 where
-  // the nearest face centroid is farther than tol. Collapses flux's O(F*Q) ordinal<->tag
+  // the nearest face centroid is farther than tol. Collapses the host application's O(F*Q) ordinal<->tag
   // matching loop into one native call and is the honest home for the centroid data faces()
   // already exposes (report §4.5 persistent-naming fallback, §8.2 marker remap). GIL released
   // for the numeric sweep.

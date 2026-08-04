@@ -10,7 +10,7 @@
 // convention, and PysmeshError with the rest of pysmesh. Input and output both cross the
 // boundary as raw BREP bytes (BRepTools::Read/Write), exactly like load_brep.
 //
-// Index convention (matches Shape.faces()/edges() and flux's tag composition): face/edge
+// Index convention (matches Shape.faces()/edges() and the host application's tag composition): face/edge
 // ids are 1-based TopExp::MapShapes ordinals with a per-kind type filter. face_map[i-1] is
 // the new 1-based face id that original face id i survives as, or -1 if it was removed;
 // edge_map is the same for edges. Merged originals share one survivor (many-to-one).

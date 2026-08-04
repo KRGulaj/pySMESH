@@ -1,6 +1,6 @@
 """Type stubs for the pySMESH native ``_core`` extension (Tier-1).
 
-flux runs ``mypy --strict`` against these; keep signatures exact.
+The host application runs ``mypy --strict`` against these; keep signatures exact.
 """
 
 from __future__ import annotations

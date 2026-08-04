@@ -12,7 +12,7 @@ license = "LGPL-2.1-only"
 authors = [{ name = "Kajetan R. Gulaj" }]
 keywords = ["mesh", "cfd", "viscous-layers", "smesh", "occt", "prism"]
 # NOTE: VTK is intentionally NOT a dependency. It is resolved at runtime from the host
-# environment (e.g. flux's VTK 9.6.2) and its version is hard-checked at import; bundling or
+# environment and its version is hard-checked at import; bundling or
 # pip-installing a second VTK would defeat the whole purpose of pySMESH.
 dependencies = ["numpy>=1.26"]
 classifiers = [

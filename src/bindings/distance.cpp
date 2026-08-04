@@ -17,7 +17,7 @@
 //     same free-boundary criterion as ShapeAnalysis_FreeBounds, but returns original edge
 //     ids directly rather than reconstructed wires.
 //
-// Index convention (matches Shape.edges() and flux's tag composition): edge ids are 1-based
+// Index convention (matches Shape.edges() and the host application's tag composition): edge ids are 1-based
 // TopExp::MapShapes ordinals with a per-kind (edges-only) type filter.
 
 #include <cstdint>

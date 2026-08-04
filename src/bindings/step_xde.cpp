@@ -80,7 +80,7 @@ std::string to_ascii(const TCollection_ExtendedString& ext) {
 }
 
 // Metres per one unit of the given STEP length-unit name (case-insensitive). OCCT's FileUnits
-// reports the file's declared unit; this maps it to the SI factor flux multiplies coordinates
+// reports the file's declared unit; this maps it to the SI factor the host application multiplies coordinates
 // by. Returns 0.0 for an unrecognised unit (caller falls back to millimetres).
 double metres_per_unit(const TCollection_AsciiString& raw) {
   TCollection_AsciiString n = raw;

@@ -1,4 +1,4 @@
-name: flux-pysmesh-build
+name: pysmesh-build
 # =============================================================================
 # pySMESH — build-only conda environment (conda-forge ONLY)
 #
@@ -10,7 +10,7 @@ channels:
   - nodefaults
 dependencies:
   - python=3.13
-  # --- THE PIN — exact match to flux's vtk ---
+  # --- THE PIN — exact match to the host application's vtk, for connectivity ---
   - vtk=9.6.2
   # --- static-linked into _core.pyd: free to resolve ---
   - occt=8.0.0
