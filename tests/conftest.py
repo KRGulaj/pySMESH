@@ -39,6 +39,23 @@ def fixtures_dir() -> Path:
 
 
 @pytest.fixture(scope="session")
+def industrial_step_brep() -> bytes:
+    """BREP bytes of the real industrial STEP assembly, or a skip when it is absent.
+
+    ``test_files/`` is git-ignored — the file is far too large to commit — so every test
+    that needs a production-scale model skips on CI and on a fresh checkout instead of
+    failing. Session-scoped because reading the STEP costs several seconds.
+    """
+    path = Path(__file__).resolve().parent.parent / "test_files" / "perrinn_f1.step"
+    if not path.is_file():
+        pytest.skip(f"industrial STEP fixture not present: {path}")
+
+    import pysmesh
+
+    return pysmesh.read_step_xde(str(path)).brep
+
+
+@pytest.fixture(scope="session")
 def box_brep(fixtures_dir: Path) -> bytes:
     """Raw BREP bytes for the unit box fixture (see ``generate_fixtures.cpp``)."""
     return (fixtures_dir / "box.brep").read_bytes()

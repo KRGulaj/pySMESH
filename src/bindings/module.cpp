@@ -19,6 +19,7 @@ void bind_offset(py::module_& m);
 void bind_distance(py::module_& m);
 void bind_classify(py::module_& m);
 void bind_step_xde(py::module_& m);
+void bind_session(py::module_& m);
 
 namespace {
 
@@ -64,4 +65,5 @@ PYBIND11_MODULE(_core, m) {
   pysmesh::bind_distance(m);
   pysmesh::bind_classify(m);
   pysmesh::bind_step_xde(m);
+  pysmesh::bind_session(m);
 }

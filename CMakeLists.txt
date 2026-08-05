@@ -124,7 +124,8 @@ pybind11_add_module(_core
     src/bindings/offset.cpp
     src/bindings/distance.cpp
     src/bindings/classify.cpp
-    src/bindings/step_xde.cpp)
+    src/bindings/step_xde.cpp
+    src/bindings/session.cpp)
 target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
 # TKShHealing (ShapeUpgrade_UnifySameDomain), TKOffset (BRepOffsetAPI_*), and TKTopAlgo
 # (BRepClass3d_SolidClassifier) are pulled in transitively via the SMESH static libs, but the

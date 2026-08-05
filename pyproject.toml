@@ -29,6 +29,13 @@ classifiers = [
 Homepage = "https://github.com/KRGulaj/pySMESH"
 Source = "https://github.com/KRGulaj/pySMESH"
 
+[tool.pytest.ini_options]
+# Registered so `-m "not slow"` works locally without an unknown-marker warning. CI runs the
+# whole suite; the slow tests need the git-ignored test_files/ assembly and skip without it.
+markers = [
+    "slow: needs the production-scale STEP assembly; minutes, not seconds",
+]
+
 [tool.scikit-build]
 minimum-version = "0.10"
 cmake.version = ">=3.27"
