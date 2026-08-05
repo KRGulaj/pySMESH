@@ -106,6 +106,27 @@ and logged (not silently ignored). MinGW/gcc-only patches are no-ops under our M
 | `smesh/StdMeshers_ViscousLayers.patch` | L | ViscousLayers build fixups (the payload algorithm). |
 | `smesh/mefisto.patch` | L | Wire the f2c `trte.c` into the MEFISTO2 target. |
 
+### Source edits made by pySMESH itself
+
+Three deltas are applied by `prepare.py::_apply_tag_fixups` as exact string replacements rather
+than as patch files, because they target our `V9_9_0` **tag** and no upstream patch exists for
+them. They are modifications of already-vendored SALOME source (still LGPL-2.1), not new
+vendoring:
+
+| Edit | File | What / why |
+|---|---|---|
+| `gethostname` include | `Kernel/Basics/Basics_Utils.cxx` | Needs `<winsock2.h>` on Windows. |
+| `SMESH_TLink` default ctor + hasher functor | `SMESH/SMESHUtils/SMESH_TypeDefs.hxx` | OCCT 8.0 `NCollection` maps require a default-constructible key and call the hasher as a functor. |
+| **`ElementsOnShape` out-of-line copy ctor / `operator=`** | `SMESH/Controls/SMESH_ControlsDef.hxx` + `SMESH_Controls.cxx` | `ElementsOnShape` holds `std::vector<Classifier>` with `Classifier` only forward-declared in the header. MSVC eagerly instantiates the *implicit* copy operations against the incomplete type (**C2036**) in every TU that copies the predicate. Declaring them in the header and defining them (`= default`) in `SMESH_Controls.cxx`, where `Classifier` is complete, confines the `vector<Classifier>` instantiation to that one TU. |
+
+**The `ElementsOnShape` edit is what un-blocks the five `StdMeshers` translation units** that
+v1 excluded from the build (`Cartesian_3D`, `Import_1D2D`, `MaxElementVolume`,
+`MaxElementArea`, `PolyhedronPerSolid_3D`). The fix was added for `StdMeshers_ViscousLayers`,
+which hit the same C2036; the exclusion list in `cmake/SMESH/CMakeLists.txt` outlived it. As
+of v2 ground-zero work all five compile unmodified, `StdMeshers` is built from a plain
+`file(GLOB)` with no exclusions, and the whole `StdMeshers` family is exercised by the
+`v2_probe` target (`tests/probe`). No further upstream source change is required.
+
 ## OCCT toolkits linked & bundled
 
 `_core.pyd` links OCCT dynamically; the wheel bundles (at delvewheel-repair time) every OCCT
@@ -115,6 +136,14 @@ exception (see [NOTICE.md](NOTICE.md)); this records *which* toolkits and *why*,
 - Modelling / meshing (present since B2–B3): TKernel, TKMath, TKG2d, TKG3d, TKGeomBase,
   TKGeomAlgo, TKBRep, TKTopAlgo, TKPrim, TKBO, TKMesh, TKShHealing, TKOffset, plus the
   DataExchange STL toolkit **TKDESTL** (the OCCT-8.0 rename of TKSTL — see the patch note above).
+  TKBool and TKFillet were already bundled transitively (TKOffset pulls `BRepFill_PipeShell`
+  from TKBool; TKShHealing/TKTopAlgo pull TKFillet).
+- **v2 Tier-C modelling (added by the ground-zero pass)**: **TKPrim**, **TKBO** and
+  **TKFillet** are now linked *explicitly* by `_core` rather than relied on transitively, and
+  **TKFeat** (`BRepFeat_SplitShape`), **TKHelix** (`HelixBRep_BuilderHelix`) and **TKDEIGES**
+  (`IGES{,CAF}Control_Reader`) are added to the link line. TKBool is deliberately *not* linked:
+  OCCT 8.0 keeps `BRepAlgoAPI_*` in TKBO, and TKBool carries only the legacy `TopOpeBRep`
+  engine plus `BRepFill_*`, both reached through facades in other toolkits.
 - **DataExchange + OCAF/XDE (added for B1 `read_step_xde`/`write_step_xde`)**: **TKDESTEP**
   (STEP reader/writer; OCCT-8.0 rename of TKSTEP, mirroring the TKSTL→TKDESTL precedent),
   **TKXCAF**/**TKVCAF** (XDE shape/colour/name tools), **TKLCAF**/**TKCAF**/**TKCDF** (OCAF

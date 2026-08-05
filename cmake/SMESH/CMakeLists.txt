@@ -85,14 +85,13 @@ target_link_libraries(SMESH PUBLIC
 target_include_directories(SMESH PUBLIC ${SMESH_SRC_DIR}/SMESH)
 
 # --- StdMeshers : standard hypotheses/algorithms, incl. ViscousLayers ---
+# Complete since v2: Cartesian_3D, Import_1D2D, MaxElementVolume, MaxElementArea and
+# PolyhedronPerSolid_3D were excluded in v1 for MSVC C2036 —
+# SMESH::Controls::ElementsOnShape's *implicit* copy/move instantiated against an incomplete
+# nested Classifier. prepare.py's `_apply_tag_fixups` now declares those copy operations
+# out-of-line (defined in SMESH_Controls.cxx, where Classifier is complete), which is the fix
+# the v1 build comment named; with it the five translation units compile unmodified.
 file(GLOB StdMeshers_SRC ${SMESH_SRC_DIR}/StdMeshers/*.cxx)
-# These 5 algorithms instantiate SMESH::Controls::ElementsOnShape's implicit copy/move with
-# an incomplete nested Classifier type (MSVC C2036). None are on the ViscousLayers path
-# (StdMeshers_ViscousLayers.cxx compiles cleanly), so they are excluded from the Tier-1
-# build. Revisit with an out-of-line copy/move on ElementsOnShape if any are ever needed.
-foreach(_excl Cartesian_3D Import_1D2D MaxElementVolume MaxElementArea PolyhedronPerSolid_3D)
-    list(REMOVE_ITEM StdMeshers_SRC "${SMESH_SRC_DIR}/StdMeshers/StdMeshers_${_excl}.cxx")
-endforeach()
 add_library(StdMeshers STATIC ${StdMeshers_SRC})
 target_link_libraries(StdMeshers PUBLIC SMESH MEFISTO2 TKOffset TKExpress ${Boost_LIBRARIES})
 target_include_directories(StdMeshers PUBLIC ${SMESH_SRC_DIR}/StdMeshers)

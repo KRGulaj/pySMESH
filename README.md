@@ -253,6 +253,22 @@ pytest tests/ -q
 python examples/box_bl.py
 ```
 
+### Capability probe
+
+`tests/probe` is a build-verification target: it constructs and runs every OCCT class and
+SMESH capability the 2.0 requirements name, against the exact link set `_core` uses. Run it
+after any change to the OCCT toolkit list, the patch series, or the `StdMeshers` source set —
+it turns a missing toolkit, a dead-stripped SMESH object or an un-built translation unit into
+a named failure instead of a surprise mid-binding.
+
+```bash
+cmake -G Ninja -S . -B build -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_PREFIX_PATH=<env>/Library -DPython_EXECUTABLE=<env>/python.exe \
+      -DPYSMESH_BUILD_V2_PROBE=ON
+cmake --build build --target v2_probe
+./build/v2_probe.exe                             # exit 0 == every probed capability is usable
+```
+
 ## Design principles
 
 - **Narrow API.** No general meshing-API parity with SALOME — every exported function exists

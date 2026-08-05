@@ -135,6 +135,19 @@ target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
 #   TKLCAF/TKCAF/TKCDF  OCAF document core (TDocStd_Document, TDataStd_*, application/session)
 #   TKXSBase  data-exchange base (Interface_Static, IFSelect_ReturnStatus)
 # All are dynamic (bundled at wheel-repair time); see NOTICE.md / PROVENANCE.md.
+#
+# v2 adds the modelling toolkits the Tier-C operation surface needs. Verified against
+# the pinned occt=8.0.0 by tests/probe (PYSMESH_BUILD_V2_PROBE):
+#   TKPrim    BRepPrimAPI_Make{Box,Cylinder,Cone,Sphere,Torus,Wedge,Prism,Revol}
+#   TKBO      BRepAlgoAPI_{Fuse,Cut,Common,Section,Splitter,Defeaturing}, BOPAlgo_*
+#   TKFillet  BRepFilletAPI_Make{Fillet,Chamfer}
+#   TKFeat    BRepFeat_SplitShape (the imprint alternative to the splitter)
+#   TKHelix   HelixBRep_BuilderHelix / HelixGeom_* — TKHelix's actual API surface
+#   TKDEIGES  IGES{,CAF}Control_Reader
+# TKPrim and TKBO were already in the closure transitively (SMESHUtils links TKPrim, Geom
+# links TKBO); they are listed explicitly because the bindings call them directly. TKBool is
+# deliberately NOT listed: OCCT 8.0 keeps BRepAlgoAPI_* in TKBO, and TKBool holds the legacy
+# TopOpeBRep engine plus BRepFill_PipeShell, which is reached only through TKOffset's facade.
 target_link_libraries(_core PRIVATE
     ${SMESH_STATIC_LIBS} Geom Kernel
     VTK::CommonCore VTK::CommonDataModel VTK::FiltersVerdict
@@ -142,6 +155,12 @@ target_link_libraries(_core PRIVATE
     TKMesh
     TKOffset
     TKTopAlgo
+    TKPrim
+    TKBO
+    TKFillet
+    TKFeat
+    TKHelix
+    TKDEIGES
     TKDESTEP
     TKXCAF
     TKVCAF
@@ -206,6 +225,26 @@ install(FILES ${PKG_DIR}/_build_info.py DESTINATION pysmesh)
 # Fixture generator (dev-only, OFF by default). Emits tests/fixtures/*.brep via OCCT.
 # Not part of the wheel and not run by CI — the committed *.brep files are the fixtures.
 # --------------------------------------------------------------------------- #
+option(PYSMESH_BUILD_V2_PROBE "Build the v2 capability probe (tests/probe)" OFF)
+if(PYSMESH_BUILD_V2_PROBE)
+    # Build-verification target for the v2 Tier-C modelling surface. It constructs and
+    # runs every OCCT class and SMESH capability that surface needs, against the exact
+    # link set _core uses, so that a missing toolkit / dead-stripped SMESH object / un-built
+    # translation unit fails HERE rather than half-way through writing the v2 bindings.
+    # Not part of the wheel; run it from CI and after any change to the link set or patches.
+    add_executable(v2_probe
+        tests/probe/probe_main.cpp
+        tests/probe/probe_occt.cpp
+        tests/probe/probe_smesh.cpp)
+    target_include_directories(v2_probe PRIVATE ${CMAKE_SOURCE_DIR}/tests/probe)
+    target_link_libraries(v2_probe PRIVATE
+        ${SMESH_STATIC_LIBS} Geom Kernel
+        VTK::CommonCore VTK::CommonDataModel VTK::FiltersVerdict
+        TKShHealing TKMesh TKOffset TKTopAlgo TKPrim TKBO TKFillet TKFeat TKHelix
+        TKDEIGES TKDESTEP TKXCAF TKVCAF TKLCAF TKCAF TKCDF TKXSBase
+        ${Boost_LIBRARIES})
+endif()
+
 option(PYSMESH_BUILD_FIXTURE_GEN "Build the OCCT BREP fixture generator" OFF)
 if(PYSMESH_BUILD_FIXTURE_GEN)
     add_executable(generate_fixtures tests/fixtures/generate_fixtures.cpp)

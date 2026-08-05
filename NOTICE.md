@@ -36,6 +36,19 @@ feature** (`read_step_xde` / `write_step_xde`) adds the OCCT **DataExchange + OC
 These DLLs are added to the wheel (a few MB) with no new licence text; the relinking right holds
 as for all OCCT toolkits because pySMESH is fully open and rebuildable from this repo.
 
+The **v2 (Tier C) modelling surface** links three further toolkits. All are the same OCCT
+component and licence, and none is a new obligation:
+
+- **TKFeat** — `BRepFeat_SplitShape` (imprint), the feature-operation toolkit.
+- **TKHelix** — `HelixBRep_BuilderHelix` / `HelixGeom_*` (helical wire construction).
+- **TKDEIGES** — `IGESControl_Reader` / `IGESCAFControl_Reader` (IGES import).
+
+These three appear in the wheel only once a binding actually calls them: MSVC records an
+import entry per *used* symbol, so a toolkit named in the link line but not referenced by
+`src/bindings` contributes no DLL dependency and delvewheel does not vendor it.
+`ci/check_wheel.py` therefore asserts the toolkits that ship today and names these three as
+the ones to add alongside their bindings.
+
 ## Why VTK is treated differently from OCCT/Boost
 
 OCCT and Boost are private implementation details of `_core.pyd`: their DLLs are bundled
