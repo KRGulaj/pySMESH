@@ -24,11 +24,11 @@ _B1_XDE_TOOLKITS = ("tkdestep", "tkxcaf", "tklcaf", "tkcaf", "tkcdf", "tkxsbase"
 # Scope note, so this list is read correctly: MSVC records an import entry only for a DLL
 # whose import library actually contributed a symbol, so a toolkit named in CMake but not yet
 # *called* by ``src/bindings`` produces no dependency and delvewheel does not vendor it.
-# TKFeat (BRepFeat_SplitShape), TKHelix (HelixBRep_BuilderHelix) and TKDEIGES
-# (IGES{,CAF}Control_Reader) are therefore linked and proven usable by ``tests/probe``
-# (the ``v2_probe`` target) but are deliberately absent from this list until a binding calls
-# them — add each stem here in the same commit that adds its binding. Reachability of the
-# whole v2 surface is gated by ``v2_probe``; this file gates only what actually ships.
+# TKFeat (BRepFeat_SplitShape) and TKDEIGES (IGES{,CAF}Control_Reader) are therefore linked
+# and proven usable by ``tests/probe`` (the ``v2_probe`` target) but are deliberately absent
+# from this list until a binding calls them — add each stem here in the same commit that adds
+# its binding. Reachability of the whole v2 surface is gated by ``v2_probe``; this file gates
+# only what actually ships.
 _V2_MODELLING_TOOLKITS = (
     "tkprim",  # BRepPrimAPI_Make* (primitives)
     "tkbo",  # BRepAlgoAPI_* / BOPAlgo_* (booleans, defeature/split)
@@ -38,6 +38,7 @@ _V2_MODELLING_TOOLKITS = (
     "tkshhealing",  # ShapeFix_* / ShapeUpgrade_*
     "tktopalgo",  # BRepBuilderAPI_*, BRepGProp, BRepCheck_Analyzer
     "tkmesh",  # BRepMesh_IncrementalMesh
+    "tkhelix",  # HelixBRep_BuilderHelix, called by Session.add_helix
 )
 
 

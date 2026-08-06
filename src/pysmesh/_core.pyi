@@ -83,6 +83,147 @@ class Session:
         ay: float,
         az: float,
     ) -> dict[str, object]: ...
+    def add_cone(
+        self,
+        radius1: float,
+        radius2: float,
+        height: float,
+        ox: float,
+        oy: float,
+        oz: float,
+        ax: float,
+        ay: float,
+        az: float,
+        angle_rad: float,
+    ) -> dict[str, object]: ...
+    def add_sphere(
+        self,
+        radius: float,
+        cx: float,
+        cy: float,
+        cz: float,
+        ax: float,
+        ay: float,
+        az: float,
+        angle_rad: float,
+    ) -> dict[str, object]: ...
+    def add_torus(
+        self,
+        radius1: float,
+        radius2: float,
+        ox: float,
+        oy: float,
+        oz: float,
+        ax: float,
+        ay: float,
+        az: float,
+        angle_rad: float,
+    ) -> dict[str, object]: ...
+    def add_wedge(
+        self,
+        dx: float,
+        dy: float,
+        dz: float,
+        ltx: float,
+        ox: float,
+        oy: float,
+        oz: float,
+        ax: float,
+        ay: float,
+        az: float,
+    ) -> dict[str, object]: ...
+    def add_line(
+        self, x1: float, y1: float, z1: float, x2: float, y2: float, z2: float
+    ) -> dict[str, object]: ...
+    def add_arc(
+        self,
+        x1: float,
+        y1: float,
+        z1: float,
+        x2: float,
+        y2: float,
+        z2: float,
+        x3: float,
+        y3: float,
+        z3: float,
+    ) -> dict[str, object]: ...
+    def add_circle(
+        self,
+        cx: float,
+        cy: float,
+        cz: float,
+        nx: float,
+        ny: float,
+        nz: float,
+        radius: float,
+    ) -> dict[str, object]: ...
+    def add_polyline(
+        self, points: NDArray[np.float64], closed: bool
+    ) -> dict[str, object]: ...
+    def add_spline(
+        self,
+        points: NDArray[np.float64],
+        degree_min: int,
+        degree_max: int,
+        tol: float,
+    ) -> dict[str, object]: ...
+    def add_bspline(
+        self, poles: NDArray[np.float64], degree: int
+    ) -> dict[str, object]: ...
+    def add_helix(
+        self,
+        cx: float,
+        cy: float,
+        cz: float,
+        ax: float,
+        ay: float,
+        az: float,
+        diameter: float,
+        pitch: float,
+        turns: float,
+        tol: float,
+    ) -> dict[str, object]: ...
+    def add_rectangle(
+        self,
+        ox: float,
+        oy: float,
+        oz: float,
+        nx: float,
+        ny: float,
+        nz: float,
+        dx: float,
+        dy: float,
+    ) -> dict[str, object]: ...
+    def make_wire(self, edge_ids: list[int]) -> dict[str, object]: ...
+    def make_face(self, edge_ids: list[int]) -> dict[str, object]: ...
+    def make_filling(self, edge_ids: list[int]) -> dict[str, object]: ...
+    def extrude(
+        self, entity_ids: list[int], vx: float, vy: float, vz: float
+    ) -> dict[str, object]: ...
+    def revolve(
+        self,
+        entity_ids: list[int],
+        ox: float,
+        oy: float,
+        oz: float,
+        ax: float,
+        ay: float,
+        az: float,
+        angle_rad: float,
+    ) -> dict[str, object]: ...
+    def pipe(
+        self, spine_ids: list[int], profile_ids: list[int]
+    ) -> dict[str, object]: ...
+    def pipe_shell(
+        self,
+        spine_ids: list[int],
+        profile_ids: list[int],
+        frenet: bool,
+        solid: bool,
+    ) -> dict[str, object]: ...
+    def thru_sections(
+        self, sections: list[list[int]], solid: bool, ruled: bool
+    ) -> dict[str, object]: ...
     def fuse(
         self,
         targets: list[int],
@@ -90,7 +231,47 @@ class Session:
         fuzzy: float,
         parallel: bool,
     ) -> dict[str, object]: ...
-    def fillet(self, edge_ids: list[int], radius: float) -> dict[str, object]: ...
+    def cut(
+        self,
+        targets: list[int],
+        tools: list[int],
+        fuzzy: float,
+        parallel: bool,
+    ) -> dict[str, object]: ...
+    def common(
+        self,
+        targets: list[int],
+        tools: list[int],
+        fuzzy: float,
+        parallel: bool,
+    ) -> dict[str, object]: ...
+    def section(
+        self,
+        targets: list[int],
+        tools: list[int],
+        fuzzy: float,
+        parallel: bool,
+    ) -> dict[str, object]: ...
+    def split(
+        self,
+        targets: list[int],
+        tools: list[int],
+        fuzzy: float,
+        parallel: bool,
+    ) -> dict[str, object]: ...
+    def fragment(
+        self, entity_ids: list[int], fuzzy: float, parallel: bool
+    ) -> dict[str, object]: ...
+    def fillet(
+        self, edge_ids: list[int], radius: float, radius_end: float | None
+    ) -> dict[str, object]: ...
+    def chamfer(
+        self,
+        edge_ids: list[int],
+        distance: float,
+        distance_end: float | None,
+        face_id: int | None,
+    ) -> dict[str, object]: ...
     def translate(
         self, dx: float, dy: float, dz: float, entity_ids: list[int] | None
     ) -> dict[str, object]: ...
@@ -105,6 +286,27 @@ class Session:
         angle_rad: float,
         entity_ids: list[int] | None,
     ) -> dict[str, object]: ...
+    def mirror(
+        self,
+        px: float,
+        py: float,
+        pz: float,
+        nx: float,
+        ny: float,
+        nz: float,
+        entity_ids: list[int] | None,
+    ) -> dict[str, object]: ...
+    def scale(
+        self,
+        sx: float,
+        sy: float,
+        sz: float,
+        cx: float,
+        cy: float,
+        cz: float,
+        entity_ids: list[int] | None,
+    ) -> dict[str, object]: ...
+    def copy(self, entity_ids: list[int]) -> dict[str, object]: ...
     def snapshot(self) -> int: ...
     def restore(self, mark: int) -> None: ...
     def discard_snapshot(self, mark: int) -> None: ...
