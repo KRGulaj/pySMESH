@@ -119,9 +119,9 @@ py::dict Session::copy(const std::vector<EntityId>& entity_ids) {
 // traversal orders agree) and asserts TShape identity on every pair, so a refactor that
 // silently turned this into a copying transform would fail here rather than quietly
 // orphaning every id in the model.
-// Which bodies an entity-scoped transform acts on: all of them, or the ones owning the
-// named entities.
-std::vector<TopoDS_Shape> Session::moving_bodies(
+// Which bodies a scoped operation acts on: all of them, or the ones owning the named
+// entities. Shared by the transforms and by the healing family.
+std::vector<TopoDS_Shape> Session::scoped_bodies(
       const std::optional<std::vector<EntityId>>& entity_ids, const char* op_name) const {
   const std::vector<TopoDS_Shape> bodies = root_bodies(state_.root);
   if (!entity_ids.has_value()) {
@@ -175,7 +175,7 @@ py::dict Session::rebuild_moved(const std::optional<std::vector<EntityId>>& enti
                          const char* op_name,
                          const std::function<void(const TopoDS_Shape&, TopoDS_Shape&,
                                                   Handle(BRepTools_History)&)>& run) {
-  const std::vector<TopoDS_Shape> moving = moving_bodies(entity_ids, op_name);
+  const std::vector<TopoDS_Shape> moving = scoped_bodies(entity_ids, op_name);
   const std::vector<TopoDS_Shape> staying = bodies_excluding(moving);
   const TopoDS_Shape input = make_root(moving);
 
@@ -202,7 +202,7 @@ py::dict Session::relocate(const gp_Trsf& trsf,
                     const std::optional<std::vector<EntityId>>& entity_ids,
                     const char* op_name) {
   const std::vector<TopoDS_Shape> bodies = root_bodies(state_.root);
-  const std::vector<TopoDS_Shape> moving = moving_bodies(entity_ids, op_name);
+  const std::vector<TopoDS_Shape> moving = scoped_bodies(entity_ids, op_name);
 
   const TopLoc_Location move(trsf);
   std::vector<TopoDS_Shape> new_bodies;

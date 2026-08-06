@@ -66,15 +66,7 @@ std::int64_t Session::snapshot_count() const {
 // ---- queries ---------------------------------------------------------------------- //
 
 py::array_t<std::int64_t> Session::entities(const std::string& kind) const {
-  const TopAbs_ShapeEnum k = kind_from_name(kind);
-  std::vector<EntityId> ids;
-  for (const auto& [id, rec] : state_.registry->alive) {
-    if (rec.kind == k) {
-      ids.push_back(id);
-    }
-  }
-  std::sort(ids.begin(), ids.end());
-  return ids_array(ids);
+  return ids_array(ids_of_kind(kind_from_name(kind)));
 }
 
 std::string Session::entity_kind(EntityId id) const {
@@ -97,14 +89,7 @@ std::int64_t Session::shape_count(EntityId id) const {
 // per-entity objects because the calling convention has to stay vectorised for a model
 // with tens of thousands of faces.
 py::dict Session::entity_table(const std::string& kind) const {
-  const TopAbs_ShapeEnum k = kind_from_name(kind);
-  std::vector<EntityId> ids;
-  for (const auto& [id, rec] : state_.registry->alive) {
-    if (rec.kind == k) {
-      ids.push_back(id);
-    }
-  }
-  std::sort(ids.begin(), ids.end());
+  const std::vector<EntityId> ids = ids_of_kind(kind_from_name(kind));
 
   const auto n = static_cast<py::ssize_t>(ids.size());
   py::array_t<double> measure(n);
@@ -507,29 +492,35 @@ py::dict Session::add_bodies(const TopoDS_Shape& added, const char* op_name) {
 // information.
 py::dict Session::commit(const std::vector<TopoDS_Shape>& bodies,
                   const Handle(BRepTools_History) & history, const char* op_name,
-                  const TopoDS_Shape& built) {
+                  const TopoDS_Shape& built, Validation mode) {
   Handle(BRepTools_History) hist = history;
   if (tear_next_history_) {
     hist.Nullify();
     tear_next_history_ = false;
   }
 
-  if (validate_ && !built.IsNull()) {
+  // Report mode checks even when the session runs unvalidated, because there the verdict is
+  // the operation's answer rather than a safety net: a heal that cannot say whether it
+  // succeeded has not done its job.
+  std::optional<bool> verdict;
+  if (!built.IsNull() && (validate_ || mode == Validation::Report)) {
     bool valid = true;
     {
       py::gil_scoped_release release;
       valid = BRepCheck_Analyzer(built).IsValid();
     }
-    if (!valid) {
+    if (!valid && mode == Validation::Strict) {
       throw PysmeshError(std::string("Session.") + op_name +
                          ": the operation produced an invalid shape "
                          "(BRepCheck_Analyzer reported errors); the session is unchanged.");
     }
+    verdict = valid;
   }
   const TopoDS_Shape new_root = make_root(bodies);
 
   const std::int64_t op_index = next_op_;
-  const Delta delta = carry_registry(new_root, hist, op_index);
+  Delta delta = carry_registry(new_root, hist, op_index);
+  delta.valid = verdict;
 
   state_.root = new_root;
   state_.op_index = op_index;
@@ -732,6 +723,95 @@ py::dict Session::delta_dict(const Delta& d, std::int64_t op_index, const char* 
   out["modified"] = ids_array(d.modified);
   out["split"] = ids_array(d.split);
   out["merged"] = ids_array(d.merged);
+  out["valid"] = d.valid.has_value() ? py::cast(*d.valid) : py::none();
+  return out;
+}
+
+std::vector<std::pair<double, double>> Session::pairs_of(const char* op, const char* argname,
+                                                         const PointArray& a) {
+  if (a.ndim() != 2 || a.shape(1) != 2) {
+    throw PysmeshError(std::string("Session.") + op + ": " + argname +
+                       " must be an (N, 2) array of parameter pairs.");
+  }
+  const double* p = a.data();
+  std::vector<std::pair<double, double>> out;
+  out.reserve(static_cast<std::size_t>(a.shape(0)));
+  for (py::ssize_t i = 0; i < a.shape(0); ++i) {
+    out.emplace_back(p[2 * i + 0], p[2 * i + 1]);
+  }
+  return out;
+}
+
+std::vector<EntityId> Session::ids_of_kind(TopAbs_ShapeEnum kind) const {
+  std::vector<EntityId> ids;
+  for (const auto& [id, rec] : state_.registry->alive) {
+    if (rec.kind == kind) {
+      ids.push_back(id);
+    }
+  }
+  std::sort(ids.begin(), ids.end());
+  return ids;
+}
+
+// The faces the named entities denote, for the operations that rework a body around them.
+// A split entity is rejected rather than silently contributing several faces.
+std::vector<TopoDS_Shape> Session::faces_of(const char* op,
+                                            const std::vector<EntityId>& ids) const {
+  if (ids.empty()) {
+    throw PysmeshError(std::string("Session.") + op +
+                       ": face_ids must name at least one face.");
+  }
+  std::vector<TopoDS_Shape> out;
+  for (EntityId id : ids) {
+    const EntityRecord& rec = require_alive(op, id);
+    if (rec.kind != TopAbs_FACE) {
+      throw PysmeshError(std::string("Session.") + op + ": entity " + std::to_string(id) +
+                         " is a " + kind_name(rec.kind) + ", not a FACE.");
+    }
+    if (rec.shapes.size() != 1) {
+      throw PysmeshError(std::string("Session.") + op + ": entity " + std::to_string(id) +
+                         " denotes " + std::to_string(rec.shapes.size()) +
+                         " faces (it was split); name one of them instead.");
+    }
+    append_unique(out, rec.shapes.front());
+  }
+  return out;
+}
+
+TopoDS_Face Session::sole_face(const char* op, EntityId id) const {
+  const EntityRecord& rec = require_alive(op, id);
+  if (rec.kind != TopAbs_FACE) {
+    throw PysmeshError(std::string("Session.") + op + ": entity " + std::to_string(id) +
+                       " is a " + kind_name(rec.kind) + ", not a FACE.");
+  }
+  if (rec.shapes.size() != 1) {
+    throw PysmeshError(std::string("Session.") + op + ": face " + std::to_string(id) +
+                       " was split and denotes several faces; name one of them.");
+  }
+  return TopoDS::Face(rec.shapes.front());
+}
+
+// Bodies for a boolean-family operand list, whatever dimension they are.
+std::vector<TopoDS_Shape> Session::operand_bodies(const char* op, const char* argname,
+                                                  const std::vector<EntityId>& ids) const {
+  if (ids.empty()) {
+    throw PysmeshError(std::string("Session.") + op + ": " + argname +
+                       " must name at least one entity.");
+  }
+  const ShapeKeyed<TopoDS_Shape> owners = body_of_subshape();
+  std::vector<TopoDS_Shape> out;
+  for (EntityId id : ids) {
+    const EntityRecord& rec = require_alive(op, id);
+    for (const TopoDS_Shape& s : rec.shapes) {
+      const auto it = owners.find(s);
+      if (it == owners.end()) {
+        throw PysmeshError(std::string("Session.") + op + ": " + argname + " entity " +
+                           std::to_string(id) +
+                           " does not belong to any body of the session root.");
+      }
+      append_unique(out, it->second);
+    }
+  }
   return out;
 }
 

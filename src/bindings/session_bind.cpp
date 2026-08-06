@@ -88,6 +88,34 @@ void bind_session(py::module_& m) {
       .def("scale", &Session::scale, py::arg("sx"), py::arg("sy"), py::arg("sz"),
            py::arg("cx"), py::arg("cy"), py::arg("cz"), py::arg("entity_ids"))
       .def("copy", &Session::copy, py::arg("entity_ids"))
+      .def("heal", &Session::heal, py::arg("entity_ids"), py::arg("precision"),
+           py::arg("min_tolerance"), py::arg("max_tolerance"))
+      .def("sew", &Session::sew, py::arg("entity_ids"), py::arg("tolerance"),
+           py::arg("make_solid"), py::arg("non_manifold"))
+      .def("remove_internal_wires", &Session::remove_internal_wires, py::arg("entity_ids"),
+           py::arg("min_area"), py::arg("remove_faces"))
+      .def("defeature", &Session::defeature, py::arg("face_ids"), py::arg("parallel"))
+      .def("imprint", &Session::imprint, py::arg("targets"), py::arg("tools"),
+           py::arg("fuzzy"), py::arg("parallel"), py::arg("glue"))
+      .def("remove", &Session::remove, py::arg("entity_ids"))
+      .def("unify_same_domain", &Session::unify_same_domain, py::arg("entity_ids"),
+           py::arg("unify_faces"), py::arg("unify_edges"), py::arg("concat_bsplines"),
+           py::arg("linear_tol"), py::arg("angular_tol_rad"))
+      .def("entity_types", &Session::entity_types, py::arg("kind"))
+      .def("bounding_boxes", &Session::bounding_boxes, py::arg("kind"))
+      .def("mass_properties", &Session::mass_properties, py::arg("entity_ids"))
+      .def("face_parameter_bounds", &Session::face_parameter_bounds, py::arg("face_ids"))
+      .def("edge_parameter_bounds", &Session::edge_parameter_bounds, py::arg("edge_ids"))
+      .def("adjacency", &Session::adjacency, py::arg("kind"), py::arg("other_kind"))
+      .def("surface_at", &Session::surface_at, py::arg("face_id"), py::arg("uv"))
+      .def("curvature", &Session::curvature, py::arg("face_ids"), py::arg("samples"))
+      .def("project_on_face", &Session::project_on_face, py::arg("face_id"),
+           py::arg("points"))
+      .def("entities_in_box", &Session::entities_in_box, py::arg("kind"), py::arg("xmin"),
+           py::arg("ymin"), py::arg("zmin"), py::arg("xmax"), py::arg("ymax"),
+           py::arg("zmax"), py::arg("strict"))
+      .def("contains", &Session::contains, py::arg("solid_ids"), py::arg("points"),
+           py::arg("tol"))
       .def("snapshot", &Session::snapshot)
       .def("restore", &Session::restore, py::arg("mark"))
       .def("discard_snapshot", &Session::discard_snapshot, py::arg("mark"))

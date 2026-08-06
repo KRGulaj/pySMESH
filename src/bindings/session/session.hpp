@@ -27,11 +27,13 @@
 // carrying every operation stops being navigable long before it stops compiling:
 //
 //   session_core.cpp       — the id registry and its carry across an operation, snapshots,
-//                            queries, names, and the resolution helpers the other units
-//                            share;
+//                            state queries, names, and the resolution helpers the other
+//                            units share;
 //   session_construct.cpp  — primitives, curve and surface construction, sweeps;
 //   session_boolean.cpp    — the boolean family, fillet and chamfer;
 //   session_transform.cpp  — the relocation and rebuild transform paths, and copy;
+//   session_heal.cpp       — healing, sewing, defeaturing, imprinting and removal;
+//   session_query.cpp      — the geometric query surface over the live shape;
 //   session_bind.cpp       — the pybind11 surface.
 //
 // What is defined here rather than in a translation unit is defined here for one of three
@@ -58,9 +60,13 @@
 #include <utility>
 #include <vector>
 
+#include <BOPAlgo_GlueEnum.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_BuilderAlgo.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_Defeaturing.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepAlgoAPI_Section.hxx>
 #include <BRepAlgoAPI_Splitter.hxx>
@@ -70,12 +76,16 @@
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepGProp.hxx>
+#include <BRepLProp_SLProps.hxx>
 #include <BRepOffsetAPI_MakeFilling.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
@@ -90,24 +100,38 @@
 #include <BRepPrimAPI_MakeWedge.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_History.hxx>
+#include <BRepTools_ReShape.hxx>
+#include <BRepTopAdaptor_FClass2d.hxx>
 #include <BRep_Builder.hxx>
+#include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
 #include <GC_MakeArcOfCircle.hxx>
 #include <GProp_GProps.hxx>
 #include <GeomAPI_PointsToBSpline.hxx>
+#include <GeomAPI_ProjectPointOnSurf.hxx>
+#include <GeomAbs_CurveType.hxx>
 #include <GeomAbs_Shape.hxx>
+#include <GeomAbs_SurfaceType.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_Circle.hxx>
+#include <Geom_Surface.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <HelixBRep_BuilderHelix.hxx>
 #include <NCollection_Array1.hxx>
 #include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_IndexedMap.hxx>
 #include <NCollection_List.hxx>
+#include <Precision.hxx>
+#include <ShapeBuild_ReShape.hxx>
+#include <ShapeFix_Shape.hxx>
+#include <ShapeUpgrade_RemoveInternalWires.hxx>
+#include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <Standard_Handle.hxx>
 #include <TopAbs.hxx>
 #include <TopAbs_ShapeEnum.hxx>
+#include <TopAbs_State.hxx>
 #include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
@@ -116,6 +140,7 @@
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Iterator.hxx>
 #include <TopoDS_Shape.hxx>
+#include <TopoDS_Shell.hxx>
 #include <TopoDS_Wire.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
@@ -126,6 +151,7 @@
 #include <gp_Mat.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_Pnt2d.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
 #include <gp_XYZ.hxx>
@@ -216,6 +242,16 @@ struct SessionState {
   std::int64_t op_index = 0;
 };
 
+// What an operation does about a result BRepCheck_Analyzer rejects.
+//
+// Strict is the rule for every operation that assumes valid input: an invalid result is a
+// failure, the session is left untouched, and the caller is told. The healing family is the
+// deliberate exception — its input is invalid by assumption, so refusing to commit a shape
+// that is *less* invalid than before would make the operations useless on exactly the shapes
+// they exist for. Those report the verdict on the delta instead of raising, and the caller
+// decides whether the improvement was enough.
+enum class Validation : int { Strict = 0, Report = 1 };
+
 // Provenance of one issued id. Append-only and session-global: it survives a restore, so a
 // name minted on a branch that was later abandoned still resolves — to Lost, which is the
 // honest answer, rather than to whatever now occupies that position.
@@ -233,6 +269,10 @@ struct Delta {
   std::vector<EntityId> modified;  // survived, but denotes different shape(s) than before
   std::vector<EntityId> split;     // survived, now denotes more than one shape
   std::vector<EntityId> merged;    // survived onto a shape that other ids also denote
+
+  // The BRepCheck_Analyzer verdict on the shape this operation built, when one was taken.
+  // Empty means the operation built nothing to check, or the session runs unvalidated.
+  std::optional<bool> valid;
 };
 
 // ---- Small helpers ------------------------------------------------------------------ //
@@ -388,6 +428,75 @@ inline gp_Dir direction_of(const char* op, const char* argname, double x, double
 inline gp_Ax2 frame_of(const char* op, double ox, double oy, double oz, double ax,
                        double ay, double az) {
   return gp_Ax2(gp_Pnt(ox, oy, oz), direction_of(op, "axis", ax, ay, az));
+}
+
+// Canonical name of a face's underlying geometry. The spelling matches the stateless API's
+// FaceInfo.surface_type exactly, so a consumer that switches from one to the other does not
+// have to re-learn the vocabulary.
+inline const char* surface_type_name(GeomAbs_SurfaceType t) {
+  switch (t) {
+    case GeomAbs_Plane:
+      return "Plane";
+    case GeomAbs_Cylinder:
+      return "Cylinder";
+    case GeomAbs_Cone:
+      return "Cone";
+    case GeomAbs_Sphere:
+      return "Sphere";
+    case GeomAbs_Torus:
+      return "Torus";
+    case GeomAbs_BezierSurface:
+      return "Bezier";
+    case GeomAbs_BSplineSurface:
+      return "BSpline";
+    case GeomAbs_SurfaceOfRevolution:
+      return "Revolution";
+    case GeomAbs_SurfaceOfExtrusion:
+      return "Extrusion";
+    case GeomAbs_OffsetSurface:
+      return "Offset";
+    case GeomAbs_OtherSurface:
+      return "Other";
+  }
+  return "Other";
+}
+
+inline const char* curve_type_name(GeomAbs_CurveType t) {
+  switch (t) {
+    case GeomAbs_Line:
+      return "Line";
+    case GeomAbs_Circle:
+      return "Circle";
+    case GeomAbs_Ellipse:
+      return "Ellipse";
+    case GeomAbs_Hyperbola:
+      return "Hyperbola";
+    case GeomAbs_Parabola:
+      return "Parabola";
+    case GeomAbs_BezierCurve:
+      return "Bezier";
+    case GeomAbs_BSplineCurve:
+      return "BSpline";
+    case GeomAbs_OffsetCurve:
+      return "Offset";
+    case GeomAbs_OtherCurve:
+      return "Other";
+  }
+  return "Other";
+}
+
+// The larger of the two principal curvatures in magnitude.
+//
+// This is not a convenience wrapper. MaxCurvature() and MinCurvature() return the SIGNED
+// principal curvatures ordered by value, not by magnitude: on an outward-normal cylinder of
+// radius R they are (0, -1/R), so MaxCurvature() alone reads 0 and a curvature map keyed on
+// it reports every cylinder as flat. They are also non-const and mutate cached derivative
+// state, so each must be read exactly once into a local — reading either twice in one
+// expression does not give the same answer as reading it once.
+inline double peak_curvature(BRepLProp_SLProps& props) {
+  const double k1 = props.MaxCurvature();
+  const double k2 = props.MinCurvature();
+  return std::max(std::abs(k1), std::abs(k2));
 }
 
 // A rigid transform applied with Copy = false only changes a shape's Location, which is what
@@ -592,6 +701,57 @@ class Session {
   // still in the model; every entity of every copy is a new identity.
   py::dict copy(const std::vector<EntityId>& entity_ids);
 
+  // ---- healing, defeaturing, imprinting, removal -------------------------------------- //
+  //
+  // These are the operations whose input is allowed to be broken, and that shapes their
+  // contract: the healing three report the BRepCheck_Analyzer verdict on their result
+  // instead of refusing to commit it, because a shape that is less invalid than before is
+  // progress the caller must be allowed to keep. See Validation.
+  //
+  // All of them are scoped. ShapeFix_Shape and friends work on whatever shape they are
+  // given, so restricting a heal to chosen bodies costs nothing and buys the property a
+  // global healing pass cannot offer: every entity outside the scope is left byte-identical,
+  // not merely unchanged-looking.
+
+  py::dict heal(const std::optional<std::vector<EntityId>>& entity_ids, double precision,
+                double min_tolerance, double max_tolerance);
+
+  // Sew the named bodies into shells, optionally closing a watertight shell into a solid.
+  // This is the "faces to solid" path, and the repair for a model whose faces coincide at
+  // their boundaries without sharing edges.
+  py::dict sew(const std::vector<EntityId>& entity_ids, double tolerance, bool make_solid,
+               bool non_manifold);
+
+  // Drop internal wires (holes) smaller than min_area, and optionally the faces they leave
+  // behind. This is small-feature defeaturing on the face level, where `defeature` is the
+  // solid-level operation.
+  py::dict remove_internal_wires(const std::optional<std::vector<EntityId>>& entity_ids,
+                                 double min_area, bool remove_faces);
+
+  // Remove the features the named faces belong to, closing the gaps with the surrounding
+  // geometry. OCCT removes a *complete* feature: naming part of one leaves the shape
+  // untouched while still reporting success, so this verifies every named face actually went
+  // away and fails loud naming the ones that did not.
+  py::dict defeature(const std::vector<EntityId>& face_ids, bool parallel);
+
+  // Imprint the tools onto the targets: the targets are split where the tools meet them, so
+  // the interface exists as real topology on both sides. Unlike `split` the tools may be of
+  // any dimension, and like `split` they are not consumed.
+  py::dict imprint(const std::vector<EntityId>& targets, const std::vector<EntityId>& tools,
+                   double fuzzy, bool parallel, int glue);
+
+  // Drop the bodies owning the named entities from the model. Every id inside them dies and
+  // is never reused; an id on a sub-shape a surviving body also owns stays alive, because
+  // that shape is still in the model.
+  py::dict remove(const std::vector<EntityId>& entity_ids);
+
+  // Merge faces and edges that lie on one underlying surface or curve. This is the
+  // duplicate-removal pass after a boolean, and the stateless API's unify_same_domain with
+  // the session's identity carried across it.
+  py::dict unify_same_domain(const std::optional<std::vector<EntityId>>& entity_ids,
+                             bool unify_faces, bool unify_edges, bool concat_bsplines,
+                             double linear_tol, double angular_tol_rad);
+
   // ---- snapshot / restore ----------------------------------------------------------- //
 
   // Guarded like an operation, not like a query. These mutate the session, and an operation
@@ -625,6 +785,70 @@ class Session {
   py::dict entity_table(const std::string& kind) const;
 
   py::bytes brep() const;
+
+  // ---- geometric queries -------------------------------------------------------------- //
+  //
+  // Read-only, so unlike an operation they take no OpGuard: the invariant that state_ is
+  // only ever written while the GIL is held makes a query safe without one. A query that
+  // releases the GIL copies the shapes it needs first, so it reads handles it owns rather
+  // than the session's live state.
+
+  // The underlying geometry type of every live entity of one kind: a surface type for faces,
+  // a curve type for edges. Bulk, because a caller classifying a model wants every answer.
+  py::dict entity_types(const std::string& kind) const;
+
+  // Bounding boxes alone, for every live entity of one kind. Deliberately separate from
+  // entity_table: BRepBndLib is orders of magnitude cheaper than BRepGProp's mass
+  // properties, and a caller culling or spatially indexing a model needs only the box.
+  py::dict bounding_boxes(const std::string& kind) const;
+
+  // Measure and centre of mass of the named entities. Each is computed by its own kind —
+  // volume for a solid, area for a face, length for an edge — never by walking a parent:
+  // BRepGProp::LinearProperties on a SOLID visits every edge once per owning face and
+  // silently doubles the answer.
+  py::dict mass_properties(const std::vector<EntityId>& entity_ids) const;
+
+  // (N, 4) umin, umax, vmin, vmax for the named faces.
+  py::array_t<double> face_parameter_bounds(const std::vector<EntityId>& face_ids) const;
+
+  // (N, 2) first, last parameter for the named edges.
+  py::array_t<double> edge_parameter_bounds(const std::vector<EntityId>& edge_ids) const;
+
+  // Pairs relating every live entity of one kind to the entities of another kind it touches.
+  // Which direction the relation runs is decided by the two kinds: towards a lower dimension
+  // it is the boundary (a face's edges), towards a higher one it is the ancestors (an edge's
+  // faces). One method rather than two, because they are one relation read from either end.
+  py::dict adjacency(const std::string& kind, const std::string& other_kind) const;
+
+  // Positions and outward normals of a face at the given parameters. The normal is flipped
+  // for a REVERSED face, so it points out of the body rather than along the surface's own
+  // parametrisation — which is the direction every consumer of a normal actually means.
+  py::dict surface_at(EntityId face_id, const PointArray& uv) const;
+
+  // Peak absolute curvature of each named face, over an n x n grid of its parameter domain.
+  //
+  // The grid is the point of the operation. Sampling one point at a face's parametric centre
+  // — which is what the API this replaces does — is exact only for a face of constant
+  // curvature and arbitrarily wrong otherwise: on a cone tapering 4 to 1 the centre sample
+  // reads 0.358 against a true peak of 0.894. Samples land at cell centres, so no sample
+  // sits on a seam or a pole, and a sample outside the face's own trimming is discarded
+  // rather than reporting a curvature the face does not have.
+  py::dict curvature(const std::vector<EntityId>& face_ids, int samples) const;
+
+  // Closest point on a face's underlying surface to each of the given points.
+  py::dict project_on_face(EntityId face_id, const PointArray& points) const;
+
+  // Live entities of one kind whose bounding box meets the given box. `strict` asks for
+  // containment (the entity's box inside the query box) rather than overlap.
+  py::array_t<std::int64_t> entities_in_box(const std::string& kind, double xmin, double ymin,
+                                            double zmin, double xmax, double ymax,
+                                            double zmax, bool strict) const;
+
+  // (S, P) mask: whether each point is strictly inside each named solid. Strictly inside
+  // only — a point within tol of the boundary is ON, and reads False, which is the right
+  // contract for seeding a volume.
+  py::array_t<bool> contains(const std::vector<EntityId>& solid_ids, const PointArray& points,
+                             double tol) const;
 
   // ---- names ------------------------------------------------------------------------ //
 
@@ -763,6 +987,35 @@ class Session {
   NCollection_List<TopoDS_Shape> solids_of(const char* op, const char* argname,
                                            const std::vector<EntityId>& ids) const;
 
+  // ---- healing helpers -------------------------------------------------------------- //
+
+  // The rework counterpart of rebuild_moved: hand the scoped bodies to a repair algorithm as
+  // one compound, take back a shape and a history, and commit the result reporting its
+  // validity rather than refusing it. The bodies outside the scope are never passed to the
+  // algorithm at all, which is what makes "everything out of scope stays byte-identical" a
+  // property of the construction rather than a hope about the algorithm.
+  py::dict rework(const std::optional<std::vector<EntityId>>& entity_ids, const char* op_name,
+                  const std::function<void(const TopoDS_Shape&, TopoDS_Shape&,
+                                           Handle(BRepTools_History)&)>& run);
+
+  // The faces the named entities denote, for the operations that rework a body around them.
+  // A split entity is rejected rather than silently contributing several faces.
+  std::vector<TopoDS_Shape> faces_of(const char* op, const std::vector<EntityId>& ids) const;
+
+  // The single face a query names.
+  TopoDS_Face sole_face(const char* op, EntityId id) const;
+
+  // Bodies for a boolean-family operand list, whatever dimension they are. The boolean
+  // family proper takes SOLID ids (solids_of); imprinting deliberately does not, because a
+  // face or a wire is a legitimate imprinting tool.
+  std::vector<TopoDS_Shape> operand_bodies(const char* op, const char* argname,
+                                           const std::vector<EntityId>& ids) const;
+
+  // ---- query helpers ---------------------------------------------------------------- //
+
+  // Live entity ids of one kind, ascending. The order every bulk query's rows are in.
+  std::vector<EntityId> ids_of_kind(TopAbs_ShapeEnum kind) const;
+
   // ---- root bookkeeping ------------------------------------------------------------- //
 
   std::vector<TopoDS_Shape> bodies_excluding(const std::vector<TopoDS_Shape>& drop) const;
@@ -831,7 +1084,7 @@ class Session {
   // information.
   py::dict commit(const std::vector<TopoDS_Shape>& bodies,
                   const Handle(BRepTools_History) & history, const char* op_name,
-                  const TopoDS_Shape& built);
+                  const TopoDS_Shape& built, Validation mode = Validation::Strict);
 
   Delta carry_registry(const TopoDS_Shape& new_root, const Handle(BRepTools_History) & hist,
                        std::int64_t op_index);
@@ -847,9 +1100,12 @@ class Session {
   // traversal orders agree) and asserts TShape identity on every pair, so a refactor that
   // silently turned this into a copying transform would fail here rather than quietly
   // orphaning every id in the model.
-  // Which bodies an entity-scoped transform acts on: all of them, or the ones owning the
-  // named entities.
-  std::vector<TopoDS_Shape> moving_bodies(
+  // Which bodies a scoped operation acts on: all of them, or the ones owning the named
+  // entities. Shared by the transforms and by the healing family, because "move these" and
+  // "repair these" select their subject the same way — and carry the same hazard, that a
+  // body sharing sub-shapes with one left alone cannot be reworked on its own without
+  // tearing the model.
+  std::vector<TopoDS_Shape> scoped_bodies(
       const std::optional<std::vector<EntityId>>& entity_ids, const char* op_name) const;
 
   // A transform OCCT can express as a change of Location alone takes the relocation path,
@@ -881,6 +1137,10 @@ class Session {
   static void finalise(Delta& d);
 
   static py::dict delta_dict(const Delta& d, std::int64_t op_index, const char* op_name);
+
+  // A (N, 2) parameter-pair argument, forcecast so a list of tuples is accepted.
+  static std::vector<std::pair<double, double>> pairs_of(const char* op, const char* argname,
+                                                         const PointArray& a);
 
   // ---- state ------------------------------------------------------------------------ //
 

@@ -90,6 +90,31 @@ _DEFAULT_BSPLINE_DEGREE: Final[int] = 3
 _ORIGIN: Final[Vec3] = (0.0, 0.0, 0.0)
 _Z_AXIS: Final[Vec3] = (0.0, 0.0, 1.0)
 
+# Healing tolerances, matching OCCT's own ``ShapeFix_Shape`` defaults. ``precision`` is the
+# accuracy the repair works to; ``max_tolerance`` is how far it may loosen a sub-shape's
+# tolerance to close a gap, and is the parameter that decides how dirty an import it can take.
+_DEFAULT_HEAL_PRECISION: Final[float] = 1.0e-7
+_DEFAULT_HEAL_MIN_TOLERANCE: Final[float] = 1.0e-7
+_DEFAULT_HEAL_MAX_TOLERANCE: Final[float] = 1.0e-3
+
+# Sewing tolerance: the largest gap between two face boundaries that still counts as a shared
+# edge. Deliberately tighter than the healing maximum, because sewing across a real gap
+# invents topology rather than repairing it.
+_DEFAULT_SEW_TOLERANCE: Final[float] = 1.0e-6
+
+# Same-domain merge tolerances, matching the stateless ``unify_same_domain``. An angular
+# tolerance of zero asks for the tightest angle OCCT admits.
+_DEFAULT_LINEAR_TOL: Final[float] = 1.0e-7
+_DEFAULT_ANGULAR_TOL_DEG: Final[float] = 0.0
+
+# Boundary tolerance for point classification: OCCT's ``Precision::Confusion``.
+_DEFAULT_CLASSIFY_TOL: Final[float] = 1.0e-7
+
+# Curvature sampling density per parametric direction. 8 x 8 is enough to find the peak of a
+# smoothly varying face to a few percent; a face whose curvature varies sharply wants more,
+# and the cost is quadratic in this number.
+_DEFAULT_CURVATURE_SAMPLES: Final[int] = 8
+
 
 class EntityKind(StrEnum):
     """The shape kinds a session tracks.
@@ -115,6 +140,24 @@ class NameRole(IntEnum):
 
     CONSTRUCTED = 0
     GENERATED = 1
+
+
+class GlueMode(IntEnum):
+    """How much OCCT may assume about how two operands meet, in :meth:`Session.imprint`.
+
+    Gluing skips the intersection step for operands the caller declares only *touch*. It is a
+    large speed-up on an assembly of coincident-faced parts, and silently wrong on operands
+    that genuinely interpenetrate — so it is off unless asked for.
+
+    Attributes:
+        OFF: Full intersection. Always correct; the default.
+        PARTIAL: The operands coincide over part of their boundaries and nowhere else.
+        FULL: The operands coincide over whole faces.
+    """
+
+    OFF = 0
+    PARTIAL = 1
+    FULL = 2
 
 
 class ResolutionStatus(StrEnum):
@@ -213,6 +256,18 @@ class HistoryDelta:
         modified: Ids that survived but now denote different shapes than before.
         split: Ids that survived and now denote more than one shape.
         merged: Ids that survived onto a shape that other ids also denote.
+        valid: OCCT's ``BRepCheck_Analyzer`` verdict on the shape this operation built.
+
+            ``None`` means no verdict was taken — the operation built nothing to check
+            (:meth:`Session.remove`, the transforms), or the session was constructed with
+            ``validate=False``.
+
+            Every operation but the healing family *raises* rather than committing an
+            invalid result, so for those this is ``True`` whenever it is not ``None``. The
+            healing family reports instead, because its input is invalid by assumption and
+            refusing to commit a shape that is less invalid than before would make those
+            operations useless on exactly the shapes they exist for. There, ``False`` is the
+            answer to act on, not an error.
     """
 
     op_index: int
@@ -222,6 +277,7 @@ class HistoryDelta:
     modified: NDArray[np.int64]
     split: NDArray[np.int64]
     merged: NDArray[np.int64]
+    valid: bool | None
 
 
 @dataclass(frozen=True)
@@ -251,6 +307,136 @@ class EntityTable:
     shape_count: NDArray[np.int64]
 
 
+@dataclass(frozen=True)
+class TypeTable:
+    """Underlying geometry type of every live entity of one kind.
+
+    Attributes:
+        kind: The entity kind this table covers.
+        ids: (N,) int64, ascending.
+        types: One name per row — a surface type for faces (``"Plane"``, ``"Cylinder"``,
+            ``"Cone"``, ``"Sphere"``, ``"Torus"``, ``"Bezier"``, ``"BSpline"``,
+            ``"Revolution"``, ``"Extrusion"``, ``"Offset"``, ``"Other"``), a curve type for
+            edges (``"Line"``, ``"Circle"``, ``"Ellipse"``, ``"Hyperbola"``, ``"Parabola"``,
+            ``"Bezier"``, ``"BSpline"``, ``"Offset"``, ``"Other"``), and the kind's own name
+            for solids and vertices. The spelling matches :attr:`FaceInfo.surface_type` from
+            the stateless API exactly.
+    """
+
+    kind: EntityKind
+    ids: NDArray[np.int64]
+    types: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class BoundsTable:
+    """Bounding box of every live entity of one kind.
+
+    Deliberately separate from :class:`EntityTable`: a bounding box costs a fraction of a
+    mass property, and a caller culling or spatially indexing a model needs only the box.
+
+    Attributes:
+        kind: The entity kind this table covers.
+        ids: (N,) int64, ascending.
+        bbox: (N, 6) float64 — xmin, ymin, zmin, xmax, ymax, zmax, covering every shape a
+            split entity denotes.
+    """
+
+    kind: EntityKind
+    ids: NDArray[np.int64]
+    bbox: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class MassTable:
+    """Measure and centre of mass of named entities, in the order they were named.
+
+    Attributes:
+        ids: (N,) int64, as given.
+        measure: (N,) float64 — volume for a solid, area for a face, length for an edge,
+            0.0 for a vertex. Summed over every shape a split entity denotes.
+        centroid: (N, 3) float64, measure-weighted over a split entity's shapes.
+    """
+
+    ids: NDArray[np.int64]
+    measure: NDArray[np.float64]
+    centroid: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class AdjacencyPairs:
+    """Which entities of one kind touch which entities of another.
+
+    Row ``i`` states that ``ids[i]`` is adjacent to ``related[i]``. An entity appears once
+    per neighbour, so the arrays are longer than either entity list.
+
+    Attributes:
+        kind: The kind the rows are keyed by.
+        other_kind: The kind the rows point at.
+        ids: (M,) int64.
+        related: (M,) int64.
+    """
+
+    kind: EntityKind
+    other_kind: EntityKind
+    ids: NDArray[np.int64]
+    related: NDArray[np.int64]
+
+
+@dataclass(frozen=True)
+class SurfaceSample:
+    """Positions and outward normals of one face at requested parameters.
+
+    Attributes:
+        points: (N, 3) float64 — the surface point at each ``(u, v)``.
+        normals: (N, 3) float64 — the unit normal, pointing **out of** the body. Zero where
+            ``defined`` is False.
+        defined: (N,) bool — whether a normal exists at that parameter. It does not at a
+            degeneracy: a cone's apex, a sphere's pole.
+    """
+
+    points: NDArray[np.float64]
+    normals: NDArray[np.float64]
+    defined: NDArray[np.bool_]
+
+
+@dataclass(frozen=True)
+class CurvatureTable:
+    """Peak absolute curvature of named faces, and where on each face it occurs.
+
+    Attributes:
+        ids: (N,) int64, as given.
+        k_max: (N,) float64 — the largest ``max(|k1|, |k2|)`` found over the sample grid.
+            0.0 where ``samples_used`` is 0.
+        uv: (N, 2) float64 — the parameters of the sample that produced ``k_max``.
+        xyz: (N, 3) float64 — that sample's position in model space.
+        samples_used: (N,) int64 — how many grid points were inside the face's trimming *and*
+            had a defined curvature. Below ``samples**2`` for a trimmed face; 0 means the
+            face answered nowhere, and ``k_max`` is then not a measurement.
+    """
+
+    ids: NDArray[np.int64]
+    k_max: NDArray[np.float64]
+    uv: NDArray[np.float64]
+    xyz: NDArray[np.float64]
+    samples_used: NDArray[np.int64]
+
+
+@dataclass(frozen=True)
+class Projection:
+    """Closest point on one face's surface to each query point.
+
+    Attributes:
+        points: (N, 3) float64 — the closest point.
+        uv: (N, 2) float64 — its surface parameters.
+        distance: (N,) float64 — the distance from the query point.
+    """
+
+    points: NDArray[np.float64]
+    uv: NDArray[np.float64]
+    distance: NDArray[np.float64]
+
+
 def _delta(raw: dict[str, object]) -> HistoryDelta:
     """Wrap a raw ``_core`` delta dict in its frozen dataclass."""
     return HistoryDelta(
@@ -261,6 +447,7 @@ def _delta(raw: dict[str, object]) -> HistoryDelta:
         modified=cast("NDArray[np.int64]", raw["modified"]),
         split=cast("NDArray[np.int64]", raw["split"]),
         merged=cast("NDArray[np.int64]", raw["merged"]),
+        valid=cast("bool | None", raw["valid"]),
     )
 
 
@@ -280,6 +467,36 @@ def _points(name: str, values: Points) -> NDArray[np.float64]:
     if arr.ndim != 2 or arr.shape[1] != 3:
         raise PysmeshError(f"{name} must be an (N, 3) array of points (got {arr.shape}).")
     return arr
+
+
+def _pairs(
+    name: str, values: NDArray[np.float64] | Sequence[tuple[float, float]]
+) -> NDArray[np.float64]:
+    """Normalise a caller's parameter list to a C-contiguous (N, 2) float64 array."""
+    arr = np.ascontiguousarray(values, dtype=np.float64)
+    if arr.ndim != 2 or arr.shape[1] != 2:
+        raise PysmeshError(
+            f"{name} must be an (N, 2) array of parameter pairs (got {arr.shape})."
+        )
+    return arr
+
+
+def _surface_sample(raw: dict[str, object]) -> SurfaceSample:
+    """Wrap a raw ``_core`` surface-sample dict in its frozen dataclass."""
+    return SurfaceSample(
+        points=cast("NDArray[np.float64]", raw["points"]),
+        normals=cast("NDArray[np.float64]", raw["normals"]),
+        defined=cast("NDArray[np.bool_]", raw["defined"]),
+    )
+
+
+def _projection(raw: dict[str, object]) -> Projection:
+    """Wrap a raw ``_core`` projection dict in its frozen dataclass."""
+    return Projection(
+        points=cast("NDArray[np.float64]", raw["points"]),
+        uv=cast("NDArray[np.float64]", raw["uv"]),
+        distance=cast("NDArray[np.float64]", raw["distance"]),
+    )
 
 
 class Session:
@@ -1257,6 +1474,256 @@ class Session:
         """
         return _delta(self._s.copy(_ids(entities)))
 
+    # ---- healing, defeaturing, imprinting, removal ------------------------------------ #
+
+    def heal(
+        self,
+        entities: Sequence[EntityId] | None = None,
+        *,
+        precision: float = _DEFAULT_HEAL_PRECISION,
+        min_tolerance: float = _DEFAULT_HEAL_MIN_TOLERANCE,
+        max_tolerance: float = _DEFAULT_HEAL_MAX_TOLERANCE,
+    ) -> HistoryDelta:
+        """Repair the whole model, or the bodies owning the named entities.
+
+        Runs OCCT's ``ShapeFix_Shape``: it re-orients faces and shells, closes small gaps,
+        fixes wire order and self-intersection, and tightens or loosens sub-shape tolerances
+        to make the result consistent.
+
+        **Scope is a real guarantee, not a filter.** Bodies outside the scope are never
+        handed to the repair at all, so every entity in them stays byte-identical rather than
+        merely unchanged-looking. That is the property a global healing pass cannot offer.
+
+        Unlike every other operation, this one does **not** raise when the result fails
+        OCCT's validity check — its input is invalid by assumption, and refusing a shape that
+        is less invalid than before would make it useless on exactly the shapes it exists
+        for. Read :attr:`HistoryDelta.valid` for the verdict.
+
+        Most of what ``ShapeFix`` does preserves shape identity — a re-orientation changes a
+        flag, not the geometry — so a heal typically leaves every entity id in place.
+
+        Args:
+            entities: Entities whose owning bodies are repaired. ``None`` repairs the whole
+                model.
+            precision: The accuracy the repair works to (> 0).
+            min_tolerance: Smallest tolerance the repair may assign to a sub-shape (> 0).
+            max_tolerance: Largest tolerance it may assign (>= ``min_tolerance``). This is
+                the parameter that decides how dirty an import can be taken: raising it lets
+                the repair close bigger gaps, at the cost of a looser model.
+
+        Returns:
+            The delta, carrying the validity verdict on ``valid``.
+
+        Raises:
+            PysmeshError: On a non-positive tolerance, ``max_tolerance`` below
+                ``min_tolerance``, an empty ``entities``, a dead id, or a selection that
+                shares sub-shapes with bodies left out of the scope.
+        """
+        ids = None if entities is None else _ids(entities)
+        return _delta(self._s.heal(ids, precision, min_tolerance, max_tolerance))
+
+    def sew(
+        self,
+        entities: Sequence[EntityId],
+        *,
+        tolerance: float = _DEFAULT_SEW_TOLERANCE,
+        make_solid: bool = False,
+        non_manifold: bool = False,
+    ) -> HistoryDelta:
+        """Join the named bodies along boundaries that coincide within ``tolerance``.
+
+        This is the repair for a model whose faces meet geometrically but share no topology —
+        the usual state of a surface import — and the path from a set of faces to a solid.
+
+        Args:
+            entities: Entities whose owning bodies are sewed. At least one.
+            tolerance: Largest gap between two boundaries that still counts as shared (> 0).
+                Deliberately tight by default: sewing across a real gap invents topology
+                rather than repairing it.
+            make_solid: Close the result into a solid. Only a watertight shell bounds a
+                volume, so an open one is left as a shell and ``valid`` reports on that.
+            non_manifold: Allow more than two faces to meet at one edge. Off by default,
+                because a non-manifold result is rarely what a CAD repair wants and is
+                accepted by very little downstream.
+
+        Returns:
+            The delta, carrying the validity verdict on ``valid``.
+
+        Raises:
+            PysmeshError: On a non-positive tolerance, an empty selection, a dead id, or a
+                selection that shares sub-shapes with bodies left out of the scope.
+        """
+        return _delta(
+            self._s.sew(_ids(entities), tolerance, make_solid, non_manifold)
+        )
+
+    def remove_internal_wires(
+        self,
+        entities: Sequence[EntityId] | None = None,
+        *,
+        min_area: float,
+        remove_faces: bool = True,
+    ) -> HistoryDelta:
+        """Drop holes smaller than ``min_area`` from the faces that carry them.
+
+        Face-level defeaturing, where :meth:`defeature` is the solid-level operation: this
+        removes the *wire* bounding a small hole and heals the face over it, which is what
+        clears the fastener holes and vent slots a CFD model does not resolve.
+
+        Args:
+            entities: Entities whose owning bodies are processed. ``None`` processes the
+                whole model.
+            min_area: Holes bounding less than this area are removed (> 0). Required, not
+                defaulted: the right threshold is a property of the model's units and of what
+                the caller intends to resolve, and no default can be right for both.
+            remove_faces: Also drop the faces a removed hole leaves stranded.
+
+        Returns:
+            The delta, carrying the validity verdict on ``valid``.
+
+        Raises:
+            PysmeshError: On a non-positive ``min_area``, an empty ``entities``, a dead id,
+                or a selection that shares sub-shapes with bodies left out of the scope.
+        """
+        ids = None if entities is None else _ids(entities)
+        return _delta(self._s.remove_internal_wires(ids, min_area, remove_faces))
+
+    def unify_same_domain(
+        self,
+        entities: Sequence[EntityId] | None = None,
+        *,
+        unify_faces: bool = True,
+        unify_edges: bool = True,
+        concat_bsplines: bool = False,
+        linear_tol: float = _DEFAULT_LINEAR_TOL,
+        angular_tol_deg: float = _DEFAULT_ANGULAR_TOL_DEG,
+    ) -> HistoryDelta:
+        """Merge faces and edges that lie on one underlying surface or curve.
+
+        The clean-up pass after a boolean, which leaves a model split along seams that carry
+        no geometric meaning. This is the stateless :func:`unify_same_domain` with the
+        session's identity carried across it: merged entities keep **all** their ids, so
+        several ids come to denote one shape and every stale reference still resolves.
+
+        Args:
+            entities: Entities whose owning bodies are unified. ``None`` unifies the whole
+                model.
+            unify_faces: Merge coincident-surface faces.
+            unify_edges: Merge coincident-curve edges.
+            concat_bsplines: Also join B-spline pieces into one curve. Off by default: it
+                changes the parametrisation, which invalidates any parameter a caller holds.
+            linear_tol: Chord tolerance for deciding coplanarity (> 0).
+            angular_tol_deg: Largest connection angle that still merges, in degrees. 0.0 asks
+                for the tightest angle OCCT admits.
+
+        Returns:
+            The delta, carrying the validity verdict on ``valid``. Merged ids appear in
+            ``merged``, not in ``deleted``.
+
+        Raises:
+            PysmeshError: If both ``unify_faces`` and ``unify_edges`` are off, on a
+                non-positive ``linear_tol``, a negative ``angular_tol_deg``, an empty
+                ``entities``, or a dead id.
+        """
+        ids = None if entities is None else _ids(entities)
+        return _delta(
+            self._s.unify_same_domain(
+                ids,
+                unify_faces,
+                unify_edges,
+                concat_bsplines,
+                linear_tol,
+                math.radians(angular_tol_deg),
+            )
+        )
+
+    def defeature(
+        self, face_ids: Sequence[EntityId], *, parallel: bool = True
+    ) -> HistoryDelta:
+        """Remove the features the named faces belong to, closing the surrounding geometry.
+
+        Hand it the faces of a boss, a pocket or a hole and OCCT deletes them and extends
+        their neighbours to meet, as though the feature had never been modelled.
+
+        A feature must be named **completely**. OCCT declines an incomplete one — a blind
+        hole's cylindrical wall without the flat that caps it — and reports the refusal as a
+        *warning*, leaving its success flags set and returning the input unchanged. This
+        verifies every named face actually went away and fails loud naming the ones that did
+        not, rather than committing a no-op as a success.
+
+        Args:
+            face_ids: Faces of the features to remove. At least one, all on one body.
+            parallel: Run OCCT's internal steps in parallel.
+
+        Returns:
+            The delta for this operation.
+
+        Raises:
+            PysmeshError: If an id is dead or is not a face, if the faces straddle two
+                bodies, or if OCCT removed nothing for any named face — in which case those
+                faces' ids are carried on ``.face_ids``. No partial result is ever returned.
+        """
+        return _delta(self._s.defeature(_ids(face_ids), parallel))
+
+    def imprint(
+        self,
+        targets: Sequence[EntityId],
+        tools: Sequence[EntityId],
+        *,
+        fuzzy: float = _DEFAULT_FUZZY,
+        parallel: bool = True,
+        glue: GlueMode = GlueMode.OFF,
+    ) -> HistoryDelta:
+        """Split the targets where the tools meet them, leaving the tools in place.
+
+        Imprinting is how an interface becomes real topology on both sides — the way a
+        boundary patch, a contact region or a refinement zone is marked on a body without
+        changing its shape. Unlike :meth:`split` the tools may be of any dimension, so a
+        plane, a face or a wire is a legitimate tool.
+
+        The tools are **not** consumed. Use :meth:`remove` to get rid of one afterwards.
+
+        Args:
+            targets: Entities whose owning bodies are imprinted. At least one.
+            tools: Entities whose owning bodies do the imprinting. At least one, and disjoint
+                from ``targets``.
+            fuzzy: Additional tolerance for the operation, in model units.
+            parallel: Run OCCT's internal steps in parallel.
+            glue: What OCCT may assume about how the operands meet. See :class:`GlueMode`.
+
+        Returns:
+            The delta. A target the tools cut clean through is **split**: its id survives on
+            every piece and its name resolves as :attr:`ResolutionStatus.AMBIGUOUS`.
+
+        Raises:
+            PysmeshError: On an empty operand list, a dead id, a body named on both sides, a
+                negative ``fuzzy``, or an operation OCCT reports as failed.
+        """
+        return _delta(
+            self._s.imprint(_ids(targets), _ids(tools), fuzzy, parallel, int(glue))
+        )
+
+    def remove(self, entities: Sequence[EntityId]) -> HistoryDelta:
+        """Drop the bodies owning the named entities from the model.
+
+        Every id inside a removed body dies and is never reused, so a stale reference
+        resolves to :attr:`ResolutionStatus.LOST` rather than to whatever now occupies that
+        position. An id on a sub-shape that a surviving body also owns stays **alive**,
+        because that shape is still in the model.
+
+        Args:
+            entities: Entities whose owning bodies are removed. At least one.
+
+        Returns:
+            The delta; ``deleted`` holds every id that died and ``valid`` is ``None``,
+            because a removal builds no shape to check.
+
+        Raises:
+            PysmeshError: On an empty selection, a dead id, or entities that belong to no
+                body of the model.
+        """
+        return _delta(self._s.remove(_ids(entities)))
+
     # ---- snapshot / restore ---------------------------------------------------------- #
 
     def snapshot(self) -> SnapshotMark:
@@ -1394,6 +1861,282 @@ class Session:
             The root compound as BREP bytes.
         """
         return self._s.brep()
+
+    # ---- geometric queries ------------------------------------------------------------ #
+
+    def entity_types(self, kind: EntityKind) -> TypeTable:
+        """Underlying geometry type of every live entity of one kind.
+
+        Args:
+            kind: The entity kind to classify.
+
+        Returns:
+            Ids and one type name per id. Faces get a surface type, edges a curve type; a
+            solid or vertex gets its own kind's name, because neither has a distinct
+            underlying geometry.
+        """
+        raw = self._s.entity_types(str(kind))
+        return TypeTable(
+            kind=kind,
+            ids=cast("NDArray[np.int64]", raw["ids"]),
+            types=tuple(cast("list[str]", raw["types"])),
+        )
+
+    def bounding_boxes(self, kind: EntityKind) -> BoundsTable:
+        """Bounding box of every live entity of one kind.
+
+        The cheap bulk query. :meth:`entity_table` also returns boxes, but pays for mass
+        properties to do it — on a large assembly that is seconds rather than milliseconds.
+        Use this one for culling, spatial indexing and picking.
+
+        Args:
+            kind: The entity kind to bound.
+
+        Returns:
+            Ids and their boxes, ascending by id.
+        """
+        raw = self._s.bounding_boxes(str(kind))
+        return BoundsTable(
+            kind=kind,
+            ids=cast("NDArray[np.int64]", raw["ids"]),
+            bbox=cast("NDArray[np.float64]", raw["bbox"]),
+        )
+
+    def mass_properties(self, entities: Sequence[EntityId]) -> MassTable:
+        """Measure and centre of mass of the named entities.
+
+        Each entity is measured by its own kind — volume for a solid, area for a face, length
+        for an edge — never by walking a parent. That distinction matters: OCCT's linear
+        properties of a *solid* visit every edge once per owning face, so a total edge length
+        taken that way comes out doubled.
+
+        Args:
+            entities: Entity ids, of any kinds.
+
+        Returns:
+            The measures and centroids, in the order the entities were named.
+
+        Raises:
+            PysmeshError: If an id was never issued, or is dead.
+        """
+        raw = self._s.mass_properties(_ids(entities))
+        return MassTable(
+            ids=cast("NDArray[np.int64]", raw["ids"]),
+            measure=cast("NDArray[np.float64]", raw["measure"]),
+            centroid=cast("NDArray[np.float64]", raw["centroid"]),
+        )
+
+    def face_parameter_bounds(
+        self, face_ids: Sequence[EntityId]
+    ) -> NDArray[np.float64]:
+        """Parameter domain of the named faces.
+
+        Args:
+            face_ids: Face entity ids. Each must denote exactly one face.
+
+        Returns:
+            (N, 4) float64 — umin, umax, vmin, vmax, in the order named.
+
+        Raises:
+            PysmeshError: If an id is dead, is not a face, or was split.
+        """
+        return self._s.face_parameter_bounds(_ids(face_ids))
+
+    def edge_parameter_bounds(
+        self, edge_ids: Sequence[EntityId]
+    ) -> NDArray[np.float64]:
+        """Parameter range of the named edges.
+
+        Args:
+            edge_ids: Edge entity ids. Each must denote exactly one edge.
+
+        Returns:
+            (N, 2) float64 — first, last parameter, in the order named.
+
+        Raises:
+            PysmeshError: If an id is dead, is not an edge, or was split.
+        """
+        return self._s.edge_parameter_bounds(_ids(edge_ids))
+
+    def adjacency(self, kind: EntityKind, other_kind: EntityKind) -> AdjacencyPairs:
+        """Which entities of one kind touch which entities of another.
+
+        Which way the relation runs follows from the two kinds, so one method answers both
+        questions a caller has. Towards a lower dimension it is the **boundary**:
+        ``adjacency(FACE, EDGE)`` gives each face's edges. Towards a higher one it is the
+        **ancestors**: ``adjacency(EDGE, FACE)`` gives each edge's faces. The two are the
+        same relation read from either end, and both are needed — the first to walk a body
+        down, the second to find what a picked edge belongs to.
+
+        Args:
+            kind: The kind to key the rows by.
+            other_kind: The kind to relate them to. Must differ from ``kind``.
+
+        Returns:
+            One row per (entity, neighbour) pair.
+
+        Raises:
+            PysmeshError: If the two kinds are the same.
+        """
+        raw = self._s.adjacency(str(kind), str(other_kind))
+        return AdjacencyPairs(
+            kind=kind,
+            other_kind=other_kind,
+            ids=cast("NDArray[np.int64]", raw["ids"]),
+            related=cast("NDArray[np.int64]", raw["related"]),
+        )
+
+    def surface_at(
+        self, face_id: EntityId, uv: NDArray[np.float64] | Sequence[tuple[float, float]]
+    ) -> SurfaceSample:
+        """Positions and outward normals of a face at the given parameters.
+
+        The normal points **out of the body**, not along the surface's own parametrisation:
+        a reversed face's surface normal points inward, and every consumer of a normal — a
+        boundary condition, a shading pass, an offset direction — means the outward one.
+
+        Args:
+            face_id: A face entity id denoting exactly one face.
+            uv: (N, 2) parameters. Get the valid range from
+                :meth:`face_parameter_bounds`.
+
+        Returns:
+            The points, the normals, and which of them are defined.
+
+        Raises:
+            PysmeshError: If the id is dead, is not a face, was split, or if ``uv`` is not
+                (N, 2).
+        """
+        return _surface_sample(self._s.surface_at(int(face_id), _pairs("uv", uv)))
+
+    def curvature(
+        self,
+        face_ids: Sequence[EntityId],
+        *,
+        samples: int = _DEFAULT_CURVATURE_SAMPLES,
+    ) -> CurvatureTable:
+        """Peak absolute curvature of each named face, over a grid of its parameter domain.
+
+        **The grid is the point of the operation.** Sampling one point at a face's parametric
+        centre is exact only for a face of constant curvature and arbitrarily wrong
+        otherwise: on a cone tapering from radius 4 to radius 1, the centre sample reads
+        0.358 against a true peak of 0.894. A curvature-driven sizing field built from centre
+        samples therefore under-refines every tapering, blending or varying face in the
+        model — which is exactly where refinement is needed.
+
+        Two details the result depends on. The reported value is ``max(|k1|, |k2|)``, not the
+        larger *signed* principal curvature: those are ordered by value, so on a cylinder they
+        are ``(0, -1/R)`` and the larger one is 0. And samples land at cell centres, so none
+        sits on a seam or a pole, and a sample outside the face's own trimming — inside a
+        hole, or on the cut-away part of a trimmed patch — is discarded rather than reporting
+        a curvature the face does not have.
+
+        Args:
+            face_ids: Face entity ids, each denoting exactly one face.
+            samples: Grid resolution per parametric direction (>= 1). Cost is quadratic in
+                this; ``samples=1`` is exactly the single-centre-sample behaviour, kept
+                addressable so the difference can be measured rather than argued.
+
+        Returns:
+            The peak curvature of each face and where it occurs, in the order named.
+
+        Raises:
+            PysmeshError: On an empty ``face_ids``, ``samples`` below 1, or an id that is
+                dead, is not a face, or was split.
+        """
+        raw = self._s.curvature(_ids(face_ids), samples)
+        return CurvatureTable(
+            ids=cast("NDArray[np.int64]", raw["ids"]),
+            k_max=cast("NDArray[np.float64]", raw["k_max"]),
+            uv=cast("NDArray[np.float64]", raw["uv"]),
+            xyz=cast("NDArray[np.float64]", raw["xyz"]),
+            samples_used=cast("NDArray[np.int64]", raw["samples_used"]),
+        )
+
+    def project_on_face(self, face_id: EntityId, points: Points) -> Projection:
+        """Closest point on a face's surface to each of the given points.
+
+        Projection is onto the face's **underlying surface**, not onto its trimmed boundary,
+        so the result may lie outside the face itself. That is OCCT's contract for this
+        operation and it is the right one for parameter recovery; for a distance to the
+        trimmed face, use the stateless :func:`shape_distance`.
+
+        Args:
+            face_id: A face entity id denoting exactly one face.
+            points: (N, 3) query points.
+
+        Returns:
+            The closest points, their surface parameters, and the distances.
+
+        Raises:
+            PysmeshError: If the id is dead, is not a face, was split, if ``points`` is not
+                (N, 3), or if OCCT finds no projection — which happens for a point on a
+                surface of revolution's own axis, where no nearest point is unique.
+        """
+        return _projection(
+            self._s.project_on_face(int(face_id), _points("points", points))
+        )
+
+    def entities_in_box(
+        self,
+        kind: EntityKind,
+        minimum: Vec3,
+        maximum: Vec3,
+        *,
+        strict: bool = False,
+    ) -> NDArray[np.int64]:
+        """Live entities of one kind whose bounding box meets the given box.
+
+        A bounding-box test, so it over-selects: an entity whose box overlaps but whose
+        geometry does not is returned. That is the useful contract for a broad phase — narrow
+        it with an exact test on the far smaller result.
+
+        Args:
+            kind: The entity kind to search.
+            minimum: The query box's minimum corner.
+            maximum: The query box's maximum corner. Each component must be >= ``minimum``'s.
+            strict: Require the entity's box to lie **inside** the query box, rather than
+                merely overlap it.
+
+        Returns:
+            (N,) int64 entity ids, ascending.
+
+        Raises:
+            PysmeshError: If any component of ``maximum`` is below ``minimum``'s.
+        """
+        xmin, ymin, zmin = minimum
+        xmax, ymax, zmax = maximum
+        return self._s.entities_in_box(
+            str(kind), xmin, ymin, zmin, xmax, ymax, zmax, strict
+        )
+
+    def contains(
+        self,
+        solid_ids: Sequence[EntityId],
+        points: Points,
+        *,
+        tol: float = _DEFAULT_CLASSIFY_TOL,
+    ) -> NDArray[np.bool_]:
+        """Whether each point lies strictly inside each named solid.
+
+        Strictly inside only: a point within ``tol`` of the boundary counts as *on* it and
+        reads ``False``. That is the right contract for choosing a seed point for a volume,
+        where a point on the wall is not in the volume.
+
+        Args:
+            solid_ids: Solid entity ids, each denoting exactly one solid.
+            points: (N, 3) query points.
+            tol: Half-width of the boundary band, in model units (> 0).
+
+        Returns:
+            (S, N) bool — row ``i`` answers for ``solid_ids[i]``.
+
+        Raises:
+            PysmeshError: On an empty ``solid_ids``, a non-positive ``tol``, a ``points``
+                array that is not (N, 3), or an id that is dead, is not a solid, or was
+                split.
+        """
+        return self._s.contains(_ids(solid_ids), _points("points", points), tol)
 
     # ---- names ------------------------------------------------------------------------ #
 
