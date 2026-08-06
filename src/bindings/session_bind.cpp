@@ -116,6 +116,8 @@ void bind_session(py::module_& m) {
            py::arg("zmax"), py::arg("strict"))
       .def("contains", &Session::contains, py::arg("solid_ids"), py::arg("points"),
            py::arg("tol"))
+      .def("tessellate", &Session::tessellate, py::arg("deflection"), py::arg("angle_rad"),
+           py::arg("relative"), py::arg("parallel"), py::arg("incremental"))
       .def("snapshot", &Session::snapshot)
       .def("restore", &Session::restore, py::arg("mark"))
       .def("discard_snapshot", &Session::discard_snapshot, py::arg("mark"))

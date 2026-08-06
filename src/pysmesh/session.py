@@ -115,6 +115,13 @@ _DEFAULT_CLASSIFY_TOL: Final[float] = 1.0e-7
 # and the cost is quadratic in this number.
 _DEFAULT_CURVATURE_SAMPLES: Final[int] = 8
 
+# Render-mesh quality. Chord deflection in model units, and the largest turn a single mesh
+# edge may span. These are display defaults, not analysis ones: they are chosen so a typical
+# CAD body looks smooth at screen resolution, and a caller measuring geometry from the
+# triangles should ask for far less.
+_DEFAULT_DEFLECTION: Final[float] = 0.1
+_DEFAULT_MESH_ANGLE_DEG: Final[float] = 20.0
+
 
 class EntityKind(StrEnum):
     """The shape kinds a session tracks.
@@ -435,6 +442,73 @@ class Projection:
     points: NDArray[np.float64]
     uv: NDArray[np.float64]
     distance: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class RenderMesh:
+    """Triangles, edge polylines and vertex points of the live shape, from one call.
+
+    Three properties are contract rather than implementation, because nothing in the arrays
+    states them and a consumer that builds a derived structure — a GPU buffer, a spatial
+    index, an out-of-core store — has to know:
+
+    * **The mesh is unwelded across faces.** Each face contributes its own node range. That
+      is correct for B-rep shading: a hard edge at a face seam, smooth inside a curved patch.
+    * **The two coincident nodes a shared edge produces are bitwise equal.** ``BRepMesh``
+      discretises each edge once and both adjacent faces read that one polygon, so the
+      positions agree *exactly*, not approximately. A consumer welding by exact position
+      therefore gets the seam and nothing else. Measured, not assumed.
+    * **Edge and vertex ids share the face ids' namespace.** All three are session
+      :data:`EntityId` values, so a picked edge, the faces it bounds and the solid they
+      belong to are addressable without a ``(dimension, id)`` pair.
+
+    ``nodes`` holds every face's nodes first, in ``face_id`` order, followed by the points of
+    any edge that bounds no face. Those trailing nodes carry a zero normal, because there is
+    no surface at them to take one from.
+
+    Attributes:
+        nodes: (N, 3) float64 — model-space position of every mesh node.
+        normals: (N, 3) float64 — unit normal per node, evaluated on the underlying surface
+            at the node's own parameters and flipped to point out of the body. The zero
+            vector at a degeneracy (a cone's apex, a sphere's pole) and on a free edge's
+            nodes; a caller that needs a direction there must supply its own.
+        tris: (M, 3) int32 — triangle connectivity, 0-based into ``nodes``. Wound so the
+            right-hand normal agrees with ``normals``, including on reversed faces.
+        tri_face_id: (M,) int64 — the face each triangle belongs to.
+        edge_lines: (L, 2) int32 — polyline segments as node index pairs, into the same
+            ``nodes``. Harvested from the discretisation ``BRepMesh`` has already computed,
+            so an edge on a face costs index pairs and nothing else.
+        edge_id: (L,) int64 — the edge each segment belongs to.
+        vertex_xyz: (P, 3) float64 — the position of every vertex.
+        vertex_id: (P,) int64 — the vertex each point belongs to.
+        face_id: (F,) int64 — the faces that contributed, in traversal order. A face several
+            ids denote after a merge is listed under the lowest of them; a face an id was
+            split into appears once per piece.
+        face_node_range: (F, 2) int32 — ``[start, end)`` into ``nodes`` per face. Empty for a
+            face the mesher could not triangulate, which is listed all the same so that an
+            absent face and an unmeshed one stay distinguishable.
+        face_tri_range: (F, 2) int32 — ``[start, end)`` into ``tris`` per face.
+        retriangulated: (K,) int64 — faces whose triangulation this call rebuilt.
+        changed: (J,) int64 — faces whose emitted nodes differ from the previous call's.
+            A superset of ``retriangulated``: it also contains faces that were only *moved*,
+            which keep their triangulation and still land somewhere else. This is the set a
+            consumer holding model-space data must refresh; ``retriangulated`` is the subset
+            it cannot refresh with a rigid transform.
+    """
+
+    nodes: NDArray[np.float64]
+    normals: NDArray[np.float64]
+    tris: NDArray[np.int32]
+    tri_face_id: NDArray[np.int64]
+    edge_lines: NDArray[np.int32]
+    edge_id: NDArray[np.int64]
+    vertex_xyz: NDArray[np.float64]
+    vertex_id: NDArray[np.int64]
+    face_id: NDArray[np.int64]
+    face_node_range: NDArray[np.int32]
+    face_tri_range: NDArray[np.int32]
+    retriangulated: NDArray[np.int64]
+    changed: NDArray[np.int64]
 
 
 def _delta(raw: dict[str, object]) -> HistoryDelta:
@@ -2137,6 +2211,85 @@ class Session:
                 split.
         """
         return self._s.contains(_ids(solid_ids), _points("points", points), tol)
+
+    # ---- the render mesh --------------------------------------------------------------- #
+
+    def tessellate(
+        self,
+        *,
+        deflection: float = _DEFAULT_DEFLECTION,
+        angle_deg: float = _DEFAULT_MESH_ANGLE_DEG,
+        relative: bool = False,
+        parallel: bool = True,
+        incremental: bool = True,
+    ) -> RenderMesh:
+        """Triangles, edge polylines and vertex points of the live shape, from one call.
+
+        Two things separate this from the stateless :func:`tessellate`, and both come from
+        the session owning its shape rather than re-reading it.
+
+        **The work is proportional to what changed.** ``BRepMesh`` caches its triangulation
+        on the face itself, and a session keeps its faces alive across operations, so a face
+        no operation touched is not re-triangulated. Reading a shape back from bytes produces
+        new faces with no triangulation, which is why the stateless entry point re-meshes the
+        whole model every time however little of it moved.
+
+        **The result says what changed.** :attr:`RenderMesh.changed` names the faces whose
+        nodes differ from the previous call's, and :attr:`RenderMesh.retriangulated` the
+        subset that was genuinely re-meshed rather than merely moved. A consumer holding
+        anything derived from the arrays cannot use the first property without the second
+        piece of information, and recovering it by diffing the arrays costs more than the
+        tessellation saved.
+
+        Not an operation: no ids are issued, :meth:`op_count` does not advance and the
+        topology is untouched. It does write the triangulation onto the shape, which is a
+        cache and is shared with retained states — a snapshot taken before this call and
+        restored after it sees the same geometry, and gets the cached mesh for free.
+
+        Args:
+            deflection: Largest distance a mesh edge may stray from the true geometry, in
+                model units (>= 1e-7). In relative mode, a fraction of each edge's own length.
+            angle_deg: Largest turn a single mesh edge may span, in degrees, in (0, 180).
+                Smaller values refine tightly curved geometry.
+            relative: Interpret ``deflection`` per edge, as a fraction of that edge's length,
+                rather than as an absolute distance. Per *edge*, not per model, so growing the
+                model does not invalidate what is already meshed.
+            parallel: Mesh faces on several threads. The result is the same either way.
+            incremental: Keep what is already meshed and re-triangulate only what needs it.
+                ``False`` discards every cached triangulation first and re-meshes the whole
+                model, which is what a change of quality needs — a request for a **coarser**
+                mesh than the one already computed is otherwise ignored, because OCCT will
+                not lower the quality of a triangulation it already has.
+
+        Returns:
+            The render mesh, and the set of faces whose contribution to it changed.
+
+        Raises:
+            PysmeshError: On a deflection below 1e-7 or an ``angle_deg`` outside (0, 180),
+                or if a sub-shape of the root carries no entity id.
+        """
+        if not (0.0 < angle_deg < 180.0):
+            raise PysmeshError(
+                f"Session.tessellate: angle_deg must be in (0, 180) (got {angle_deg})."
+            )
+        raw = self._s.tessellate(
+            deflection, math.radians(angle_deg), relative, parallel, incremental
+        )
+        return RenderMesh(
+            nodes=cast("NDArray[np.float64]", raw["nodes"]),
+            normals=cast("NDArray[np.float64]", raw["normals"]),
+            tris=cast("NDArray[np.int32]", raw["tris"]),
+            tri_face_id=cast("NDArray[np.int64]", raw["tri_face_id"]),
+            edge_lines=cast("NDArray[np.int32]", raw["edge_lines"]),
+            edge_id=cast("NDArray[np.int64]", raw["edge_id"]),
+            vertex_xyz=cast("NDArray[np.float64]", raw["vertex_xyz"]),
+            vertex_id=cast("NDArray[np.int64]", raw["vertex_id"]),
+            face_id=cast("NDArray[np.int64]", raw["face_id"]),
+            face_node_range=cast("NDArray[np.int32]", raw["face_node_range"]),
+            face_tri_range=cast("NDArray[np.int32]", raw["face_tri_range"]),
+            retriangulated=cast("NDArray[np.int64]", raw["retriangulated"]),
+            changed=cast("NDArray[np.int64]", raw["changed"]),
+        )
 
     # ---- names ------------------------------------------------------------------------ #
 

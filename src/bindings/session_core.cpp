@@ -753,6 +753,24 @@ std::vector<EntityId> Session::ids_of_kind(TopAbs_ShapeEnum kind) const {
   return ids;
 }
 
+// The id that labels a sub-shape of the current root. A merge leaves several ids on one
+// shape; the lowest is the label, and the others stay alive and still resolve — they just do
+// not appear in a per-shape array, which has one row to give. A shape in the root with no id
+// at all is a torn registry, so it raises rather than being skipped: a render mesh with an
+// unlabelled face would be unpickable and would look like a rendering bug rather than an
+// identity one.
+EntityId Session::label_of(const char* op, const TopoDS_Shape& s) const {
+  const auto it = state_.registry->by_shape.find(s);
+  if (it == state_.registry->by_shape.end() || it->second.empty()) {
+    throw PysmeshError(std::string("Session.") + op + ": a " +
+                       std::string(TopAbs::ShapeTypeToString(s.ShapeType())) +
+                       " of the session root carries no entity id. The registry and the "
+                       "root have diverged; this is a bug, not a caller error.");
+  }
+  // by_shape's id lists are sorted ascending when the registry is published.
+  return it->second.front();
+}
+
 // The faces the named entities denote, for the operations that rework a body around them.
 // A split entity is rejected rather than silently contributing several faces.
 std::vector<TopoDS_Shape> Session::faces_of(const char* op,

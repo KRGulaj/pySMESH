@@ -39,6 +39,19 @@ def fixtures_dir() -> Path:
 
 
 @pytest.fixture(scope="session")
+def industrial_step_path() -> str:
+    """Path to the real industrial STEP assembly, or a skip when it is absent.
+
+    Separate from :func:`industrial_step_brep` because a benchmark against another mesher
+    needs the file itself, not this library's reading of it.
+    """
+    path = Path(__file__).resolve().parent.parent / "test_files" / "perrinn_f1.step"
+    if not path.is_file():
+        pytest.skip(f"industrial STEP fixture not present: {path}")
+    return str(path)
+
+
+@pytest.fixture(scope="session")
 def industrial_step_brep() -> bytes:
     """BREP bytes of the real industrial STEP assembly, or a skip when it is absent.
 

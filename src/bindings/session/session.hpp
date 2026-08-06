@@ -34,6 +34,7 @@
 //   session_transform.cpp  — the relocation and rebuild transform paths, and copy;
 //   session_heal.cpp       — healing, sewing, defeaturing, imprinting and removal;
 //   session_query.cpp      — the geometric query surface over the live shape;
+//   session_tessellate.cpp — the render mesh, and the incremental delta over it;
 //   session_bind.cpp       — the pybind11 surface.
 //
 // What is defined here rather than in a translation unit is defined here for one of three
@@ -86,6 +87,7 @@
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepGProp.hxx>
 #include <BRepLProp_SLProps.hxx>
+#include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepOffsetAPI_MakeFilling.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
@@ -112,15 +114,20 @@
 #include <GeomAbs_CurveType.hxx>
 #include <GeomAbs_Shape.hxx>
 #include <GeomAbs_SurfaceType.hxx>
+#include <GeomLProp_SLProps.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_Circle.hxx>
 #include <Geom_Surface.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <HelixBRep_BuilderHelix.hxx>
+#include <IMeshTools_Parameters.hxx>
 #include <NCollection_Array1.hxx>
 #include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_IndexedMap.hxx>
 #include <NCollection_List.hxx>
+#include <Poly_Polygon3D.hxx>
+#include <Poly_PolygonOnTriangulation.hxx>
+#include <Poly_Triangulation.hxx>
 #include <Precision.hxx>
 #include <ShapeBuild_ReShape.hxx>
 #include <ShapeFix_Shape.hxx>
@@ -141,6 +148,7 @@
 #include <TopoDS_Iterator.hxx>
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Shell.hxx>
+#include <TopoDS_Vertex.hxx>
 #include <TopoDS_Wire.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
@@ -251,6 +259,26 @@ struct SessionState {
 // they exist for. Those report the verdict on the delta instead of raising, and the caller
 // decides whether the improvement was enough.
 enum class Validation : int { Strict = 0, Report = 1 };
+
+// What one face contributed to the previous render mesh: which triangulation it carried and
+// where that triangulation sat.
+//
+// The two are separate on purpose, because they answer different questions and an operation
+// can change one without the other. A rebuilt face gets a new Poly_Triangulation. A face that
+// was merely *relocated* keeps its triangulation — OCCT stores the nodes in the face's own
+// frame — but every node the render mesh emits for it moves. A consumer holding derived data
+// needs the second; a consumer that could reuse its buffers under a rigid motion needs to
+// tell the two apart. Reporting only one would either force a full rebuild or leave a stale
+// render, and those are exactly the two failure directions the render-mesh contract names.
+//
+// `face` is held rather than dropped: it keeps the TShape the record is keyed by alive, so a
+// freed TShape's address can never be reused by a later face and read as "unchanged".
+// `triangulation` is held for the same reason.
+struct EmittedFace {
+  TopoDS_Shape face;
+  Handle(Poly_Triangulation) triangulation;
+  TopLoc_Location location;
+};
 
 // Provenance of one issued id. Append-only and session-global: it survives a restore, so a
 // name minted on a branch that was later abandoned still resolves — to Lost, which is the
@@ -850,6 +878,29 @@ class Session {
   py::array_t<bool> contains(const std::vector<EntityId>& solid_ids, const PointArray& points,
                              double tol) const;
 
+  // ---- the render mesh ---------------------------------------------------------------- //
+
+  // Triangles, edge polylines and vertex points of the live shape, all indexed into one node
+  // array and all labelled with session entity ids.
+  //
+  // Three things make this different from the stateless tessellator, and each is the reason
+  // the session exists:
+  //
+  //   * BRepMesh caches its triangulation on the TopoDS_Face. A session keeps its faces
+  //     alive across operations, so a face no operation touched is not re-triangulated —
+  //     the work is proportional to what changed, not to the model.
+  //   * The output says *what* changed, which is the half a consumer cannot recover for
+  //     itself: diffing the arrays costs more than the tessellation saved.
+  //   * Edges and vertices come from the same call and index into the same nodes. Above the
+  //     size at which triangles stop being shippable, the polylines and the points are the
+  //     whole picking and wireframe substrate, and a face-only tessellation cannot serve it.
+  //
+  // Not an operation: it issues no ids, advances no counter and changes no topology. It is
+  // still guarded and still non-const, because it writes the triangulation onto shapes that
+  // retained states share and it does that with the GIL released.
+  py::dict tessellate(double deflection, double angle_rad, bool relative, bool parallel,
+                      bool incremental);
+
   // ---- names ------------------------------------------------------------------------ //
 
   // The persistent name of an entity: the operation that issued its id, how that operation
@@ -1016,6 +1067,12 @@ class Session {
   // Live entity ids of one kind, ascending. The order every bulk query's rows are in.
   std::vector<EntityId> ids_of_kind(TopAbs_ShapeEnum kind) const;
 
+  // The id that labels a sub-shape of the current root. A merge leaves several ids on one
+  // shape; the lowest is the label, and the others stay alive and still resolve — they just
+  // do not appear in a per-shape array, which has one row to give. A shape in the root with
+  // no id at all is a torn registry, so it raises rather than being skipped.
+  EntityId label_of(const char* op, const TopoDS_Shape& s) const;
+
   // ---- root bookkeeping ------------------------------------------------------------- //
 
   std::vector<TopoDS_Shape> bodies_excluding(const std::vector<TopoDS_Shape>& drop) const;
@@ -1168,6 +1225,13 @@ class Session {
   std::vector<std::optional<SessionState>> snapshots_;
   std::atomic<bool> in_op_{false};
   bool tear_next_history_ = false;
+
+  // What the previous tessellate() emitted, keyed by TShape address. Not part of
+  // SessionState: it describes the last render mesh handed out, which a restore does not
+  // undo. Restoring an earlier root simply means the faces of that root are compared against
+  // whatever they last emitted, which is the right answer — their triangulations are still
+  // whatever they were.
+  std::unordered_map<const void*, EmittedFace> emitted_;
 };
 
 }  // namespace session
