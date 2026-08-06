@@ -35,6 +35,9 @@
 //   session_heal.cpp       — healing, sewing, defeaturing, imprinting and removal;
 //   session_query.cpp      — the geometric query surface over the live shape;
 //   session_tessellate.cpp — the render mesh, and the incremental delta over it;
+//   session_handoff.cpp    — the export to a mesher, and the id-to-ordinal bijection;
+//   session_progress.cpp   — the progress/cancellation driver (declared in progress.hpp,
+//                            which is its own header because it is not part of this class);
 //   session_bind.cpp       — the pybind11 surface.
 //
 // What is defined here rather than in a translation unit is defined here for one of three
@@ -165,6 +168,7 @@
 #include <gp_XYZ.hxx>
 
 #include "common.hpp"
+#include "progress.hpp"
 
 namespace pysmesh {
 namespace session {
@@ -567,7 +571,26 @@ class Session {
 
   // ---- construction operations ------------------------------------------------------ //
 
-  py::dict add_brep(const py::bytes& data);
+  // ---- the long-operation contract --------------------------------------------------- //
+  //
+  // Every operation below that can exceed a few hundred milliseconds ends with the same two
+  // arguments: `progress`, a callable taking the fraction done, and `cancel`, a predicate
+  // asked whether to stop. Either may be None. Both are consulted from a helper thread while
+  // the operation runs with the GIL released — see session/progress.hpp for why they cannot
+  // be called from OCCT's own hooks.
+  //
+  // A cancelled operation raises CancelledError and commits nothing. That is decided by the
+  // driver's own flag, never by the algorithm's reporting: a cancelled ShapeFix_Shape hands
+  // back a non-null shape carrying a fraction of the model's faces, and committing it would
+  // be exactly the partial result the contract forbids.
+  //
+  // Two repair operations deliberately have no such arguments — unify_same_domain and
+  // remove_internal_wires — because OCCT 8.0 gives ShapeUpgrade_UnifySameDomain::Build and
+  // ShapeUpgrade_RemoveInternalWires::Perform no Message_ProgressRange to hand them. They
+  // take neither rather than accepting one and ignoring it.
+
+  py::dict add_brep(const py::bytes& data, const py::object& progress,
+                    const py::object& cancel);
 
   py::dict add_box(double dx, double dy, double dz, double ox, double oy, double oz);
 
@@ -635,7 +658,8 @@ class Session {
   // A surface filling the named boundary edges, consuming them. Unlike make_face this
   // handles a non-planar boundary; the surface is an approximation, so the result's edges
   // are new geometry and the boundary edges' ids die.
-  py::dict make_filling(const std::vector<EntityId>& edge_ids);
+  py::dict make_filling(const std::vector<EntityId>& edge_ids, const py::object& progress,
+                        const py::object& cancel);
 
   // ---- sweeps ----------------------------------------------------------------------- //
   //
@@ -651,57 +675,67 @@ class Session {
                    double ax, double ay, double az, double angle_rad);
 
   py::dict pipe(const std::vector<EntityId>& spine_ids,
-                const std::vector<EntityId>& profile_ids);
+                const std::vector<EntityId>& profile_ids, const py::object& progress,
+                const py::object& cancel);
 
   // The general sweep. Unlike pipe it exposes the frame law (Frenet vs corrected Frenet)
   // and can close the shell into a solid, which is what a swept CFD body normally needs.
   py::dict pipe_shell(const std::vector<EntityId>& spine_ids,
-                      const std::vector<EntityId>& profile_ids, bool frenet, bool solid);
+                      const std::vector<EntityId>& profile_ids, bool frenet, bool solid,
+                      const py::object& progress, const py::object& cancel);
 
   // Loft through an ordered list of section wires, consuming all of them.
   py::dict thru_sections(const std::vector<std::vector<EntityId>>& sections, bool solid,
-                         bool ruled);
+                         bool ruled, const py::object& progress, const py::object& cancel);
 
   // ---- modelling operations --------------------------------------------------------- //
 
   py::dict fuse(const std::vector<EntityId>& targets, const std::vector<EntityId>& tools,
-                double fuzzy, bool parallel);
+                double fuzzy, bool parallel, const py::object& progress,
+                const py::object& cancel);
 
   py::dict cut(const std::vector<EntityId>& targets, const std::vector<EntityId>& tools,
-               double fuzzy, bool parallel);
+               double fuzzy, bool parallel, const py::object& progress,
+               const py::object& cancel);
 
   py::dict common(const std::vector<EntityId>& targets, const std::vector<EntityId>& tools,
-                  double fuzzy, bool parallel);
+                  double fuzzy, bool parallel, const py::object& progress,
+                  const py::object& cancel);
 
   // The section curves of targets against tools. Additive: the result of a section is the
   // intersection geometry alone, so both operand groups stay in the model and only the
   // section's vertices and edges are added.
   py::dict section(const std::vector<EntityId>& targets, const std::vector<EntityId>& tools,
-                   double fuzzy, bool parallel);
+                   double fuzzy, bool parallel, const py::object& progress,
+                   const py::object& cancel);
 
   // Split the targets by the tools. The tools are not consumed: OCCT's Splitter excludes
   // their split parts from the result, and a tool the caller still holds ids for must not
   // disappear from the model as a side effect.
   py::dict split(const std::vector<EntityId>& targets, const std::vector<EntityId>& tools,
-                 double fuzzy, bool parallel);
+                 double fuzzy, bool parallel, const py::object& progress,
+                 const py::object& cancel);
 
   // The general fuse: every operand is split by every other and the result keeps all the
   // pieces. This is the operation a conformal multi-body CFD domain is built with.
-  py::dict fragment(const std::vector<EntityId>& entity_ids, double fuzzy, bool parallel);
+  py::dict fragment(const std::vector<EntityId>& entity_ids, double fuzzy, bool parallel,
+                    const py::object& progress, const py::object& cancel);
 
   // ---- fillet and chamfer ----------------------------------------------------------- //
 
   // radius_end, when given, makes the radius evolve linearly along each named edge from
   // radius to radius_end (OCCT's two-radius Add).
   py::dict fillet(const std::vector<EntityId>& edge_ids, double radius,
-                  const std::optional<double>& radius_end);
+                  const std::optional<double>& radius_end, const py::object& progress,
+                  const py::object& cancel);
 
   // distance_end + face_id give OCCT's two-distance chamfer, where the first distance is
   // measured on the named reference face. That is the only form in OCCT 8.0 that takes a
   // face at all — there is no (distance, edge, face) overload.
   py::dict chamfer(const std::vector<EntityId>& edge_ids, double distance,
                    const std::optional<double>& distance_end,
-                   const std::optional<EntityId>& face_id);
+                   const std::optional<EntityId>& face_id, const py::object& progress,
+                   const py::object& cancel);
 
   // ---- transforms ------------------------------------------------------------------- //
 
@@ -742,13 +776,14 @@ class Session {
   // not merely unchanged-looking.
 
   py::dict heal(const std::optional<std::vector<EntityId>>& entity_ids, double precision,
-                double min_tolerance, double max_tolerance);
+                double min_tolerance, double max_tolerance, const py::object& progress,
+                const py::object& cancel);
 
   // Sew the named bodies into shells, optionally closing a watertight shell into a solid.
   // This is the "faces to solid" path, and the repair for a model whose faces coincide at
   // their boundaries without sharing edges.
   py::dict sew(const std::vector<EntityId>& entity_ids, double tolerance, bool make_solid,
-               bool non_manifold);
+               bool non_manifold, const py::object& progress, const py::object& cancel);
 
   // Drop internal wires (holes) smaller than min_area, and optionally the faces they leave
   // behind. This is small-feature defeaturing on the face level, where `defeature` is the
@@ -760,13 +795,15 @@ class Session {
   // geometry. OCCT removes a *complete* feature: naming part of one leaves the shape
   // untouched while still reporting success, so this verifies every named face actually went
   // away and fails loud naming the ones that did not.
-  py::dict defeature(const std::vector<EntityId>& face_ids, bool parallel);
+  py::dict defeature(const std::vector<EntityId>& face_ids, bool parallel,
+                     const py::object& progress, const py::object& cancel);
 
   // Imprint the tools onto the targets: the targets are split where the tools meet them, so
   // the interface exists as real topology on both sides. Unlike `split` the tools may be of
   // any dimension, and like `split` they are not consumed.
   py::dict imprint(const std::vector<EntityId>& targets, const std::vector<EntityId>& tools,
-                   double fuzzy, bool parallel, int glue);
+                   double fuzzy, bool parallel, int glue, const py::object& progress,
+                   const py::object& cancel);
 
   // Drop the bodies owning the named entities from the model. Every id inside them dies and
   // is never reused; an id on a sub-shape a surviving body also owns stays alive, because
@@ -899,7 +936,26 @@ class Session {
   // still guarded and still non-const, because it writes the triangulation onto shapes that
   // retained states share and it does that with the GIL released.
   py::dict tessellate(double deflection, double angle_rad, bool relative, bool parallel,
-                      bool incremental);
+                      bool incremental, const py::object& progress,
+                      const py::object& cancel);
+
+  // ---- the meshing handoff ------------------------------------------------------------ //
+
+  // The live shape as BREP, plus the entity id at every ordinal of the traversal a reader of
+  // those bytes reproduces — the map a mesher's own tags have to be paired against.
+  //
+  // The pairing is positional, never geometric. Matching by centroid is the obvious shortcut
+  // and it is wrong by construction: a pipe's inner and outer walls have the same centroid
+  // to within 6e-17, so any centroid-keyed map collides on the most ordinary CAD feature
+  // there is. Ordinals cannot collide, and the order is reproducible — measured, on a
+  // 28 255-entity assembly written and read back with every ordinal preserved.
+  //
+  // The map must be a bijection, and this verifies it rather than assuming it. Two session
+  // states break it, both reachable and both legitimate: a merge leaves several live ids on
+  // one shape, and a split leaves one live id on several. Either makes "this id is that tag"
+  // ambiguous, so the export fails loud naming the ids rather than handing over a map that
+  // silently loses some of them.
+  py::dict export_handoff() const;
 
   // ---- names ------------------------------------------------------------------------ //
 
@@ -988,6 +1044,16 @@ class Session {
   // contract, which is wide enough for every id a session can realistically issue.
   static std::vector<int> ids_as_int(const std::vector<EntityId>& ids);
 
+  // Validate the two caller-supplied hooks and pair them with the poll interval.
+  //
+  // The interval is fixed rather than exposed. 25 ms is short enough that a cancel is seen
+  // far inside the half-second the contract allows and that a progress bar updates at 40 Hz,
+  // and long enough that the GIL round trip is nothing beside the operation — a boolean that
+  // advances its position 291 303 times is polled a few hundred times instead. A knob here
+  // would be a number every caller leaves alone.
+  static ProgressHooks hooks_of(const char* op, const py::object& progress,
+                                const py::object& cancel);
+
   // Normalise any BRepBuilderAPI_MakeShape-derived algorithm's history into the same
   // Handle(BRepTools_History) the booleans produce, so one carry routine serves them all.
   template <typename Algo>
@@ -1023,7 +1089,7 @@ class Session {
   // or extends the model differ. `op` must already carry its arguments and tools.
   py::dict run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
                    const std::vector<TopoDS_Shape>& consumed, bool additive, double fuzzy,
-                   bool parallel);
+                   bool parallel, const ProgressHooks& hooks);
 
   // The edges of every contour OCCT could not build a fillet on. This is the diagnostic
   // that turns "the fillet failed" into "the fillet failed on these edges"; when the
@@ -1045,9 +1111,13 @@ class Session {
   // validity rather than refusing it. The bodies outside the scope are never passed to the
   // algorithm at all, which is what makes "everything out of scope stays byte-identical" a
   // property of the construction rather than a hope about the algorithm.
+  // The `run` callback takes the progress range so that a repair which accepts one can pass
+  // it on; the two that cannot ignore the argument, which is honest — OCCT gives them no
+  // range to take.
   py::dict rework(const std::optional<std::vector<EntityId>>& entity_ids, const char* op_name,
-                  const std::function<void(const TopoDS_Shape&, TopoDS_Shape&,
-                                           Handle(BRepTools_History)&)>& run);
+                  const ProgressHooks& hooks,
+                  const std::function<void(const TopoDS_Shape&, const Message_ProgressRange&,
+                                           TopoDS_Shape&, Handle(BRepTools_History)&)>& run);
 
   // The faces the named entities denote, for the operations that rework a body around them.
   // A split entity is rejected rather than silently contributing several faces.

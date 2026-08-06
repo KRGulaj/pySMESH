@@ -27,7 +27,16 @@ namespace {
 // object (via m.add_object below), so this handle stays valid for the module's lifetime.
 // A borrowed py::handle (not a py::object) avoids a Py_DECREF at interpreter shutdown,
 // which pybind11 warns against for global storage.
-py::handle g_error_type;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+py::handle g_error_type;      // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+py::handle g_cancelled_type;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+// Raise `type` carrying the message and PysmeshError's two attributes.
+void raise_as(py::handle type, const PysmeshError& e) {
+  py::object exc = py::reinterpret_borrow<py::object>(type)(py::str(e.what()));
+  exc.attr("details") = py::str(e.details);
+  exc.attr("face_ids") = py::cast(e.face_ids);
+  PyErr_SetObject(type.ptr(), exc.ptr());
+}
 
 }  // namespace
 
@@ -37,16 +46,26 @@ void register_error_type(py::module_& m) {
   m.add_object("PysmeshError", error_type);  // module now owns a reference
   g_error_type = error_type;                  // borrowed handle for the translator
 
+  // Cancellation derives from PysmeshError so it is a refinement of the existing contract
+  // rather than a second one: code that only cares that the operation did not happen keeps
+  // catching PysmeshError, and code that must tell "the user stopped it" from "it failed"
+  // catches this instead.
+  py::object cancelled_type = py::reinterpret_steal<py::object>(PyErr_NewException(
+      "pysmesh._core.PysmeshCancelled", error_type.ptr(), nullptr));
+  m.add_object("PysmeshCancelled", cancelled_type);
+  g_cancelled_type = cancelled_type;
+
   py::register_exception_translator([](std::exception_ptr p) {
     try {
       if (p) {
         std::rethrow_exception(p);
       }
+    } catch (const CancelledError& e) {
+      // Caught before PysmeshError: it derives from it, so the order is what decides which
+      // Python type the caller sees.
+      raise_as(g_cancelled_type, e);
     } catch (const PysmeshError& e) {
-      py::object exc = g_error_type(py::str(e.what()));
-      exc.attr("details") = py::str(e.details);
-      exc.attr("face_ids") = py::cast(e.face_ids);
-      PyErr_SetObject(g_error_type.ptr(), exc.ptr());
+      raise_as(g_error_type, e);
     }
   });
 }

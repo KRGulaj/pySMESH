@@ -55,7 +55,8 @@ constexpr double kPi = 3.14159265358979323846;
 }  // namespace
 
 py::dict Session::tessellate(double deflection, double angle_rad, bool relative, bool parallel,
-                             bool incremental) {
+                             bool incremental, const py::object& progress,
+                             const py::object& cancel) {
   OpGuard guard(in_op_);
 
   // OCCT throws Standard_NumericError below its own floors rather than clamping, and that
@@ -83,6 +84,7 @@ py::dict Session::tessellate(double deflection, double angle_rad, bool relative,
   if (!incremental) {
     emitted_.clear();
   }
+  ProgressDriver driver("tessellate", hooks_of("tessellate", progress, cancel));
   {
     py::gil_scoped_release release;
     if (!incremental) {
@@ -93,9 +95,22 @@ py::dict Session::tessellate(double deflection, double angle_rad, bool relative,
     params.Angle = angle_rad;
     params.Relative = relative;
     params.InParallel = parallel;
-    // The constructor meshes; calling Perform() again would walk the whole model a second
-    // time to discover that there is nothing left to do.
-    BRepMesh_IncrementalMesh mesher(root, params);
+    // Constructed empty and driven by Perform(), because only Perform takes a progress
+    // range. The shape-and-parameters constructor meshes on the spot and there is then no
+    // call left to hand a range to.
+    BRepMesh_IncrementalMesh mesher;
+    mesher.SetShape(root);
+    mesher.ChangeParameters() = params;
+    mesher.Perform(driver.range());
+  }
+  driver.finish();
+  // A cancelled tessellation leaves the faces it did reach triangulated — 2085 of 5606 in
+  // the measurement this was written against. That is benign and is deliberately left
+  // alone: a triangulation is a cache, the emission record below is not updated, so the
+  // next call reports every one of those faces as re-triangulated and the consumer is
+  // never told a face is up to date when it is not.
+  if (driver.cancelled()) {
+    ProgressDriver::raise_cancelled("tessellate");
   }
 
   // ---- resolve the faces ------------------------------------------------------------- //

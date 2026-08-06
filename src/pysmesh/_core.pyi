@@ -19,6 +19,13 @@ class PysmeshError(RuntimeError):
     details: str
     face_ids: list[int]
 
+class PysmeshCancelled(PysmeshError):
+    """An operation the caller stopped through its ``cancel`` predicate.
+
+    A subclass of :class:`PysmeshError`, so code that only cares that the operation did not
+    happen keeps catching that. The session is left exactly as it was.
+    """
+
 class FaceInfo:
     id: int
     area: float
@@ -68,7 +75,9 @@ class Session:
     """Stateful modelling context. ``pysmesh.session.Session`` is the typed wrapper."""
 
     def __init__(self, validate: bool) -> None: ...
-    def add_brep(self, data: bytes) -> dict[str, object]: ...
+    def add_brep(
+        self, data: bytes, progress: object, cancel: object
+    ) -> dict[str, object]: ...
     def add_box(
         self, dx: float, dy: float, dz: float, ox: float, oy: float, oz: float
     ) -> dict[str, object]: ...
@@ -196,7 +205,9 @@ class Session:
     ) -> dict[str, object]: ...
     def make_wire(self, edge_ids: list[int]) -> dict[str, object]: ...
     def make_face(self, edge_ids: list[int]) -> dict[str, object]: ...
-    def make_filling(self, edge_ids: list[int]) -> dict[str, object]: ...
+    def make_filling(
+        self, edge_ids: list[int], progress: object, cancel: object
+    ) -> dict[str, object]: ...
     def extrude(
         self, entity_ids: list[int], vx: float, vy: float, vz: float
     ) -> dict[str, object]: ...
@@ -212,7 +223,11 @@ class Session:
         angle_rad: float,
     ) -> dict[str, object]: ...
     def pipe(
-        self, spine_ids: list[int], profile_ids: list[int]
+        self,
+        spine_ids: list[int],
+        profile_ids: list[int],
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def pipe_shell(
         self,
@@ -220,9 +235,16 @@ class Session:
         profile_ids: list[int],
         frenet: bool,
         solid: bool,
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def thru_sections(
-        self, sections: list[list[int]], solid: bool, ruled: bool
+        self,
+        sections: list[list[int]],
+        solid: bool,
+        ruled: bool,
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def fuse(
         self,
@@ -230,6 +252,8 @@ class Session:
         tools: list[int],
         fuzzy: float,
         parallel: bool,
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def cut(
         self,
@@ -237,6 +261,8 @@ class Session:
         tools: list[int],
         fuzzy: float,
         parallel: bool,
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def common(
         self,
@@ -244,6 +270,8 @@ class Session:
         tools: list[int],
         fuzzy: float,
         parallel: bool,
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def section(
         self,
@@ -251,6 +279,8 @@ class Session:
         tools: list[int],
         fuzzy: float,
         parallel: bool,
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def split(
         self,
@@ -258,12 +288,24 @@ class Session:
         tools: list[int],
         fuzzy: float,
         parallel: bool,
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def fragment(
-        self, entity_ids: list[int], fuzzy: float, parallel: bool
+        self,
+        entity_ids: list[int],
+        fuzzy: float,
+        parallel: bool,
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def fillet(
-        self, edge_ids: list[int], radius: float, radius_end: float | None
+        self,
+        edge_ids: list[int],
+        radius: float,
+        radius_end: float | None,
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def chamfer(
         self,
@@ -271,6 +313,8 @@ class Session:
         distance: float,
         distance_end: float | None,
         face_id: int | None,
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def translate(
         self, dx: float, dy: float, dz: float, entity_ids: list[int] | None
@@ -313,6 +357,8 @@ class Session:
         precision: float,
         min_tolerance: float,
         max_tolerance: float,
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def sew(
         self,
@@ -320,12 +366,18 @@ class Session:
         tolerance: float,
         make_solid: bool,
         non_manifold: bool,
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def remove_internal_wires(
         self, entity_ids: list[int] | None, min_area: float, remove_faces: bool
     ) -> dict[str, object]: ...
     def defeature(
-        self, face_ids: list[int], parallel: bool
+        self,
+        face_ids: list[int],
+        parallel: bool,
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def imprint(
         self,
@@ -334,6 +386,8 @@ class Session:
         fuzzy: float,
         parallel: bool,
         glue: int,
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def remove(self, entity_ids: list[int]) -> dict[str, object]: ...
     def unify_same_domain(
@@ -381,6 +435,8 @@ class Session:
         relative: bool,
         parallel: bool,
         incremental: bool,
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def snapshot(self) -> int: ...
     def restore(self, mark: int) -> None: ...
@@ -392,6 +448,7 @@ class Session:
     def shape_count(self, entity_id: int) -> int: ...
     def entity_table(self, kind: str) -> dict[str, object]: ...
     def brep(self) -> bytes: ...
+    def export_handoff(self) -> dict[str, object]: ...
     def name_of(self, entity_id: int) -> dict[str, object]: ...
     def origin(self, entity_id: int) -> dict[str, object]: ...
     def resolve(self, op_index: int, role: int, ordinal: int) -> dict[str, object]: ...

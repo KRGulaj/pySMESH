@@ -43,7 +43,8 @@ Handle(BRepTools_History) history_of_context(const Handle(BRepTools_ReShape) & c
 // ---- healing ------------------------------------------------------------------------ //
 
 py::dict Session::heal(const std::optional<std::vector<EntityId>>& entity_ids,
-                       double precision, double min_tolerance, double max_tolerance) {
+                       double precision, double min_tolerance, double max_tolerance,
+                       const py::object& progress, const py::object& cancel) {
   OpGuard guard(in_op_);
   require_positive("precision", precision);
   require_positive("min_tolerance", min_tolerance);
@@ -52,10 +53,10 @@ py::dict Session::heal(const std::optional<std::vector<EntityId>>& entity_ids,
     throw PysmeshError("Session.heal: max_tolerance (" + std::to_string(max_tolerance) +
                        ") must be >= min_tolerance (" + std::to_string(min_tolerance) + ").");
   }
-  return rework(entity_ids, "heal",
+  return rework(entity_ids, "heal", hooks_of("heal", progress, cancel),
                 [precision, min_tolerance, max_tolerance](
-                    const TopoDS_Shape& input, TopoDS_Shape& out,
-                    Handle(BRepTools_History) & hist) {
+                    const TopoDS_Shape& input, const Message_ProgressRange& range,
+                    TopoDS_Shape& out, Handle(BRepTools_History) & hist) {
                   ShapeFix_Shape fixer;
                   // The context is supplied rather than left to the algorithm, because it is
                   // the only channel through which the repair's history reaches the registry.
@@ -65,21 +66,23 @@ py::dict Session::heal(const std::optional<std::vector<EntityId>>& entity_ids,
                   fixer.SetPrecision(precision);
                   fixer.SetMinTolerance(min_tolerance);
                   fixer.SetMaxTolerance(max_tolerance);
-                  fixer.Perform();
+                  fixer.Perform(range);
                   out = fixer.Shape();
                   hist = history_of_context(context);
                 });
 }
 
 py::dict Session::sew(const std::vector<EntityId>& entity_ids, double tolerance,
-                      bool make_solid, bool non_manifold) {
+                      bool make_solid, bool non_manifold, const py::object& progress,
+                      const py::object& cancel) {
   OpGuard guard(in_op_);
   require_positive("tolerance", tolerance);
   if (entity_ids.empty()) {
     throw PysmeshError("Session.sew: at least one entity must be named.");
   }
-  return rework(entity_ids, "sew",
+  return rework(entity_ids, "sew", hooks_of("sew", progress, cancel),
                 [tolerance, make_solid, non_manifold](const TopoDS_Shape& input,
+                                                      const Message_ProgressRange& range,
                                                       TopoDS_Shape& out,
                                                       Handle(BRepTools_History) & hist) {
                   BRepBuilderAPI_Sewing sewing(tolerance, /*sewing=*/true,
@@ -90,7 +93,7 @@ py::dict Session::sew(const std::vector<EntityId>& entity_ids, double tolerance,
                   for (TopoDS_Iterator it(input); it.More(); it.Next()) {
                     sewing.Add(it.Value());
                   }
-                  sewing.Perform();
+                  sewing.Perform(range);
                   out = sewing.SewedShape();
                   hist = history_of_context(sewing.GetContext());
                   if (!make_solid || out.IsNull()) {
@@ -120,8 +123,11 @@ py::dict Session::remove_internal_wires(
     bool remove_faces) {
   OpGuard guard(in_op_);
   require_positive("min_area", min_area);
-  return rework(entity_ids, "remove_internal_wires",
-                [min_area, remove_faces](const TopoDS_Shape& input, TopoDS_Shape& out,
+  // No hooks: ShapeUpgrade_RemoveInternalWires::Perform takes no Message_ProgressRange in
+  // OCCT 8.0, so there is nothing to drive and the range argument is ignored below.
+  return rework(entity_ids, "remove_internal_wires", ProgressHooks{},
+                [min_area, remove_faces](const TopoDS_Shape& input,
+                                         const Message_ProgressRange&, TopoDS_Shape& out,
                                          Handle(BRepTools_History) & hist) {
                   ShapeUpgrade_RemoveInternalWires remover(input);
                   remover.MinArea() = min_area;
@@ -145,10 +151,11 @@ py::dict Session::unify_same_domain(const std::optional<std::vector<EntityId>>& 
   // Zero is meaningful here and is the stateless API's default: OCCT clamps anything below
   // Precision::Angular() up to it, so 0 asks for the tightest angle the kernel admits.
   require_non_negative("angular_tol_rad", angular_tol_rad);
-  return rework(entity_ids, "unify_same_domain",
+  // No hooks: ShapeUpgrade_UnifySameDomain::Build takes no Message_ProgressRange in OCCT 8.0.
+  return rework(entity_ids, "unify_same_domain", ProgressHooks{},
                 [unify_faces, unify_edges, concat_bsplines, linear_tol, angular_tol_rad](
-                    const TopoDS_Shape& input, TopoDS_Shape& out,
-                    Handle(BRepTools_History) & hist) {
+                    const TopoDS_Shape& input, const Message_ProgressRange&,
+                    TopoDS_Shape& out, Handle(BRepTools_History) & hist) {
                   ShapeUpgrade_UnifySameDomain unify(input, unify_faces, unify_edges,
                                                      concat_bsplines);
                   unify.SetLinearTolerance(linear_tol);
@@ -161,12 +168,14 @@ py::dict Session::unify_same_domain(const std::optional<std::vector<EntityId>>& 
 
 // ---- defeaturing --------------------------------------------------------------------- //
 
-py::dict Session::defeature(const std::vector<EntityId>& face_ids, bool parallel) {
+py::dict Session::defeature(const std::vector<EntityId>& face_ids, bool parallel,
+                            const py::object& progress, const py::object& cancel) {
   OpGuard guard(in_op_);
   const std::vector<TopoDS_Shape> faces = faces_of("defeature", face_ids);
   const TopoDS_Shape owner = sole_owner_body(body_of_subshape(), faces);
   const std::vector<TopoDS_Shape> survivors = bodies_excluding({owner});
 
+  ProgressDriver driver("defeature", hooks_of("defeature", progress, cancel));
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   std::string diagnostics;
@@ -183,7 +192,7 @@ py::dict Session::defeature(const std::vector<EntityId>& face_ids, bool parallel
     op.SetToFillHistory(true);
     op.SetRunParallel(parallel);
     try {
-      op.Build();
+      op.Build(driver.range());
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(std::string("Session.defeature: OCCT's defeaturing threw: ") +
@@ -209,6 +218,12 @@ py::dict Session::defeature(const std::vector<EntityId>& face_ids, bool parallel
         hist = op.History();
       }
     }
+  }
+  driver.finish();
+  // Ahead of the post-condition check: a cancelled defeaturing has removed nothing, and
+  // blaming the caller's faces for still being present would be a false diagnostic.
+  if (driver.cancelled()) {
+    ProgressDriver::raise_cancelled("defeature");
   }
   if (!kept.empty()) {
     std::vector<EntityId> blamed;
@@ -237,7 +252,7 @@ py::dict Session::defeature(const std::vector<EntityId>& face_ids, bool parallel
 
 py::dict Session::imprint(const std::vector<EntityId>& targets,
                           const std::vector<EntityId>& tools, double fuzzy, bool parallel,
-                          int glue) {
+                          int glue, const py::object& progress, const py::object& cancel) {
   OpGuard guard(in_op_);
   if (targets.empty()) {
     throw PysmeshError("Session.imprint: targets must name at least one entity.");
@@ -280,7 +295,8 @@ py::dict Session::imprint(const std::vector<EntityId>& targets,
   op.SetGlue(static_cast<BOPAlgo_GlueEnum>(glue));
   // The tools are not consumed: an imprint exists to put the interface into the target, and
   // a tool the caller still holds ids for must not vanish as a side effect.
-  return run_bop("imprint", op, target_bodies, /*additive=*/false, fuzzy, parallel);
+  return run_bop("imprint", op, target_bodies, /*additive=*/false, fuzzy, parallel,
+                 hooks_of("imprint", progress, cancel));
 }
 
 // ---- removal ------------------------------------------------------------------------- //
@@ -302,24 +318,36 @@ py::dict Session::remove(const std::vector<EntityId>& entity_ids) {
 // ---- the scoped-rework driver -------------------------------------------------------- //
 
 py::dict Session::rework(const std::optional<std::vector<EntityId>>& entity_ids,
-                         const char* op_name,
-                         const std::function<void(const TopoDS_Shape&, TopoDS_Shape&,
+                         const char* op_name, const ProgressHooks& hooks,
+                         const std::function<void(const TopoDS_Shape&,
+                                                  const Message_ProgressRange&,
+                                                  TopoDS_Shape&,
                                                   Handle(BRepTools_History)&)>& run) {
   const std::vector<TopoDS_Shape> scope = scoped_bodies(entity_ids, op_name);
   const std::vector<TopoDS_Shape> untouched = bodies_excluding(scope);
   const TopoDS_Shape input = make_root(scope);
 
+  ProgressDriver driver(op_name, hooks);
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   {
     py::gil_scoped_release release;
     try {
-      run(input, result, hist);
+      run(input, driver.range(), result, hist);
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(std::string("Session.") + op_name + ": OCCT's repair threw: " +
                          e.what());
     }
+  }
+  driver.finish();
+  // This check is what stops the repair family committing a partial model, and it has to be
+  // the driver's own flag rather than anything the algorithm reports. A cancelled
+  // ShapeFix_Shape returns Perform() == false and a shape that is NOT null — measured at 436
+  // of an assembly's 5606 faces. The null test below would pass it straight through, and
+  // committing it would delete every entity the repair had not reached yet.
+  if (driver.cancelled()) {
+    ProgressDriver::raise_cancelled(op_name);
   }
   if (result.IsNull()) {
     throw PysmeshError(std::string("Session.") + op_name +

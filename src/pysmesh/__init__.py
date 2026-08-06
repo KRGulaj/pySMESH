@@ -4,7 +4,8 @@ Public surface: :func:`load_brep`, :class:`Shape`, :class:`Mesh`, and the per-en
 types for geometry query and surface-mesh injection; :func:`compute_viscous_layers` (with
 :class:`VLParams` / :class:`VLResult` / :class:`ExtrusionMethod`) for boundary-layer prism
 generation; :func:`unify_same_domain` (with :class:`UnifyParams` / :class:`UnifyResult`) for
-B-rep same-domain face/edge merging; and :class:`PysmeshError` for every library failure.
+B-rep same-domain face/edge merging; and :class:`PysmeshError` for every library failure, with
+:class:`PysmeshCancelled` for the subset a caller stopped.
 
 Import-time contract: ``_core`` links VTK dynamically against whatever VTK the host
 process provides. The build was compiled against a specific VTK version; importing into an
@@ -57,6 +58,7 @@ from ._core import (  # noqa: E402 - must follow the VTK check
     EdgeInfo,
     FaceInfo,
     Mesh,
+    PysmeshCancelled,
     PysmeshError,
     Shape,
     SolidInfo,
@@ -87,6 +89,7 @@ from .session import (  # noqa: E402 - must follow the VTK check (imports _core)
     EntityKind,
     EntityTable,
     GlueMode,
+    Handoff,
     HistoryDelta,
     MassTable,
     Name,
@@ -95,6 +98,8 @@ from .session import (  # noqa: E402 - must follow the VTK check (imports _core)
     Projection,
     RenderMesh,
     Resolution,
+    CancelPredicate,
+    ProgressCallback,
     ResolutionStatus,
     Session,
     SnapshotMark,
@@ -127,6 +132,7 @@ from .viscous import (  # noqa: E402 - must follow the VTK check (imports _core)
 __all__ = [
     "AdjacencyPairs",
     "BoundsTable",
+    "CancelPredicate",
     "CurvatureTable",
     "EdgeInfo",
     "EntityId",
@@ -136,6 +142,7 @@ __all__ = [
     "ExtrusionMethod",
     "FaceInfo",
     "GlueMode",
+    "Handoff",
     "HistoryDelta",
     "MassTable",
     "Mesh",
@@ -144,7 +151,9 @@ __all__ = [
     "OffsetParams",
     "OffsetResult",
     "Origin",
+    "ProgressCallback",
     "Projection",
+    "PysmeshCancelled",
     "PysmeshError",
     "RenderMesh",
     "Resolution",

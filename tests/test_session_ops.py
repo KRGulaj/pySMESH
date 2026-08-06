@@ -879,7 +879,7 @@ def test_a_boolean_on_a_face_id_raises_naming_the_wrong_kind(
 def test_a_boolean_with_a_negative_fuzzy_raises(touching_boxes: Session, op: str) -> None:
     solids = [EntityId(i) for i in touching_boxes.entities(EntityKind.SOLID)]
 
-    with pytest.raises(ps.PysmeshError, match="fuzzy must be >= 0"):
+    with pytest.raises(ps.PysmeshError, match="fuzzy must be a finite value >= 0"):
         getattr(touching_boxes, op)(solids[:1], solids[1:], fuzzy=-1.0)
 
 

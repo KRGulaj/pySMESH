@@ -17,20 +17,28 @@ namespace session {
 
 // ---- construction operations ------------------------------------------------------ //
 
-py::dict Session::add_brep(const py::bytes& data) {
+py::dict Session::add_brep(const py::bytes& data, const py::object& progress,
+                           const py::object& cancel) {
   OpGuard guard(in_op_);
   const std::string buffer = data;
+  ProgressDriver driver("add_brep", hooks_of("add_brep", progress, cancel));
   TopoDS_Shape imported;
   {
     py::gil_scoped_release release;
     std::istringstream stream(buffer);
     BRep_Builder builder;
     try {
-      BRepTools::Read(imported, stream, builder);
+      BRepTools::Read(imported, stream, builder, driver.range());
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(std::string("Session.add_brep: BREP read failed: ") + e.what());
     }
+  }
+  driver.finish();
+  // A cancelled read leaves a null shape, which the check below would report as malformed
+  // data. Naming the real cause first keeps the two apart.
+  if (driver.cancelled()) {
+    ProgressDriver::raise_cancelled("add_brep");
   }
   if (imported.IsNull()) {
     throw PysmeshError(
@@ -384,7 +392,8 @@ py::dict Session::make_face(const std::vector<EntityId>& edge_ids) {
 // A surface filling the named boundary edges, consuming them. Unlike make_face this
 // handles a non-planar boundary; the surface is an approximation, so the result's edges
 // are new geometry and the boundary edges' ids die.
-py::dict Session::make_filling(const std::vector<EntityId>& edge_ids) {
+py::dict Session::make_filling(const std::vector<EntityId>& edge_ids,
+                               const py::object& progress, const py::object& cancel) {
   OpGuard guard(in_op_);
   const std::vector<TopoDS_Shape> edges = edges_of("make_filling", edge_ids);
   const std::vector<TopoDS_Shape> owners = owner_bodies("make_filling", edge_ids);
@@ -392,6 +401,7 @@ py::dict Session::make_filling(const std::vector<EntityId>& edge_ids) {
     require_curve_body("make_filling", b);
   }
   const std::vector<TopoDS_Shape> survivors = bodies_excluding(owners);
+  ProgressDriver driver("make_filling", hooks_of("make_filling", progress, cancel));
   TopoDS_Shape face;
   {
     py::gil_scoped_release release;
@@ -400,7 +410,7 @@ py::dict Session::make_filling(const std::vector<EntityId>& edge_ids) {
       mk.Add(TopoDS::Edge(e), GeomAbs_C0);
     }
     try {
-      mk.Build();
+      mk.Build(driver.range());
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(
@@ -410,6 +420,10 @@ py::dict Session::make_filling(const std::vector<EntityId>& edge_ids) {
     if (mk.IsDone()) {
       face = mk.Shape();
     }
+  }
+  driver.finish();
+  if (driver.cancelled()) {
+    ProgressDriver::raise_cancelled("make_filling");
   }
   if (face.IsNull()) {
     throw PysmeshError("Session.make_filling: OCCT could not fill the named boundary.",
@@ -498,7 +512,8 @@ py::dict Session::revolve(const std::vector<EntityId>& entity_ids, double ox, do
 }
 
 py::dict Session::pipe(const std::vector<EntityId>& spine_ids,
-                const std::vector<EntityId>& profile_ids) {
+                const std::vector<EntityId>& profile_ids, const py::object& progress,
+                const py::object& cancel) {
   OpGuard guard(in_op_);
   const TopoDS_Shape spine_body = sole_body("pipe", spine_ids);
   const TopoDS_Shape profile = sole_body("pipe", profile_ids);
@@ -509,13 +524,14 @@ py::dict Session::pipe(const std::vector<EntityId>& spine_ids,
   const TopoDS_Wire spine = wire_of_body("pipe", "spine_ids", spine_body);
   const std::vector<TopoDS_Shape> survivors = bodies_excluding({spine_body, profile});
 
+  ProgressDriver driver("pipe", hooks_of("pipe", progress, cancel));
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   {
     py::gil_scoped_release release;
     BRepOffsetAPI_MakePipe mk(spine, profile);
     try {
-      mk.Build();
+      mk.Build(driver.range());
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(std::string("Session.pipe: BRepOffsetAPI_MakePipe failed: ") +
@@ -525,6 +541,10 @@ py::dict Session::pipe(const std::vector<EntityId>& spine_ids,
       result = mk.Shape();
       hist = history_of(profile, mk);
     }
+  }
+  driver.finish();
+  if (driver.cancelled()) {
+    ProgressDriver::raise_cancelled("pipe");
   }
   if (result.IsNull()) {
     throw PysmeshError("Session.pipe: OCCT could not sweep the profile along the spine.",
@@ -536,7 +556,8 @@ py::dict Session::pipe(const std::vector<EntityId>& spine_ids,
 // The general sweep. Unlike pipe it exposes the frame law (Frenet vs corrected Frenet)
 // and can close the shell into a solid, which is what a swept CFD body normally needs.
 py::dict Session::pipe_shell(const std::vector<EntityId>& spine_ids,
-                      const std::vector<EntityId>& profile_ids, bool frenet, bool solid) {
+                      const std::vector<EntityId>& profile_ids, bool frenet, bool solid,
+                      const py::object& progress, const py::object& cancel) {
   OpGuard guard(in_op_);
   const TopoDS_Shape spine_body = sole_body("pipe_shell", spine_ids);
   const TopoDS_Shape profile = sole_body("pipe_shell", profile_ids);
@@ -547,6 +568,7 @@ py::dict Session::pipe_shell(const std::vector<EntityId>& spine_ids,
   const TopoDS_Wire prof = wire_of_body("pipe_shell", "profile_ids", profile);
   const std::vector<TopoDS_Shape> survivors = bodies_excluding({spine_body, profile});
 
+  ProgressDriver driver("pipe_shell", hooks_of("pipe_shell", progress, cancel));
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   std::string detail;
@@ -559,7 +581,7 @@ py::dict Session::pipe_shell(const std::vector<EntityId>& spine_ids,
       detail = "BRepOffsetAPI_MakePipeShell::IsReady() is false.";
     } else {
       try {
-        mk.Build();
+        mk.Build(driver.range());
       } catch (const std::exception& e) {
         py::gil_scoped_acquire acquire;
         throw PysmeshError(
@@ -576,6 +598,10 @@ py::dict Session::pipe_shell(const std::vector<EntityId>& spine_ids,
       }
     }
   }
+  driver.finish();
+  if (driver.cancelled()) {
+    ProgressDriver::raise_cancelled("pipe_shell");
+  }
   if (result.IsNull()) {
     throw PysmeshError("Session.pipe_shell: OCCT could not sweep the profile.", detail,
                        ids_as_int(profile_ids));
@@ -585,7 +611,7 @@ py::dict Session::pipe_shell(const std::vector<EntityId>& spine_ids,
 
 // Loft through an ordered list of section wires, consuming all of them.
 py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sections, bool solid,
-                         bool ruled) {
+                         bool ruled, const py::object& progress, const py::object& cancel) {
   OpGuard guard(in_op_);
   if (sections.size() < 2) {
     throw PysmeshError("Session.thru_sections: at least two sections are required (got " +
@@ -606,6 +632,7 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
   }
   const std::vector<TopoDS_Shape> survivors = bodies_excluding(bodies);
 
+  ProgressDriver driver("thru_sections", hooks_of("thru_sections", progress, cancel));
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   {
@@ -615,7 +642,7 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
       mk.AddWire(w);
     }
     try {
-      mk.Build();
+      mk.Build(driver.range());
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(
@@ -630,6 +657,10 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
       }
       hist = new BRepTools_History(args, mk);
     }
+  }
+  driver.finish();
+  if (driver.cancelled()) {
+    ProgressDriver::raise_cancelled("thru_sections");
   }
   if (result.IsNull()) {
     throw PysmeshError("Session.thru_sections: OCCT could not loft the sections.",

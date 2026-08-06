@@ -210,6 +210,29 @@ std::int64_t Session::entity_count() const {
   return static_cast<std::int64_t>(state_.registry->alive.size());
 }
 
+// Validate the two caller-supplied hooks. A non-callable is refused here, where the caller's
+// own call stack is still what raised it, rather than surfacing minutes later from a poll
+// thread part-way through a long operation.
+ProgressHooks Session::hooks_of(const char* op, const py::object& progress,
+                                const py::object& cancel) {
+  ProgressHooks hooks;
+  if (!progress.is_none()) {
+    if (!py::isinstance<py::function>(progress) && !py::hasattr(progress, "__call__")) {
+      throw PysmeshError(std::string("Session.") + op +
+                         ": progress must be callable or None.");
+    }
+    hooks.on_progress = progress;
+  }
+  if (!cancel.is_none()) {
+    if (!py::isinstance<py::function>(cancel) && !py::hasattr(cancel, "__call__")) {
+      throw PysmeshError(std::string("Session.") + op +
+                         ": cancel must be callable or None.");
+    }
+    hooks.should_cancel = cancel;
+  }
+  return hooks;
+}
+
 void Session::require_positive(const char* name, double v) {
   if (!(v > 0.0)) {
     throw PysmeshError(std::string("Session: ") + name + " must be > 0 (got " +

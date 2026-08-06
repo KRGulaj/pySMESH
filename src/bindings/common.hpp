@@ -49,6 +49,21 @@ class PysmeshError : public std::runtime_error {
         face_ids(std::move(face_ids_)) {}
 };
 
+// An operation the caller stopped, surfaced as pysmesh._core.PysmeshCancelled — a SUBCLASS
+// of PysmeshError, so every existing `except PysmeshError` still catches it and nothing that
+// already handles failures has to change.
+//
+// It is a separate type because the two outcomes need different handling and telling them
+// apart by message text would be fragile: a cancellation is the normal end of a long
+// operation the user interrupted, and a failure is a defect to report. Both leave the
+// session exactly as it was; neither returns a partial shape.
+class CancelledError : public PysmeshError {
+ public:
+  explicit CancelledError(const std::string& message,
+                          std::string details_ = std::string())
+      : PysmeshError(message, std::move(details_)) {}
+};
+
 void register_error_type(py::module_& m);
 
 // ---- Shared shape container ------------------------------------------------------- //

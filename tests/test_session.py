@@ -375,7 +375,7 @@ def test_fuse_with_a_face_id_as_a_target_raises(two_box_session: Session) -> Non
 def test_fuse_with_a_negative_fuzzy_value_raises(two_box_session: Session) -> None:
     solids = _ids(two_box_session, EntityKind.SOLID)
 
-    with pytest.raises(ps.PysmeshError, match="fuzzy must be >= 0"):
+    with pytest.raises(ps.PysmeshError, match="fuzzy must be a finite value >= 0"):
         two_box_session.fuse(
             [EntityId(solids[0])], [EntityId(solids[1])], fuzzy=-1.0
         )

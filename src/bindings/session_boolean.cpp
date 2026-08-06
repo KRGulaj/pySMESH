@@ -18,68 +18,76 @@ namespace session {
 // ---- modelling operations --------------------------------------------------------- //
 
 py::dict Session::fuse(const std::vector<EntityId>& targets, const std::vector<EntityId>& tools,
-                double fuzzy, bool parallel) {
+                double fuzzy, bool parallel, const py::object& progress,
+                const py::object& cancel) {
   OpGuard guard(in_op_);
   require_operands("fuse", targets, tools, fuzzy);
   BRepAlgoAPI_Fuse op;
   op.SetArguments(solids_of("fuse", "targets", targets));
   op.SetTools(solids_of("fuse", "tools", tools));
-  return run_bop("fuse", op, bodies_of(targets, tools), /*additive=*/false, fuzzy,
-                 parallel);
+  return run_bop("fuse", op, bodies_of(targets, tools), /*additive=*/false, fuzzy, parallel,
+                 hooks_of("fuse", progress, cancel));
 }
 
 py::dict Session::cut(const std::vector<EntityId>& targets, const std::vector<EntityId>& tools,
-               double fuzzy, bool parallel) {
+               double fuzzy, bool parallel, const py::object& progress,
+               const py::object& cancel) {
   OpGuard guard(in_op_);
   require_operands("cut", targets, tools, fuzzy);
   BRepAlgoAPI_Cut op;
   op.SetArguments(solids_of("cut", "targets", targets));
   op.SetTools(solids_of("cut", "tools", tools));
-  return run_bop("cut", op, bodies_of(targets, tools), /*additive=*/false, fuzzy,
-                 parallel);
+  return run_bop("cut", op, bodies_of(targets, tools), /*additive=*/false, fuzzy, parallel,
+                 hooks_of("cut", progress, cancel));
 }
 
 py::dict Session::common(const std::vector<EntityId>& targets,
-                         const std::vector<EntityId>& tools, double fuzzy, bool parallel) {
+                         const std::vector<EntityId>& tools, double fuzzy, bool parallel,
+                         const py::object& progress, const py::object& cancel) {
   OpGuard guard(in_op_);
   require_operands("common", targets, tools, fuzzy);
   BRepAlgoAPI_Common op;
   op.SetArguments(solids_of("common", "targets", targets));
   op.SetTools(solids_of("common", "tools", tools));
-  return run_bop("common", op, bodies_of(targets, tools), /*additive=*/false, fuzzy,
-                 parallel);
+  return run_bop("common", op, bodies_of(targets, tools), /*additive=*/false, fuzzy, parallel,
+                 hooks_of("common", progress, cancel));
 }
 
 // The section curves of targets against tools. Additive: the result of a section is the
 // intersection geometry alone, so both operand groups stay in the model and only the
 // section's vertices and edges are added.
 py::dict Session::section(const std::vector<EntityId>& targets,
-                          const std::vector<EntityId>& tools, double fuzzy, bool parallel) {
+                          const std::vector<EntityId>& tools, double fuzzy, bool parallel,
+                          const py::object& progress, const py::object& cancel) {
   OpGuard guard(in_op_);
   require_operands("section", targets, tools, fuzzy);
   BRepAlgoAPI_Section op;
   op.SetArguments(solids_of("section", "targets", targets));
   op.SetTools(solids_of("section", "tools", tools));
-  return run_bop("section", op, {}, /*additive=*/true, fuzzy, parallel);
+  return run_bop("section", op, {}, /*additive=*/true, fuzzy, parallel,
+                 hooks_of("section", progress, cancel));
 }
 
 // Split the targets by the tools. The tools are not consumed: OCCT's Splitter excludes
 // their split parts from the result, and a tool the caller still holds ids for must not
 // disappear from the model as a side effect.
 py::dict Session::split(const std::vector<EntityId>& targets,
-                        const std::vector<EntityId>& tools, double fuzzy, bool parallel) {
+                        const std::vector<EntityId>& tools, double fuzzy, bool parallel,
+                        const py::object& progress, const py::object& cancel) {
   OpGuard guard(in_op_);
   require_operands("split", targets, tools, fuzzy);
   BRepAlgoAPI_Splitter op;
   op.SetArguments(solids_of("split", "targets", targets));
   op.SetTools(solids_of("split", "tools", tools));
-  return run_bop("split", op, bodies_of(targets, {}), /*additive=*/false, fuzzy, parallel);
+  return run_bop("split", op, bodies_of(targets, {}), /*additive=*/false, fuzzy, parallel,
+                 hooks_of("split", progress, cancel));
 }
 
 // The general fuse: every operand is split by every other and the result keeps all the
 // pieces. This is the operation a conformal multi-body CFD domain is built with.
-py::dict Session::fragment(const std::vector<EntityId>& entity_ids, double fuzzy, bool parallel
-    ) {
+py::dict Session::fragment(const std::vector<EntityId>& entity_ids, double fuzzy,
+                           bool parallel, const py::object& progress,
+                           const py::object& cancel) {
   OpGuard guard(in_op_);
   if (entity_ids.size() < 2) {
     throw PysmeshError("Session.fragment: at least two solids are required (got " +
@@ -89,7 +97,7 @@ py::dict Session::fragment(const std::vector<EntityId>& entity_ids, double fuzzy
   BRepAlgoAPI_BuilderAlgo op;
   op.SetArguments(solids_of("fragment", "entity_ids", entity_ids));
   return run_bop("fragment", op, bodies_of(entity_ids, {}), /*additive=*/false, fuzzy,
-                 parallel);
+                 parallel, hooks_of("fragment", progress, cancel));
 }
 
 // ---- fillet and chamfer ----------------------------------------------------------- //
@@ -97,7 +105,8 @@ py::dict Session::fragment(const std::vector<EntityId>& entity_ids, double fuzzy
 // radius_end, when given, makes the radius evolve linearly along each named edge from
 // radius to radius_end (OCCT's two-radius Add).
 py::dict Session::fillet(const std::vector<EntityId>& edge_ids, double radius,
-                  const std::optional<double>& radius_end) {
+                  const std::optional<double>& radius_end, const py::object& progress,
+                  const py::object& cancel) {
   OpGuard guard(in_op_);
   require_positive("radius", radius);
   if (radius_end.has_value()) {
@@ -112,6 +121,7 @@ py::dict Session::fillet(const std::vector<EntityId>& edge_ids, double radius,
   const TopoDS_Shape owner = sole_owner_body(body_of_subshape(), edges);
   const std::vector<TopoDS_Shape> survivors = bodies_excluding({owner});
 
+  ProgressDriver driver("fillet", hooks_of("fillet", progress, cancel));
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   std::vector<TopoDS_Shape> faulty;
@@ -126,7 +136,7 @@ py::dict Session::fillet(const std::vector<EntityId>& edge_ids, double radius,
       }
     }
     try {
-      mk.Build();
+      mk.Build(driver.range());
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(
@@ -139,6 +149,12 @@ py::dict Session::fillet(const std::vector<EntityId>& edge_ids, double radius,
     } else {
       faulty = faulty_edges(mk);
     }
+  }
+  driver.finish();
+  // Before the failure path, not after it: an operation the caller stopped has no faulty
+  // edges to blame, and reporting the radius as unbuildable would be a false diagnostic.
+  if (driver.cancelled()) {
+    ProgressDriver::raise_cancelled("fillet");
   }
   if (result.IsNull()) {
     throw PysmeshError(
@@ -156,7 +172,8 @@ py::dict Session::fillet(const std::vector<EntityId>& edge_ids, double radius,
 // face at all — there is no (distance, edge, face) overload.
 py::dict Session::chamfer(const std::vector<EntityId>& edge_ids, double distance,
                    const std::optional<double>& distance_end,
-                   const std::optional<EntityId>& face_id) {
+                   const std::optional<EntityId>& face_id, const py::object& progress,
+                   const py::object& cancel) {
   OpGuard guard(in_op_);
   require_positive("distance", distance);
   if (distance_end.has_value()) {
@@ -190,6 +207,7 @@ py::dict Session::chamfer(const std::vector<EntityId>& edge_ids, double distance
   const TopoDS_Shape owner = sole_owner_body(body_of_subshape(), selection);
   const std::vector<TopoDS_Shape> survivors = bodies_excluding({owner});
 
+  ProgressDriver driver("chamfer", hooks_of("chamfer", progress, cancel));
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   std::vector<TopoDS_Shape> faulty;
@@ -204,7 +222,7 @@ py::dict Session::chamfer(const std::vector<EntityId>& edge_ids, double distance
       }
     }
     try {
-      mk.Build();
+      mk.Build(driver.range());
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(
@@ -215,6 +233,10 @@ py::dict Session::chamfer(const std::vector<EntityId>& edge_ids, double distance
       result = mk.Shape();
       hist = history_of(owner, mk);
     }
+  }
+  driver.finish();
+  if (driver.cancelled()) {
+    ProgressDriver::raise_cancelled("chamfer");
   }
   if (result.IsNull()) {
     throw PysmeshError(
@@ -227,10 +249,18 @@ py::dict Session::chamfer(const std::vector<EntityId>& edge_ids, double distance
   return commit(concat(survivors, result), hist, "chamfer", result);
 }
 
+// The fuzzy value is the one tolerance a caller supplies to a boolean, and it is checked
+// rather than forwarded.
+//
+// `!(fuzzy >= 0.0)` rather than `fuzzy < 0.0` is the point of the rewrite: every comparison
+// against NaN is false, so the negated form let NaN straight through to SetFuzzyValue, where
+// it becomes a tolerance nothing compares equal to and the boolean's behaviour is undefined.
+// Infinity is refused for the same reason — it is not a distance.
 void Session::require_fuzzy(const char* op, double fuzzy) {
-  if (fuzzy < 0.0) {
-    throw PysmeshError(std::string("Session.") + op + ": fuzzy must be >= 0 (got " +
-                       std::to_string(fuzzy) + ").");
+  if (!(fuzzy >= 0.0) || !std::isfinite(fuzzy)) {
+    throw PysmeshError(std::string("Session.") + op +
+                       ": fuzzy must be a finite value >= 0 (got " + std::to_string(fuzzy) +
+                       ").");
   }
 }
 
@@ -274,11 +304,14 @@ std::vector<TopoDS_Shape> Session::bodies_of(const std::vector<EntityId>& a,
 // or extends the model differ. `op` must already carry its arguments and tools.
 py::dict Session::run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
                    const std::vector<TopoDS_Shape>& consumed, bool additive, double fuzzy,
-                   bool parallel) {
+                   bool parallel, const ProgressHooks& hooks) {
   // Bodies the boolean does not consume pass straight through and keep their identity.
   const std::vector<TopoDS_Shape> survivors =
       additive ? root_bodies(state_.root) : bodies_excluding(consumed);
 
+  // Constructed under the GIL, before it is released, and destroyed after it is back: the
+  // driver holds Python references and starts the thread that touches them.
+  ProgressDriver driver(op_name, hooks);
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   std::string errors;
@@ -290,14 +323,16 @@ py::dict Session::run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
     // Not an option, and not a performance knob. BOPAlgo's default is destructive: it
     // updates the argument TShapes in place. A session's whole snapshot contract rests on
     // an operation never mutating a shape an earlier state still points at, so every
-    // boolean runs non-destructively and OCCT copies what it needs to change.
+    // boolean runs non-destructively and OCCT copies what it needs to change. It is
+    // deliberately not a parameter: exposing it would let a caller switch off the property
+    // every retained snapshot depends on.
     op.SetNonDestructive(true);
     op.SetRunParallel(parallel);
     if (fuzzy > 0.0) {
       op.SetFuzzyValue(fuzzy);
     }
     try {
-      op.Build();
+      op.Build(driver.range());
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(std::string("Session.") + op_name + ": OCCT's boolean threw: " +
@@ -311,6 +346,14 @@ py::dict Session::run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
       result = op.Shape();
       hist = op.History();
     }
+  }
+  driver.finish();
+  // A cancelled boolean records its own BOPAlgo_AlertUserBreak, so it lands in the failure
+  // path above with an error string. It is caught here first, because "the caller stopped
+  // it" and "the geometry defeated it" need different handling and the message text is not
+  // a safe way to tell them apart.
+  if (driver.cancelled()) {
+    ProgressDriver::raise_cancelled(op_name);
   }
   if (!errors.empty() || result.IsNull()) {
     throw PysmeshError(std::string("Session.") + op_name +
