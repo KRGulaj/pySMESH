@@ -266,7 +266,68 @@ def _apply_tag_fixups() -> None:
         "// Out-of-line so std::vector<Classifier> instantiates where Classifier is complete.\n"
         "ElementsOnShape::ElementsOnShape(const ElementsOnShape&) = default;\n"
         "ElementsOnShape& ElementsOnShape::operator=(const ElementsOnShape&) = default;")
-    _log("applied V9_9_0-tag fixups (winsock, SMESH_TLink ctor+hasher, ElementsOnShape copy)")
+    # StdMeshers_CompositeHexa_3D.hxx carries StdMeshers_CompositeSegment_1D's include guard
+    # (_SMESH_CompositeSegment_1D_HXX_) verbatim, so whichever of the two is included second
+    # is silenced entirely and its class is never declared. Any translation unit that needs
+    # both cannot be made to compile by reordering, because the collision is symmetric. Give
+    # the header its own guard.
+    _replace_once(
+        STAGED / "src/SMESH/src/StdMeshers/StdMeshers_CompositeHexa_3D.hxx",
+        "#ifndef _SMESH_CompositeSegment_1D_HXX_\n#define _SMESH_CompositeSegment_1D_HXX_",
+        "#ifndef _SMESH_CompositeHexa_3D_HXX_\n#define _SMESH_CompositeHexa_3D_HXX_")
+    # StdMeshers_Prism_3D caches three helper algorithms in function-local statics, each
+    # constructed against the FIRST SMESH_Gen it ever sees. That is safe in SALOME, which has
+    # one process-global generator, and unsafe here: pySMESH gives each Mesher its own
+    # generator, and ~SMESH_Gen nullifies the _gen of every hypothesis registered with it —
+    # including these singletons. A second Prism_3D compute in the same process then works
+    # through a singleton whose generator is gone, and segfaults.
+    #
+    # Rebuild the singleton whenever the generator differs from the one it was built against.
+    # Deleting the stale one is safe in both directions: ~SMESH_Hypothesis is guarded on
+    # `_gen` for the dead-generator case, and merely un-registers itself for the live one.
+    for anchor, kind in (
+        ("      static TQuadrangleAlgo* algo = new TQuadrangleAlgo( fatherAlgo->GetGen() );",
+         "TQuadrangleAlgo"),
+        ("      static TProjction1dAlgo* algo = new TProjction1dAlgo( fatherAlgo->GetGen() );",
+         "TProjction1dAlgo"),
+        ("      static TProjction2dAlgo* algo = new TProjction2dAlgo( fatherAlgo->GetGen() );",
+         "TProjction2dAlgo"),
+    ):
+        _replace_once(
+            STAGED / "src/SMESH/src/StdMeshers/StdMeshers_Prism_3D.cxx",
+            anchor,
+            f"      static {kind}* algo = 0;\n"
+            f"      if ( !algo || algo->GetGen() != fatherAlgo->GetGen() )\n"
+            f"      {{\n"
+            f"        delete algo; // its SMESH_Gen is gone; ~SMESH_Hypothesis guards on _gen\n"
+            f"        algo = new {kind}( fatherAlgo->GetGen() );\n"
+            f"      }}")
+    # OCCT 8.0 made Adaptor3d_Curve::Value a NON-virtual inline forwarding to a new virtual
+    # EvalD0, whose base implementation raises Standard_NotImplemented. Prism_3D's two curve
+    # adaptors still override Value, which now merely *hides* the base one: every call through
+    # an Adaptor3d_Curve reference reaches the base EvalD0 and throws, so Prism_3D fails on
+    # every solid with "Standard_NotImplemented: Adaptor3d_Curve::EvalD0". Overriding EvalD0
+    # to forward to their own Value restores both paths. (Adaptor2d_Curve2d::Value is still
+    # virtual in 8.0, so the pcurve adaptor beside them needs nothing.)
+    _replace_once(
+        STAGED / "src/SMESH/src/StdMeshers/StdMeshers_Prism_3D.hxx",
+        "    TVerticalEdgeAdaptor( const TParam2ColumnMap* columnsMap, const double parameter );\n"
+        "    gp_Pnt Value(const Standard_Real U) const;",
+        "    TVerticalEdgeAdaptor( const TParam2ColumnMap* columnsMap, const double parameter );\n"
+        "    gp_Pnt Value(const Standard_Real U) const;\n"
+        "    // OCCT 8.0: Value is no longer virtual; EvalD0 is the evaluation entry point.\n"
+        "    gp_Pnt EvalD0(const Standard_Real U) const override { return Value(U); }")
+    _replace_once(
+        STAGED / "src/SMESH/src/StdMeshers/StdMeshers_Prism_3D.hxx",
+        "      :mySide(sideFace), myV( isTop ? 1.0 : 0.0 ) {}\n"
+        "    gp_Pnt Value(const Standard_Real U) const;",
+        "      :mySide(sideFace), myV( isTop ? 1.0 : 0.0 ) {}\n"
+        "    gp_Pnt Value(const Standard_Real U) const;\n"
+        "    // OCCT 8.0: Value is no longer virtual; EvalD0 is the evaluation entry point.\n"
+        "    gp_Pnt EvalD0(const Standard_Real U) const override { return Value(U); }")
+    _log("applied V9_9_0-tag fixups (winsock, SMESH_TLink ctor+hasher, ElementsOnShape copy, "
+         "CompositeHexa_3D include guard, Prism_3D per-generator singletons, Prism_3D "
+         "Adaptor3d_Curve::EvalD0)")
 
 
 def _apply_geomutils_occt_fix() -> None:

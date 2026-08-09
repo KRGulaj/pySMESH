@@ -108,9 +108,9 @@ and logged (not silently ignored). MinGW/gcc-only patches are no-ops under our M
 
 ### Source edits made by pySMESH itself
 
-Three deltas are applied by `prepare.py::_apply_tag_fixups` as exact string replacements rather
+Six deltas are applied by `prepare.py::_apply_tag_fixups` as exact string replacements rather
 than as patch files, because they target our `V9_9_0` **tag** and no upstream patch exists for
-them. They are modifications of already-vendored SALOME source (still LGPL-2.1), not new
+them. They are modifications of already-vendored SALOME source, not new
 vendoring:
 
 | Edit | File | What / why |
@@ -118,6 +118,9 @@ vendoring:
 | `gethostname` include | `Kernel/Basics/Basics_Utils.cxx` | Needs `<winsock2.h>` on Windows. |
 | `SMESH_TLink` default ctor + hasher functor | `SMESH/SMESHUtils/SMESH_TypeDefs.hxx` | OCCT 8.0 `NCollection` maps require a default-constructible key and call the hasher as a functor. |
 | **`ElementsOnShape` out-of-line copy ctor / `operator=`** | `SMESH/Controls/SMESH_ControlsDef.hxx` + `SMESH_Controls.cxx` | `ElementsOnShape` holds `std::vector<Classifier>` with `Classifier` only forward-declared in the header. MSVC eagerly instantiates the *implicit* copy operations against the incomplete type (**C2036**) in every TU that copies the predicate. Declaring them in the header and defining them (`= default`) in `SMESH_Controls.cxx`, where `Classifier` is complete, confines the `vector<Classifier>` instantiation to that one TU. |
+| **`CompositeHexa_3D` include guard** | `SMESH/StdMeshers/StdMeshers_CompositeHexa_3D.hxx` | The header carries `StdMeshers_CompositeSegment_1D`'s guard (`_SMESH_CompositeSegment_1D_HXX_`) verbatim, so whichever of the two headers is included second is silenced and its class is never declared. The collision is symmetric, so no include order fixes it, and any translation unit needing both algorithms cannot compile. Renamed to `_SMESH_CompositeHexa_3D_HXX_`. |
+| **`Prism_3D` curve adaptors override `EvalD0`** | `SMESH/StdMeshers/StdMeshers_Prism_3D.hxx` | OCCT 8.0 made `Adaptor3d_Curve::Value` a **non-virtual** inline forwarding to a new virtual `EvalD0`, whose base implementation raises `Standard_NotImplemented`. Prism_3D's `TVerticalEdgeAdaptor` and `THorizontalEdgeAdaptor` still override `Value`, which now only *hides* the base one — so every call through an `Adaptor3d_Curve` reference reached the base `EvalD0` and threw, and **`Prism_3D` failed on every solid**. Each now overrides `EvalD0` to forward to its own `Value`. `Adaptor2d_Curve2d::Value` is still virtual in 8.0, so the pcurve adaptor beside them needs nothing. |
+| **`Prism_3D` per-generator helper singletons** | `SMESH/StdMeshers/StdMeshers_Prism_3D.cxx` | Three helper algorithms (`TQuadrangleAlgo`, `TProjction1dAlgo`, `TProjction2dAlgo`) are cached in function-local statics built against the **first** `SMESH_Gen` they ever see. SALOME has one process-global generator, so that holds there. pySMESH gives each `Mesher` its own, and `~SMESH_Gen` nullifies the `_gen` of every hypothesis registered with it — these singletons included. A **second** `Prism_3D` compute in one process then runs through a singleton whose generator is gone and **segfaults** (reproduced deterministically). Each site now rebuilds the singleton when the generator differs from the one it was built against; deleting the stale one is safe because `~SMESH_Hypothesis` is guarded on `_gen`. |
 
 **The `ElementsOnShape` edit is what un-blocks the five `StdMeshers` translation units** that
 v1 excluded from the build (`Cartesian_3D`, `Import_1D2D`, `MaxElementVolume`,
@@ -125,7 +128,12 @@ v1 excluded from the build (`Cartesian_3D`, `Import_1D2D`, `MaxElementVolume`,
 which hit the same C2036; the exclusion list in `cmake/SMESH/CMakeLists.txt` outlived it. As
 of v2 ground-zero work all five compile unmodified, `StdMeshers` is built from a plain
 `file(GLOB)` with no exclusions, and the whole `StdMeshers` family is exercised by the
-`v2_probe` target (`tests/probe`). No further upstream source change is required.
+`v2_probe` target (`tests/probe`).
+
+**The include-guard edit is what un-blocks the algorithm catalogue.** It surfaced only when a
+single translation unit first needed both composite algorithms, which is why the earlier
+stages did not meet it: each SALOME translation unit includes one of the two headers, never
+both. Nothing in the compiled behaviour changes — the guard is a name.
 
 ## OCCT toolkits linked & bundled
 

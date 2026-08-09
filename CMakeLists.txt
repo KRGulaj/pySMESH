@@ -134,7 +134,12 @@ pybind11_add_module(_core
     src/bindings/session_tessellate.cpp
     src/bindings/session_handoff.cpp
     src/bindings/session_progress.cpp
-    src/bindings/session_bind.cpp)
+    src/bindings/session_bind.cpp
+    src/bindings/mesher_core.cpp
+    src/bindings/mesher_catalog.cpp
+    src/bindings/mesher_harvest.cpp
+    src/bindings/mesher_gmf.cpp
+    src/bindings/mesher_bind.cpp)
 target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
 # TKShHealing (ShapeUpgrade_UnifySameDomain), TKOffset (BRepOffsetAPI_*), and TKTopAlgo
 # (BRepClass3d_SolidClassifier) are pulled in transitively via the SMESH static libs, but the

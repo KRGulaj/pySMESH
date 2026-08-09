@@ -14,18 +14,22 @@
 #include "probe.hpp"
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <list>
 #include <memory>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_BuilderAlgo.hxx>
 #include <NCollection_List.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -43,7 +47,9 @@
 #include <SMDS_Mesh.hxx>
 #include <SMDS_MeshElement.hxx>
 #include <SMDS_MeshNode.hxx>
+#include <SMDS_MeshVolume.hxx>
 #include <SMESHDS_Group.hxx>
+#include <SMESHDS_SubMesh.hxx>
 #include <SMESHDS_Mesh.hxx>
 #include <SMESH_ComputeError.hxx>
 #include <SMESH_ControlsDef.hxx>
@@ -960,6 +966,377 @@ void probe_r17_groups() {
   check(s.mesh().GetGroupIds().size() == 1, "GROUPS the mesh reports exactly one group id");
 }
 
+// ---------------------------------------------------------------------------- MESHBIND -- //
+// The behaviours a Python meshing binding rests on, as opposed to the capabilities above.
+// Each of these decides a design question that a header read cannot answer: what a
+// body-fitted mesher actually emits, how an element names the sub-shape it sits on, whether
+// progress and cancellation can be driven from another thread, and whether two different
+// 3-D algorithms on one model meet at a shared face.
+void probe_meshing_binding_behaviour() {
+  section("MESHBIND", "the behaviours a Python meshing binding depends on");
+
+  // ---- What Cartesian_3D emits, and how a polyhedron's connectivity is read ---------- //
+  {
+    const TopoDS_Shape block = BRepPrimAPI_MakeBox(gp_Pnt(-4, -4, 0), 8.0, 8.0, 6.0).Shape();
+    const TopoDS_Shape bore = BRepPrimAPI_MakeCylinder(1.5, 6.0).Shape();
+    NCollection_List<TopoDS_Shape> args;
+    args.Append(block);
+    NCollection_List<TopoDS_Shape> tools;
+    tools.Append(bore);
+    BRepAlgoAPI_Cut cut;
+    cut.SetArguments(args);
+    cut.SetTools(tools);
+    cut.Build();
+
+    Session s(cut.Shape());
+    StdMeshers_Cartesian_3D* algo = s.make<StdMeshers_Cartesian_3D>();
+    StdMeshers_CartesianParameters3D* params = s.make<StdMeshers_CartesianParameters3D>();
+    std::vector<std::string> spacing(1, std::string("1.0"));
+    std::vector<double> internal_points;
+    for (int axis = 0; axis < 3; ++axis) {
+      params->SetGridSpacing(spacing, internal_points, axis);
+    }
+    params->SetSizeThreshold(4.0);
+    s.assign(s.shape(), algo);
+    s.assign(s.shape(), params);
+    check(s.compute(), "MESHBIND Cartesian_3D computes on the bored block");
+
+    int n_hexa = 0, n_poly = 0, n_other = 0;
+    const SMDS_MeshElement* a_polyhedron = nullptr;
+    for (SMDS_ElemIteratorPtr it = s.meshDS()->elementsIterator(SMDSAbs_Volume); it->more();) {
+      const SMDS_MeshElement* e = it->next();
+      switch (e->GetEntityType()) {
+        case SMDSEntity_Hexa: ++n_hexa; break;
+        case SMDSEntity_Polyhedra:
+          ++n_poly;
+          if (a_polyhedron == nullptr) {
+            a_polyhedron = e;
+          }
+          break;
+        default: ++n_other; break;
+      }
+    }
+    char msg[220];
+    std::snprintf(msg, sizeof(msg),
+                  "MESHBIND Cartesian_3D emits hexahedra AND polyhedra (hexa %d, poly %d, "
+                  "other %d) — a binding must carry a per-face node split",
+                  n_hexa, n_poly, n_other);
+    check(n_hexa > 0 && n_poly > 0, msg);
+
+    if (a_polyhedron != nullptr) {
+      const SMDS_MeshVolume* vol = SMDS_Mesh::DownCast<SMDS_MeshVolume>(a_polyhedron);
+      check(vol != nullptr, "MESHBIND a polyhedron downcasts to SMDS_MeshVolume");
+      if (vol != nullptr) {
+        const std::vector<int> quantities = vol->GetQuantities();
+        int summed = 0;
+        for (const int q : quantities) {
+          summed += q;
+        }
+        std::snprintf(msg, sizeof(msg),
+                      "MESHBIND GetQuantities() sums to NbNodes() (%d faces, %d node slots, "
+                      "NbNodes %d) — the node list IS the face stream",
+                      static_cast<int>(quantities.size()), summed, a_polyhedron->NbNodes());
+        check(!quantities.empty() && summed == a_polyhedron->NbNodes(), msg);
+      }
+    }
+  }
+
+  // ---- How an element names the sub-shape it sits on -------------------------------- //
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    check(build_hexa_mesh(s, 2), "MESHBIND hexa mesh for the shape-binding probe computes");
+    SMESHDS_Mesh* ds = s.meshDS();
+
+    int bound = 0, unbound = 0, wrong_kind = 0;
+    for (SMDS_ElemIteratorPtr it = ds->elementsIterator(SMDSAbs_Face); it->more();) {
+      const SMDS_MeshElement* e = it->next();
+      const int shape_id = e->getshapeId();
+      if (shape_id <= 0) {
+        ++unbound;
+        continue;
+      }
+      ++bound;
+      // IndexToShape is the inverse of ShapeToIndex, so a SMESHDS shape index translates
+      // back to the TopoDS_Shape and from there to this shape's own TopExp ordinal — which
+      // is what keeps SMESHDS indices out of the public signatures.
+      const TopoDS_Shape& sub = ds->IndexToShape(shape_id);
+      if (sub.IsNull() || sub.ShapeType() != TopAbs_FACE) {
+        ++wrong_kind;
+      }
+    }
+    char msg[200];
+    std::snprintf(msg, sizeof(msg),
+                  "MESHBIND every face element names a FACE through getshapeId() + "
+                  "IndexToShape (bound %d, unbound %d, wrong kind %d)",
+                  bound, unbound, wrong_kind);
+    check(bound > 0 && unbound == 0 && wrong_kind == 0, msg);
+
+    // The same question for nodes, which carry the sub-shape they were classified onto.
+    int node_bound = 0, node_unbound = 0;
+    for (SMDS_NodeIteratorPtr it = ds->nodesIterator(); it->more();) {
+      (it->next()->getshapeId() > 0 ? node_bound : node_unbound)++;
+    }
+    std::snprintf(msg, sizeof(msg),
+                  "MESHBIND every node names a sub-shape too (bound %d, unbound %d)",
+                  node_bound, node_unbound);
+    check(node_bound > 0 && node_unbound == 0, msg);
+  }
+
+  // ---- AddHypothesis reports a refusal in words, not only as a status ---------------- //
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    s.assign(s.shape(), a1);
+    StdMeshers_Regular_1D* a1b = s.make<StdMeshers_Regular_1D>();
+    std::string error;
+    const SMESH_Hypothesis::Hypothesis_Status status =
+        s.mesh().AddHypothesis(s.shape(), a1b->GetID(), &error);
+    char msg[240];
+    std::snprintf(msg, sizeof(msg),
+                  "MESHBIND a second 1-D algorithm on one shape is refused with a status and "
+                  "text (status %d, text \"%s\")",
+                  static_cast<int>(status), error.c_str());
+    check(SMESH_Hypothesis::IsStatusFatal(status), msg);
+  }
+
+  // ---- Progress and cancellation, driven from another thread ------------------------ //
+  // SMESH has no Message_ProgressIndicator: progress is *pulled* through
+  // SMESH_Mesh::GetComputeProgress() and a break is *pushed* through
+  // SMESH_Gen::CancelCompute(). Both are designed to be called while Compute() runs, which
+  // is the whole question — a binding polls them from a helper thread with the GIL released.
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+    n->SetNumberOfSegments(40);
+    StdMeshers_Quadrangle_2D* a2 = s.make<StdMeshers_Quadrangle_2D>();
+    StdMeshers_Hexa_3D* a3 = s.make<StdMeshers_Hexa_3D>();
+    s.assign(s.shape(), a1);
+    s.assign(s.shape(), n);
+    s.assign(s.shape(), a2);
+    s.assign(s.shape(), a3);
+
+    std::atomic<bool> running{true};
+    std::atomic<int> samples{0};
+    std::atomic<int> non_monotone{0};
+    double last = -1.0;
+    std::thread poller([&] {
+      while (running.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        const double p = s.mesh().GetComputeProgress();
+        if (p < last) {
+          non_monotone.fetch_add(1);
+        }
+        last = p;
+        samples.fetch_add(1);
+      }
+    });
+    const bool ok = s.compute();
+    running.store(false);
+    poller.join();
+
+    char msg[220];
+    std::snprintf(msg, sizeof(msg),
+                  "MESHBIND GetComputeProgress() is safe to poll from another thread during "
+                  "Compute (%d samples, %d backwards steps)",
+                  samples.load(), non_monotone.load());
+    check(ok && samples.load() > 0, msg);
+  }
+
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+    n->SetNumberOfSegments(60);
+    StdMeshers_Quadrangle_2D* a2 = s.make<StdMeshers_Quadrangle_2D>();
+    StdMeshers_Hexa_3D* a3 = s.make<StdMeshers_Hexa_3D>();
+    s.assign(s.shape(), a1);
+    s.assign(s.shape(), n);
+    s.assign(s.shape(), a2);
+    s.assign(s.shape(), a3);
+
+    std::atomic<bool> stop{false};
+    std::thread canceller([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(30));
+      if (!stop.load()) {
+        s.gen().CancelCompute(s.mesh(), s.shape());
+      }
+    });
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool ok = s.compute();
+    const double elapsed_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
+            .count();
+    stop.store(true);
+    canceller.join();
+
+    // Compute() returning false is NOT by itself "the caller cancelled": a cancel landing
+    // late leaves a complete mesh and the same false, and an ordinary algorithm failure
+    // gives false with no cancel at all. The binding's own flag has to be the authority,
+    // exactly as the OCCT-side progress driver already establishes.
+    char msg[260];
+    std::snprintf(msg, sizeof(msg),
+                  "MESHBIND CancelCompute() from another thread stops Compute (returned %s "
+                  "after %.0f ms, %d of 216000 volumes built)",
+                  ok ? "true" : "false", elapsed_ms,
+                  static_cast<int>(s.meshDS()->NbVolumes()));
+    check(!ok, msg);
+  }
+
+  // Only three StdMeshers algorithms poll _computeCanceled inside their own loop —
+  // Adaptive1D, Cartesian_3D and Prism_3D. Everything else can be broken only *between*
+  // sub-meshes, which is where SMESH_Gen tests its own flag. So cancellation latency is
+  // bounded by the longest single algorithm run, not by a poll interval, and that has to be
+  // stated rather than discovered. Cartesian_3D is the one that can prove the good case.
+  {
+    const TopoDS_Shape block =
+        BRepPrimAPI_MakeBox(gp_Pnt(-8, -8, 0), 16.0, 16.0, 12.0).Shape();
+    const TopoDS_Shape bore = BRepPrimAPI_MakeCylinder(2.0, 12.0).Shape();
+    NCollection_List<TopoDS_Shape> args;
+    args.Append(block);
+    NCollection_List<TopoDS_Shape> tools;
+    tools.Append(bore);
+    BRepAlgoAPI_Cut cut;
+    cut.SetArguments(args);
+    cut.SetTools(tools);
+    cut.Build();
+
+    Session s(cut.Shape());
+    StdMeshers_Cartesian_3D* algo = s.make<StdMeshers_Cartesian_3D>();
+    StdMeshers_CartesianParameters3D* params = s.make<StdMeshers_CartesianParameters3D>();
+    std::vector<std::string> spacing(1, std::string("0.15"));
+    std::vector<double> internal_points;
+    for (int axis = 0; axis < 3; ++axis) {
+      params->SetGridSpacing(spacing, internal_points, axis);
+    }
+    params->SetSizeThreshold(4.0);
+    s.assign(s.shape(), algo);
+    s.assign(s.shape(), params);
+
+    std::atomic<bool> stop{false};
+    std::thread canceller([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(150));
+      if (!stop.load()) {
+        s.gen().CancelCompute(s.mesh(), s.shape());
+      }
+    });
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool ok = s.compute();
+    const double elapsed_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
+            .count();
+    stop.store(true);
+    canceller.join();
+
+    char msg[260];
+    std::snprintf(msg, sizeof(msg),
+                  "MESHBIND Cartesian_3D honours a cancel mid-algorithm (returned %s after "
+                  "%.0f ms with %d volumes) — it is one of the three that poll the flag",
+                  ok ? "true" : "false", elapsed_ms,
+                  static_cast<int>(s.meshDS()->NbVolumes()));
+    check(!ok && elapsed_ms < 1500.0, msg);
+  }
+
+  // ---- Two 3-D algorithms on one model, and whether they meet ----------------------- //
+  // The gate's real question: a mixed assignment must be conforming at the internal
+  // boundary. An algorithm that consumes the 2-D boundary mesh conforms by construction; one
+  // that ignores it cannot. Both cases are measured here rather than assumed.
+  {
+    // A plain fuse of two face-touching boxes returns ONE solid — the seam face is internal
+    // to the result and OCCT drops it. The general fuse keeps both pieces and glues them on
+    // a shared FACE, which is the only fixture that can carry an internal boundary at all.
+    const TopoDS_Shape lower = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 4.0, 4.0, 4.0).Shape();
+    const TopoDS_Shape upper = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 4), 4.0, 4.0, 4.0).Shape();
+    NCollection_List<TopoDS_Shape> args;
+    args.Append(lower);
+    args.Append(upper);
+    BRepAlgoAPI_BuilderAlgo fuse;
+    fuse.SetArguments(args);
+    fuse.Build();
+    check(fuse.IsDone(), "MESHBIND two-solid stacked fixture builds");
+
+    std::vector<TopoDS_Shape> solids;
+    for (TopExp_Explorer ex(fuse.Shape(), TopAbs_SOLID); ex.More(); ex.Next()) {
+      solids.push_back(ex.Current());
+    }
+    char msg[240];
+    std::snprintf(msg, sizeof(msg), "MESHBIND the stacked fixture has 2 solids (got %d)",
+                  static_cast<int>(solids.size()));
+    check(solids.size() == 2, msg);
+
+    if (solids.size() == 2) {
+      Session s(fuse.Shape());
+      StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+      StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+      n->SetNumberOfSegments(2);
+      StdMeshers_Quadrangle_2D* a2 = s.make<StdMeshers_Quadrangle_2D>();
+      s.assign(s.shape(), a1);
+      s.assign(s.shape(), n);
+      s.assign(s.shape(), a2);
+
+      StdMeshers_Hexa_3D* hexa = s.make<StdMeshers_Hexa_3D>();
+      StdMeshers_PolyhedronPerSolid_3D* poly = s.make<StdMeshers_PolyhedronPerSolid_3D>();
+      const int st_hexa = static_cast<int>(s.assign_status(solids[0], hexa));
+      const int st_poly = static_cast<int>(s.assign_status(solids[1], poly));
+      std::snprintf(msg, sizeof(msg),
+                    "MESHBIND a different 3-D algorithm assigns to each solid (Hexa_3D %d, "
+                    "PolyhedronPerSolid_3D %d)",
+                    st_hexa, st_poly);
+      check(!SMESH_Hypothesis::IsStatusFatal(
+                static_cast<SMESH_Hypothesis::Hypothesis_Status>(st_hexa)) &&
+                !SMESH_Hypothesis::IsStatusFatal(
+                    static_cast<SMESH_Hypothesis::Hypothesis_Status>(st_poly)),
+            msg);
+
+      const bool computed = s.compute();
+      // Conformity, asserted node by node: every node on the shared FACE must be a single
+      // node used by elements of both solids, not two coincident ones.
+      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> lower_faces, upper_faces;
+      TopExp::MapShapes(solids[0], TopAbs_FACE, lower_faces);
+      TopExp::MapShapes(solids[1], TopAbs_FACE, upper_faces);
+      int shared_faces = 0;
+      TopoDS_Shape interface_face;
+      for (int i = 1; i <= lower_faces.Extent(); ++i) {
+        if (upper_faces.Contains(lower_faces.FindKey(i))) {
+          ++shared_faces;
+          interface_face = lower_faces.FindKey(i);
+        }
+      }
+      std::snprintf(msg, sizeof(msg),
+                    "MESHBIND the two solids share exactly one FACE (got %d)",
+                    shared_faces);
+      check(shared_faces == 1, msg);
+
+      int interface_nodes = 0, shared_by_both = 0;
+      if (computed && !interface_face.IsNull()) {
+        const SMESHDS_SubMesh* sub = s.meshDS()->MeshElements(interface_face);
+        if (sub != nullptr) {
+          for (SMDS_NodeIteratorPtr it = sub->GetNodes(); it->more();) {
+            const SMDS_MeshNode* node = it->next();
+            ++interface_nodes;
+            std::set<int> owning_solids;
+            for (SMDS_ElemIteratorPtr eit = node->GetInverseElementIterator(SMDSAbs_Volume);
+                 eit->more();) {
+              const int sid = eit->next()->getshapeId();
+              if (sid > 0) {
+                owning_solids.insert(sid);
+              }
+            }
+            if (owning_solids.size() >= 2) {
+              ++shared_by_both;
+            }
+          }
+        }
+      }
+      std::snprintf(msg, sizeof(msg),
+                    "MESHBIND the mixed mesh is conforming node by node at the shared FACE "
+                    "(computed %s, %d interface nodes, %d used by both solids)",
+                    computed ? "true" : "false", interface_nodes, shared_by_both);
+      check(computed && interface_nodes > 0 && shared_by_both == interface_nodes, msg);
+    }
+  }
+}
+
 // ---------------------------------------------------------------------------- GMF ----- //
 void probe_r18_gmf_driver() {
   section("GMF", "DriverGMF: Inria .mesh / .meshb round-trip");
@@ -1000,12 +1377,89 @@ void probe_r18_gmf_driver() {
   check(read_mesh->GetMeshDS()->NbVolumes() == volumes,
         "GMF round-trip preserves the volume count");
   check(read_mesh->GetMeshDS()->NbFaces() == faces, "GMF round-trip preserves the face count");
-  delete read_mesh;
 
+  // Does the per-element sub-shape reference survive? The writer emits elem->getshapeId() as
+  // each element's GMF reference, so the file carries it — but the reader parses it into a
+  // local and never applies it. Measured rather than assumed, because a binding that claims
+  // the CAD binding survives a round trip would be wrong.
+  {
+    int with_shape = 0, without_shape = 0;
+    for (SMDS_ElemIteratorPtr it = read_mesh->GetMeshDS()->elementsIterator(SMDSAbs_Volume);
+         it->more();) {
+      (it->next()->getshapeId() > 0 ? with_shape : without_shape)++;
+    }
+    char msg[220];
+    std::snprintf(msg, sizeof(msg),
+                  "GMF the per-element sub-shape reference is written but DROPPED on read "
+                  "(%d volumes with a shape id, %d without)",
+                  with_shape, without_shape);
+    check(with_shape == 0 && without_shape > 0, msg);
+  }
+  delete read_mesh;
   std::remove(path.c_str());
-  note("GMF .meshb (binary) and MMG/fTetWild files",
-       "libmesh5 selects ASCII/binary by extension; reading engine-written files is a "
-       "binding-layer test needing those engines' output as fixtures");
+
+  // Groups: the only group channel the GMF driver carries is the "required entities" one —
+  // a group whose store name contains "_required_<Entity>". A general named group is silently
+  // not written, which the binding must say rather than imply.
+  {
+    Session g(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    check(build_hexa_mesh(g, 2), "GMF hexa mesh for the group round-trip computes");
+    SMESH_Group* required = g.mesh().AddGroup(SMDSAbs_Face, "req");
+    SMESH_Group* ordinary = g.mesh().AddGroup(SMDSAbs_Face, "ordinary");
+    SMESHDS_Group* req_ds = dynamic_cast<SMESHDS_Group*>(required->GetGroupDS());
+    SMESHDS_Group* ord_ds = dynamic_cast<SMESHDS_Group*>(ordinary->GetGroupDS());
+    check(req_ds != nullptr && ord_ds != nullptr, "GMF two face groups are created");
+    req_ds->SetStoreName("_required_Quadrilaterals");
+    ord_ds->SetStoreName("ordinary");
+    int added = 0;
+    for (SMDS_ElemIteratorPtr it = g.meshDS()->elementsIterator(SMDSAbs_Face);
+         it->more() && added < 5;) {
+      const SMDS_MeshElement* e = it->next();
+      req_ds->Add(e);
+      ord_ds->Add(e);
+      ++added;
+    }
+
+    const std::string gpath = "pysmesh_probe_gmf_groups.meshb";
+    DriverGMF_Write gw;
+    gw.SetFile(gpath);
+    gw.SetMesh(g.meshDS());
+    gw.SetExportRequiredGroups(true);
+    check(gw.Perform() == Driver_Mesh::DRS_OK,
+          "GMF a binary .meshb file is written (libmesh5 picks the format by extension)");
+
+    SMESH_Gen ggen;
+    SMESH_Mesh* gread = ggen.CreateMesh(false);
+    DriverGMF_Read gr;
+    gr.SetFile(gpath);
+    gr.SetMesh(gread->GetMeshDS());
+    gr.SetMakeRequiredGroups(true);
+    check(gr.Perform() == Driver_Mesh::DRS_OK, "GMF the binary .meshb file reads back");
+
+    int required_back = 0;
+    bool ordinary_back = false;
+    for (SMESHDS_GroupBase* grp : gread->GetMeshDS()->GetGroups()) {
+      const std::string name = grp->GetStoreName();
+      if (name.find("_required_") != std::string::npos) {
+        required_back = static_cast<int>(grp->Extent());
+      }
+      if (name == "ordinary") {
+        ordinary_back = true;
+      }
+    }
+    char msg[240];
+    std::snprintf(msg, sizeof(msg),
+                  "GMF a _required_ group round-trips with its membership (%d of %d back) "
+                  "while an ordinary group is NOT written (%s)",
+                  required_back, added, ordinary_back ? "present" : "absent");
+    check(required_back == added && !ordinary_back, msg);
+    delete gread;
+    std::remove(gpath.c_str());
+  }
+
+  note("GMF MMG / fTetWild files",
+       "reading engine-written files is a binding-layer test needing those engines' output "
+       "as fixtures");
 }
 
 }  // namespace
@@ -1018,5 +1472,6 @@ void run_smesh_probe() {
   probe_r15_meshing_family();
   probe_r16_medial_axis_and_blocks();
   probe_r17_groups();
+  probe_meshing_binding_behaviour();
   probe_r18_gmf_driver();
 }

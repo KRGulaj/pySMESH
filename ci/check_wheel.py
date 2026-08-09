@@ -39,6 +39,7 @@ _V2_MODELLING_TOOLKITS = (
     "tktopalgo",  # BRepBuilderAPI_*, BRepGProp, BRepCheck_Analyzer
     "tkmesh",  # BRepMesh_IncrementalMesh
     "tkhelix",  # HelixBRep_BuilderHelix, called by Session.add_helix
+    "tkexpress",  # ExprIntrp, reached by the mesher's expression-based 1-D distributions
 )
 
 
