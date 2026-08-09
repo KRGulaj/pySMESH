@@ -69,7 +69,7 @@ pip install "vtk==9.6.2"
 # conda install -c conda-forge vtk==9.6.2
 
 # 2. Install the downloaded wheel (OCCT and Boost are bundled, no other deps needed)
-pip install pysmesh-3.0.0-cp313-win.whl
+pip install pysmesh-3.0.0-cp313-abi3-win_amd64.whl
 ```
 
 **Platform:** Windows x64, CPython 3.13 only. There are no other wheels.
