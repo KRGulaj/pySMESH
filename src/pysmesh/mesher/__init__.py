@@ -19,6 +19,13 @@ at the walls — which a single global algorithm cannot express at all::
     report = mesher.compute()
     mesh = mesher.mesh()
 
+Once a mesh exists, two things say whether it is any good and what parts of it mean what.
+**Quality controls** measure and classify: ``mesher.quality(AspectRatio3D())`` gives one
+number per cell, and ``mesher.select(BadOrientedVolume())`` gives the ids of the cells that
+are inverted. **Groups** name: a named set of elements that the mesher itself maintains
+across editing, so a wall named on a coarse mesh is still the wall after the mesh has been
+converted to second order or split.
+
 **Three id spaces meet here and must not be confused.** A mesh entity carries its own mesh
 id; the sub-shape it sits on is named by a *positional ordinal* of the meshed shape; and the
 session that produced that shape names the same sub-shape by an :data:`~pysmesh.EntityId`.
@@ -31,20 +38,23 @@ releases the GIL, and the progress and cancel hooks are called from a helper thr
 **Layout.**
 
 ===================  =====================================================================
-``_types``           the element and sub-shape enums, and what a compute and harvest return
+``_base``            the native handle every operation group is written against
+``_types``          the element and sub-shape enums, and what a compute and harvest return
 ``_catalog``         the algorithm and hypothesis dataclasses
+``_mesh``            assignment, compute and the harvest
+``_controls``        the quality controls, the predicates and the filter algebra
+``_group``           named groups of elements and nodes
+``_edit``            the mesh editor
+``_search``          location, ray casting, classification and slot cutting
+``_medial``          the medial axis of a face
+``_block``           block decomposition and pattern mapping
 ``_gmf``             Inria ``.mesh`` / ``.meshb`` interchange
 ===================  =====================================================================
 """
 
 from __future__ import annotations
 
-import os
-from collections.abc import Sequence
-from typing import cast
-
-from .._core import Mesher as _Mesher
-from .._core import Shape
+from ._base import _MesherBase
 from ._catalog import (
     Adaptive1D,
     Algorithm,
@@ -95,7 +105,83 @@ from ._catalog import (
     ViscousLayers,
     ViscousLayers2D,
 )
+from ._controls import (
+    And,
+    Area,
+    AspectRatio,
+    AspectRatio3D,
+    BadOrientedVolume,
+    BareBorderFace,
+    BareBorderVolume,
+    BelongToGroup,
+    CoincidentElements,
+    CoincidentNodes,
+    Control,
+    Deflection2D,
+    ElementsOnShape,
+    EqualTo,
+    FreeBorders,
+    FreeEdges,
+    FreeFaces,
+    FreeNodes,
+    Length,
+    Length2D,
+    Length3D,
+    LessThan,
+    ManifoldPart,
+    MaxElementLength2D,
+    MaxElementLength3D,
+    MinimumAngle,
+    MoreThan,
+    MultiConnection,
+    MultiConnection2D,
+    NodeConnectivityNumber,
+    Not,
+    Or,
+    OverConstrainedFace,
+    OverConstrainedVolume,
+    Predicate,
+    QualityResult,
+    RangeOfIds,
+    Selection,
+    Skew,
+    Taper,
+    Volume,
+    Warping,
+    _QualityOps,
+    quality,
+    select,
+)
+from ._block import (
+    BLOCK_EDGE_NAMES,
+    BLOCK_FACE_NAMES,
+    BLOCK_VERTEX_NAMES,
+    Block,
+    BlockParameters,
+    PatternReport,
+    _PatternOps,
+    block_parameters,
+    block_points,
+    block_shapes,
+)
+from ._edit import EditReport, SmoothMethod, SplitMethod, _EditOps
+from ._medial import BranchEnd, MedialAxis, MedialBranch, medial_axis
+from ._search import (
+    ClosestElements,
+    ElementsAtPoints,
+    FacePatches,
+    MergeObstruction,
+    PointState,
+    ProjectedPoints,
+    RayHits,
+    SharpEdges,
+    SlotBoundary,
+    _SearchOps,
+)
 from ._gmf import GmfMesh, gmf_unwritable_types, gmf_writable_group_name, read_gmf, write_gmf
+from ._group import _GroupOps
+from ._mesh import _MeshOps
+
 # The hook aliases belong to the session, which defines them; the mesher shares them
 # rather than declaring a second pair that means the same thing.
 from ..session import CancelPredicate, ProgressCallback
@@ -105,18 +191,16 @@ from ._types import (
     ComputeReport,
     ElementDimension,
     ElementType,
+    GroupSource,
     MeshData,
     MeshGroup,
     SubMeshCount,
     SubShape,
     SubShapeKind,
-    _groups,
-    _mesh_data,
-    _report,
 )
 
 
-class Mesher:
+class Mesher(_MeshOps, _QualityOps, _GroupOps, _EditOps, _SearchOps, _PatternOps):
     """A shape, the algorithms and hypotheses assigned across it, and the mesh they produce.
 
     A mesher is built on one :class:`~pysmesh.Shape` and holds a single mesh. Assignments
@@ -126,6 +210,9 @@ class Mesher:
     Assignment is scoped. An assignment with no ``on`` governs the whole shape and is the
     default everywhere; one naming a sub-shape overrides it there. That is the whole of the
     model, and it is what makes a mixed mesh expressible.
+
+    Once computed, :meth:`quality` and :meth:`select` measure and classify the result, and
+    the group methods name parts of it in a way that survives editing.
 
     Thread contract: **not thread-safe**. One mesher per thread. :meth:`compute` releases the
     GIL and calls its hooks from a helper thread.
@@ -137,169 +224,10 @@ class Mesher:
         >>> m.assign(Quadrangle2D())                        # doctest: +SKIP
         >>> m.assign(Hexa3D())                              # doctest: +SKIP
         >>> report = m.compute()                            # doctest: +SKIP
+        >>> worst = m.quality(AspectRatio3D()).values.max()  # doctest: +SKIP
     """
 
-    __slots__ = ("_m",)
-
-    _m: _Mesher
-
-    def __init__(self, shape: Shape) -> None:
-        """Build a mesher on a shape.
-
-        Args:
-            shape: The shape to mesh, from :func:`~pysmesh.load_brep` or another loader.
-        """
-        self._m = _Mesher(shape)
-
-    # ---- Assignment ------------------------------------------------------------------- #
-
-    def assign(self, item: Algorithm | Hypothesis, on: SubShape | None = None) -> None:
-        """Attach an algorithm or a hypothesis to a sub-shape.
-
-        Args:
-            item: The algorithm or hypothesis to attach.
-            on: The sub-shape it governs. ``None`` means the whole shape, which is how a
-                default for the model is expressed.
-
-        Raises:
-            PysmeshError: If SMESH refuses the assignment. The message names the sub-shape
-                and why — a second algorithm of the same dimension already there, a
-                hypothesis that does not fit the algorithm beside it, a sub-shape whose
-                geometry the algorithm cannot read, and so on.
-        """
-        kind = "" if on is None else on.kind.name
-        ordinal = 0 if on is None else on.ordinal
-        self._m.assign(item.native_name, item.params(), kind, ordinal)
-
-    def unassign(self, item: Algorithm | Hypothesis, on: SubShape | None = None) -> None:
-        """Detach an algorithm or a hypothesis previously attached to a sub-shape.
-
-        Args:
-            item: The algorithm or hypothesis to detach. Only its name is used, so an
-                equivalent instance works.
-            on: The sub-shape it was attached to.
-
-        Raises:
-            PysmeshError: If nothing of that name is attached there, or SMESH refuses to
-                detach it.
-        """
-        kind = "" if on is None else on.kind.name
-        ordinal = 0 if on is None else on.ordinal
-        self._m.unassign(item.native_name, kind, ordinal)
-
-    def assignments(self) -> tuple[tuple[str, SubShape | None], ...]:
-        """Everything attached, in the order it was attached.
-
-        Returns:
-            One ``(native_name, sub_shape)`` pair per assignment, with ``None`` for the ones
-            governing the whole shape.
-        """
-        out: list[tuple[str, SubShape | None]] = []
-        for entry in self._m.assignments():
-            name, kind, ordinal = cast("tuple[str, str, int]", entry)
-            on = None if not kind else SubShape(SubShapeKind[kind], ordinal)
-            out.append((name, on))
-        return tuple(out)
-
-    # ---- Compute ---------------------------------------------------------------------- #
-
-    def compute(
-        self,
-        progress: ProgressCallback | None = None,
-        cancel: CancelPredicate | None = None,
-    ) -> ComputeReport:
-        """Run the assigned algorithms over the shape.
-
-        Progress and cancellation both work, with two limits that are properties of SMESH
-        rather than of this binding and are worth knowing before relying on either:
-
-        * **A cancel is not preemptive.** Three algorithms poll it inside their own loop —
-          :class:`Cartesian3D`, :class:`Prism3D` and the one driven by :class:`Adaptive1D` —
-          and every other one can be stopped only between sub-meshes. So the latency is
-          bounded by the longest single algorithm run, not by any poll interval.
-        * **Progress is exact only at sub-mesh granularity.** The fraction of the sub-meshes
-          already done is real. Within one running algorithm SMESH interpolates with a tick
-          counter that advances once per enquiry, so the value there tracks the enquiry, not
-          the work. Only :class:`QuadFromMedialAxis1D2D` reports its own true fraction. The
-          practical shape of this: an algorithm that meshes the whole model in one call — a
-          body-fitted Cartesian run, say — reports values that creep up from near zero and
-          then jump to 1.0 at the end. The updates are real and monotone; the *number* they
-          carry is not a fraction of the work done.
-
-        Args:
-            progress: Called with a float in ``[0, 1]``, strictly increasing, from a helper
-                thread while the mesher runs. An exception raised in it cancels the compute
-                and is re-raised here with its own type and traceback.
-            cancel: Asked whether to stop. It is asked once before anything starts, so a
-                flag set beforehand is honoured even by a mesh that finishes quickly.
-
-        Returns:
-            What the run produced, and which sub-shapes received elements.
-
-        Raises:
-            PysmeshCancelled: If ``cancel`` returned True or ``progress`` raised. The mesh is
-                cleared, so nothing partial survives.
-            PysmeshError: If any sub-mesh failed. The message names every failed sub-shape
-                with SMESH's own reason and the algorithm that reported it, and ``.face_ids``
-                carries the ordinals of the failed faces. The partial mesh is **kept** here
-                rather than cleared, because how far the assignment got is the diagnostic.
-        """
-        return _report(self._m.compute(progress, cancel))
-
-    # ---- Results ---------------------------------------------------------------------- #
-
-    def mesh(self) -> MeshData:
-        """The mesh as arrays.
-
-        Reading is always allowed. It makes no claim that the mesh is complete —
-        :meth:`compute` is the only thing that reports success — so after a caught failure
-        this returns however much was built.
-
-        Returns:
-            The nodes, the elements, and the sub-shape each of them sits on.
-        """
-        return _mesh_data(self._m.mesh_arrays())
-
-    def groups(self) -> tuple[MeshGroup, ...]:
-        """The groups carried on the mesh.
-
-        Algorithms create these themselves where they have something to name — a viscous
-        layer stack collects its cells into the group its hypothesis names.
-
-        Returns:
-            One entry per group.
-        """
-        return _groups(cast("Sequence[object]", self._m.groups()))
-
-    def write_gmf(
-        self, path: str | os.PathLike[str], groups: Sequence[MeshGroup] = ()
-    ) -> None:
-        """Write this mesher's mesh to an Inria ``.mesh`` or ``.meshb`` file.
-
-        Args:
-            path: File to write.
-            groups: Groups to write; see :func:`~pysmesh.write_gmf` for what the format can
-                carry.
-
-        Raises:
-            PysmeshError: If the mesh holds an element the format cannot represent — a
-                body-fitted Cartesian mesh always does — or the file cannot be written.
-        """
-        write_gmf(path, self.mesh(), groups)
-
-    # ---- Lifetime --------------------------------------------------------------------- #
-
-    def release(self) -> None:
-        """Free the underlying mesh. Idempotent; the mesher is unusable afterwards."""
-        self._m.release()
-
-    def is_open(self) -> bool:
-        """Whether the mesher still holds a mesh.
-
-        Returns:
-            False once :meth:`release` has run.
-        """
-        return bool(self._m.is_open())
+    __slots__ = ()
 
     def __enter__(self) -> Mesher:
         """Enter a context that releases the mesh on exit.
@@ -315,44 +243,96 @@ class Mesher:
 
 
 __all__ = [
-    "GMF_REQUIRED_MARKER",
-    "GMF_WRITABLE_TYPES",
     "Adaptive1D",
     "Algorithm",
+    "And",
+    "Area",
     "Arithmetic1D",
+    "AspectRatio",
+    "AspectRatio3D",
     "AutomaticLength",
+    "BLOCK_EDGE_NAMES",
+    "BLOCK_FACE_NAMES",
+    "BLOCK_VERTEX_NAMES",
+    "BadOrientedVolume",
+    "BareBorderFace",
+    "BareBorderVolume",
+    "BelongToGroup",
+    "Block",
+    "BlockParameters",
+    "BranchEnd",
     "CancelPredicate",
     "Cartesian3D",
     "CartesianParameters3D",
+    "ClosestElements",
+    "CoincidentElements",
+    "CoincidentNodes",
     "CompositeHexa3D",
     "CompositeSegment1D",
     "ComputeReport",
+    "Control",
     "Deflection1D",
+    "Deflection2D",
     "Distribution",
+    "EditReport",
     "ElementDimension",
     "ElementType",
+    "ElementsAtPoints",
+    "ElementsOnShape",
+    "EqualTo",
+    "FacePatches",
     "FixedPoints1D",
+    "FreeBorders",
+    "FreeEdges",
+    "FreeFaces",
+    "FreeNodes",
+    "GMF_REQUIRED_MARKER",
+    "GMF_WRITABLE_TYPES",
     "Geometric1D",
     "GmfMesh",
+    "GroupSource",
     "Hexa3D",
     "HexaFromSkin3D",
     "Hypothesis",
     "LayerDistribution",
+    "Length",
+    "Length2D",
+    "Length3D",
+    "LessThan",
     "LocalLength",
+    "ManifoldPart",
     "MaxElementArea",
+    "MaxElementLength2D",
+    "MaxElementLength3D",
     "MaxElementVolume",
     "MaxLength",
+    "MedialAxis",
+    "MedialBranch",
     "Mefisto2D",
+    "MergeObstruction",
     "MeshData",
     "MeshGroup",
     "Mesher",
+    "MinimumAngle",
+    "MoreThan",
+    "MultiConnection",
+    "MultiConnection2D",
+    "NodeConnectivityNumber",
+    "Not",
     "NumberOfLayers",
     "NumberOfLayers2D",
     "NumberOfSegments",
+    "Or",
+    "OverConstrainedFace",
+    "OverConstrainedVolume",
+    "PatternReport",
+    "PointState",
     "PolygonPerFace2D",
     "PolyhedronPerSolid3D",
+    "Predicate",
     "Prism3D",
     "ProgressCallback",
+    "ProjectedPoints",
     "Projection1D",
     "Projection1D2D",
     "Projection2D",
@@ -363,22 +343,40 @@ __all__ = [
     "Propagation",
     "QuadFromMedialAxis1D2D",
     "QuadType",
+    "Quadrangle2D",
     "QuadrangleParams",
     "QuadranglePreference",
-    "Quadrangle2D",
     "QuadraticMesh",
+    "QualityResult",
     "RadialPrism3D",
     "RadialQuadrangle1D2D",
+    "RangeOfIds",
+    "RayHits",
     "Regular1D",
     "SegmentLengthAroundVertex",
+    "Selection",
+    "SharpEdges",
+    "Skew",
+    "SlotBoundary",
+    "SmoothMethod",
+    "SplitMethod",
     "StartEndLength",
     "SubMeshCount",
     "SubShape",
     "SubShapeKind",
+    "Taper",
     "ViscousLayers",
     "ViscousLayers2D",
+    "Volume",
+    "Warping",
+    "block_parameters",
+    "block_points",
+    "block_shapes",
     "gmf_unwritable_types",
     "gmf_writable_group_name",
+    "medial_axis",
+    "quality",
     "read_gmf",
+    "select",
     "write_gmf",
 ]

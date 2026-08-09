@@ -3,14 +3,19 @@
 Part of the :mod:`pysmesh.mesher` package. Everything here is data: the element and
 sub-shape enums, the frozen dataclasses a compute and a harvest return, and the small
 helpers that turn a native dict into them. No operation lives in this module.
+
+It also owns the base every parameterised thing in the package derives from — an algorithm,
+a hypothesis, a quality control, a predicate. They share one rule: **the field names are the
+native parameter names**, and the native factory refuses any key it did not read. So a field
+added on one side without the other fails on the first call rather than being dropped.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from enum import IntEnum
-from typing import Final, cast
+from typing import ClassVar, Final, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -113,6 +118,11 @@ GMF_WRITABLE_TYPES: Final[frozenset[ElementType]] = frozenset(
 GMF_REQUIRED_MARKER: Final[str] = "_required_"
 
 
+# A sub-shape reference the native layer reads as "not set". The kind is arbitrary and only
+# the zero ordinal is meaningful, because an ordinal is 1-based everywhere else.
+_UNSET_SUBSHAPE: Final[tuple[str, int]] = ("VERTEX", 0)
+
+
 @dataclass(frozen=True)
 class SubShape:
     """One sub-shape of the meshed shape, named the way the geometry API names one.
@@ -137,18 +147,76 @@ class SubShape:
             raise ValueError(f"SubShape.ordinal is 1-based; got {self.ordinal}.")
 
 
+def _encode(value: object) -> object:
+    """Turn one dataclass field into what the native factory reads."""
+    if isinstance(value, _Spec):
+        return {"name": value.native_name, "params": value.params()}
+    if isinstance(value, SubShape):
+        return (value.kind.name, value.ordinal)
+    if value is None:
+        return _UNSET_SUBSHAPE
+    if isinstance(value, IntEnum):
+        return int(value)
+    if isinstance(value, tuple):
+        return [_encode(item) for item in value]
+    return value
+
+
 @dataclass(frozen=True)
-class MeshGroup:
-    """A named set of elements carried on the mesh.
+class _Spec:
+    """Base of everything the native factories build by name: an algorithm, a hypothesis,
+    a quality control, a predicate.
+
+    The field names *are* the native parameter names. A field added here with no matching
+    branch in the native factory is refused on the first call rather than silently dropped,
+    which is what keeps the typed surface and the factories from drifting apart.
+    """
+
+    native_name: ClassVar[str] = ""
+
+    def params(self) -> dict[str, object]:
+        """The parameter dict the native factory reads.
+
+        Returns:
+            One entry per dataclass field, encoded for the C++ side.
+        """
+        return {f.name: _encode(getattr(self, f.name)) for f in fields(self)}
+
+
+class GroupSource(IntEnum):
+    """What maintains a group's membership.
+
+    The difference is not cosmetic: only an :attr:`EXPLICIT` group can be edited by hand, and
+    only the other two follow the mesh without being told to.
 
     Attributes:
-        name: The group's stored name.
+        EXPLICIT: An id list. SMESH carries it through editing itself, replacing an element
+            by whatever replaced it and dropping one that was deleted.
+        SHAPE: Everything bound to one sub-shape. Follows a re-compute.
+        FILTER: Everything a predicate accepts, re-evaluated when the mesh changes.
+    """
+
+    EXPLICIT = 0
+    SHAPE = 1
+    FILTER = 2
+
+
+@dataclass(frozen=True)
+class MeshGroup:
+    """A named set of mesh entities carried on the mesh.
+
+    Attributes:
+        name: The group's stored name. Names are unique within one mesher.
         dimension: The element family the group is defined over.
-        element_ids: (K,) int64 — the mesh ids of its members.
+        source: What maintains its membership.
+        element_ids: (K,) int64 — the mesh ids of its members, read at the moment the group
+            was queried. A group defined by a shape or a filter can answer differently after
+            the mesh changes, which is the point of it.
     """
 
     name: str
     dimension: ElementDimension
+    source: GroupSource
     element_ids: NDArray[np.int64]
 
 
@@ -320,13 +388,18 @@ def _mesh_data(raw: dict[str, object]) -> MeshData:
 
 
 def _groups(raw: Sequence[object]) -> tuple[MeshGroup, ...]:
-    """Build the group tuple from the native (name, dimension, ids) triples."""
+    """Build the group tuple from the native (name, dimension, source, ids) entries."""
     out: list[MeshGroup] = []
     for entry in raw:
-        name, dimension, ids = cast("tuple[str, int, NDArray[np.int64]]", entry)
+        name, dimension, source, ids = cast(
+            "tuple[str, int, int, NDArray[np.int64]]", entry
+        )
         out.append(
             MeshGroup(
-                name=name, dimension=ElementDimension(dimension), element_ids=ids
+                name=name,
+                dimension=ElementDimension(dimension),
+                source=GroupSource(source),
+                element_ids=ids,
             )
         )
     return tuple(out)

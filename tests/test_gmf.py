@@ -33,6 +33,7 @@ from pysmesh import (
     CartesianParameters3D,
     ElementDimension,
     ElementType,
+    GroupSource,
     EntityKind,
     GmfMesh,
     Hexa3D,
@@ -226,6 +227,7 @@ def test_a_required_group_round_trips_with_its_membership(
     group = MeshGroup(
         name=gmf_writable_group_name("Triangles"),
         dimension=ElementDimension.FACE,
+        source=GroupSource.EXPLICIT,
         element_ids=np.array(marked, dtype=np.int64),
     )
     path = tmp_path / "grouped.meshb"
@@ -245,6 +247,7 @@ def test_a_group_the_format_cannot_carry_is_refused_naming_it(
     group = MeshGroup(
         name="inlet",
         dimension=ElementDimension.FACE,
+        source=GroupSource.EXPLICIT,
         element_ids=triangle_mesh.element_id[:3],
     )
 

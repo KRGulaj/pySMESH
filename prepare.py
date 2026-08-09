@@ -325,9 +325,43 @@ def _apply_tag_fixups() -> None:
         "    gp_Pnt Value(const Standard_Real U) const;\n"
         "    // OCCT 8.0: Value is no longer virtual; EvalD0 is the evaluation entry point.\n"
         "    gp_Pnt EvalD0(const Standard_Real U) const override { return Value(U); }")
+    # ManifoldPart::process() walks its face vector from the requested start element and wraps
+    # at the end, but it advances the index itself and the wrap sits AFTER a `continue` that
+    # skips an already-treated face. So the moment the last face has already been treated —
+    # which is the ordinary case, since findConnected() treats a whole connected region at
+    # once — the index runs past the end and the process reads unallocated memory. With the
+    # start element at index 0 the loop also never terminates by its own condition. Both are
+    # reachable from a plain selection; measured as an access violation on a three-face
+    # fixture. Rewritten as a bounded modulo walk, which is the documented intent: visit every
+    # face exactly once, starting at the requested one.
+    _replace_once(
+        STAGED / "src/SMESH/src/Controls/SMESH_Controls.cxx",
+        "  const int aStartIndx = myAllFacePtrIntDMap[aStartFace];\n"
+        "  bool isStartTreat = false;\n"
+        "  for ( int fi = aStartIndx; !isStartTreat || fi != aStartIndx ; fi++ )\n"
+        "  {\n"
+        "    if ( fi == aStartIndx )\n"
+        "      isStartTreat = true;\n"
+        "    // as result next time when fi will be equal to aStartIndx\n"
+        "\n"
+        "    SMDS_MeshFace* aFacePtr = myAllFacePtr[ fi ];",
+        "  const int aStartIndx = myAllFacePtrIntDMap[aStartFace];\n"
+        "  const int aNbFaces   = (int) myAllFacePtr.size();\n"
+        "  // Visit every face exactly once, starting at aStartIndx and wrapping. Indexing the\n"
+        "  // vector modulo its size keeps the walk in bounds whatever the body does.\n"
+        "  for ( int fj = 0; fj < aNbFaces; fj++ )\n"
+        "  {\n"
+        "    const int fi = ( aStartIndx + fj ) % aNbFaces;\n"
+        "    SMDS_MeshFace* aFacePtr = myAllFacePtr[ fi ];")
+    _replace_once(
+        STAGED / "src/SMESH/src/Controls/SMESH_Controls.cxx",
+        "    if ( fi == int( myAllFacePtr.size() - 1 ))\n"
+        "      fi = 0;\n"
+        "  } // end run on vector of faces",
+        "  } // end run on vector of faces; the wrap now lives in the loop head")
     _log("applied V9_9_0-tag fixups (winsock, SMESH_TLink ctor+hasher, ElementsOnShape copy, "
          "CompositeHexa_3D include guard, Prism_3D per-generator singletons, Prism_3D "
-         "Adaptor3d_Curve::EvalD0)")
+         "Adaptor3d_Curve::EvalD0, ManifoldPart out-of-bounds walk)")
 
 
 def _apply_geomutils_occt_fix() -> None:

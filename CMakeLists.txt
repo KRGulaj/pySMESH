@@ -138,6 +138,13 @@ pybind11_add_module(_core
     src/bindings/mesher_core.cpp
     src/bindings/mesher_catalog.cpp
     src/bindings/mesher_harvest.cpp
+    src/bindings/mesher_scratch.cpp
+    src/bindings/mesher_controls.cpp
+    src/bindings/mesher_groups.cpp
+    src/bindings/mesher_edit.cpp
+    src/bindings/mesher_search.cpp
+    src/bindings/mesher_medial.cpp
+    src/bindings/mesher_block.cpp
     src/bindings/mesher_gmf.cpp
     src/bindings/mesher_bind.cpp)
 target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)

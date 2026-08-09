@@ -44,31 +44,6 @@ namespace pysmesh {
 namespace mesher {
 namespace {
 
-// A shape-free SMESH mesh, owned for the duration of one read or write. The teardown order
-// is the same one the Mesher documents: the wrapper before the generator.
-class ScratchMesh {
- public:
-  ScratchMesh() {
-    gen_ = std::make_unique<SMESH_Gen>();
-    mesh_ = gen_->CreateMesh(false);
-  }
-  ~ScratchMesh() {
-    delete mesh_;
-    mesh_ = nullptr;
-    gen_.reset();
-  }
-
-  ScratchMesh(const ScratchMesh&) = delete;
-  ScratchMesh& operator=(const ScratchMesh&) = delete;
-
-  SMESH_Mesh& mesh() { return *mesh_; }
-  SMESHDS_Mesh& ds() { return *mesh_->GetMeshDS(); }
-
- private:
-  std::unique_ptr<SMESH_Gen> gen_;
-  SMESH_Mesh* mesh_ = nullptr;
-};
-
 const char* status_text(Driver_Mesh::Status status) {
   switch (status) {
     case Driver_Mesh::DRS_OK:
@@ -137,88 +112,26 @@ const char* type_name(int type) {
   }
 }
 
-// Rebuild one element with its own id. SMESHDS overloads AddFaceWithID / AddVolumeWithID by
-// arity, so the node count is the whole dispatch — which is exactly what the compressed row
-// list carries.
-bool add_element(SMESHDS_Mesh& ds, int type, const std::vector<smIdType>& n, smIdType id) {
-  const std::size_t k = n.size();
-  switch (static_cast<SMDSAbs_ElementType>(
-      static_cast<SMDSAbs_EntityType>(type) <= SMDSEntity_Quad_Edge ? SMDSAbs_Edge
-      : static_cast<SMDSAbs_EntityType>(type) <= SMDSEntity_Quad_Polygon ? SMDSAbs_Face
-                                                                         : SMDSAbs_Volume)) {
-    case SMDSAbs_Edge:
-      if (k == 2) return ds.AddEdgeWithID(n[0], n[1], id) != nullptr;
-      if (k == 3) return ds.AddEdgeWithID(n[0], n[1], n[2], id) != nullptr;
-      return false;
-    case SMDSAbs_Face:
-      if (k == 3) return ds.AddFaceWithID(n[0], n[1], n[2], id) != nullptr;
-      if (k == 4) return ds.AddFaceWithID(n[0], n[1], n[2], n[3], id) != nullptr;
-      if (k == 6)
-        return ds.AddFaceWithID(n[0], n[1], n[2], n[3], n[4], n[5], id) != nullptr;
-      if (k == 7)
-        return ds.AddFaceWithID(n[0], n[1], n[2], n[3], n[4], n[5], n[6], id) != nullptr;
-      if (k == 8)
-        return ds.AddFaceWithID(n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], id) != nullptr;
-      if (k == 9)
-        return ds.AddFaceWithID(n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8], id) !=
-               nullptr;
-      return false;
-    default:
-      if (k == 4) return ds.AddVolumeWithID(n[0], n[1], n[2], n[3], id) != nullptr;
-      if (k == 5) return ds.AddVolumeWithID(n[0], n[1], n[2], n[3], n[4], id) != nullptr;
-      if (k == 6)
-        return ds.AddVolumeWithID(n[0], n[1], n[2], n[3], n[4], n[5], id) != nullptr;
-      if (k == 8)
-        return ds.AddVolumeWithID(n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], id) !=
-               nullptr;
-      if (k == 10)
-        return ds.AddVolumeWithID(n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8], n[9],
-                                  id) != nullptr;
-      if (k == 20)
-        return ds.AddVolumeWithID(n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8], n[9],
-                                  n[10], n[11], n[12], n[13], n[14], n[15], n[16], n[17],
-                                  n[18], n[19], id) != nullptr;
-      if (k == 27)
-        return ds.AddVolumeWithID(n[0], n[1], n[2], n[3], n[4], n[5], n[6], n[7], n[8], n[9],
-                                  n[10], n[11], n[12], n[13], n[14], n[15], n[16], n[17],
-                                  n[18], n[19], n[20], n[21], n[22], n[23], n[24], n[25],
-                                  n[26], id) != nullptr;
-      return false;
-  }
-}
-
-template <class T>
-py::array_t<T, py::array::c_style | py::array::forcecast> field(const py::dict& mesh,
-                                                                const char* key) {
-  if (!mesh.contains(key)) {
-    throw PysmeshError(std::string("write_gmf: the mesh is missing '") + key + "'.");
-  }
-  return mesh[key].cast<py::array_t<T, py::array::c_style | py::array::forcecast>>();
-}
-
 }  // namespace
 
 void write_gmf(const std::string& path, const py::dict& mesh, const py::list& groups) {
-  const auto coords = field<double>(mesh, "node_coords");
-  const auto node_ids = field<std::int64_t>(mesh, "node_id");
-  const auto offsets = field<std::int64_t>(mesh, "element_offsets");
-  const auto connectivity = field<std::int32_t>(mesh, "element_nodes");
-  const auto types = field<std::int8_t>(mesh, "element_type");
-  const auto element_ids = field<std::int64_t>(mesh, "element_id");
-
-  const py::ssize_t n_nodes = node_ids.shape(0);
-  if (coords.ndim() != 2 || coords.shape(0) != n_nodes || coords.shape(1) != 3) {
-    throw PysmeshError("write_gmf: node_coords must have shape (N, 3) matching node_id.");
+  if (!mesh.contains("element_type") || !mesh.contains("element_id")) {
+    throw PysmeshError("write_gmf: the mesh is missing 'element_type' or 'element_id'.");
   }
-  const py::ssize_t n_elements = types.shape(0);
-  if (element_ids.shape(0) != n_elements || offsets.shape(0) != n_elements + 1) {
-    throw PysmeshError("write_gmf: element_type, element_id and element_offsets disagree on "
-                       "the element count.");
+  const auto types =
+      mesh["element_type"].cast<py::array_t<std::int8_t, py::array::c_style |
+                                                             py::array::forcecast>>();
+  const auto element_ids =
+      mesh["element_id"].cast<py::array_t<std::int64_t, py::array::c_style |
+                                                            py::array::forcecast>>();
+  if (element_ids.shape(0) != types.shape(0)) {
+    throw PysmeshError("write_gmf: element_type and element_id disagree on the element "
+                       "count.");
   }
 
   // Refuse a mesh the format cannot hold, naming the first offending element and its type.
   // The alternative is a file that is silently missing its cut cells.
-  for (py::ssize_t i = 0; i < n_elements; ++i) {
+  for (py::ssize_t i = 0; i < types.shape(0); ++i) {
     if (!is_writable(types.data()[i])) {
       throw PysmeshError(
           "write_gmf: element " + std::to_string(element_ids.data()[i]) + " is " +
@@ -230,36 +143,10 @@ void write_gmf(const std::string& path, const py::dict& mesh, const py::list& gr
 
   ScratchMesh scratch;
   SMESHDS_Mesh& ds = scratch.ds();
-
-  const double* xyz = coords.data();
-  for (py::ssize_t i = 0; i < n_nodes; ++i) {
-    const smIdType id = static_cast<smIdType>(node_ids.data()[i]);
-    if (ds.AddNodeWithID(xyz[3 * i], xyz[3 * i + 1], xyz[3 * i + 2], id) == nullptr) {
-      throw PysmeshError("write_gmf: could not add node with id " + std::to_string(id) +
-                         " (a duplicate or non-positive id).");
-    }
-  }
-
-  std::vector<smIdType> nodes;
-  for (py::ssize_t i = 0; i < n_elements; ++i) {
-    const std::int64_t from = offsets.data()[i];
-    const std::int64_t to = offsets.data()[i + 1];
-    nodes.clear();
-    for (std::int64_t j = from; j < to; ++j) {
-      const std::int32_t row = connectivity.data()[j];
-      if (row < 0 || row >= n_nodes) {
-        throw PysmeshError("write_gmf: element_nodes[" + std::to_string(j) +
-                           "] is not a row of node_coords.");
-      }
-      nodes.push_back(static_cast<smIdType>(node_ids.data()[row]));
-    }
-    const smIdType id = static_cast<smIdType>(element_ids.data()[i]);
-    if (!add_element(ds, types.data()[i], nodes, id)) {
-      throw PysmeshError("write_gmf: could not rebuild element " +
-                         std::to_string(element_ids.data()[i]) + " (" +
-                         std::to_string(nodes.size()) + " nodes, type " +
-                         std::to_string(static_cast<int>(types.data()[i])) + ").");
-    }
+  try {
+    rebuild_mesh(ds, mesh);
+  } catch (const PysmeshError& failure) {
+    throw PysmeshError(std::string("write_gmf: ") + failure.what(), failure.details);
   }
 
   for (const py::handle& item : groups) {

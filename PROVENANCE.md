@@ -108,7 +108,7 @@ and logged (not silently ignored). MinGW/gcc-only patches are no-ops under our M
 
 ### Source edits made by pySMESH itself
 
-Six deltas are applied by `prepare.py::_apply_tag_fixups` as exact string replacements rather
+Seven deltas are applied by `prepare.py::_apply_tag_fixups` as exact string replacements rather
 than as patch files, because they target our `V9_9_0` **tag** and no upstream patch exists for
 them. They are modifications of already-vendored SALOME source, not new
 vendoring:
@@ -121,6 +121,7 @@ vendoring:
 | **`CompositeHexa_3D` include guard** | `SMESH/StdMeshers/StdMeshers_CompositeHexa_3D.hxx` | The header carries `StdMeshers_CompositeSegment_1D`'s guard (`_SMESH_CompositeSegment_1D_HXX_`) verbatim, so whichever of the two headers is included second is silenced and its class is never declared. The collision is symmetric, so no include order fixes it, and any translation unit needing both algorithms cannot compile. Renamed to `_SMESH_CompositeHexa_3D_HXX_`. |
 | **`Prism_3D` curve adaptors override `EvalD0`** | `SMESH/StdMeshers/StdMeshers_Prism_3D.hxx` | OCCT 8.0 made `Adaptor3d_Curve::Value` a **non-virtual** inline forwarding to a new virtual `EvalD0`, whose base implementation raises `Standard_NotImplemented`. Prism_3D's `TVerticalEdgeAdaptor` and `THorizontalEdgeAdaptor` still override `Value`, which now only *hides* the base one — so every call through an `Adaptor3d_Curve` reference reached the base `EvalD0` and threw, and **`Prism_3D` failed on every solid**. Each now overrides `EvalD0` to forward to its own `Value`. `Adaptor2d_Curve2d::Value` is still virtual in 8.0, so the pcurve adaptor beside them needs nothing. |
 | **`Prism_3D` per-generator helper singletons** | `SMESH/StdMeshers/StdMeshers_Prism_3D.cxx` | Three helper algorithms (`TQuadrangleAlgo`, `TProjction1dAlgo`, `TProjction2dAlgo`) are cached in function-local statics built against the **first** `SMESH_Gen` they ever see. SALOME has one process-global generator, so that holds there. pySMESH gives each `Mesher` its own, and `~SMESH_Gen` nullifies the `_gen` of every hypothesis registered with it — these singletons included. A **second** `Prism_3D` compute in one process then runs through a singleton whose generator is gone and **segfaults** (reproduced deterministically). Each site now rebuilds the singleton when the generator differs from the one it was built against; deleting the stale one is safe because `~SMESH_Hypothesis` is guarded on `_gen`. |
+| **`ManifoldPart::process()` out-of-bounds face walk** | `SMESH/Controls/SMESH_Controls.cxx` | The walk starts at the requested face and wraps at the end of its own vector, but it advances the index itself and the wrap statement sits **after** a `continue` that skips an already-treated face. Since `findConnected()` treats a whole connected region at once, the last face is normally already treated when the walk reaches it, the wrap is skipped, and the index runs off the end — an **access violation**, measured on a three-face fixture. With the start element at index 0 the loop also cannot terminate by its own condition. Rewritten as a bounded modulo walk (`fi = (aStartIndx + fj) % aNbFaces`, `fj` from 0 to the face count), which is the documented intent: visit every face exactly once, starting at the requested one. Behaviour is otherwise unchanged; pinned by the `CTLBIND` section of `tests/probe`. |
 
 **The `ElementsOnShape` edit is what un-blocks the five `StdMeshers` translation units** that
 v1 excluded from the build (`Cartesian_3D`, `Import_1D2D`, `MaxElementVolume`,
@@ -134,6 +135,12 @@ of v2 ground-zero work all five compile unmodified, `StdMeshers` is built from a
 single translation unit first needed both composite algorithms, which is why the earlier
 stages did not meet it: each SALOME translation unit includes one of the two headers, never
 both. Nothing in the compiled behaviour changes — the guard is a name.
+
+**Four of the seven are runtime defects rather than build fixups**, and all four surfaced the
+same way: by *driving* a class from a binding rather than linking and constructing it. Two of
+the `Prism_3D` edits and the `ManifoldPart` one make a class that compiles and links perfectly
+either fail on every input or corrupt memory. Construct-and-link checking cannot see any of
+them, which is why the acceptance gates for each package run the code.
 
 ## OCCT toolkits linked & bundled
 

@@ -53,6 +53,9 @@
 #include <SMESHDS_Mesh.hxx>
 #include <SMESH_ComputeError.hxx>
 #include <SMESH_ControlsDef.hxx>
+#include <BRepMesh_DataStructureOfDelaun.hxx>
+#include <BRepMesh_Triangle.hxx>
+#include <SMESH_Block.hxx>
 #include <SMESH_Delaunay.hxx>
 #include <SMESH_Gen.hxx>
 #include <SMESH_Group.hxx>
@@ -183,7 +186,19 @@ bool build_hexa_mesh(Session& s, int nseg) {
   return ok && s.compute();
 }
 
-// ---------------------------------------------------------------------------- STDMESH ----- //
+// The same without a 3-D algorithm: the quadrangular skin alone.
+bool build_quad_mesh(Session& s, int nseg) {
+  StdMeshers_Regular_1D* algo1d = s.make<StdMeshers_Regular_1D>();
+  StdMeshers_NumberOfSegments* nseg_hyp = s.make<StdMeshers_NumberOfSegments>();
+  nseg_hyp->SetNumberOfSegments(nseg);
+  StdMeshers_Quadrangle_2D* algo2d = s.make<StdMeshers_Quadrangle_2D>();
+  bool ok = s.assign(s.shape(), algo1d);
+  ok = s.assign(s.shape(), nseg_hyp) && ok;
+  ok = s.assign(s.shape(), algo2d) && ok;
+  return ok && s.compute();
+}
+
+// ---------------------------------------------------------------------------- STDMESH ---- //
 void probe_r11_unexcluded_translation_units() {
   section("STDMESH", "the five StdMeshers translation units excluded in v1");
 
@@ -595,8 +610,8 @@ void probe_r13_mesh_editor() {
   // successful sew needs a purpose-built two-patch fixture, which belongs in the binding-layer
   // test suite rather than a link/run probe.
   note("EDITOR SewFreeBorder / SewSideElements",
-       "linked and callable; a meaningful sew needs a two-patch fixture, which belongs in "
-       "a binding-layer pytest");
+       "linked and callable; a meaningful sew needs a two-patch fixture, so it is gated in "
+       "the binding-layer suite rather than here");
 }
 
 // ---------------------------------------------------------------------------- SEARCH ----- //
@@ -695,7 +710,7 @@ void probe_r14_search_and_ray_casting() {
         "SEARCH SMESH_MeshAlgos::MakeSlot links and runs");
 }
 
-// ---------------------------------------------------------------------------- ALGOFAM ----- //
+// ---------------------------------------------------------------------------- ALGOFAM ---- //
 void probe_r15_meshing_family() {
   section("ALGOFAM", "algorithm/hypothesis assignment model and the StdMeshers family");
 
@@ -907,9 +922,10 @@ void probe_r16_medial_axis_and_blocks() {
   SMESH_Pattern pattern;
   check(!pattern.Load("!!! Nb of points, Nb of elements\n4 1\n0 0\n1 0\n1 1\n0 1\n0 1 2 3\n"),
         "MEDAX SMESH_Pattern::Load links and rejects a malformed pattern");
-  note("MEDAX SMESH_Delaunay / SMESH_Block",
-       "SMESH_Delaunay is abstract (getNodeUV must be supplied by the binding) and "
-       "SMESH_Block needs a meshed shell; both link — see the symbol reference below");
+  note("MEDAX SMESH_Delaunay",
+       "abstract (getNodeUV must be supplied), links and constructs — and then answers "
+       "nothing, because its triangulation comes back entirely deleted under the pinned "
+       "OCCT. Measured in the EDITBIND section below; not bound for that reason");
   check(SMESH_Block::ShapeIndex(SMESH_Block::ID_Ex00) == 0,
         "MEDAX SMESH_Block links (static shape-index arithmetic)");
 }
@@ -1337,6 +1353,395 @@ void probe_meshing_binding_behaviour() {
   }
 }
 
+// A concrete SMESH_Delaunay: the one abstract member is where a node sits in the face's
+// parameter space, which the probe's own fixture answers directly.
+class ProbeDelaunay : public SMESH_Delaunay {
+ public:
+  ProbeDelaunay(const std::vector<const UVPtStructVec*>& boundary, const TopoDS_Face& face,
+                int face_id)
+      : SMESH_Delaunay(boundary, face, face_id) {}
+
+ protected:
+  gp_XY getNodeUV(const TopoDS_Face&, const SMDS_MeshNode* node) const override {
+    return gp_XY(node->X(), node->Y());
+  }
+};
+
+// ---------------------------------------------------------------------------- EDITBIND -- //
+// The behaviours an editor, search and medial-axis binding rests on, as opposed to the
+// capabilities the EDITOR, SEARCH and MEDAX sections above already prove. Each of these
+// decides a design question that a header read answers wrongly, and three of them are
+// upstream defects a caller has to be told about rather than left to meet.
+void probe_editor_and_search_binding_behaviour() {
+  section("EDITBIND", "the behaviours an editor, search and medial-axis binding depends on");
+
+  // ---- The surface offset refuses a mesh it cannot handle, by throwing ---------------- //
+  // It tests the WHOLE source mesh rather than the faces it was handed, so a triangular
+  // patch of a mesh that also holds quadrangles is refused. The refusal arrives as an
+  // exception, not as a null result, so a binding must translate it.
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    check(build_quad_mesh(s, 2), "EDITBIND quadrangular skin for the offset probe computes");
+    SMESHDS_Mesh* ds = s.meshDS();
+    SMESH_MeshAlgos::TElemIntPairVec new2old_faces;
+    SMESH_MeshAlgos::TNodeIntPairVec new2old_nodes;
+    bool threw = false;
+    try {
+      SMDS_Mesh* offset =
+          SMESH_MeshAlgos::MakeOffset(ds->elementsIterator(SMDSAbs_Face), *ds, 0.1, false,
+                                      new2old_faces, new2old_nodes);
+      delete offset;
+    } catch (const std::exception&) {
+      threw = true;
+    }
+    check(threw, "EDITBIND MakeOffset throws on a mesh that is not all linear triangles");
+  }
+
+  // ---- SplitBiQuadraticIntoLinear reads an empty set as nothing ------------------------ //
+  // Every other editing call in this package takes an empty set as "the whole mesh". This
+  // one does not, so a binding that keeps the convention has to fill the set itself.
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    check(build_hexa_mesh(s, 2),
+          "EDITBIND hexa mesh for the bi-quadratic split probe computes");
+    SMESHDS_Mesh* ds = s.meshDS();
+    SMESH_MeshEditor editor(&s.mesh());
+    editor.ConvertToQuadratic(/*theForce3d=*/true, /*theToBiQuad=*/true);
+    const smIdType volumes_before = ds->NbVolumes();
+    TIDSortedElemSet nothing;
+    editor.SplitBiQuadraticIntoLinear(nothing);
+    check(ds->NbVolumes() == volumes_before,
+          "EDITBIND SplitBiQuadraticIntoLinear over an empty set splits nothing");
+    TIDSortedElemSet everything;
+    for (SMDS_ElemIteratorPtr it = ds->elementsIterator(SMDSAbs_Volume); it->more();) {
+      everything.insert(it->next());
+    }
+    editor.SplitBiQuadraticIntoLinear(everything);
+    check(ds->NbVolumes() == 8 * volumes_before,
+          "EDITBIND the same call over every cell splits each into 8 linear ones");
+  }
+
+  // ---- DeMerge's volume branch cannot report ------------------------------------------- //
+  // It builds its comparison from the element's own current nodes rather than from the
+  // proposed post-merge ones, so it compares a thing with itself. A caller must not read an
+  // empty answer for a volume cell as "this merge is safe".
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    check(build_hexa_mesh(s, 2), "EDITBIND hexa mesh for the de-merge probe computes");
+    SMESHDS_Mesh* ds = s.meshDS();
+    const SMDS_MeshElement* cell = ds->elementsIterator(SMDSAbs_Volume)->next();
+
+    // The connectivity the cell would have if two of its own corners were merged.
+    std::vector<const SMDS_MeshNode*> proposed;
+    for (SMDS_NodeIteratorPtr it = cell->nodeIterator(); it->more();) {
+      proposed.push_back(it->next());
+    }
+    proposed[2] = proposed[0];
+    std::vector<const SMDS_MeshNode*> keep_apart;
+    SMESH_MeshAlgos::DeMerge(cell, proposed, keep_apart);
+    check(keep_apart.empty(),
+          "EDITBIND DeMerge reports nothing for a volume cell, whatever the merge proposed");
+  }
+
+  // ---- The line query is a broad phase, in both senses ---------------------------------- //
+  // It answers about bounding boxes, and about an infinite LINE rather than a half line, so
+  // a caller reading it as a hit list is wrong in both directions. That is why the binding
+  // exposes it under its own name and computes the hits over it.
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    check(build_hexa_mesh(s, 3), "EDITBIND hexa mesh for the ray probe computes");
+    SMESHDS_Mesh* ds = s.meshDS();
+    std::unique_ptr<SMESH_ElementSearcher> searcher(SMESH_MeshAlgos::GetElementSearcher(*ds));
+
+    // A line starting past the far side of the box still reports the faces behind it.
+    std::vector<const SMDS_MeshElement*> behind;
+    const gp_Pnt beyond(BX / 2.0, BY / 2.0, BZ + 10.0);
+    searcher->GetElementsNearLine(gp_Ax1(beyond, gp_Dir(0, 0, 1)), SMDSAbs_Face, behind);
+    check(!behind.empty(),
+          "EDITBIND the line query reports faces behind its own origin (it is a line)");
+
+    // And a line that misses every face but crosses their bounding boxes still reports them.
+    std::vector<const SMDS_MeshElement*> boxed;
+    searcher->GetElementsNearLine(gp_Ax1(gp_Pnt(0, 0, -10.0), gp_Dir(0, 0, 1)), SMDSAbs_Face,
+                                  boxed);
+    check(!boxed.empty(),
+          "EDITBIND the line query answers about bounding boxes, not about the faces");
+  }
+
+  // ---- An open surface is classified OUT, not UNKNOWN ----------------------------------- //
+  // There is no inside of an open surface, and the searcher does not say so: it answers OUT
+  // for every point, including one lying on the surface. A caller wanting to know whether the
+  // question was meaningful has to test for a free border itself.
+  {
+    Session s(BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 0, BX, 0, BY)
+                  .Face());
+    check(build_quad_mesh(s, 2),
+          "EDITBIND single-face mesh for the point-state probe computes");
+    SMESHDS_Mesh* ds = s.meshDS();
+    std::unique_ptr<SMESH_ElementSearcher> searcher(SMESH_MeshAlgos::GetElementSearcher(*ds));
+    const TopAbs_State above = searcher->GetPointState(gp_Pnt(BX / 2.0, BY / 2.0, 5.0));
+    const TopAbs_State on = searcher->GetPointState(gp_Pnt(BX / 2.0, BY / 2.0, 0.0));
+    check(above == TopAbs_OUT && on == TopAbs_OUT,
+          "EDITBIND an open surface classifies every point OUT, never UNKNOWN");
+  }
+
+  // ---- SMESH_Delaunay cannot answer under this OCCT ------------------------------------- //
+  // The most consequential finding of the three. It hands its boundary points to OCCT's
+  // triangulator as a bare vertex array, and the triangulator comes back having marked every
+  // triangle deleted with an empty live-element set — so the class's own entry point finds no
+  // triangle beside any boundary node and every query it offers returns nothing. The reach is
+  // wider than the class: the projection utilities subclass it.
+  {
+    const TopoDS_Face face =
+        BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 0, BX, 0, BY).Face();
+    std::unique_ptr<SMDS_Mesh> scratch(new SMDS_Mesh);
+    UVPtStructVec boundary;
+    const double corners[8][2] = {{0, 0},   {1.5, 0}, {3, 0},   {3, 3.5},
+                                  {3, 7},   {1.5, 7}, {0, 7},   {0, 3.5}};
+    for (int i = 0; i < 8; ++i) {
+      const SMDS_MeshNode* node =
+          scratch->AddNode(corners[i][0], corners[i][1], 0.0);
+      UVPtStruct point(node);
+      point.SetUV(gp_XY(corners[i][0], corners[i][1]));
+      point.param = point.normParam = point.x = point.y = 0.0;
+      boundary.push_back(point);
+    }
+    std::vector<const UVPtStructVec*> wires(1, &boundary);
+    ProbeDelaunay delaunay(wires, face, 1);
+    Handle(BRepMesh_DataStructureOfDelaun) structure = delaunay.GetDS();
+    int alive = 0;
+    for (int t = 1; t <= structure->NbElements(); ++t) {
+      if (structure->GetElement(t).Movability() != BRepMesh_Deleted) {
+        ++alive;
+      }
+    }
+    char msg[220];
+    std::snprintf(msg, sizeof(msg),
+                  "EDITBIND SMESH_Delaunay leaves no live triangle (%d elements, %d alive, "
+                  "%d in the domain)",
+                  structure->NbElements(), alive, structure->ElementsOfDomain().Extent());
+    check(structure->NbElements() > 0 && alive == 0 &&
+              structure->ElementsOfDomain().Extent() == 0,
+          msg);
+    check(delaunay.GetTriangleNear(0) == nullptr,
+          "EDITBIND and its own entry point therefore finds no triangle to start from");
+  }
+
+  // ---- The ordered-edge walk is per wire ------------------------------------------------ //
+  // Both the medial axis and any boundary walk need the face's edges in wire order, and a
+  // face with a hole has more than one wire. The counts come back per wire, which is what
+  // makes the two orders line up.
+  {
+    const TopoDS_Face face =
+        BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 0, BX, 0, BY).Face();
+    std::list<TopoDS_Edge> edges;
+    std::list<int> per_wire;
+    const int wires = SMESH_Block::GetOrderedEdges(face, edges, per_wire);
+    check(wires == 1 && per_wire.size() == 1 && per_wire.front() == 4 && edges.size() == 4,
+          "EDITBIND GetOrderedEdges reports the face's edges grouped by wire");
+  }
+
+  // ---- Ignoring the corners collapses a rectangle's axis to one branch ------------------ //
+  // The corner arms are branches like any other, so a caller counting branches to find a
+  // junction would find two on a shape that has none. Both settings are pinned.
+  {
+    const double w = 10.0;
+    const double h = 4.0;
+    const TopoDS_Face rect =
+        BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 0, w, 0, h).Face();
+    std::vector<TopoDS_Edge> edges;
+    for (TopExp_Explorer ex(rect, TopAbs_EDGE); ex.More(); ex.Next()) {
+      edges.push_back(TopoDS::Edge(ex.Current()));
+    }
+    SMESH_MAT2d::MedialAxis kept(rect, edges, 0.1, /*ignoreCorners=*/false);
+    SMESH_MAT2d::MedialAxis dropped(rect, edges, 0.1, /*ignoreCorners=*/true);
+    check(kept.nbBranches() == 5 && dropped.nbBranches() == 1,
+          "EDITBIND ignoring the corners takes a rectangle's axis from 5 branches to 1");
+  }
+}
+
+// ---------------------------------------------------------------------------- CTLBIND -- //
+// The behaviours a quality-control and group binding rests on, as opposed to the capabilities
+// the QC and GROUPS sections above already prove. Each decides a design question a header read
+// cannot answer: when a control's cached state is stale, whether an editing operation tells
+// the mesh it changed, and whether a group follows an edit that replaces or deletes elements.
+void probe_controls_and_groups_binding_behaviour() {
+  section("CTLBIND", "the behaviours a controls-and-groups binding depends on");
+
+  // ---- A mesh assembled by hand starts with modification time 0 ----------------------- //
+  // Several controls cache against SMDS's modification time and read "unchanged since I last
+  // looked" from a mesh that has never been published. A binding that builds a mesh from
+  // arrays must call Modified() or those controls answer about nothing at all.
+  {
+    SMESH_Gen gen;
+    SMESH_Mesh* mesh = gen.CreateMesh(false);
+    SMESHDS_Mesh* ds = mesh->GetMeshDS();
+    ds->AddNodeWithID(0.0, 0.0, 0.0, 1);
+    ds->AddNodeWithID(BX, 0.0, 0.0, 2);
+    ds->AddNodeWithID(BX, BY, 0.0, 3);
+    ds->AddNodeWithID(0.0, BY, 0.0, 4);
+    ds->AddNodeWithID(0.0, 0.0, 0.0, 5);  // deliberately on top of node 1
+    ds->AddFaceWithID(1, 2, 3, 4, 1);
+
+    check(ds->GetMTime() == 0,
+          "CTLBIND a mesh built by hand has modification time 0 until it is published");
+
+    SMESH::Controls::CoincidentNodes stale;
+    stale.SetMesh(ds);
+    check(!stale.IsSatisfy(1) && !stale.IsSatisfy(5),
+          "CTLBIND a modification-tracked control finds nothing on an unpublished mesh");
+
+    ds->Modified();
+    SMESH::Controls::CoincidentNodes fresh;
+    fresh.SetMesh(ds);
+    check(fresh.IsSatisfy(1) && fresh.IsSatisfy(5),
+          "CTLBIND the same control finds the coincident pair once Modified() is called");
+    delete mesh;
+  }
+
+  // ---- An editing operation does not publish itself ----------------------------------- //
+  // SMESH_MeshEditor calls Modified() in exactly one of its operations; the SALOME layer
+  // above it does the rest. A group defined by a filter tests that time to decide whether to
+  // re-evaluate, so an edited mesh keeps answering with its old membership until published.
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    check(build_hexa_mesh(s, 2), "CTLBIND hexa mesh for the staleness probe computes");
+    SMESHDS_Mesh* ds = s.meshDS();
+
+    SMESH::Controls::PredicatePtr positive;
+    {
+      SMESH::Controls::MoreThan* more = new SMESH::Controls::MoreThan();
+      positive.reset(more);
+      more->SetNumFunctor(
+          SMESH::Controls::NumericalFunctorPtr(new SMESH::Controls::Volume()));
+      more->SetMargin(0.0);
+    }
+    SMESH_Group* group = s.mesh().AddGroup(SMDSAbs_Volume, "positive", -1, TopoDS_Shape(),
+                                           positive);
+    check(group != nullptr && group->GetGroupDS() != nullptr,
+          "CTLBIND SMESH_Mesh::AddGroup accepts a predicate and makes a filtered group");
+    SMESHDS_GroupBase* gds = group->GetGroupDS();
+    const smIdType before = gds->Extent();
+
+    SMESH_MeshEditor editor(&s.mesh());
+    SMESH_MeshEditor::TFacetOfElem facets;
+    TIDSortedElemSet hexas;
+    for (SMDS_ElemIteratorPtr it = ds->elementsIterator(SMDSAbs_Volume); it->more();) {
+      hexas.insert(it->next());
+    }
+    editor.GetHexaFacetsToSplit(hexas, gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), facets);
+    const smIdType volumes_before = ds->NbVolumes();
+    editor.SplitVolumes(facets, SMESH_MeshEditor::HEXA_TO_2_PRISMS);
+    const smIdType volumes_after = ds->NbVolumes();
+
+    const smIdType stale = gds->Extent();
+    ds->Modified();
+    const smIdType fresh = gds->Extent();
+    char msg[240];
+    std::snprintf(msg, sizeof(msg),
+                  "CTLBIND a filtered group is stale after an edit until the mesh is "
+                  "published (%d cells -> %d, group read %d then %d)",
+                  static_cast<int>(volumes_before), static_cast<int>(volumes_after),
+                  static_cast<int>(stale), static_cast<int>(fresh));
+    check(before == volumes_before && volumes_after == 2 * volumes_before &&
+              stale == volumes_before && fresh == volumes_after,
+          msg);
+  }
+
+  // ---- An explicit group follows a replacement and a deletion ------------------------- //
+  // The property a named group exists for: SMESH's editor rewrites group membership as it
+  // works, so a group named on a coarse mesh still names the right cells afterwards.
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    check(build_hexa_mesh(s, 2), "CTLBIND hexa mesh for the group-survival probe computes");
+    SMESHDS_Mesh* ds = s.meshDS();
+
+    SMESH_Group* group = s.mesh().AddGroup(SMDSAbs_Volume, "half");
+    SMESHDS_Group* gds = dynamic_cast<SMESHDS_Group*>(group->GetGroupDS());
+    int added = 0;
+    for (SMDS_ElemIteratorPtr it = ds->elementsIterator(SMDSAbs_Volume); it->more();) {
+      const SMDS_MeshElement* e = it->next();
+      if (added < 4) {
+        gds->Add(e);
+        ++added;
+      }
+    }
+    check(gds->Extent() == 4, "CTLBIND the explicit group starts with the 4 cells added");
+
+    // An id of another family is refused rather than silently dropped.
+    const SMDS_MeshElement* a_face = ds->elementsIterator(SMDSAbs_Face)->next();
+    check(!gds->Add(a_face->GetID()),
+          "CTLBIND an id of the wrong family is refused by the group");
+
+    SMESH_MeshEditor editor(&s.mesh());
+    SMESH_MeshEditor::TFacetOfElem facets;
+    TIDSortedElemSet hexas;
+    for (SMDS_ElemIteratorPtr it = ds->elementsIterator(SMDSAbs_Volume); it->more();) {
+      hexas.insert(it->next());
+    }
+    editor.GetHexaFacetsToSplit(hexas, gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), facets);
+    editor.SplitVolumes(facets, SMESH_MeshEditor::HEXA_TO_2_PRISMS);
+    ds->Modified();
+    check(gds->Extent() == 8,
+          "CTLBIND the group follows a split: each cell replaced by two, both in the group");
+
+    // Every member must still be an element of the mesh — a group naming a deleted element
+    // is the failure that would corrupt a solver handoff.
+    bool all_alive = true;
+    for (SMDS_ElemIteratorPtr it = gds->GetElements(); it->more();) {
+      all_alive = all_alive && ds->FindElement(it->next()->GetID()) != nullptr;
+    }
+    check(all_alive, "CTLBIND every member of the group is still an element of the mesh");
+
+    TIDSortedNodeSet whole;
+    SMESH_MeshEditor::TListOfListOfNodes coincident;
+    editor.FindCoincidentNodes(whole, BX / 2.0 + 0.1, coincident, false);
+    const smIdType members_before = gds->Extent();
+    editor.MergeNodes(coincident);
+    ds->Modified();
+    bool alive_after_merge = true;
+    for (SMDS_ElemIteratorPtr it = gds->GetElements(); it->more();) {
+      alive_after_merge =
+          alive_after_merge && ds->FindElement(it->next()->GetID()) != nullptr;
+    }
+    char msg[240];
+    std::snprintf(msg, sizeof(msg),
+                  "CTLBIND the group drops the elements a merge deleted (%d members before, "
+                  "%d after, %d groups of coincident nodes)",
+                  static_cast<int>(members_before), static_cast<int>(gds->Extent()),
+                  static_cast<int>(coincident.size()));
+    check(!coincident.empty() && alive_after_merge && gds->Extent() <= members_before, msg);
+
+    // ConvertFromQuadratic reports success whether or not anything was quadratic, so its
+    // return value carries no information and a binding must not read one into it.
+    check(editor.ConvertFromQuadratic(),
+          "CTLBIND ConvertFromQuadratic returns true on an already-linear mesh");
+  }
+
+  // ---- ManifoldPart walks its whole face vector without leaving it -------------------- //
+  // Upstream advanced the index itself and skipped its own wrap on an already-treated face,
+  // so it read past the end of the vector. Patched (see PROVENANCE.md); this is the pin.
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    check(build_hexa_mesh(s, 2), "CTLBIND hexa mesh for the manifold-walk probe computes");
+    SMESHDS_Mesh* ds = s.meshDS();
+    const smIdType first_face = ds->elementsIterator(SMDSAbs_Face)->next()->GetID();
+
+    SMESH::Controls::ManifoldPart manifold;
+    manifold.SetStartElem(static_cast<long>(first_face));
+    manifold.SetIsOnlyManifold(true);
+    manifold.SetMesh(ds);  // the walk runs here; an out-of-bounds one crashes the process
+    int selected = 0;
+    for (SMDS_ElemIteratorPtr it = ds->elementsIterator(SMDSAbs_Face); it->more();) {
+      if (manifold.IsSatisfy(it->next()->GetID())) {
+        ++selected;
+      }
+    }
+    check(selected > 0 && selected <= ds->NbFaces(),
+          "CTLBIND ManifoldPart walks every face of a closed shell and stays in bounds");
+  }
+}
+
 // ---------------------------------------------------------------------------- GMF ----- //
 void probe_r18_gmf_driver() {
   section("GMF", "DriverGMF: Inria .mesh / .meshb round-trip");
@@ -1473,5 +1878,7 @@ void run_smesh_probe() {
   probe_r16_medial_axis_and_blocks();
   probe_r17_groups();
   probe_meshing_binding_behaviour();
+  probe_controls_and_groups_binding_behaviour();
+  probe_editor_and_search_binding_behaviour();
   probe_r18_gmf_driver();
 }

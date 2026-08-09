@@ -32,8 +32,6 @@
 #include <SMDS_MeshElement.hxx>
 #include <SMDS_MeshNode.hxx>
 #include <SMDS_MeshVolume.hxx>
-#include <SMESHDS_Group.hxx>
-#include <SMESHDS_GroupBase.hxx>
 #include <SMESHDS_Mesh.hxx>
 #include <SMESH_Mesh.hxx>
 
@@ -54,20 +52,9 @@ std::int8_t kind_code(const char* kind) {
   return 4;                      // VERTEX
 }
 
-template <class T>
-py::array_t<T> vector_to_array(const std::vector<T>& v) {
-  py::array_t<T> out(static_cast<py::ssize_t>(v.size()));
-  if (!v.empty()) {
-    std::copy(v.begin(), v.end(), out.mutable_data());
-  }
-  return out;
-}
-
 }  // namespace
 
 py::dict Mesher::mesh_arrays() const { return harvest_arrays(meshDS(), this); }
-
-py::list Mesher::groups() const { return harvest_groups(meshDS()); }
 
 py::dict harvest_arrays(const SMESHDS_Mesh& ds, const Mesher* owner) {
   // A mesh read from a file carries no shape, so there is nothing to translate a SMESHDS
@@ -196,23 +183,6 @@ py::dict harvest_arrays(const SMESHDS_Mesh& ds, const Mesher* owner) {
   out["element_ordinal"] = vector_to_array(ordinals);
   out["face_offsets"] = vector_to_array(face_offsets);
   out["face_sizes"] = vector_to_array(face_sizes);
-  return out;
-}
-
-py::list harvest_groups(const SMESHDS_Mesh& ds) {
-  py::list out;
-  for (const SMESHDS_GroupBase* group : ds.GetGroups()) {
-    if (group == nullptr) {
-      continue;
-    }
-    std::vector<std::int64_t> ids;
-    ids.reserve(static_cast<std::size_t>(group->Extent()));
-    for (SMDS_ElemIteratorPtr it = group->GetElements(); it->more();) {
-      ids.push_back(static_cast<std::int64_t>(it->next()->GetID()));
-    }
-    out.append(py::make_tuple(std::string(group->GetStoreName()),
-                              static_cast<int>(group->GetType()), vector_to_array(ids)));
-  }
   return out;
 }
 

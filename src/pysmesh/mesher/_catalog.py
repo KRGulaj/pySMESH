@@ -26,51 +26,12 @@ assignment can silently have no effect where an all-dimensional algorithm govern
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from enum import IntEnum
 from typing import ClassVar
 
 from ..viscous import ExtrusionMethod
-from ._types import SubShape
-
-# A sub-shape reference the native layer reads as "not set". The kind is arbitrary and only
-# the zero ordinal is meaningful, because an ordinal is 1-based everywhere else.
-_UNSET_SUBSHAPE: tuple[str, int] = ("VERTEX", 0)
-
-
-def _encode(value: object) -> object:
-    """Turn one dataclass field into what the native factory reads."""
-    if isinstance(value, _Spec):
-        return {"name": value.native_name, "params": value.params()}
-    if isinstance(value, SubShape):
-        return (value.kind.name, value.ordinal)
-    if value is None:
-        return _UNSET_SUBSHAPE
-    if isinstance(value, IntEnum):
-        return int(value)
-    if isinstance(value, tuple):
-        return [_encode(item) for item in value]
-    return value
-
-
-@dataclass(frozen=True)
-class _Spec:
-    """Base of every algorithm and hypothesis.
-
-    The field names *are* the native parameter names. A field added here with no matching
-    branch in the native factory is refused on the first call rather than silently dropped,
-    which is what keeps the typed surface and the factory from drifting apart.
-    """
-
-    native_name: ClassVar[str] = ""
-
-    def params(self) -> dict[str, object]:
-        """The parameter dict the native factory reads.
-
-        Returns:
-            One entry per dataclass field, encoded for the C++ side.
-        """
-        return {f.name: _encode(getattr(self, f.name)) for f in fields(self)}
+from ._types import SubShape, _Spec
 
 
 @dataclass(frozen=True)

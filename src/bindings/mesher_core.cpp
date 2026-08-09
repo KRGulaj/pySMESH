@@ -95,6 +95,34 @@ std::string where(const std::string& kind, int ordinal) {
 
 }  // namespace
 
+// ---- Shared value helpers -------------------------------------------------------------- //
+
+SMDSAbs_ElementType family_of(int code) {
+  if (code < 0 || code > static_cast<int>(SMDSAbs_Ball)) {
+    throw PysmeshError("Unknown element family " + std::to_string(code) +
+                       " (expected one of ALL, NODE, EDGE, FACE, VOLUME, ELEM_0D, BALL).");
+  }
+  return static_cast<SMDSAbs_ElementType>(code);
+}
+
+py::array_t<double, py::array::c_style | py::array::forcecast> point_table(
+    const py::object& values, const char* name, int columns) {
+  py::array_t<double, py::array::c_style | py::array::forcecast> table =
+      values.cast<py::array_t<double, py::array::c_style | py::array::forcecast>>();
+  if (table.ndim() != 2 || table.shape(1) != columns) {
+    throw PysmeshError(std::string(name) + " must have shape (N, " + std::to_string(columns) +
+                       ").");
+  }
+  return table;
+}
+
+void require_triple(const std::vector<double>& values, const char* name) {
+  if (values.size() != 3) {
+    throw PysmeshError(std::string(name) + " must be three numbers (got " +
+                       std::to_string(values.size()) + ").");
+  }
+}
+
 // ---- Params -------------------------------------------------------------------------- //
 
 py::object Params::take(const char* key) {
@@ -116,6 +144,10 @@ std::vector<double> Params::numbers(const char* key) {
 
 std::vector<int> Params::integers(const char* key) {
   return take(key).cast<std::vector<int>>();
+}
+
+std::vector<std::int64_t> Params::ids(const char* key) {
+  return take(key).cast<std::vector<std::int64_t>>();
 }
 
 std::pair<std::string, int> Params::subshape(const char* key) {
