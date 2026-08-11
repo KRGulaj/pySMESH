@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-07-03
+
 // pySMESH binding — geometry: load_brep, Shape, FaceInfo/EdgeInfo/VertexInfo,
 // face_distance. See src/bindings/common.hpp for ShapeData (the id -> TopoDS_* source of
 // truth) and PysmeshError.

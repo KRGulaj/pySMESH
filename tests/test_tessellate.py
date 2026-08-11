@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-07-12
+
 """Tests for pysmesh.tessellate (D1).
 
 Covers: output shapes and dtypes, face-id alignment with Shape.faces(), triangle index

@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-07-12
+
 """Tier-2 STEP XDE tests: read_step_xde, write_step_xde, and Shape.solids (A4/B1).
 
 Fixtures are labelled STEP files from ``tests/fixtures/generate_fixtures.cpp``:

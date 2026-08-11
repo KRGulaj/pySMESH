@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-06
+
 // pySMESH binding — Session: the geometric query surface over the live shape.
 //
 // Everything a consumer reads from a modelling kernel — types, boxes, mass properties,

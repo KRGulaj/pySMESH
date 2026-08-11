@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-09
+
 // pySMESH binding — block decomposition, and pattern mapping onto a face or a block.
 //
 // A **block** is a six-faced solid seen as a deformed unit cube: every point in it has a

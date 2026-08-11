@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-05
+
 // pySMESH v2 capability probe — SMESH side (the StdMeshers/Controls/MeshEditor surface
 // v1 compiles but does not expose).
 //

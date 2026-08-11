@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-09
+
 """Gates for the mesh editor.
 
 Every operation here gets what its own requirement asks for: a before/after invariant test

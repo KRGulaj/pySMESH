@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-06
+
 // pySMESH binding — progress reporting and cancellation for the long session operations.
 //
 // OCCT's progress mechanism is a Message_ProgressIndicator handed to an algorithm as a

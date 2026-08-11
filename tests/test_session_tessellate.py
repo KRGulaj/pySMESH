@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-06
+
 """Gates for the session's render mesh and its incremental delta.
 
 Five claims are under test, and they are the render-mesh contract rather than a tessellator's

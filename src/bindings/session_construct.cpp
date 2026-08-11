@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-06
+
 // pySMESH binding — Session: primitives, construction geometry and sweeps.
 //
 // Everything that adds new geometry to the model rather than reworking what is there. The

@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-09
+
 """Gates for named mesh groups, and for the three editing operations one has to survive.
 
 The claim under test is the one that makes a group worth having: **the mesher maintains

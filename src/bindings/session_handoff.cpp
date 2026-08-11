@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-06
+
 // pySMESH binding — Session: the export to a mesher, and the id-to-ordinal bijection.
 //
 // The session is the CAD authority; a mesher is a consumer of it. The boundary between them

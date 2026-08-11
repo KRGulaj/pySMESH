@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-09
+
 // pySMESH binding — the mesh quality controls: numerical functors, predicates, filter algebra.
 //
 // SMESH's controls are the part of this library with no array-side equivalent anywhere in the

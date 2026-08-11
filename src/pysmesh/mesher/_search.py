@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-09
+
 """pySMESH mesher — searching a mesh: location, ray casting, classification, slot cutting.
 
 Part of the :mod:`pysmesh.mesher` package. These answer questions *about* a mesh rather than

@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-09
+
 """Gates for the meshing assignment model, the body-fitted Cartesian mesher, and the harvest.
 
 Four claims are under test, and each is checked against something the binding did not

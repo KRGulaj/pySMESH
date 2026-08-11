@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-07-03
+
 """Shared pytest setup for pySMESH.
 
 Makes the ``pysmesh`` package (with its native ``_core`` extension and generated

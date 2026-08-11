@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-09
+
 """pySMESH mesher — the value types the whole meshing surface shares.
 
 Part of the :mod:`pysmesh.mesher` package. Everything here is data: the element and

@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-05
+
 """The identity gate: entity ids must never resolve to something they do not denote.
 
 Every persistent-naming scheme that has gone wrong went wrong in history composition, so

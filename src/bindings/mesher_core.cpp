@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-09
+
 // pySMESH binding — the mesher's ownership, assignment model, compute and error reporting.
 //
 // See mesher/mesher.hpp for the file split and for the three hazards this code exists to

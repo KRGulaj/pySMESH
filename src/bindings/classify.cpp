@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-07-12
+
 // pySMESH binding — point/solid classification: point_in_solid.
 //
 // Wraps OCCT's BRepClass3d_SolidClassifier (TKTopAlgo): an exact ray-casting point-in-solid

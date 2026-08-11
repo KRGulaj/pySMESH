@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-06
+
 // pySMESH binding — Session: the boolean family, fillet and chamfer.
 //
 // Every BRepAlgoAPI_BuilderAlgo descendant shares its arguments, options, history and error

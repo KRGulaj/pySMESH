@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-09
+
 """pySMESH mesher — named groups of elements and nodes.
 
 Part of the :mod:`pysmesh.mesher` package. A group is a named set of mesh entities that the

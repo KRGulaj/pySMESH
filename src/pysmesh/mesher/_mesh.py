@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-09
+
 """pySMESH mesher — the assignment model, the compute, and the mesh out.
 
 Part of the :mod:`pysmesh.mesher` package. This is the core of the meshing surface: an

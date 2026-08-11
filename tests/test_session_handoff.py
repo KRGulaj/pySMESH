@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-06
+
 """Gates for the CAD-to-mesher handoff: a deterministic, verified id-to-ordinal bijection.
 
 The session is the CAD authority and a mesher is a consumer of it. What crosses the boundary

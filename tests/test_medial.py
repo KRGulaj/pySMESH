@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-09
+
 """Gates for the medial axis, block decomposition and pattern mapping.
 
 The medial axis is checked against shapes whose axis is known in closed form:

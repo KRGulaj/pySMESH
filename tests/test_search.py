@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-09
+
 """Gates for mesh search: location, ray casting, classification, offset and slot cutting.
 
 Three of these answers have no counterpart in a surface-array pipeline, and each is gated

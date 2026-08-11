@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-09
+
 """Volume and surface meshing: SMESH's algorithms, hypotheses and assignment model.
 
 This is the meshing side of the CAD/mesher boundary. A :class:`~pysmesh.Session` owns a live

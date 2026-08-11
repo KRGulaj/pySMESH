@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-06
+
 // pySMESH binding — Session: the stateful, history-carrying modelling context.
 //
 // The rest of pysmesh is a stateless BREP-in/BREP-out service: every entry point reads

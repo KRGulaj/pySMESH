@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-07-03
+
 """Import-time VTK compatibility contract.
 
 pySMESH's ``_core`` links VTK dynamically against the host environment. The package

@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-06
+
 """pySMESH session — the object every operation group is implemented against.
 
 Part of the :mod:`pysmesh.session` package. This holds the one piece of state a session

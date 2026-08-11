@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-09
+
 // pySMESH binding — Inria .mesh / .meshb, through SMESH's own GMF driver.
 //
 // The format is the native interchange of MMG and fTetWild, and the driver is already

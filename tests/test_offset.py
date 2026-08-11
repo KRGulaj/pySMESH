@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-07-12
+
 """Tests for pysmesh.make_thick_solid and pysmesh.offset_shape (A2 / D1).
 
 Covers: output shape, dtype, face_map invariants, id alignment with Shape.faces(),

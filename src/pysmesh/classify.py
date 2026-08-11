@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-07-12
+
 """Point/solid classification: point_in_solid (Tier-2).
 
 Public surface: :func:`point_in_solid`. Wraps the low-level ``_core.point_in_solid``

@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-09
+
 // pySMESH binding — Mesher: the pybind11 surface.
 //
 // Positional, un-defaulted and untyped by design: src/pysmesh/mesher/ is the public API and

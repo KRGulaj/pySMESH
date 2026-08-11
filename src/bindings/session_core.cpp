@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-06
+
 // pySMESH binding — Session: state, identity and the queries over them.
 //
 // The identity-carrying core lives here: commit() replaces the root shape, carry_registry()

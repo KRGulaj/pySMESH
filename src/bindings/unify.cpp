@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-07-04
+
 // pySMESH binding — topology healing: unify_same_domain.
 //
 // Wraps OCCT's ShapeUpgrade_UnifySameDomain (TKShHealing) — a pure B-rep operation that

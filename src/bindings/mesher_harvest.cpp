@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-09
+
 // pySMESH binding — the mesh out: nodes, elements, their CAD binding, and groups.
 //
 // The layout is a compressed row list rather than one array per element type, for two

@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-07-04
+
 """Same-domain healing tests (Tier-2 / C1).
 
 Heals the committed ``split_box`` fixture — two cubes fused along a shared plane, whose four

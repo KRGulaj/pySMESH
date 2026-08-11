@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-07-12
+
 """B-rep offset operations: make_thick_solid and offset_shape (Tier-2).
 
 Public surface: :class:`ThickSolidParams`, :class:`ThickSolidResult`,

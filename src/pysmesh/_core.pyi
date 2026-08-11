@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-07-03
+
 """Type stubs for the pySMESH native ``_core`` extension (Tier-1).
 
 The host application runs ``mypy --strict`` against these; keep signatures exact.

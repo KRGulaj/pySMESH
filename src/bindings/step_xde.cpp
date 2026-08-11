@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-07-12
+
 // pySMESH binding — STEP XDE import/export: read_step_xde, write_step_xde.
 //
 // The CFD headliner (report §6.1/§6.2): unlike Gmsh's importShapes, which discards STEP

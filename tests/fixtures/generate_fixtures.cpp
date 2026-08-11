@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-07-03
+
 // Deterministic fixture generator for pySMESH tests (dev-only; never run by CI).
 //
 // Emits the committed BREP shapes AND classified surface meshes (as .npy files) that the

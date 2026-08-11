@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-07-12
+
 """B-rep tessellation for viewport rendering (Tier-2).
 
 Public surface: :class:`TessellateParams`, :class:`TessellateResult`, and :func:`tessellate`.

@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-09
+
 """Gates for the Inria ``.mesh`` / ``.meshb`` interchange.
 
 The format is what MMG and fTetWild read and write, so the value of this binding is that a

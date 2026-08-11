@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-09
+
 // pySMESH binding — a shape-free mesh, and the rebuild of one from plain arrays.
 //
 // Two consumers need the same thing: the Inria writer has to hand SMESH a real SMDS mesh

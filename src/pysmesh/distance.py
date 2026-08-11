@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-07-12
+
 """Proximity & topology diagnostics: shape_distance and free_boundary_edges (Tier-2).
 
 Public surface: :class:`ShapeDistanceResult`, :func:`shape_distance`,

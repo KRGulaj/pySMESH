@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-09
+
 // pySMESH binding — the medial axis of a face, and a constrained Delaunay over one.
 //
 // The **medial axis** of a 2-D region is the set of centres of the maximal circles that fit

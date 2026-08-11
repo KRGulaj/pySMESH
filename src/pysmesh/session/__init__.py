@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-06
+
 """Stateful modelling session with persistent entity identity.
 
 The rest of pySMESH is a stateless BREP-in/BREP-out service: each entry point reads bytes,

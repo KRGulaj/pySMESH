@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-09
+
 // pySMESH binding — searching a mesh: location, ray casting, classification, offset, slot.
 //
 // This is the part of SMESH that answers questions *about* a mesh rather than building or
