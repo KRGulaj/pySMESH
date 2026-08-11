@@ -150,6 +150,15 @@ py::dict Session::add_wedge(double dx, double dy, double dz, double ltx, double 
 // its own: it is named through the ids of its edges, and every operation that consumes a
 // profile resolves the named entities to the single body that owns them.
 
+// A standalone vertex body. The only construction that adds a point to the model as an
+// entity in its own right rather than as the boundary of something else.
+py::dict Session::add_vertex(double x, double y, double z) {
+  OpGuard guard(in_op_);
+  const TopoDS_Shape vertex = build_shape(
+      "add_vertex", [&] { return BRepBuilderAPI_MakeVertex(gp_Pnt(x, y, z)).Vertex(); });
+  return add_bodies(vertex, "add_vertex");
+}
+
 py::dict Session::add_line(double x1, double y1, double z1, double x2, double y2, double z2) {
   OpGuard guard(in_op_);
   const gp_Pnt a(x1, y1, z1);
@@ -190,6 +199,44 @@ py::dict Session::add_circle(double cx, double cy, double cz, double nx, double 
     return BRepBuilderAPI_MakeEdge(new Geom_Circle(gp_Circ(frame, radius))).Edge();
   });
   return add_bodies(edge, "add_circle");
+}
+
+// A full elliptical edge, rx along the plane's first in-plane direction and ry along its
+// second.
+//
+// The in-plane orientation is part of an ellipse's geometry, which is what separates this
+// from add_circle: a normal alone fixes the plane but not where the major axis points in it,
+// so x_dir names the first in-plane direction when the caller cares, and OCCT derives it
+// from the normal when the caller does not.
+py::dict Session::add_ellipse(double cx, double cy, double cz, double nx, double ny,
+                              double nz, double rx, double ry,
+                              const std::optional<std::array<double, 3>>& x_dir) {
+  OpGuard guard(in_op_);
+  require_positive("rx", rx);
+  require_positive("ry", ry);
+  const gp_Pnt centre(cx, cy, cz);
+  const gp_Dir normal = direction_of("add_ellipse", "normal", nx, ny, nz);
+  gp_Ax2 frame(centre, normal);
+  if (x_dir.has_value()) {
+    const std::array<double, 3>& d = *x_dir;
+    const gp_Dir x = direction_of("add_ellipse", "x_dir", d[0], d[1], d[2]);
+    if (x.IsParallel(normal, Precision::Angular())) {
+      throw PysmeshError(
+          "Session.add_ellipse: x_dir is parallel to normal, so it names no direction in "
+          "the ellipse's plane.");
+    }
+    frame = gp_Ax2(centre, normal, x);
+  }
+  // gp_Elips demands major >= minor, but ry > rx is not a caller error: it is the same
+  // ellipse with its major axis along the plane's second direction. Naming that direction
+  // as the major one expresses it exactly, so no case is refused and none is approximated.
+  const gp_Ax2 axes(centre, normal, ry > rx ? frame.YDirection() : frame.XDirection());
+  const double major = std::max(rx, ry);
+  const double minor = std::min(rx, ry);
+  const TopoDS_Shape edge = build_shape("add_ellipse", [&] {
+    return BRepBuilderAPI_MakeEdge(new Geom_Ellipse(gp_Elips(axes, major, minor))).Edge();
+  });
+  return add_bodies(edge, "add_ellipse");
 }
 
 // A polyline through the given points. Unlike make_wire this shares one vertex between

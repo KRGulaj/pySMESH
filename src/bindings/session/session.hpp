@@ -81,6 +81,7 @@
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
@@ -120,6 +121,7 @@
 #include <GeomLProp_SLProps.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_Circle.hxx>
+#include <Geom_Ellipse.hxx>
 #include <Geom_Surface.hxx>
 #include <Geom_TrimmedCurve.hxx>
 #include <HelixBRep_BuilderHelix.hxx>
@@ -158,6 +160,7 @@
 #include <gp_Ax3.hxx>
 #include <gp_Circ.hxx>
 #include <gp_Dir.hxx>
+#include <gp_Elips.hxx>
 #include <gp_GTrsf.hxx>
 #include <gp_Mat.hxx>
 #include <gp_Pln.hxx>
@@ -618,6 +621,10 @@ class Session {
   // its own: it is named through the ids of its edges, and every operation that consumes a
   // profile resolves the named entities to the single body that owns them.
 
+  // A standalone vertex body. The only construction that adds a point to the model as an
+  // entity in its own right rather than as the boundary of something else.
+  py::dict add_vertex(double x, double y, double z);
+
   py::dict add_line(double x1, double y1, double z1, double x2, double y2, double z2);
 
   // Three-point arc: through p1, ending at p3, passing through p2.
@@ -626,6 +633,13 @@ class Session {
 
   py::dict add_circle(double cx, double cy, double cz, double nx, double ny, double nz,
                       double radius);
+
+  // A full elliptical edge. rx and ry are the radii along the plane's first and second
+  // in-plane directions; x_dir names the first one explicitly, and is derived from the
+  // normal when it is absent.
+  py::dict add_ellipse(double cx, double cy, double cz, double nx, double ny, double nz,
+                       double rx, double ry,
+                       const std::optional<std::array<double, 3>>& x_dir);
 
   // A polyline through the given points. Unlike make_wire this shares one vertex between
   // consecutive segments by construction, so no edge is ever rebuilt to connect it.
