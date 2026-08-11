@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-07-03
+
 // pySMESH binding — viscous prism layers: compute_viscous_layers.
 //
 // Wraps StdMeshers_ViscousLayers::Compute on an *injected* surface mesh. The upstream

@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-07-12
+
 """Tests for pysmesh.point_in_solid (A5 / D1).
 
 Covers: analytical inside/outside/on-boundary classification on the unit box and sphere,

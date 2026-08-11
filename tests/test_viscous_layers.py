@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-07-03
+
 """Viscous-layer end-to-end tests (B3).
 
 Injects the committed classified box surface mesh, grows prism layers, and checks the

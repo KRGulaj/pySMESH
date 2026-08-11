@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-07-12
+
 // pySMESH binding — tessellation: tessellate.
 //
 // Wraps OCCT's BRepMesh_IncrementalMesh (TKMesh) to produce a lightweight triangulation of

@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-08-06
+
 """pySMESH session — healing, sewing, defeaturing, imprinting and removal.
 
 Part of the :mod:`pysmesh.session` package. The session's operations are declared on one

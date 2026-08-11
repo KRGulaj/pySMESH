@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-07-12
+
 // pySMESH binding — B-rep offset operations: make_thick_solid and offset_shape.
 //
 // make_thick_solid wraps BRepOffsetAPI_MakeThickSolid (TKOffset): hollows a solid by

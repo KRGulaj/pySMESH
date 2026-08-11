@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-07-03
+
 """Viscous boundary-layer prism generation (Tier-1).
 
 Public surface: :class:`ExtrusionMethod`, :class:`VLParams`, :class:`VLResult`, and

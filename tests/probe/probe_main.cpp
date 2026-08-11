@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-05
+
 // pySMESH v2 capability probe — runner and check harness implementation.
 //
 // Build:  cmake -DPYSMESH_BUILD_V2_PROBE=ON ... && cmake --build build --target v2_probe

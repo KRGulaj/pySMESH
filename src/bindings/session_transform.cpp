@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-06
+
 // pySMESH binding — Session: transforms and copy.
 //
 // Two paths, and which one an operation takes is decided by the transform itself rather than

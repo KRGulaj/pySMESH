@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-05
+
 // pySMESH v2 capability probe — shared check harness.
 //
 // The probe is a build-verification target, not a unit-test suite: it exists to prove that

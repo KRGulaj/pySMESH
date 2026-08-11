@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-07-12
+
 """Tests for pysmesh.shape_distance and pysmesh.free_boundary_edges (A3 / D1).
 
 Covers: exact analytical minimum distance between separated boxes, witness-point geometry,

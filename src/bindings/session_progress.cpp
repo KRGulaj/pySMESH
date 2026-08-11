@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-08-06
+
 // pySMESH binding — the progress/cancellation driver.
 //
 // See session/progress.hpp for why the Python hooks are polled from a helper thread rather

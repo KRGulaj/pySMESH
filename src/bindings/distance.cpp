@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-07-12
+
 // pySMESH binding — proximity & topology diagnostics: shape_distance, free_boundary_edges.
 //
 // Two OCCT-only queries that share just the BREP bytes bridge, the 1-based TopExp index

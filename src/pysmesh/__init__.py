@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: LGPL-2.1-only
+# Copyright (C) 2026 Kajetan R. Gulaj
+# Created: 2026-07-03
+
 """pySMESH — standalone SMESH ViscousLayers + OCCT same-domain healing bindings.
 
 Public surface: :func:`load_brep`, :class:`Shape`, :class:`Mesh`, and the per-entity info

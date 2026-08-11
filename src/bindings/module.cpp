@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-07-03
+
 // pySMESH _core extension module: geometry query (Shape), surface-mesh injection (Mesh),
 // viscous prism layers (compute_viscous_layers), and same-domain healing (unify_same_domain).
 //

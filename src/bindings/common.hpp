@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: LGPL-2.1-only
+// Copyright (C) 2026 Kajetan R. Gulaj
+// Created: 2026-07-03
+
 // pySMESH binding — shared infrastructure.
 //
 // Defines the typed exception carried across the C++/Python boundary, the refcounted
