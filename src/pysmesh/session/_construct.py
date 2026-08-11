@@ -240,6 +240,23 @@ class _ConstructOps(_SessionBase):
     # its own: it is named through the ids of its edges. Every operation that consumes a
     # profile resolves the entities it is given to the single body that owns them.
 
+    def add_vertex(self, point: Vec3) -> HistoryDelta:
+        """Add a standalone vertex body.
+
+        This is the only construction that adds a point to the model as an entity in its own
+        right rather than as the boundary of something else. The vertex is a body like any
+        other: it carries an :data:`EntityId`, it moves under a transform, it is swept to an
+        edge by :meth:`extrude` or :meth:`revolve`, and :meth:`remove` drops it.
+
+        Args:
+            point: Position of the vertex.
+
+        Returns:
+            The delta; the vertex is newly issued.
+        """
+        x, y, z = point
+        return _delta(self._s.add_vertex(x, y, z))
+
     def add_line(self, start: Vec3, end: Vec3) -> HistoryDelta:
         """Add a straight edge between two points.
 
@@ -294,6 +311,48 @@ class _ConstructOps(_SessionBase):
         cx, cy, cz = centre
         nx, ny, nz = normal
         return _delta(self._s.add_circle(cx, cy, cz, nx, ny, nz, radius))
+
+    def add_ellipse(
+        self,
+        centre: Vec3,
+        normal: Vec3,
+        rx: float,
+        ry: float,
+        *,
+        x_dir: Vec3 | None = None,
+    ) -> HistoryDelta:
+        """Add a full elliptical edge.
+
+        The ellipse is exact geometry, not an approximation. Close it with :meth:`make_face`
+        for an elliptical disk. Equal radii give a circle-shaped ellipse; :meth:`add_circle`
+        is the exact circle constructor, and its edge reports the curve type ``Circle``.
+
+        Unlike a circle, an ellipse has an in-plane orientation: the normal fixes the plane
+        but not where the major axis points in it. ``x_dir`` names that direction when it
+        matters.
+
+        Args:
+            centre: Centre of the ellipse.
+            normal: Normal of the ellipse's plane; must be non-zero.
+            rx: Radius along the plane's first in-plane direction (> 0).
+            ry: Radius along the plane's second in-plane direction (> 0). ``ry > rx`` is not
+                an error — it is the same ellipse with its major axis along the second
+                direction.
+            x_dir: The plane's first in-plane direction. Must be non-zero and not parallel
+                to ``normal``; its component along ``normal`` is removed. ``None`` leaves
+                OCCT to derive it from the normal, which for ``normal = (0, 0, 1)`` gives
+                ``x_dir = (1, 0, 0)``.
+
+        Returns:
+            The delta; the closed edge and its single seam vertex are newly issued.
+
+        Raises:
+            PysmeshError: On a non-positive radius, a zero normal, or an ``x_dir`` that is
+                zero or parallel to ``normal``.
+        """
+        cx, cy, cz = centre
+        nx, ny, nz = normal
+        return _delta(self._s.add_ellipse(cx, cy, cz, nx, ny, nz, rx, ry, x_dir))
 
     def add_polyline(self, points: Points, *, closed: bool = False) -> HistoryDelta:
         """Add a polyline wire through the given points.

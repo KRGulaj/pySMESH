@@ -349,6 +349,115 @@ def test_add_circle_edge_length_is_the_circumference() -> None:
     assert model_counts(s) == (0, 0, 1, 1)
 
 
+def test_add_ellipse_perimeter_matches_the_second_kind_elliptic_integral() -> None:
+    """Perimeter of an ellipse, against Ramanujan's second approximation.
+
+    ``pi (a + b) (1 + 3h / (10 + sqrt(4 - 3h)))`` with ``h = ((a - b) / (a + b))**2``. Its
+    own error is below 1e-9 at this eccentricity, so it is an independent oracle for the
+    exact perimeter rather than a restatement of OCCT's integration.
+
+    The tolerance is loose because the *measurement* is: ``BRepGProp::LinearProperties``
+    integrates a conic with a fixed-order Gauss rule and lands 5.4e-4 high here. The
+    ellipse itself is exact — the area and bounding-box gates below pin it to 1e-6 through
+    two other OCCT routines — so this test states the perimeter to the accuracy the length
+    measurement has, and does not claim more.
+    """
+    s = Session()
+    a, b = 5.0, 3.0
+
+    s.add_ellipse((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), a, b)
+
+    h = ((a - b) / (a + b)) ** 2
+    expected = math.pi * (a + b) * (1.0 + 3.0 * h / (10.0 + math.sqrt(4.0 - 3.0 * h)))
+    assert model_length(s) == pytest.approx(expected, rel=1e-3)
+    # A closed elliptical edge has one seam vertex, not two.
+    assert model_counts(s) == (0, 0, 1, 1)
+
+
+def test_add_ellipse_closed_by_make_face_has_the_pi_a_b_area() -> None:
+    s = Session()
+    a, b = 5.0, 3.0
+
+    s.add_ellipse((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), a, b)
+    s.make_face([EntityId(i) for i in s.entities(EntityKind.EDGE)])
+
+    assert model_area(s) == pytest.approx(math.pi * a * b, rel=CURVED_RTOL)
+
+
+def test_add_ellipse_with_ry_above_rx_puts_the_major_axis_along_y() -> None:
+    """``ry > rx`` is the same ellipse turned a quarter turn, not an error.
+
+    ``gp_Elips`` demands major >= minor, so the case has to be expressed by naming the
+    plane's second direction as the major one. Checked on the bounding box, which is
+    ``2 rx`` by ``2 ry`` either way round.
+    """
+    s = Session()
+    rx, ry = 3.0, 5.0
+
+    s.add_ellipse((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), rx, ry)
+
+    box = ps.load_brep(s.brep()).edges()[0].bbox
+    assert (box[3] - box[0]) == pytest.approx(2.0 * rx, rel=CURVED_RTOL)
+    assert (box[4] - box[1]) == pytest.approx(2.0 * ry, rel=CURVED_RTOL)
+
+
+def test_add_ellipse_x_dir_orients_the_major_axis_in_the_plane() -> None:
+    """A 45 degree x_dir tilts the ellipse, so its box is neither 2rx nor 2ry wide."""
+    s = Session()
+    rx, ry = 5.0, 3.0
+    root_half = math.sqrt(0.5)
+
+    s.add_ellipse(
+        (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), rx, ry, x_dir=(root_half, root_half, 0.0)
+    )
+
+    box = ps.load_brep(s.brep()).edges()[0].bbox
+    # Half-extent of an ellipse along x is sqrt((a cos t)^2 + (b sin t)^2), t = 45 degrees.
+    expected = math.hypot(rx * root_half, ry * root_half)
+    assert (box[3] - box[0]) == pytest.approx(2.0 * expected, rel=CURVED_RTOL)
+
+
+def test_add_ellipse_with_a_non_positive_radius_raises() -> None:
+    s = Session()
+
+    with pytest.raises(ps.PysmeshError, match="ry"):
+        s.add_ellipse((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 5.0, 0.0)
+
+
+def test_add_ellipse_with_x_dir_parallel_to_the_normal_raises() -> None:
+    s = Session()
+
+    with pytest.raises(ps.PysmeshError, match="parallel"):
+        s.add_ellipse(
+            (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 5.0, 3.0, x_dir=(0.0, 0.0, 2.0)
+        )
+
+
+def test_add_vertex_is_a_body_of_its_own_carrying_one_id() -> None:
+    s = Session()
+    point = (1.0, 2.0, 3.0)
+
+    delta = s.add_vertex(point)
+
+    assert model_counts(s) == (0, 0, 0, 1)
+    assert delta.created.size == 1
+    table = s.entity_table(EntityKind.VERTEX)
+    assert tuple(float(c) for c in table.centroid[0]) == pytest.approx(point, abs=1e-12)
+
+
+def test_add_vertex_extrudes_to_an_edge_keeping_its_id() -> None:
+    """A vertex is sweepable: the sweep raises it to an edge and its id carries through."""
+    s = Session()
+    s.add_vertex((0.0, 0.0, 0.0))
+    before = [EntityId(i) for i in s.entities(EntityKind.VERTEX)]
+
+    s.extrude(before, (0.0, 0.0, BOX_DZ))
+
+    assert model_counts(s) == (0, 0, 1, 2)
+    assert model_length(s) == pytest.approx(BOX_DZ, rel=EXACT_RTOL)
+    assert set(int(i) for i in before) <= set(s.entities(EntityKind.VERTEX).tolist())
+
+
 def test_add_polyline_closed_has_one_edge_per_segment_and_the_perimeter_length() -> None:
     s = Session()
     points = [(0.0, 0.0, 0.0), (BOX_DX, 0.0, 0.0), (BOX_DX, BOX_DY, 0.0), (0.0, BOX_DY, 0.0)]

@@ -143,6 +143,7 @@ class Session:
         ay: float,
         az: float,
     ) -> dict[str, object]: ...
+    def add_vertex(self, x: float, y: float, z: float) -> dict[str, object]: ...
     def add_line(
         self, x1: float, y1: float, z1: float, x2: float, y2: float, z2: float
     ) -> dict[str, object]: ...
@@ -167,6 +168,18 @@ class Session:
         ny: float,
         nz: float,
         radius: float,
+    ) -> dict[str, object]: ...
+    def add_ellipse(
+        self,
+        cx: float,
+        cy: float,
+        cz: float,
+        nx: float,
+        ny: float,
+        nz: float,
+        rx: float,
+        ry: float,
+        x_dir: tuple[float, float, float] | None,
     ) -> dict[str, object]: ...
     def add_polyline(
         self, points: NDArray[np.float64], closed: bool

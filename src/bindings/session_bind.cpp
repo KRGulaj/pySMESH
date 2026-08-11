@@ -34,6 +34,7 @@ void bind_session(py::module_& m) {
       .def("add_wedge", &Session::add_wedge, py::arg("dx"), py::arg("dy"), py::arg("dz"),
            py::arg("ltx"), py::arg("ox"), py::arg("oy"), py::arg("oz"), py::arg("ax"),
            py::arg("ay"), py::arg("az"))
+      .def("add_vertex", &Session::add_vertex, py::arg("x"), py::arg("y"), py::arg("z"))
       .def("add_line", &Session::add_line, py::arg("x1"), py::arg("y1"), py::arg("z1"),
            py::arg("x2"), py::arg("y2"), py::arg("z2"))
       .def("add_arc", &Session::add_arc, py::arg("x1"), py::arg("y1"), py::arg("z1"),
@@ -41,6 +42,9 @@ void bind_session(py::module_& m) {
            py::arg("z3"))
       .def("add_circle", &Session::add_circle, py::arg("cx"), py::arg("cy"), py::arg("cz"),
            py::arg("nx"), py::arg("ny"), py::arg("nz"), py::arg("radius"))
+      .def("add_ellipse", &Session::add_ellipse, py::arg("cx"), py::arg("cy"), py::arg("cz"),
+           py::arg("nx"), py::arg("ny"), py::arg("nz"), py::arg("rx"), py::arg("ry"),
+           py::arg("x_dir"))
       .def("add_polyline", &Session::add_polyline, py::arg("points"), py::arg("closed"))
       .def("add_spline", &Session::add_spline, py::arg("points"), py::arg("degree_min"),
            py::arg("degree_max"), py::arg("tol"))
