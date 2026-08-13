@@ -16,6 +16,14 @@
 // what lets one mesh be structured through an extruded region, body-fitted in the interior
 // and layered at the walls, which a single global algorithm cannot express.
 //
+// **A mesher does not need a shape.** `Mesher(None)` builds one over an empty SMESH mesh that
+// is filled from arrays instead of computed from geometry, which is the only way a discrete
+// body — an imported STL, a shrink-wrap result, a boundary handed over by another mesher —
+// reaches this surface at all. It carries no sub-shape ordinals, so everything that names one
+// refuses it by name: `compute`, `assign`/`unassign`, `add_group_on_shape`, the pattern
+// mapping, and the two controls that read the geometry. Every other operation is written
+// against SMESHDS alone and works unchanged.
+//
 // Three hazards shape the code, all measured rather than assumed:
 //
 //   * **Hypothesis ids must come from SMESH_Gen::GetANewId().** Composite algorithms allocate
@@ -35,7 +43,7 @@
 //   mesher_core.cpp     ownership, sub-shape resolution, assignment, compute, error reporting
 //   mesher_catalog.cpp  the algorithm and hypothesis factory
 //   mesher_harvest.cpp  the mesh out: nodes, elements and their CAD binding, groups
-//   mesher_scratch.cpp  a shape-free mesh, and the rebuild of one from plain arrays
+//   mesher_scratch.cpp  a shape-free mesh, the rebuild of one from arrays, and the fill
 //   mesher_controls.cpp the quality controls: numerical functors, predicates, filter algebra
 //   mesher_groups.cpp   named element and node groups
 //   mesher_edit.cpp     the mesh editor
@@ -211,11 +219,35 @@ class ComputeDriver {
 // ---- Mesher ------------------------------------------------------------------------- //
 class Mesher {
  public:
+  // `shape_obj` may be None, which builds a mesh with no geometry behind it. See the header
+  // comment for what that costs; `has_shape()` is the question every shape-dependent
+  // operation asks before it starts.
   explicit Mesher(const py::object& shape_obj);
   ~Mesher();
 
   Mesher(const Mesher&) = delete;
   Mesher& operator=(const Mesher&) = delete;
+
+  // Whether this mesher was built on a shape. False for one filled from arrays.
+  bool has_shape() const { return data_ != nullptr; }
+
+  // ---- Filling from arrays (mesher_scratch.cpp) ---------------------------------------- //
+  // The injection path: nodes and elements handed in directly rather than produced by an
+  // algorithm. Both work on a shape-backed mesher too, and what they add is bound to no
+  // sub-shape there, because a caller-supplied cell has no geometry to sit on.
+
+  // Insert N nodes given as an (N, 3) table. Returns their new mesh ids.
+  py::array_t<std::int64_t> add_nodes(const py::object& coords);
+
+  // Insert M elements of one entity type, given as an (M, k) table of **node ids**. Returns
+  // their new mesh ids. Polygons and polyhedra are refused: their node count does not
+  // determine their shape, so a rectangular table cannot express one.
+  py::array_t<std::int64_t> add_elements(int type, const py::object& connectivity);
+
+  // Fill an empty mesher from the arrays a harvest produced, keeping every id. This is what
+  // turns a mesh read from a file back into a live one. Refuses a mesher that already holds
+  // anything, because the arrays carry absolute ids and a partial fill would collide.
+  void fill_from_mesh(const py::dict& mesh);
 
   // Attach an algorithm or a hypothesis to a sub-shape. An empty `kind` means the whole
   // shape, which is how a global assignment is expressed. Raises naming the offending
@@ -305,6 +337,17 @@ class Mesher {
                              const std::vector<std::int64_t>& first_nodes,
                              const std::vector<std::int64_t>& second_nodes);
 
+  // ---- Deletion (mesher_edit.cpp) ------------------------------------------------------- //
+  // The only two operations here that take entities away. Both report exactly what went, ids
+  // and all, because a caller holding named selections has to remap them against the
+  // survivors and cannot do that from a count.
+  //
+  // Deleting is not the same as merging. `merge_nodes` collapses one node onto another and
+  // rewrites the elements that used it; these two remove the entity outright, and every
+  // element built on a removed node goes with it.
+  py::dict remove_elements(const std::vector<std::int64_t>& elements, bool free_nodes);
+  py::dict remove_nodes(const std::vector<std::int64_t>& nodes);
+
   // ---- Search and ray casting (mesher_search.cpp) --------------------------------------- //
   // Every query takes a batch of points, because one searcher builds an octree over the whole
   // mesh and answering one point with it would pay for the tree per question.
@@ -322,8 +365,15 @@ class Mesher {
   py::dict project_points(const py::object& points, int family) const;
   py::dict closest_distance(const py::object& points, int family) const;
   py::dict sharp_edges(double angle, bool add_existing) const;
+
+  // The patches, and — when `name_prefix` is not empty — one explicit group per patch, named
+  // `<prefix><index>`. The groups are what makes a patch index survive an edit: SMESHDS drops
+  // a deleted element from every group it was in and never renumbers a survivor, whereas a
+  // second call to this function re-derives the patches from scratch and can number them
+  // differently once faces have gone. Not the default, because a group is state and a caller
+  // only reading the partition should not be made to own any.
   py::dict separate_faces_by_edges(const py::object& node1, const py::object& node2,
-                                   const py::object& medium) const;
+                                   const py::object& medium, const std::string& name_prefix);
   py::dict de_merge(std::int64_t element, const py::list& groups) const;
   py::dict make_slot(double width, const std::vector<std::int64_t>& segments);
 
@@ -360,6 +410,12 @@ class Mesher {
 
  private:
   void ensure_open() const;
+
+  // Raise naming `op` unless this mesher was built on a shape. Every operation that resolves
+  // a sub-shape ordinal calls it, so the refusal says which operation needs the geometry
+  // rather than failing later on a null shape.
+  void ensure_shape(const char* op) const;
+
   void clear_mesh();
 
   struct Assignment {

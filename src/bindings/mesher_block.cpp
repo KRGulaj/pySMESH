@@ -278,6 +278,7 @@ void require_pattern(const SMESH_Pattern& pattern, bool ok, const char* owner) {
 std::string Mesher::pattern_from_face(int face_ordinal, bool project) {
   ensure_open();
   const char* owner = "Mesher.pattern_from_face";
+  ensure_shape(owner);
   const TopoDS_Face& face = TopoDS::Face(sub_shape("FACE", face_ordinal));
 
   SMESH_Pattern pattern;
@@ -292,6 +293,7 @@ py::dict Mesher::apply_pattern_to_face(const std::string& text, int face_ordinal
                                        bool create_polygons) {
   ensure_open();
   const char* owner = "Mesher.apply_pattern_to_face";
+  ensure_shape(owner);
   const TopoDS_Face& face = TopoDS::Face(sub_shape("FACE", face_ordinal));
   const TopoDS_Vertex& vertex = TopoDS::Vertex(sub_shape("VERTEX", vertex_ordinal));
 
@@ -317,6 +319,7 @@ py::dict Mesher::apply_pattern_to_block(const std::string& text, int solid_ordin
                                         bool create_polyhedra) {
   ensure_open();
   const char* owner = "Mesher.apply_pattern_to_block";
+  ensure_shape(owner);
   const TopoDS_Shell shell = block_shell(shape_data(), solid_ordinal, owner);
   const TopoDS_Vertex& v000 = TopoDS::Vertex(sub_shape("VERTEX", vertex000));
   const TopoDS_Vertex& v001 = TopoDS::Vertex(sub_shape("VERTEX", vertex001));

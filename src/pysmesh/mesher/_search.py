@@ -22,7 +22,7 @@ back parallel to one another.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import cast
@@ -175,10 +175,14 @@ class FacePatches:
     Attributes:
         offsets: (P+1,) int64 — patch *i* owns ``ids[offsets[i]:offsets[i + 1]]``.
         ids: (K,) int64 — the face ids, grouped by patch.
+        names: The group each patch was stored as, in patch order. Empty unless
+            :meth:`~pysmesh.Mesher.separate_faces_by_edges` was given a ``name_prefix``. A
+            stored patch keeps its identity across an edit; a bare index does not.
     """
 
     offsets: NDArray[np.int64]
     ids: NDArray[np.int64]
+    names: tuple[str, ...] = ()
 
     @property
     def count(self) -> int:
@@ -511,29 +515,50 @@ class _SearchOps(_MesherBase):
             medium=cast("NDArray[np.int64]", raw["medium"]),
         )
 
-    def separate_faces_by_edges(self, edges: SharpEdges) -> FacePatches:
+    def separate_faces_by_edges(
+        self, edges: SharpEdges, name_prefix: str | None = None
+    ) -> FacePatches:
         """Partition the mesh's faces into regions bounded by the given edges.
 
         Paired with :meth:`sharp_edges` this is how a surface mesh with no CAD behind it is
         broken into the faces it came from — the substrate for naming, selecting and
-        assigning boundary conditions on an imported mesh.
+        assigning boundary conditions on an imported mesh. On a mesher built without a shape
+        the pair replaces the sub-shape ordinals entirely: the patches are the only division
+        of the surface there is, and the face ids they carry are what a viewport picks and
+        hides on.
+
+        **A patch index is not stable on its own.** Each call re-derives the partition from
+        scratch, so once faces have been deleted the same region can come back under a
+        different index. Passing ``name_prefix`` stores each patch as an explicit group named
+        ``f"{name_prefix}{i}"``, and *that* is stable across any edit: SMESH drops a deleted
+        element from the group it was in and never renumbers a survivor. Read the groups back
+        with :meth:`~pysmesh.Mesher.groups`.
 
         Args:
             edges: The edges to cut at, from :meth:`sharp_edges` or built by hand.
+            name_prefix: Store the patches as groups under this prefix. ``None`` stores
+                nothing, because a group is state and a caller only reading the partition
+                should not be made to own any.
 
         Returns:
-            The faces, grouped by patch.
+            The faces grouped by patch, and the group names when they were stored.
 
         Raises:
             PysmeshError: If an edge names a node the mesh does not have, if the three
-                arrays differ in length, or if the mesher has been released.
+                arrays differ in length, if a group of that name already exists — names
+                address a group, so they have to be unique — or if the mesher has been
+                released.
         """
         raw = self._m.separate_faces_by_edges(
-            edges.node1.tolist(), edges.node2.tolist(), edges.medium.tolist()
+            edges.node1.tolist(),
+            edges.node2.tolist(),
+            edges.medium.tolist(),
+            "" if name_prefix is None else name_prefix,
         )
         return FacePatches(
             offsets=cast("NDArray[np.int64]", raw["offsets"]),
             ids=cast("NDArray[np.int64]", raw["ids"]),
+            names=tuple(cast("Sequence[str]", raw["names"])),
         )
 
     # ---- Merge diagnosis and slot cutting ------------------------------------------------- #

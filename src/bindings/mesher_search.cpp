@@ -411,7 +411,8 @@ py::dict Mesher::sharp_edges(double angle, bool add_existing) const {
 }
 
 py::dict Mesher::separate_faces_by_edges(const py::object& node1, const py::object& node2,
-                                         const py::object& medium) const {
+                                         const py::object& medium,
+                                         const std::string& name_prefix) {
   ensure_open();
   const std::vector<std::int64_t> first = node1.cast<std::vector<std::int64_t>>();
   const std::vector<std::int64_t> second = node2.cast<std::vector<std::int64_t>>();
@@ -450,9 +451,25 @@ py::dict Mesher::separate_faces_by_edges(const py::object& node1, const py::obje
     offsets.push_back(static_cast<std::int64_t>(ids.size()));
   }
 
+  // One group per patch, so the patch index outlives the partition that produced it. Created
+  // after the whole walk rather than inside it, because add_group refuses a name already in
+  // use and a half-created set of patch groups would be worse than none.
+  py::list names;
+  if (!name_prefix.empty()) {
+    for (std::size_t i = 0; i < patches.size(); ++i) {
+      const std::string name = name_prefix + std::to_string(i);
+      const std::vector<std::int64_t> members(
+          ids.begin() + static_cast<std::ptrdiff_t>(offsets[i]),
+          ids.begin() + static_cast<std::ptrdiff_t>(offsets[i + 1]));
+      add_group(name, static_cast<int>(SMDSAbs_Face), members);
+      names.append(name);
+    }
+  }
+
   py::dict out;
   out["offsets"] = vector_to_array(offsets);
   out["ids"] = vector_to_array(ids);
+  out["names"] = names;
   return out;
 }
 

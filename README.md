@@ -9,8 +9,10 @@ pySMESH covers three areas:
   booleans, fillets, chamfers, sweeps, healing), with persistent entity identity across
   every edit. See [CAD modelling](#cad-modelling).
 - **`Mesher`** — SMESH's full meshing pipeline. Assign algorithms and hypotheses per
-  sub-shape, compute a mesh, then edit, query, and check its quality. See
-  [Mesh generation and editing](#mesh-generation-and-editing).
+  sub-shape, compute a mesh, then edit, query, and check its quality. It also takes a mesh
+  it did not build: a discrete body with no B-rep goes in as plain arrays. See
+  [Mesh generation and editing](#mesh-generation-and-editing) and
+  [Discrete meshes](#discrete-meshes-no-cad).
 - **Standalone OCCT geometry operations** — STEP import/export, tessellation, offsets,
   distance and leak checks, point-in-solid classification, and geometry queries. See
   [Geometry operations](#geometry-operations).
@@ -129,8 +131,8 @@ Once a mesh exists:
 - **Groups** name sets of elements. A group survives edits, so a wall named on a coarse
   mesh is still the wall after conversion to second order.
 - **The editor** smooths, merges coincident nodes, reorients cells, splits and fuses
-  faces, converts between linear and quadratic, sews free borders, and offsets a
-  surface.
+  faces, converts between linear and quadratic, sews free borders, offsets a surface, and
+  deletes elements and nodes.
 - **Search** locates elements at a point, casts rays through the mesh, finds sharp
   edges, and classifies a point as inside or outside a closed surface.
 - **The medial axis** of a face reports its centreline and local wall thickness. A face
@@ -140,6 +142,42 @@ Once a mesh exists:
 
 See `src/pysmesh/mesher/__init__.py` for the full model and `src/pysmesh/_core.pyi` for
 the typed API.
+
+## Discrete meshes (no CAD)
+
+A `Mesher` does not need a shape. `Mesher()` starts empty and is filled from arrays, which
+is how a body that never had a B-rep gets in: an imported STL, OBJ or PLY, a shrink-wrap
+result, the boundary another mesher produced, or a mesh read back from a file.
+
+```python
+from pysmesh import Mesher
+
+mesher = Mesher.from_arrays(points, triangles)   # (N, 3) float64, (M, 3) row indices
+
+# Divide the surface into patches. Without CAD faces, this is what a viewport picks on.
+edges = mesher.sharp_edges(angle=40.0)
+patches = mesher.separate_faces_by_edges(edges, name_prefix="patch_")
+
+# Delete one patch. The report names every id that went, including the freed nodes.
+gone = mesher.remove_elements(patches.at(2), free_nodes=True)
+print(gone.elements, gone.nodes)
+```
+
+Three things are worth knowing:
+
+- **Ids are the handle.** Nodes and elements keep their ids for as long as they exist, and
+  nothing is ever renumbered. `add_nodes` and `add_elements` return the ids they created;
+  `Mesher.from_mesh(mesh_data)` rebuilds a live mesh from a harvest and keeps every one of
+  them, which is the way back from `read_gmf`.
+- **A patch index is not stable; a patch group is.** Each call to
+  `separate_faces_by_edges` re-derives the partition, so indices can shift once faces have
+  been deleted. Passing `name_prefix` stores each patch as a group, and SMESH maintains
+  that membership itself — a deleted element leaves the group, survivors keep their place.
+- **What such a mesher cannot do.** Anything that resolves a sub-shape ordinal:
+  `compute`, `assign`/`unassign`, `add_group_on_shape`, the pattern mapping,
+  `smooth(in_uv_space=True)`, and the `ElementsOnShape` and `Deflection2D` controls. Each
+  refuses by name. Everything else — the editor, search, quality controls, groups by id or
+  by filter — behaves identically. Check with `mesher.has_shape`.
 
 ## Geometry operations
 

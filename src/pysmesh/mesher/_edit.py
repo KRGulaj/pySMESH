@@ -126,6 +126,45 @@ def _report(raw: dict[str, object]) -> EditReport:
     )
 
 
+@dataclass(frozen=True)
+class RemovalReport(EditReport):
+    """What one removal took away, entity by entity.
+
+    The two id arrays are the point of this type. A count says how much went; a caller
+    holding named selections, a viewport highlight or a per-element field has to remap it
+    against the survivors, and only the ids it actually lost let it do that.
+
+    They are read back from the mesh rather than echoed from the request, because the two
+    never quite match: an id listed twice is removed once, and a removal takes entities
+    nobody named — every element built on a removed node, and the nodes the free-node sweep
+    finds carrying nothing.
+
+    Attributes:
+        elements: (K,) int64 — the element ids that are gone, ascending.
+        nodes: (J,) int64 — the node ids that are gone, ascending.
+    """
+
+    elements: NDArray[np.int64]
+    nodes: NDArray[np.int64]
+
+
+def _removal(raw: dict[str, object]) -> RemovalReport:
+    """Build a :class:`RemovalReport` from the native counts and id arrays."""
+    return RemovalReport(
+        nodes_before=cast("int", raw["nodes_before"]),
+        nodes_after=cast("int", raw["nodes_after"]),
+        edges_before=cast("int", raw["edges_before"]),
+        edges_after=cast("int", raw["edges_after"]),
+        faces_before=cast("int", raw["faces_before"]),
+        faces_after=cast("int", raw["faces_after"]),
+        volumes_before=cast("int", raw["volumes_before"]),
+        volumes_after=cast("int", raw["volumes_after"]),
+        groups_merged=cast("int", raw["groups_merged"]),
+        elements=cast("NDArray[np.int64]", raw["elements"]),
+        nodes=cast("NDArray[np.int64]", raw["nodes"]),
+    )
+
+
 def _ids(values: Iterable[int]) -> list[int]:
     """One id list, as the native layer reads it."""
     return [int(value) for value in values]
@@ -767,3 +806,61 @@ class _EditOps(_MesherBase):
                 _ids(side1), _ids(side2), _ids(first_nodes), _ids(second_nodes)
             )
         )
+
+    # ---- Deletion ----------------------------------------------------------------------- #
+
+    def remove_elements(
+        self, elements: Iterable[int], free_nodes: bool = False
+    ) -> RemovalReport:
+        """Delete elements from the mesh.
+
+        This is deletion, not merging: the cells named here are taken away and nothing
+        replaces them. :meth:`merge_nodes` and :meth:`merge_equal_elements` collapse
+        entities onto one another and rewrite what used them; this leaves a hole.
+
+        Groups follow, without being told to. SMESH drops a deleted element from every
+        explicit group it belonged to, and never renumbers a survivor — so a wall, or a patch
+        stored as a group, is still itself afterwards, minus whatever went.
+
+        Nodes are **not** removed with the elements by default. A node is an entity in its own
+        right and the ones on the boundary of a deleted patch usually still carry cells;
+        ``free_nodes`` sweeps the ones left carrying nothing, which is what dropping a whole
+        patch of a surface wants.
+
+        Args:
+            elements: The element ids to delete. Listing one twice deletes it once.
+            free_nodes: Also delete every node the removal leaves with no element on it.
+
+        Returns:
+            The counts either side of the deletion, and the ids that actually went.
+
+        Raises:
+            PysmeshError: If an id names nothing in the mesh — the whole call is refused
+                before anything is deleted — or if the mesher has been released.
+        """
+        return _removal(self._m.remove_elements(_ids(elements), free_nodes))
+
+    def remove_nodes(self, nodes: Iterable[int]) -> RemovalReport:
+        """Delete nodes from the mesh, and every element built on them.
+
+        The cascade is not optional and is not a convenience: an element whose corner has
+        gone is not a cell at all, so SMESH removes it with the node. The elements it took
+        are named in the report, because they are the part a caller did not ask for and has
+        to remap against.
+
+        To delete a node without disturbing the elements around it, merge it onto a
+        neighbour with :meth:`merge_node_groups` instead — that rewrites their connectivity
+        rather than dropping them.
+
+        Args:
+            nodes: The node ids to delete. Listing one twice deletes it once.
+
+        Returns:
+            The counts either side of the deletion, and the ids that actually went — the
+            nodes named, and every element that went with them.
+
+        Raises:
+            PysmeshError: If an id names nothing in the mesh — the whole call is refused
+                before anything is deleted — or if the mesher has been released.
+        """
+        return _removal(self._m.remove_nodes(_ids(nodes)))

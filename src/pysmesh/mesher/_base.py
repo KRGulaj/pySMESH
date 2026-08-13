@@ -27,13 +27,33 @@ class _MesherBase:
 
     _m: _Mesher
 
-    def __init__(self, shape: Shape) -> None:
-        """Build a mesher on a shape.
+    def __init__(self, shape: Shape | None = None) -> None:
+        """Build a mesher on a shape, or an empty one with no geometry behind it.
 
         Args:
             shape: The shape to mesh, from :func:`~pysmesh.load_brep` or another loader.
+                ``None`` builds a mesher with no shape: an empty mesh to be filled from
+                arrays, which is how a discrete body with no B-rep reaches this surface. See
+                :attr:`has_shape` for what such a mesher cannot do.
         """
         self._m = _Mesher(shape)
+
+    @property
+    def has_shape(self) -> bool:
+        """Whether this mesher was built on a shape.
+
+        A mesher without one carries no sub-shape ordinals, so everything that names one
+        refuses it: :meth:`~pysmesh.Mesher.compute`, :meth:`~pysmesh.Mesher.assign` and
+        :meth:`~pysmesh.Mesher.unassign`, :meth:`~pysmesh.Mesher.add_group_on_shape`, the
+        three pattern-mapping calls, ``smooth(in_uv_space=True)``, and the two controls that
+        read the geometry — :class:`~pysmesh.ElementsOnShape` and
+        :class:`~pysmesh.Deflection2D`. Every other operation is written against the mesh
+        alone and works the same either way.
+
+        Returns:
+            False for a mesher built with ``shape=None``.
+        """
+        return bool(self._m.has_shape())
 
     def release(self) -> None:
         """Free the underlying mesh. Idempotent; the mesher is unusable afterwards."""

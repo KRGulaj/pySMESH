@@ -51,10 +51,13 @@ namespace {
 namespace ctl = SMESH::Controls;
 
 const Mesher& with_geometry(const Mesher* owner, const std::string& name) {
-  if (owner == nullptr) {
+  // Two ways to arrive without geometry, and they read the same to this control: a mesh
+  // handed in as arrays has no mesher at all, and a mesher built from arrays has no shape.
+  if (owner == nullptr || !owner->has_shape()) {
     throw PysmeshError("The control '" + name +
                        "' reads the geometry the mesh was built on, so it can only be "
-                       "evaluated on a mesher. A mesh handed in as arrays carries no shape.");
+                       "evaluated on a mesher that has a shape. A mesh handed in as arrays, "
+                       "or a mesher filled from them, carries none.");
   }
   return *owner;
 }

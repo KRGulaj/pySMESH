@@ -23,12 +23,26 @@ at the walls — which a single global algorithm cannot express at all::
     report = mesher.compute()
     mesh = mesher.mesh()
 
+A mesher does not need a shape at all. ``Mesher()`` starts empty and is filled from arrays,
+which is how a discrete body that never had a B-rep — an imported STL, a shrink-wrap result,
+a boundary another mesher produced — reaches any of this::
+
+    mesher = Mesher.from_arrays(points, triangles)
+    patches = mesher.separate_faces_by_edges(
+        mesher.sharp_edges(angle=40.0), name_prefix="patch_"
+    )
+    mesher.remove_elements(patches.at(2), free_nodes=True)
+
+There, the sharp-edge/patch pair does the job the sub-shape ordinals do on a shape-backed
+mesh: it divides the surface into addressable regions. Only the operations that resolve an
+ordinal are unavailable — see :attr:`Mesher.has_shape` for the list.
+
 Once a mesh exists, two things say whether it is any good and what parts of it mean what.
 **Quality controls** measure and classify: ``mesher.quality(AspectRatio3D())`` gives one
 number per cell, and ``mesher.select(BadOrientedVolume())`` gives the ids of the cells that
 are inverted. **Groups** name: a named set of elements that the mesher itself maintains
 across editing, so a wall named on a coarse mesh is still the wall after the mesh has been
-converted to second order or split.
+converted to second order, split, or had part of it deleted.
 
 **Three id spaces meet here and must not be confused.** A mesh entity carries its own mesh
 id; the sub-shape it sits on is named by a *positional ordinal* of the meshed shape; and the
@@ -46,6 +60,7 @@ releases the GIL, and the progress and cancel hooks are called from a helper thr
 ``_types``          the element and sub-shape enums, and what a compute and harvest return
 ``_catalog``         the algorithm and hypothesis dataclasses
 ``_mesh``            assignment, compute and the harvest
+``_fill``            filling a mesh from arrays instead of computing it
 ``_controls``        the quality controls, the predicates and the filter algebra
 ``_group``           named groups of elements and nodes
 ``_edit``            the mesh editor
@@ -57,6 +72,9 @@ releases the GIL, and the progress and cancel hooks are called from a helper thr
 """
 
 from __future__ import annotations
+
+import numpy as np
+from numpy.typing import NDArray
 
 from ._base import _MesherBase
 from ._catalog import (
@@ -168,7 +186,8 @@ from ._block import (
     block_points,
     block_shapes,
 )
-from ._edit import EditReport, SmoothMethod, SplitMethod, _EditOps
+from ._edit import EditReport, RemovalReport, SmoothMethod, SplitMethod, _EditOps
+from ._fill import _FillOps
 from ._medial import BranchEnd, MedialAxis, MedialBranch, medial_axis
 from ._search import (
     ClosestElements,
@@ -204,19 +223,33 @@ from ._types import (
 )
 
 
-class Mesher(_MeshOps, _QualityOps, _GroupOps, _EditOps, _SearchOps, _PatternOps):
-    """A shape, the algorithms and hypotheses assigned across it, and the mesh they produce.
+class Mesher(
+    _MeshOps, _FillOps, _QualityOps, _GroupOps, _EditOps, _SearchOps, _PatternOps
+):
+    """A mesh, and everything that builds, measures, names, edits and searches it.
 
-    A mesher is built on one :class:`~pysmesh.Shape` and holds a single mesh. Assignments
-    accumulate; :meth:`compute` runs them all and :meth:`mesh` reads the result back as
-    arrays.
+    There are two ways to get one, and the difference between them runs through the whole
+    class.
 
-    Assignment is scoped. An assignment with no ``on`` governs the whole shape and is the
-    default everywhere; one naming a sub-shape overrides it there. That is the whole of the
-    model, and it is what makes a mixed mesh expressible.
+    **From geometry.** ``Mesher(shape)`` holds one :class:`~pysmesh.Shape` and a single mesh
+    over it. Assignments accumulate; :meth:`compute` runs them all and :meth:`mesh` reads the
+    result back as arrays. Assignment is scoped: one with no ``on`` governs the whole shape
+    and is the default everywhere, one naming a sub-shape overrides it there. That is the
+    whole of the model, and it is what makes a mixed mesh expressible.
 
-    Once computed, :meth:`quality` and :meth:`select` measure and classify the result, and
-    the group methods name parts of it in a way that survives editing.
+    **From arrays.** ``Mesher()`` holds a mesh and no geometry at all — the path for a
+    discrete body that never had a B-rep: an imported STL, a shrink-wrap result, the boundary
+    another mesher produced, a mesh read back from a file. Fill it with :meth:`add_nodes` and
+    :meth:`add_triangles`, or build one in a single call with :meth:`from_arrays` or
+    :meth:`from_mesh`. Such a mesher has no sub-shape ordinals, so :attr:`has_shape` is False
+    and the handful of operations that name one refuse it; everything else — the editor, the
+    search surface, the controls, groups by id or by filter — works identically. There,
+    :meth:`sharp_edges` with :meth:`separate_faces_by_edges` is what divides the surface up,
+    in place of the faces a shape would have given.
+
+    Once a mesh exists, :meth:`quality` and :meth:`select` measure and classify it, the group
+    methods name parts of it in a way that survives editing, and
+    :meth:`remove_elements` / :meth:`remove_nodes` cut pieces out of it.
 
     Thread contract: **not thread-safe**. One mesher per thread. :meth:`compute` releases the
     GIL and calls its hooks from a helper thread.
@@ -229,9 +262,85 @@ class Mesher(_MeshOps, _QualityOps, _GroupOps, _EditOps, _SearchOps, _PatternOps
         >>> m.assign(Hexa3D())                              # doctest: +SKIP
         >>> report = m.compute()                            # doctest: +SKIP
         >>> worst = m.quality(AspectRatio3D()).values.max()  # doctest: +SKIP
+
+    Example:
+        >>> m = Mesher.from_arrays(points, triangles)        # doctest: +SKIP
+        >>> patches = m.separate_faces_by_edges(             # doctest: +SKIP
+        ...     m.sharp_edges(angle=40.0), name_prefix="patch_"
+        ... )
+        >>> gone = m.remove_elements(patches.at(3), free_nodes=True)  # doctest: +SKIP
     """
 
     __slots__ = ()
+
+    @classmethod
+    def from_arrays(
+        cls,
+        node_coords: NDArray[np.float64],
+        elements: NDArray[np.int64],
+        element_type: ElementType = ElementType.TRIANGLE,
+    ) -> Mesher:
+        """Build a mesher with no geometry from a node table and a connectivity table.
+
+        This is the one-call form of ``Mesher()`` followed by :meth:`add_nodes` and
+        :meth:`add_elements`, and it is how a triangle soup — an STL, an OBJ, a PLY, a
+        shrink-wrap result — becomes something this library can work on.
+
+        ``elements`` holds **row indices** into ``node_coords``, not node ids, because at
+        this point no ids exist yet. That is also how a harvest expresses connectivity, so
+        arrays taken from :attr:`MeshData.element_nodes` fit straight in. Use
+        :meth:`add_elements` on an existing mesher when what you have is node ids.
+
+        Args:
+            node_coords: (N, 3) float64 — the node positions.
+            elements: (M, k) integer — one row per element, holding 0-based row indices into
+                ``node_coords``.
+            element_type: The cell type each row builds. Its node count fixes ``k``.
+
+        Returns:
+            A mesher holding exactly those nodes and elements, bound to nothing.
+
+        Raises:
+            PysmeshError: If ``node_coords`` is not (N, 3), if the column count does not
+                match the element type, or if the type is a polygon or a polyhedron, whose
+                node count does not determine its shape.
+            IndexError: If a row index is not a row of ``node_coords``.
+        """
+        mesher = cls()
+        ids = mesher.add_nodes(node_coords)
+        rows = np.ascontiguousarray(elements, dtype=np.int64)
+        if rows.size and (rows.min() < 0 or rows.max() >= ids.shape[0]):
+            raise IndexError(
+                f"elements holds a row index outside node_coords, which has "
+                f"{ids.shape[0]} rows."
+            )
+        mesher.add_elements(element_type, ids[rows])
+        return mesher
+
+    @classmethod
+    def from_mesh(cls, mesh: MeshData) -> Mesher:
+        """Build a mesher with no geometry from a harvest, keeping every id.
+
+        This is the way back from arrays to a live mesh: :func:`~pysmesh.read_gmf` reads a
+        file into arrays and drops the binding, and a mesh handed over between processes is
+        arrays too. Ids are kept rather than reassigned, so anything keyed on them still
+        means the same entities.
+
+        Args:
+            mesh: The arrays to rebuild from, as :meth:`mesh` returns them.
+
+        Returns:
+            A mesher holding the same nodes and elements under the same ids, bound to
+            nothing — the CAD binding in the arrays describes a shape this mesher lacks.
+
+        Raises:
+            PysmeshError: If an id is duplicated or not positive, if a row's connectivity
+                does not name a row of ``node_coords``, or if the mesh holds a polygon or a
+                polyhedron, which cannot be rebuilt from these arrays alone.
+        """
+        mesher = cls()
+        mesher.fill_from_mesh(mesh)
+        return mesher
 
     def __enter__(self) -> Mesher:
         """Enter a context that releases the mesh on exit.
@@ -357,6 +466,7 @@ __all__ = [
     "RangeOfIds",
     "RayHits",
     "Regular1D",
+    "RemovalReport",
     "SegmentLengthAroundVertex",
     "Selection",
     "SharpEdges",

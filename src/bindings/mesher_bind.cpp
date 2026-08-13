@@ -22,6 +22,10 @@ void bind_mesher(py::module_& m) {
       .def("assign", &Mesher::assign, py::arg("name"), py::arg("params"), py::arg("kind"),
            py::arg("ordinal"))
       .def("unassign", &Mesher::unassign, py::arg("name"), py::arg("kind"), py::arg("ordinal"))
+      .def("has_shape", &Mesher::has_shape)
+      .def("add_nodes", &Mesher::add_nodes, py::arg("coords"))
+      .def("add_elements", &Mesher::add_elements, py::arg("type"), py::arg("connectivity"))
+      .def("fill_from_mesh", &Mesher::fill_from_mesh, py::arg("mesh"))
       .def("assignments", &Mesher::assignments)
       .def("compute", &Mesher::compute, py::arg("progress"), py::arg("cancel"))
       .def("mesh_arrays", &Mesher::mesh_arrays)
@@ -74,6 +78,9 @@ void bind_mesher(py::module_& m) {
            py::arg("create_polyhedra"))
       .def("sew_side_elements", &Mesher::sew_side_elements, py::arg("side1"), py::arg("side2"),
            py::arg("first_nodes"), py::arg("second_nodes"))
+      .def("remove_elements", &Mesher::remove_elements, py::arg("elements"),
+           py::arg("free_nodes"))
+      .def("remove_nodes", &Mesher::remove_nodes, py::arg("nodes"))
       .def("find_elements_by_point", &Mesher::find_elements_by_point, py::arg("points"),
            py::arg("family"))
       .def("find_closest", &Mesher::find_closest, py::arg("points"), py::arg("family"))
@@ -90,7 +97,7 @@ void bind_mesher(py::module_& m) {
            py::arg("tolerance"))
       .def("sharp_edges", &Mesher::sharp_edges, py::arg("angle"), py::arg("add_existing"))
       .def("separate_faces_by_edges", &Mesher::separate_faces_by_edges, py::arg("node1"),
-           py::arg("node2"), py::arg("medium"))
+           py::arg("node2"), py::arg("medium"), py::arg("name_prefix"))
       .def("de_merge", &Mesher::de_merge, py::arg("element"), py::arg("groups"))
       .def("make_slot", &Mesher::make_slot, py::arg("width"), py::arg("segments"))
       .def("pattern_from_face", &Mesher::pattern_from_face, py::arg("face"),

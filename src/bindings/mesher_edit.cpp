@@ -388,6 +388,12 @@ py::dict Mesher::smooth(int method, int iterations, double target_aspect_ratio,
     throw PysmeshError("Mesher.smooth: the target aspect ratio must be >= 1 (got " +
                        std::to_string(target_aspect_ratio) + ").");
   }
+  if (in_uv_space) {
+    // Smoothing in parameter space moves each node on the CAD surface its face lies on, so
+    // there has to be one. Refused here rather than silently falling back to model space,
+    // which would move the nodes somewhere else and report success.
+    ensure_shape("Mesher.smooth(in_uv_space=True)");
+  }
 
   TIDSortedElemSet chosen = element_set(*meshDS_, elements, "Mesher.smooth");
   std::set<const SMDS_MeshNode*> fixed;
@@ -721,6 +727,124 @@ py::dict Mesher::sew_side_elements(const std::vector<std::int64_t>& side1,
     throw PysmeshError(std::string(owner) + ": " + sew_error_text(code) + ".");
   }
   return report(before, counts_of(*meshDS_), 0);
+}
+
+// ---- Deletion ---------------------------------------------------------------------------- //
+// What went is read back from the mesh rather than assumed from what was asked for. Three
+// things make that necessary: an id given twice is removed once, a node takes every element
+// built on it with it, and the free-node sweep removes entities nobody named at all. A caller
+// remapping named selections against the survivors needs the set that actually went, and a
+// count cannot carry it.
+//
+// Group membership needs no work here. SMESHDS drops a removed entity from every explicit
+// group it belonged to, on both removal paths (SMESHDS_Mesh::RemoveFreeElement and
+// ::RemoveNode), and never renumbers a survivor. So a patch stored as a group is still that
+// patch afterwards, minus whatever went.
+
+py::dict Mesher::remove_elements(const std::vector<std::int64_t>& elements, bool free_nodes) {
+  ensure_open();
+  const char* owner = "Mesher.remove_elements";
+
+  // Resolve every id before removing anything, so a bad one refuses the whole call instead
+  // of leaving the mesh half-edited.
+  std::set<std::int64_t> targets;
+  std::set<const SMDS_MeshNode*> touched;
+  for (const std::int64_t id : elements) {
+    const SMDS_MeshElement* element = element_of(*meshDS_, id, owner);
+    targets.insert(static_cast<std::int64_t>(element->GetID()));
+    if (!free_nodes) {
+      continue;
+    }
+    for (SMDS_NodeIteratorPtr it = element->nodeIterator(); it->more();) {
+      touched.insert(it->next());
+    }
+  }
+
+  const Counts before = counts_of(*meshDS_);
+  std::list<smIdType> to_remove;
+  for (const std::int64_t id : targets) {
+    to_remove.push_back(static_cast<smIdType>(id));
+  }
+  SMESH_MeshEditor editor(mesh_);
+  editor.Remove(to_remove, /*isNodes=*/false);
+
+  std::vector<std::int64_t> gone_elements;
+  for (const std::int64_t id : targets) {
+    if (meshDS_->FindElement(static_cast<smIdType>(id)) == nullptr) {
+      gone_elements.push_back(id);
+    }
+  }
+
+  // The nodes the removed elements were built on are not removed with them: a node is an
+  // entity of its own and may still carry other cells. `free_nodes` sweeps the ones that are
+  // left carrying nothing, which is what a caller dropping a patch of a surface wants.
+  std::vector<std::int64_t> gone_nodes;
+  if (free_nodes) {
+    std::list<smIdType> orphans;
+    for (const SMDS_MeshNode* node : touched) {
+      if (node->NbInverseElements() == 0) {
+        orphans.push_back(node->GetID());
+      }
+    }
+    if (!orphans.empty()) {
+      editor.Remove(orphans, /*isNodes=*/true);
+      for (const smIdType id : orphans) {
+        if (meshDS_->FindNode(id) == nullptr) {
+          gone_nodes.push_back(static_cast<std::int64_t>(id));
+        }
+      }
+    }
+  }
+
+  publish(*meshDS_);
+  py::dict out = report(before, counts_of(*meshDS_), 0);
+  out["elements"] = vector_to_array(gone_elements);
+  out["nodes"] = vector_to_array(gone_nodes);
+  return out;
+}
+
+py::dict Mesher::remove_nodes(const std::vector<std::int64_t>& nodes) {
+  ensure_open();
+  const char* owner = "Mesher.remove_nodes";
+
+  std::set<std::int64_t> targets;
+  std::set<std::int64_t> cascade;
+  for (const std::int64_t id : nodes) {
+    const SMDS_MeshNode* node = node_of(*meshDS_, id, owner);
+    targets.insert(static_cast<std::int64_t>(node->GetID()));
+    // Every element built on the node goes with it. They are recorded before the removal
+    // because afterwards there is nothing left to ask.
+    for (SMDS_ElemIteratorPtr it = node->GetInverseElementIterator(); it->more();) {
+      cascade.insert(static_cast<std::int64_t>(it->next()->GetID()));
+    }
+  }
+
+  const Counts before = counts_of(*meshDS_);
+  std::list<smIdType> to_remove;
+  for (const std::int64_t id : targets) {
+    to_remove.push_back(static_cast<smIdType>(id));
+  }
+  SMESH_MeshEditor editor(mesh_);
+  editor.Remove(to_remove, /*isNodes=*/true);
+
+  std::vector<std::int64_t> gone_nodes;
+  for (const std::int64_t id : targets) {
+    if (meshDS_->FindNode(static_cast<smIdType>(id)) == nullptr) {
+      gone_nodes.push_back(id);
+    }
+  }
+  std::vector<std::int64_t> gone_elements;
+  for (const std::int64_t id : cascade) {
+    if (meshDS_->FindElement(static_cast<smIdType>(id)) == nullptr) {
+      gone_elements.push_back(id);
+    }
+  }
+
+  publish(*meshDS_);
+  py::dict out = report(before, counts_of(*meshDS_), 0);
+  out["elements"] = vector_to_array(gone_elements);
+  out["nodes"] = vector_to_array(gone_nodes);
+  return out;
 }
 
 }  // namespace mesher

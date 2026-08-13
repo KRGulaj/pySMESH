@@ -304,12 +304,20 @@ void ComputeDriver::poll() {
 
 // ---- Mesher ---------------------------------------------------------------------------//
 
-Mesher::Mesher(const py::object& shape_obj) : data_(shape_data_of(shape_obj)) {
+Mesher::Mesher(const py::object& shape_obj) {
   gen_ = std::make_unique<SMESH_Gen>();
   mesh_ = gen_->CreateMesh(false);  // owned by gen_; freed in release() before it
-  mesh_->ShapeToMesh(data_->shape);
+  // None builds a mesh with no geometry behind it. ShapeToMesh() is what sets SMESH's own
+  // _isShapeToMesh flag, so *not* calling it is the whole of the difference — the mesh is
+  // otherwise the same object, and everything written against SMESHDS works on it unchanged.
+  if (!shape_obj.is_none()) {
+    data_ = shape_data_of(shape_obj);
+    mesh_->ShapeToMesh(data_->shape);
+  }
   meshDS_ = mesh_->GetMeshDS();
-  build_index_map();
+  if (data_ != nullptr) {
+    build_index_map();
+  }
 }
 
 Mesher::~Mesher() { release(); }
@@ -336,6 +344,18 @@ void Mesher::ensure_open() const {
   }
 }
 
+void Mesher::ensure_shape(const char* op) const {
+  if (data_ != nullptr) {
+    return;
+  }
+  throw PysmeshError(std::string(op) + ": this mesher has no shape.",
+                     "It was built from arrays rather than from geometry, so it has no "
+                     "sub-shape ordinals to name and nothing for an algorithm to run on. "
+                     "Everything that works on the mesh alone — the editor, the search "
+                     "surface, the groups by id or by filter — works here; only the "
+                     "operations that resolve a sub-shape do not.");
+}
+
 SMESH_Mesh& Mesher::smesh() const {
   ensure_open();
   return *mesh_;
@@ -353,11 +373,13 @@ SMESHDS_Mesh& Mesher::meshDS() const {
 
 const ShapeData& Mesher::shape_data() const {
   ensure_open();
+  ensure_shape("Mesher.shape_data");
   return *data_;
 }
 
 const TopoDS_Shape& Mesher::sub_shape(const std::string& kind, int ordinal) const {
   ensure_open();
+  ensure_shape("Mesher.sub_shape");
   if (kind.empty()) {
     return data_->shape;
   }
@@ -419,6 +441,7 @@ std::pair<const char*, int> Mesher::ordinal_of_shape_index(int shape_index) cons
 void Mesher::assign(const std::string& name, const py::dict& params, const std::string& kind,
                     int ordinal) {
   ensure_open();
+  ensure_shape("Mesher.assign");
   const TopoDS_Shape& target = sub_shape(kind, ordinal);  // validates kind and ordinal
 
   SMESH_Hypothesis* hyp = build(name, params);  // ownership taken inside build()
@@ -439,6 +462,7 @@ void Mesher::assign(const std::string& name, const py::dict& params, const std::
 
 void Mesher::unassign(const std::string& name, const std::string& kind, int ordinal) {
   ensure_open();
+  ensure_shape("Mesher.unassign");
   const TopoDS_Shape& target = sub_shape(kind, ordinal);
   for (auto it = assigned_.begin(); it != assigned_.end(); ++it) {
     if (it->name != name || it->kind != kind || it->ordinal != ordinal) {
@@ -468,6 +492,7 @@ py::list Mesher::assignments() const {
 
 py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
   ensure_open();
+  ensure_shape("Mesher.compute");
   if (assigned_.empty()) {
     throw PysmeshError("Mesher.compute: nothing is assigned. Assign at least an algorithm "
                        "before computing.");

@@ -148,6 +148,7 @@ void Mesher::add_group(const std::string& name, int family,
 void Mesher::add_group_on_shape(const std::string& name, int family, const std::string& kind,
                                 int ordinal) {
   ensure_open();
+  ensure_shape("Mesher.add_group_on_shape");
   const TopoDS_Shape& target = sub_shape(kind, ordinal);  // validates kind and ordinal
   create_group(*this, name, family, target, SMESH::Controls::PredicatePtr());
 }

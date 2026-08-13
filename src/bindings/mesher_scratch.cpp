@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Kajetan R. Gulaj
 // Created: 2026-08-09
 
-// pySMESH binding — a shape-free mesh, and the rebuild of one from plain arrays.
+// pySMESH binding — a shape-free mesh, the rebuild of one from plain arrays, and the fill.
 //
 // Two consumers need the same thing: the Inria writer has to hand SMESH a real SMDS mesh
 // before its driver can serialise one, and the quality controls have to run on a mesh a
@@ -12,6 +12,13 @@
 // The rebuild keeps every id. That matters more than it looks: a control reports its values
 // keyed by element id, and a group's membership is a set of ids, so a rebuild that renumbered
 // would quietly break the correspondence between what a caller passed in and what comes back.
+//
+// The third thing here is the *fill*: `Mesher::add_nodes` and `Mesher::add_elements`, which
+// are how a discrete body with no B-rep behind it — an imported STL, a shrink-wrap result, a
+// boundary another mesher produced — becomes a live SMESH mesh that the whole editing and
+// search surface applies to. It sits beside the rebuild because it is the same act at a
+// different granularity, and because both have to know which entity types a rectangular
+// table can express at all.
 //
 // See mesher/mesher.hpp for the file split.
 
@@ -23,6 +30,8 @@
 #include <vector>
 
 #include <SMDSAbs_ElementType.hxx>
+#include <SMDS_MeshCell.hxx>
+#include <SMDS_MeshNode.hxx>
 #include <SMESHDS_Mesh.hxx>
 #include <SMESH_Gen.hxx>
 #include <SMESH_Mesh.hxx>
@@ -204,6 +213,105 @@ void rebuild_mesh(SMESHDS_Mesh& ds, const py::dict& mesh) {
   // since I last looked", which on a fresh mesh means they never look at all. Measured: the
   // coincident-node test found nothing on a mesh with two nodes at the same point.
   ds.Modified();
+}
+
+// ---- The fill -------------------------------------------------------------------------- //
+
+py::array_t<std::int64_t> Mesher::add_nodes(const py::object& coords) {
+  ensure_open();
+  const auto table = point_table(coords, "coords", 3);
+  const py::ssize_t n = table.shape(0);
+
+  py::array_t<std::int64_t> ids(n);
+  const double* xyz = table.data();
+  std::int64_t* out = ids.mutable_data();
+  for (py::ssize_t i = 0; i < n; ++i) {
+    const SMDS_MeshNode* node = meshDS_->AddNode(xyz[3 * i], xyz[3 * i + 1], xyz[3 * i + 2]);
+    if (node == nullptr) {
+      throw PysmeshError("Mesher.add_nodes: SMESH refused the node at row " +
+                         std::to_string(i) + ".");
+    }
+    out[i] = static_cast<std::int64_t>(node->GetID());
+  }
+  if (n > 0) {
+    meshDS_->Modified();
+  }
+  return ids;
+}
+
+py::array_t<std::int64_t> Mesher::add_elements(int type, const py::object& connectivity) {
+  ensure_open();
+  if (type < 0 || type >= static_cast<int>(SMDSEntity_Last)) {
+    throw PysmeshError("Mesher.add_elements: " + std::to_string(type) +
+                       " is not an element type.");
+  }
+  const SMDSAbs_EntityType entity = static_cast<SMDSAbs_EntityType>(type);
+  if (entity == SMDSEntity_Node) {
+    throw PysmeshError("Mesher.add_elements: NODE is not an element type. Use add_nodes.");
+  }
+  if (is_free_form(type)) {
+    throw PysmeshError(
+        "Mesher.add_elements: a polygon or a polyhedron cannot be given as a table, because "
+        "its node count does not determine its shape — the same count means a different "
+        "cell. Only the fixed-arity types can be added this way.");
+  }
+
+  const auto conn =
+      connectivity.cast<py::array_t<std::int64_t, py::array::c_style | py::array::forcecast>>();
+  if (conn.ndim() != 2) {
+    throw PysmeshError("Mesher.add_elements: connectivity must have shape (M, k).");
+  }
+  // The arity is asked of SMDS rather than tabulated here. A triangle handed four columns
+  // would otherwise dispatch on the count alone and build a *quadrangle* under the name the
+  // caller asked for, which is the one failure mode of this call that is silent.
+  const py::ssize_t arity = static_cast<py::ssize_t>(SMDS_MeshCell::NbNodes(entity));
+  if (conn.shape(1) != arity) {
+    throw PysmeshError("Mesher.add_elements: element type " + std::to_string(type) +
+                       " has " + std::to_string(arity) + " nodes, but connectivity has " +
+                       std::to_string(conn.shape(1)) + " columns.");
+  }
+
+  const py::ssize_t m = conn.shape(0);
+  py::array_t<std::int64_t> ids(m);
+  std::int64_t* out = ids.mutable_data();
+  const std::int64_t* rows = conn.data();
+
+  // A fresh id per element, taken above everything the mesh already holds. SMDS numbers every
+  // element of every dimension in one sequence, so one running counter is the whole of it.
+  smIdType next = meshDS_->MaxElementID() + 1;
+  std::vector<smIdType> nodes(static_cast<std::size_t>(arity));
+  for (py::ssize_t i = 0; i < m; ++i) {
+    for (py::ssize_t j = 0; j < arity; ++j) {
+      const std::int64_t node_id = rows[i * arity + j];
+      if (meshDS_->FindNode(static_cast<smIdType>(node_id)) == nullptr) {
+        throw PysmeshError("Mesher.add_elements: row " + std::to_string(i) + " names node " +
+                           std::to_string(node_id) + ", which the mesh does not have.");
+      }
+      nodes[static_cast<std::size_t>(j)] = static_cast<smIdType>(node_id);
+    }
+    if (!add_element(*meshDS_, type, nodes, next)) {
+      throw PysmeshError("Mesher.add_elements: SMESH refused row " + std::to_string(i) +
+                         " as element type " + std::to_string(type) + ".");
+    }
+    out[i] = static_cast<std::int64_t>(next);
+    ++next;
+  }
+  if (m > 0) {
+    meshDS_->Modified();
+  }
+  return ids;
+}
+
+void Mesher::fill_from_mesh(const py::dict& mesh) {
+  ensure_open();
+  // The arrays carry absolute ids, so filling on top of anything would collide on the first
+  // id already in use and leave the mesh half-built. Refused up front instead.
+  if (meshDS_->NbNodes() != 0 || meshDS_->NbElements() != 0) {
+    throw PysmeshError("Mesher.fill_from_mesh: the mesh is not empty.",
+                       "The arrays name absolute node and element ids and this call keeps "
+                       "them, so it can only fill a mesh that holds nothing yet.");
+  }
+  rebuild_mesh(*meshDS_, mesh);
 }
 
 }  // namespace mesher
