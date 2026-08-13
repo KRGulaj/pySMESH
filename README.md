@@ -96,7 +96,7 @@ mesh.classify_on_face(node_ids[face_nodes], face_id, uv)   # CAD classification
 mesh.classify_on_edge(node_ids[edge_nodes], edge_id, t)
 mesh.classify_on_vertex(int(node_ids[k]), vertex_id)
 mesh.add_segments(node_ids[edge_conn], edge_id)        # 1-D elements (required by VL)
-mesh.add_triangles(node_ids[tri_conn], face_id)        # 2-D elements
+tri_ids = mesh.add_triangles(node_ids[tri_conn], face_id)  # 2-D elements -> SMESH ids
 mesh.validate()
 
 result = pysmesh.compute_viscous_layers(
@@ -111,6 +111,29 @@ result.node_coords          # (P,3) float64
 result.inner_surface_tris   # (S,3) int32 — the shrunk inner surface
 result.failed_face_ids      # walls that received no layers
 ```
+
+### Removing elements and nodes
+
+An injected mesh can have parts taken out of it again. `add_nodes`, `add_segments` and
+`add_triangles` all return the SMESH ids they created, and those ids are the handle:
+
+```python
+gone = mesh.remove_elements(tri_ids[bad], free_nodes=True)
+gone.elements    # int64 (K,) — the element ids that are gone
+gone.nodes       # int64 (J,) — the node ids that are gone
+```
+
+Both `remove_elements` and `remove_nodes` report the ids that **actually** went, read back
+from the mesh rather than echoed from the request. That matters because a removal takes
+entities nobody named: `remove_nodes` takes every element built on a deleted node, and
+`free_nodes` takes the nodes a deletion leaves carrying nothing. A caller remapping named
+selections against the survivors needs that set, and a count cannot carry it. An unknown id
+refuses the whole call before anything is deleted.
+
+> Working on a mesh with **no CAD behind it** — an imported STL, a shrink-wrap result — is
+> the 3.x line's `Mesher`, which is constructible without a shape and carries the full
+> editing, search and grouping surface. `Mesh` here stays what it is: the injection path
+> for a mesh classified onto a B-rep.
 
 ### Same-domain healing
 

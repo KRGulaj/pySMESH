@@ -128,3 +128,159 @@ def test_context_manager_releases_on_exit(box_brep: bytes) -> None:
 
     with pytest.raises(PysmeshError, match="released"):
         mesh.stats()
+
+
+# ---- Removal ------------------------------------------------------------------------ #
+# Every removal test asserts against the ids that went, not only against a count: a caller
+# remapping its named selections against the survivors needs exactly that set, and a count
+# cannot carry it. The cascade cases are the ones nobody asks for and everyone has to
+# handle — the elements a deleted node carried, and the nodes left carrying nothing.
+
+
+def test_add_triangles_returns_one_element_id_per_row(box_brep: bytes) -> None:
+    shape = load_brep(box_brep)
+    mesh = Mesh(shape)
+    node_ids = _inject_face(mesh, 1)
+    more = mesh.add_nodes(
+        np.array([[9.0, 0.0, 0.0], [9.0, 1.0, 0.0], [9.0, 0.0, 1.0]], dtype=np.float64)
+    )
+    mesh.classify_on_face(more, 1, np.zeros((NODES_PER_FACE, 2), np.float64))
+
+    ids = mesh.add_triangles(
+        np.vstack([node_ids, more]).reshape(2, 3).astype(np.int64), 1
+    )
+
+    assert ids.dtype == np.int64
+    assert ids.shape == (2,)
+    assert len(np.unique(ids)) == 2
+
+
+def test_remove_elements_names_exactly_the_elements_that_went(box_brep: bytes) -> None:
+    shape = load_brep(box_brep)
+    mesh = Mesh(shape)
+    node_ids = _inject_face(mesh, 1)
+    extra = mesh.add_triangles(node_ids.reshape(1, 3).astype(np.int64), 1)
+
+    gone = mesh.remove_elements(extra)
+
+    assert gone.elements.tolist() == extra.tolist()
+    assert gone.nodes.tolist() == []
+    assert gone.n_elements_before - gone.n_elements_after == 1
+    assert gone.n_nodes_before == gone.n_nodes_after
+
+
+def test_remove_elements_listing_one_id_twice_removes_it_once(box_brep: bytes) -> None:
+    shape = load_brep(box_brep)
+    mesh = Mesh(shape)
+    node_ids = _inject_face(mesh, 1)
+    extra = mesh.add_triangles(node_ids.reshape(1, 3).astype(np.int64), 1)
+    target = int(extra[0])
+
+    gone = mesh.remove_elements(np.array([target, target], dtype=np.int64))
+
+    assert gone.elements.tolist() == [target]
+    assert gone.n_elements_before - gone.n_elements_after == 1
+
+
+def test_remove_elements_with_free_nodes_takes_the_orphans(box_brep: bytes) -> None:
+    shape = load_brep(box_brep)
+    mesh = Mesh(shape)
+    node_ids = mesh.add_nodes(
+        np.array(
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float64
+        )
+    )
+    mesh.classify_on_face(node_ids, 1, np.zeros((NODES_PER_FACE, 2), np.float64))
+    element = mesh.add_triangles(node_ids.reshape(1, 3).astype(np.int64), 1)
+    before = mesh.stats()
+
+    gone = mesh.remove_elements(element, free_nodes=True)
+
+    # Those three nodes carried that one triangle and nothing else, so all three are freed.
+    assert sorted(gone.nodes.tolist()) == sorted(int(i) for i in node_ids)
+    assert mesh.stats().n_nodes == before.n_nodes - NODES_PER_FACE
+
+
+def test_remove_elements_with_free_nodes_keeps_a_node_another_element_uses(
+    box_brep: bytes,
+) -> None:
+    shape = load_brep(box_brep)
+    mesh = Mesh(shape)
+    node_ids = mesh.add_nodes(
+        np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+                [1.0, 1.0, 0.0],
+            ],
+            dtype=np.float64,
+        )
+    )
+    mesh.classify_on_face(node_ids, 1, np.zeros((4, 2), np.float64))
+    conn = np.array(
+        [
+            [node_ids[0], node_ids[1], node_ids[2]],
+            [node_ids[1], node_ids[3], node_ids[2]],
+        ],
+        dtype=np.int64,
+    )
+    elements = mesh.add_triangles(conn, 1)
+
+    gone = mesh.remove_elements(elements[:1], free_nodes=True)
+
+    # Node 0 belonged to the deleted triangle alone; the other three are held by the survivor.
+    assert gone.nodes.tolist() == [int(node_ids[0])]
+    assert mesh.stats().n_nodes == 3
+
+
+def test_remove_elements_unknown_id_raises_and_deletes_nothing(box_brep: bytes) -> None:
+    shape = load_brep(box_brep)
+    mesh = Mesh(shape)
+    _inject_face(mesh, 1)
+    before = mesh.stats()
+
+    with pytest.raises(PysmeshError, match="Unknown element id"):
+        mesh.remove_elements(np.array([1, 999999], dtype=np.int64))
+
+    assert mesh.stats().n_faces == before.n_faces
+    assert mesh.stats().n_nodes == before.n_nodes
+
+
+def test_remove_nodes_takes_every_element_built_on_them(box_brep: bytes) -> None:
+    shape = load_brep(box_brep)
+    mesh = Mesh(shape)
+    node_ids = _inject_face(mesh, 1)
+    element = mesh.add_triangles(node_ids.reshape(1, 3).astype(np.int64), 1)
+
+    gone = mesh.remove_nodes(node_ids[:1])
+
+    assert gone.nodes.tolist() == [int(node_ids[0])]
+    # Both triangles were built on that node, so both went with it.
+    assert int(element[0]) in gone.elements.tolist()
+    assert len(gone.elements) == 2
+    assert gone.n_elements_after == 0
+
+
+def test_remove_nodes_unknown_id_raises_and_deletes_nothing(box_brep: bytes) -> None:
+    shape = load_brep(box_brep)
+    mesh = Mesh(shape)
+    node_ids = _inject_face(mesh, 1)
+    before = mesh.stats()
+
+    with pytest.raises(PysmeshError, match="Unknown node id"):
+        mesh.remove_nodes(np.array([int(node_ids[0]), 999999], dtype=np.int64))
+
+    assert mesh.stats().n_nodes == before.n_nodes
+    assert mesh.stats().n_faces == before.n_faces
+
+
+def test_removing_every_element_of_a_face_makes_validate_name_it(box_brep: bytes) -> None:
+    _shape, mesh, _face_ids = _build_valid_box_mesh(box_brep)
+    mesh.validate()  # the invariant this test falsifies
+
+    gone = mesh.remove_elements(np.array([1], dtype=np.int64))
+
+    assert gone.elements.tolist() == [1]
+    with pytest.raises(PysmeshError, match=r"face_ids with no elements"):
+        mesh.validate()

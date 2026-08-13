@@ -3,13 +3,20 @@
 // Created: 2026-07-03
 
 // pySMESH binding — surface-mesh injection: Mesh, node/element insertion, CAD
-// classification, validate/stats. See common.hpp for ShapeData and PysmeshError.
+// classification, removal, validate/stats. See common.hpp for ShapeData and PysmeshError.
 //
 // The class always resolves a Python-facing face_id/edge_id/vertex_id to the exact
 // TopoDS_* object (via the shared ShapeData) and calls the SMESHDS shape-reference
 // overloads — never the int-Index overloads (SMESHDS_Mesh_notes.md §CRITICAL).
+//
+// Removal goes through SMESH_MeshEditor::Remove rather than SMESHDS directly, because the
+// editor is what notifies the VERTEX sub-meshes that an entity they own has gone. What went
+// is then read back from the mesh, never echoed from the request: an id listed twice is
+// removed once, and removing a node takes every element built on it with it.
 
+#include <list>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -24,6 +31,7 @@
 #include <SMESH_Gen.hxx>
 #include <SMESH_Hypothesis.hxx>
 #include <SMESH_Mesh.hxx>
+#include <SMESH_MeshEditor.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Vertex.hxx>
@@ -42,6 +50,26 @@ struct MeshStats {
   std::int64_t n_faces;
   std::vector<std::pair<int, std::int64_t>> per_face_element_counts;  // (face_id, count)
 };
+
+// What one removal took away. The two id lists are the point of it: a count says how much
+// went, and a caller remapping named selections, a viewport highlight or a per-element field
+// against the survivors needs to know exactly which entities it lost.
+struct MeshRemoval {
+  std::vector<std::int64_t> elements;
+  std::vector<std::int64_t> nodes;
+  std::int64_t n_nodes_before;
+  std::int64_t n_nodes_after;
+  std::int64_t n_elements_before;
+  std::int64_t n_elements_after;
+};
+
+Array1i to_array(const std::vector<std::int64_t>& values) {
+  Array1i out(static_cast<py::ssize_t>(values.size()));
+  if (!values.empty()) {
+    std::copy(values.begin(), values.end(), out.mutable_data());
+  }
+  return out;
+}
 
 // ---- Mesh --------------------------------------------------------------------------//
 class Mesh {
@@ -110,7 +138,8 @@ class Mesh {
   // errors "Not meshed EDGE" on an edge submesh with zero elements); classification of the
   // edge nodes alone is not sufficient. A real 2-D surface mesh (e.g. from Gmsh) always
   // carries these edge segments, so injection must too.
-  void add_segments(const py::object& conn_obj, int edge_id) {
+  // Returns the new elements' SMESH ids, which are what remove_elements addresses them by.
+  Array1i add_segments(const py::object& conn_obj, int edge_id) {
     ensure_open();
     const TopoDS_Edge& edge = data_->edge(edge_id);
     Array2i conn = conn_obj.cast<Array2i>();
@@ -119,6 +148,8 @@ class Mesh {
     }
     const py::ssize_t m = conn.shape(0);
     const std::int64_t* c = conn.data();
+    Array1i ids(m);
+    std::int64_t* out = ids.mutable_data();
     for (py::ssize_t i = 0; i < m; ++i) {
       const SMDS_MeshNode* n0 = find_node(c[2 * i]);
       const SMDS_MeshNode* n1 = find_node(c[2 * i + 1]);
@@ -128,11 +159,13 @@ class Mesh {
                             std::to_string(edge_id));
       }
       meshDS_->SetMeshElementOnShape(elem, edge);
+      out[i] = static_cast<std::int64_t>(elem->GetID());
     }
+    return ids;
   }
 
-  // Add M triangles (node-id triples) bound to the face's submesh.
-  void add_triangles(const py::object& conn_obj, int face_id) {
+  // Add M triangles (node-id triples) bound to the face's submesh. Returns their ids.
+  Array1i add_triangles(const py::object& conn_obj, int face_id) {
     ensure_open();
     const TopoDS_Face& face = data_->face(face_id);
     Array2i conn = conn_obj.cast<Array2i>();
@@ -141,6 +174,8 @@ class Mesh {
     }
     const py::ssize_t m = conn.shape(0);
     const std::int64_t* c = conn.data();
+    Array1i ids(m);
+    std::int64_t* out = ids.mutable_data();
     for (py::ssize_t i = 0; i < m; ++i) {
       const SMDS_MeshNode* n0 = find_node(c[3 * i]);
       const SMDS_MeshNode* n1 = find_node(c[3 * i + 1]);
@@ -151,7 +186,119 @@ class Mesh {
                             " on face_id " + std::to_string(face_id));
       }
       meshDS_->SetMeshElementOnShape(elem, face);
+      out[i] = static_cast<std::int64_t>(elem->GetID());
     }
+    return ids;
+  }
+
+  // Delete elements. Nothing is put in their place: this leaves a hole in the mesh, which
+  // is what dropping a patch of an injected surface means.
+  //
+  // Nodes are not removed with them unless `free_nodes` is set. A node is an entity of its
+  // own and the ones on the boundary of a deleted patch usually still carry other elements;
+  // the sweep takes only the ones left carrying nothing.
+  MeshRemoval remove_elements(const Array1i& element_ids, bool free_nodes) {
+    ensure_open();
+    // Resolve every id first, so a bad one refuses the whole call rather than leaving the
+    // mesh half-edited.
+    std::set<std::int64_t> targets;
+    std::set<const SMDS_MeshNode*> touched;
+    const std::int64_t* ids = element_ids.data();
+    for (py::ssize_t i = 0; i < element_ids.shape(0); ++i) {
+      const SMDS_MeshElement* element = find_element(ids[i]);
+      targets.insert(static_cast<std::int64_t>(element->GetID()));
+      if (!free_nodes) {
+        continue;
+      }
+      for (SMDS_NodeIteratorPtr it = element->nodeIterator(); it->more();) {
+        touched.insert(it->next());
+      }
+    }
+
+    MeshRemoval out;
+    out.n_nodes_before = static_cast<std::int64_t>(meshDS_->NbNodes());
+    out.n_elements_before = static_cast<std::int64_t>(meshDS_->NbElements());
+
+    std::list<smIdType> to_remove;
+    for (const std::int64_t id : targets) {
+      to_remove.push_back(static_cast<smIdType>(id));
+    }
+    SMESH_MeshEditor editor(mesh_);
+    editor.Remove(to_remove, /*isNodes=*/false);
+
+    for (const std::int64_t id : targets) {
+      if (meshDS_->FindElement(static_cast<smIdType>(id)) == nullptr) {
+        out.elements.push_back(id);
+      }
+    }
+
+    if (free_nodes) {
+      std::list<smIdType> orphans;
+      for (const SMDS_MeshNode* node : touched) {
+        if (node->NbInverseElements() == 0) {
+          orphans.push_back(node->GetID());
+        }
+      }
+      if (!orphans.empty()) {
+        editor.Remove(orphans, /*isNodes=*/true);
+        for (const smIdType id : orphans) {
+          if (meshDS_->FindNode(id) == nullptr) {
+            out.nodes.push_back(static_cast<std::int64_t>(id));
+          }
+        }
+      }
+    }
+
+    meshDS_->Modified();
+    out.n_nodes_after = static_cast<std::int64_t>(meshDS_->NbNodes());
+    out.n_elements_after = static_cast<std::int64_t>(meshDS_->NbElements());
+    return out;
+  }
+
+  // Delete nodes, and every element built on them. The cascade is not a convenience: an
+  // element whose corner has gone is not a cell at all, so SMESH removes it with the node.
+  // The elements it took are named in the result, because they are the part the caller did
+  // not ask for.
+  MeshRemoval remove_nodes(const Array1i& node_ids) {
+    ensure_open();
+    std::set<std::int64_t> targets;
+    std::set<std::int64_t> cascade;
+    const std::int64_t* ids = node_ids.data();
+    for (py::ssize_t i = 0; i < node_ids.shape(0); ++i) {
+      const SMDS_MeshNode* node = find_node(ids[i]);
+      targets.insert(static_cast<std::int64_t>(node->GetID()));
+      // Recorded before the removal, because afterwards there is nothing left to ask.
+      for (SMDS_ElemIteratorPtr it = node->GetInverseElementIterator(); it->more();) {
+        cascade.insert(static_cast<std::int64_t>(it->next()->GetID()));
+      }
+    }
+
+    MeshRemoval out;
+    out.n_nodes_before = static_cast<std::int64_t>(meshDS_->NbNodes());
+    out.n_elements_before = static_cast<std::int64_t>(meshDS_->NbElements());
+
+    std::list<smIdType> to_remove;
+    for (const std::int64_t id : targets) {
+      to_remove.push_back(static_cast<smIdType>(id));
+    }
+    SMESH_MeshEditor editor(mesh_);
+    editor.Remove(to_remove, /*isNodes=*/true);
+
+    for (const std::int64_t id : targets) {
+      if (meshDS_->FindNode(static_cast<smIdType>(id)) == nullptr) {
+        out.nodes.push_back(id);
+      }
+    }
+    for (const std::int64_t id : cascade) {
+      if (meshDS_->FindElement(static_cast<smIdType>(id)) == nullptr) {
+        out.elements.push_back(id);
+      }
+    }
+
+    meshDS_->Modified();
+    out.n_nodes_after = static_cast<std::int64_t>(meshDS_->NbNodes());
+    out.n_elements_after = static_cast<std::int64_t>(meshDS_->NbElements());
+    return out;
   }
 
   // Every node classified onto a face/edge/vertex, every face carrying >=1 element.
@@ -261,6 +408,14 @@ class Mesh {
     return node;
   }
 
+  const SMDS_MeshElement* find_element(std::int64_t element_id) const {
+    const SMDS_MeshElement* element = meshDS_->FindElement(element_id);
+    if (element == nullptr) {
+      throw PysmeshError("Unknown element id " + std::to_string(element_id));
+    }
+    return element;
+  }
+
   static std::string join(const std::vector<std::int64_t>& v) {
     std::string s;
     for (std::size_t i = 0; i < v.size(); ++i) {
@@ -312,6 +467,22 @@ void bind_mesh(py::module_& m) {
                " n_faces=" + std::to_string(s.n_faces) + ">";
       });
 
+  py::class_<MeshRemoval>(m, "MeshRemoval")
+      .def_property_readonly(
+          "elements", [](const MeshRemoval& r) { return to_array(r.elements); },
+          "int64 (K,) — the element ids that are gone, ascending.")
+      .def_property_readonly(
+          "nodes", [](const MeshRemoval& r) { return to_array(r.nodes); },
+          "int64 (J,) — the node ids that are gone, ascending.")
+      .def_readonly("n_nodes_before", &MeshRemoval::n_nodes_before)
+      .def_readonly("n_nodes_after", &MeshRemoval::n_nodes_after)
+      .def_readonly("n_elements_before", &MeshRemoval::n_elements_before)
+      .def_readonly("n_elements_after", &MeshRemoval::n_elements_after)
+      .def("__repr__", [](const MeshRemoval& r) {
+        return "<MeshRemoval elements=" + std::to_string(r.elements.size()) +
+               " nodes=" + std::to_string(r.nodes.size()) + ">";
+      });
+
   py::class_<Mesh>(m, "Mesh")
       .def(py::init<const py::object&>(), py::arg("shape"),
            "Create an SMESH mesh bound to the given Shape.")
@@ -326,10 +497,22 @@ void bind_mesh(py::module_& m) {
       .def("classify_on_vertex", &Mesh::classify_on_vertex, py::arg("node_id"),
            py::arg("vertex_id"), "Classify a single node onto a vertex.")
       .def("add_segments", &Mesh::add_segments, py::arg("conn"), py::arg("edge_id"),
-           "Add (M,2) segments (node-id pairs) bound to the edge submesh. Required on "
-           "edges bounding wall faces for viscous layers.")
+           "Add (M,2) segments (node-id pairs) bound to the edge submesh; return their "
+           "SMESH ids as int64 (M,). Required on edges bounding wall faces for "
+           "viscous layers.")
       .def("add_triangles", &Mesh::add_triangles, py::arg("conn"), py::arg("face_id"),
-           "Add (M,3) triangles (node-id triples) bound to the face submesh.")
+           "Add (M,3) triangles (node-id triples) bound to the face submesh; return "
+           "their SMESH ids as int64 (M,).")
+      .def("remove_elements", &Mesh::remove_elements, py::arg("element_ids"),
+           py::arg("free_nodes") = false,
+           "Delete elements by id. Returns a MeshRemoval naming the ids that actually "
+           "went; an id listed twice is removed once. Nodes stay unless free_nodes is "
+           "set, which also deletes every node the removal leaves with no element on it. "
+           "An unknown id refuses the whole call before anything is deleted.")
+      .def("remove_nodes", &Mesh::remove_nodes, py::arg("node_ids"),
+           "Delete nodes by id, and every element built on them. Returns a MeshRemoval "
+           "naming both — the nodes asked for and the elements that went with them. An "
+           "unknown id refuses the whole call before anything is deleted.")
       .def("validate", &Mesh::validate,
            "Raise PysmeshError unless every node is classified and every face has "
            "elements.")

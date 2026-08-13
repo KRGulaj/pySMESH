@@ -4,8 +4,9 @@
 
 """pySMESH — standalone SMESH ViscousLayers + OCCT same-domain healing bindings.
 
-Public surface: :func:`load_brep`, :class:`Shape`, :class:`Mesh`, and the per-entity info
-types for geometry query and surface-mesh injection; :func:`compute_viscous_layers` (with
+Public surface: :func:`load_brep`, :class:`Shape`, :class:`Mesh` (with
+:class:`MeshRemoval`), and the per-entity info types for geometry query and surface-mesh
+injection; :func:`compute_viscous_layers` (with
 :class:`VLParams` / :class:`VLResult` / :class:`ExtrusionMethod`) for boundary-layer prism
 generation; :func:`unify_same_domain` (with :class:`UnifyParams` / :class:`UnifyResult`) for
 B-rep same-domain face/edge merging; and :class:`PysmeshError` for every library failure, with
@@ -62,6 +63,7 @@ from ._core import (  # noqa: E402 - must follow the VTK check
     EdgeInfo,
     FaceInfo,
     Mesh,
+    MeshRemoval,
     PysmeshCancelled,
     PysmeshError,
     Shape,
@@ -150,6 +152,7 @@ __all__ = [
     "HistoryDelta",
     "MassTable",
     "Mesh",
+    "MeshRemoval",
     "Name",
     "NameRole",
     "OffsetParams",
