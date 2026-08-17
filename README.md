@@ -13,7 +13,7 @@ pySMESH covers three areas:
   it did not build: a discrete body with no B-rep goes in as plain arrays. See
   [Mesh generation and editing](#mesh-generation-and-editing) and
   [Discrete meshes](#discrete-meshes-no-cad).
-- **Standalone OCCT geometry operations** — STEP import/export, tessellation, offsets,
+- **Standalone OCCT geometry operations** — STEP and IGES import/export, tessellation, offsets,
   distance and leak checks, point-in-solid classification, and geometry queries. See
   [Geometry operations](#geometry-operations).
 
@@ -187,6 +187,11 @@ return BREP bytes and NumPy arrays, and key every result to the same 1-based ord
 
 - **`read_step_xde` / `write_step_xde`** — STEP import/export through OCCT's XDE stack,
   preserving product names, per-face colours, and the file's length unit.
+- **`read_iges` / `write_iges`** — IGES import/export. The reader returns the geometry in
+  the file's native unit plus `length_unit` (metres per unit), exactly as `read_step_xde`
+  does; the writer takes the unit of the coordinates as an argument and declares it in the
+  header without rescaling. Neither side reads or writes OCCT's global `Interface_Static`
+  unit, so a file cannot arrive silently normalised or leave silently mislabelled.
 - **`tessellate`** — render-ready triangulation with per-vertex normals.
 - **`offset_shape` / `make_thick_solid`** — B-rep offset and hollowed thick-solid
   operations.
@@ -206,7 +211,18 @@ shape = pysmesh.load_brep(imp.brep)
 shape.faces()[0].surface_type   # "Plane" / "Cylinder" / "Cone" / "Sphere" / "Torus" / ...
 
 mask = pysmesh.point_in_solid(imp.brep, points, tol=1e-7)
+
+# IGES carries the same unit contract. Coordinates stay native; the factor comes back with
+# them, and a re-export declares the unit it was handed.
+igs = pysmesh.read_iges("housing.igs")
+igs.length_unit                              # 0.001 for an MM file, 0.0254 for an INCH file
+pysmesh.write_iges(igs.brep, unit=igs.unit_name)
 ```
+
+`read_iges` takes a path, not bytes: OCCT ships no IGES stream reader
+(`IGESSelect_WorkLibrary` does not override `IFSelect_WorkLibrary::ReadStream`). Reading one
+also makes OCCT print `Total number of loaded entities N.` to stdout — an unconditional
+info-level message inside `IGESFile_Read`, which OCCT gives no switch to silence.
 
 See `src/pysmesh/_core.pyi` for the full typed API. `mypy --strict` type-checks against
 it.

@@ -77,6 +77,12 @@ from .distance import (  # noqa: E402 - must follow the VTK check (imports _core
     free_boundary_edges,
     shape_distance,
 )
+from .iges import (  # noqa: E402 - must follow the VTK check (imports _core)
+    IGES_UNITS,
+    IgesImport,
+    read_iges,
+    write_iges,
+)
 from .mesher import (  # noqa: E402 - must follow the VTK check (imports _core)
     Adaptive1D,
     Algorithm,
@@ -335,6 +341,8 @@ __all__ = [
     "HexaFromSkin3D",
     "HistoryDelta",
     "Hypothesis",
+    "IGES_UNITS",
+    "IgesImport",
     "LayerDistribution",
     "Length",
     "Length2D",
@@ -455,11 +463,13 @@ __all__ = [
     "point_in_solid",
     "quality",
     "read_gmf",
+    "read_iges",
     "read_step_xde",
     "select",
     "shape_distance",
     "tessellate",
     "unify_same_domain",
     "write_gmf",
+    "write_iges",
     "write_step_xde",
 ]
