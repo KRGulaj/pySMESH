@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "pysmesh"
-version = "3.2.0"
+version = "3.3.0"
 description = "Python bindings to SALOME SMESH meshing (algorithms, editing, search, medial axis) and OCCT geometry operations"
 readme = "README.md"
 requires-python = ">=3.13"
