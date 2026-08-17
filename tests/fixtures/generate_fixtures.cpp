@@ -42,6 +42,7 @@
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <IGESControl_Writer.hxx>
 #include <Interface_Static.hxx>
 #include <Quantity_Color.hxx>
 #include <STEPCAFControl_Writer.hxx>
@@ -460,6 +461,32 @@ void write_named_step(const TopoDS_Shape& solid, const char* unit, const std::st
   }
 }
 
+// ---- IGES fixtures (declared length unit) ------------------------------------------ //
+// Writes a cube to IGES 5.3 with a chosen header length unit, through STOCK OCCT: the plain
+// IGESControl_Writer(unit, mode) path with OCCT's default millimetre cascade unit, which
+// divides the coordinates by the unit's size in millimetres. `solid` is therefore built in
+// millimetres and comes out at the intended native magnitude — a 2000 mm cube written as "M"
+// is a literal 2.0-in-metres cube in the file.
+//
+// This deliberately does NOT use pySMESH's own write_iges: read_iges has to be tested against
+// files a third party could have produced, not against its own inverse. The three fixtures
+// (box_mm.igs, box_m.igs, box_inch.igs) share one native coordinate extent (BOX_EDGE) and
+// differ only in the declared unit, so read_iges's length_unit is the only thing that can
+// tell them apart — and a reader that silently normalises to millimetres fails on two of the
+// three. box_inch.igs carries a non-decimal factor, which a hard-coded 1000 would miss.
+void write_box_iges(const TopoDS_Shape& solid, const char* unit, const std::string& path) {
+  IGESControl_Writer writer(unit, 1);  // 1 = BRep mode (IGES 5.3): carries the solid
+  if (!writer.AddShape(solid)) {
+    std::fprintf(stderr, "IGES transfer failed for %s\n", path.c_str());
+    std::exit(1);
+  }
+  writer.ComputeModel();
+  if (!writer.Write(path.c_str())) {
+    std::fprintf(stderr, "failed to write %s\n", path.c_str());
+    std::exit(1);
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -536,6 +563,15 @@ int main(int argc, char** argv) {
       BRepPrimAPI_MakeBox(BOX_EDGE * 1000.0, BOX_EDGE * 1000.0, BOX_EDGE * 1000.0).Shape();
   write_named_step(box_metre, "M", out_dir + "/named_box_m.step");
 
+  // IGES fixtures: the same cube declared in three units. Each source solid is built in
+  // millimetres at BOX_EDGE * <millimetres per unit>, so every file holds the native extent
+  // BOX_EDGE and only the header unit differs.
+  write_box_iges(box, "MM", out_dir + "/box_mm.igs");
+  write_box_iges(box_metre, "M", out_dir + "/box_m.igs");
+  const TopoDS_Shape box_inch =
+      BRepPrimAPI_MakeBox(BOX_EDGE * 25.4, BOX_EDGE * 25.4, BOX_EDGE * 25.4).Shape();
+  write_box_iges(box_inch, "INCH", out_dir + "/box_inch.igs");
+
   std::printf("box_mesh:\n");
   write_structured_mesh(box, BOX_GRID_N, out_dir + "/box_mesh");
   std::printf("sphere_mesh:\n");
@@ -543,7 +579,8 @@ int main(int argc, char** argv) {
 
   std::printf(
       "wrote box.brep, cylinder.brep, sphere.brep, split_box.brep, open_box_shell.brep, "
-      "box_far.brep, named_box_mm.step, named_box_m.step, box_mesh + sphere_mesh to %s\n",
+      "box_far.brep, named_box_mm.step, named_box_m.step, box_mm.igs, box_m.igs, "
+      "box_inch.igs, box_mesh + sphere_mesh to %s\n",
       out_dir.c_str());
   return 0;
 }

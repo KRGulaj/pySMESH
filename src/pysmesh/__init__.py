@@ -79,6 +79,12 @@ from .distance import (  # noqa: E402 - must follow the VTK check (imports _core
     free_boundary_edges,
     shape_distance,
 )
+from .iges import (  # noqa: E402 - must follow the VTK check (imports _core)
+    IGES_UNITS,
+    IgesImport,
+    read_iges,
+    write_iges,
+)
 from .offset import (  # noqa: E402 - must follow the VTK check (imports _core)
     OffsetParams,
     OffsetResult,
@@ -150,6 +156,8 @@ __all__ = [
     "GlueMode",
     "Handoff",
     "HistoryDelta",
+    "IGES_UNITS",
+    "IgesImport",
     "MassTable",
     "Mesh",
     "MeshRemoval",
@@ -188,9 +196,11 @@ __all__ = [
     "make_thick_solid",
     "offset_shape",
     "point_in_solid",
+    "read_iges",
     "read_step_xde",
     "shape_distance",
     "tessellate",
     "unify_same_domain",
+    "write_iges",
     "write_step_xde",
 ]

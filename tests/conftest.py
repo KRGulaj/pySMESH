@@ -153,3 +153,24 @@ def named_box_m_step_path(fixtures_dir: Path) -> str:
     """Path to the metre-unit STEP fixture: a 2 m cube declared in metres (same native extent as
     the mm fixture, but length_unit 1.0 vs 0.001) (see ``generate_fixtures.cpp``)."""
     return str(fixtures_dir / "named_box_m.step")
+
+
+@pytest.fixture(scope="session")
+def box_mm_iges_path(fixtures_dir: Path) -> str:
+    """Path to the millimetre IGES fixture: a cube of native extent 2.0 declared in MM, written
+    by stock OCCT (see ``generate_fixtures.cpp``)."""
+    return str(fixtures_dir / "box_mm.igs")
+
+
+@pytest.fixture(scope="session")
+def box_m_iges_path(fixtures_dir: Path) -> str:
+    """Path to the metre IGES fixture: the same native extent 2.0 declared in M, so only
+    ``length_unit`` separates it from the millimetre fixture."""
+    return str(fixtures_dir / "box_m.igs")
+
+
+@pytest.fixture(scope="session")
+def box_inch_iges_path(fixtures_dir: Path) -> str:
+    """Path to the inch IGES fixture: native extent 2.0 declared in INCH. Its factor (0.0254)
+    is the one a hard-coded millimetre-or-metre reader gets wrong."""
+    return str(fixtures_dir / "box_inch.igs")

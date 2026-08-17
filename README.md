@@ -8,10 +8,10 @@ inside the full SALOME platform, packaged as a self-contained `cp313-win_amd64` 
 - **`unify_same_domain`** — Open CASCADE's `ShapeUpgrade_UnifySameDomain`, B-rep healing
   that merges adjacent same-surface faces (and collinear edges) to remove the artificial
   seams over-segmented STEP imports carry.
-- **A suite of standalone OCCT geometry operations** — STEP XDE import/export, tessellation,
-  offsets/thick-solids, proximity & leak diagnostics, point-in-solid classification, and
-  geometry-query enrichment (surface type, adjacency, solids, centroid matching). See
-  [Geometry operations](#geometry-operations-occt) below.
+- **A suite of standalone OCCT geometry operations** — STEP XDE and IGES import/export,
+  tessellation, offsets/thick-solids, proximity & leak diagnostics, point-in-solid
+  classification, and geometry-query enrichment (surface type, adjacency, solids, centroid
+  matching). See [Geometry operations](#geometry-operations-occt) below.
 
 Meta:
 
@@ -195,6 +195,39 @@ named = {lbl.id: lbl.name for lbl in imp.solid_labels}
 step = pysmesh.write_step_xde(imp.brep, name="wing",
                               face_names={2: "inlet"}, face_colors={1: (0.0, 1.0, 0.0)})
 ```
+
+### IGES import/export with the declared unit (`read_iges` / `write_iges`)
+
+The same unit contract as `read_step_xde`, for the other exchange format. `read_iges`
+returns the geometry in the file's **native** unit and reports `length_unit`, the
+metres-per-unit factor, so nothing arrives silently normalised. `write_iges` takes the unit
+of the coordinates as an **argument**: the header declares it and the coordinates go out
+unchanged, so nothing leaves silently mislabelled. Neither side reads or writes OCCT's
+global `Interface_Static` unit.
+
+```python
+import pysmesh
+
+igs = pysmesh.read_iges("housing.igs")            # path only — see the note below
+igs.brep            # bytes — geometry in the file's native unit (load via load_brep)
+igs.length_unit     # 0.001 for an MM file, 1.0 for M, 0.0254 for INCH (metres per unit)
+igs.unit_name       # "MM" / "M" / "INCH" / ... — a key of pysmesh.IGES_UNITS
+
+# re-export in the same unit, or state the unit your own model is in
+data = pysmesh.write_iges(igs.brep, unit=igs.unit_name)
+data = pysmesh.write_iges(brep_in_metres, unit="M")          # IGES 5.3 (solids and shells)
+data = pysmesh.write_iges(wire_brep, unit="M", brep_mode=False)  # IGES 5.1 (faces, wires)
+```
+
+A unit IGES has no value for is refused rather than guessed — unit flag 3 with an
+unrecognised name would otherwise be taken as millimetres, which is the mislabelling this
+pair exists to prevent. BRep mode likewise refuses a shape it cannot carry whole instead of
+dropping half of it.
+
+`read_iges` takes a path, not bytes: OCCT ships no IGES stream reader
+(`IGESSelect_WorkLibrary` does not override `IFSelect_WorkLibrary::ReadStream`). Reading one
+also makes OCCT print `Total number of loaded entities N.` to stdout — an unconditional
+info-level message inside `IGESFile_Read`, which OCCT gives no switch to silence.
 
 ### Tessellation for rendering (`tessellate`)
 

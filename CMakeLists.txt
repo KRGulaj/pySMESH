@@ -125,6 +125,7 @@ pybind11_add_module(_core
     src/bindings/distance.cpp
     src/bindings/classify.cpp
     src/bindings/step_xde.cpp
+    src/bindings/iges.cpp
     src/bindings/session_core.cpp
     src/bindings/session_construct.cpp
     src/bindings/session_boolean.cpp
@@ -153,7 +154,8 @@ target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
 #   TKFillet  BRepFilletAPI_Make{Fillet,Chamfer}
 #   TKFeat    BRepFeat_SplitShape (the imprint alternative to the splitter)
 #   TKHelix   HelixBRep_BuilderHelix / HelixGeom_* — TKHelix's actual API surface
-#   TKDEIGES  IGES{,CAF}Control_Reader
+#   TKDEIGES  IGESControl_{Reader,Writer}, IGESData_{IGESModel,GlobalSection,BasicEditor}
+#             — called by src/bindings/iges.cpp since 2.3.0 (read_iges / write_iges)
 # TKPrim and TKBO were already in the closure transitively (SMESHUtils links TKPrim, Geom
 # links TKBO); they are listed explicitly because the bindings call them directly. TKBool is
 # deliberately NOT listed: OCCT 8.0 keeps BRepAlgoAPI_* in TKBO, and TKBool holds the legacy
@@ -260,7 +262,9 @@ if(PYSMESH_BUILD_FIXTURE_GEN)
     add_executable(generate_fixtures tests/fixtures/generate_fixtures.cpp)
     # TKBO: BRepAlgoAPI_Fuse for the split_box fixture (two coplanar-topped half-boxes fused).
     # TKDESTEP/TKXCAF/TKVCAF/TKLCAF/TKCAF/TKCDF/TKXSBase: labelled STEP fixture writer (B1).
+    # TKDEIGES: the IGES unit fixtures (box_mm.igs / box_m.igs / box_inch.igs), written with
+    # stock OCCT so read_iges is never tested against its own inverse.
     target_link_libraries(generate_fixtures PRIVATE
         TKernel TKMath TKBRep TKG2d TKG3d TKGeomBase TKGeomAlgo TKTopAlgo TKPrim TKMesh TKBO
-        TKDESTEP TKXCAF TKVCAF TKLCAF TKCAF TKCDF TKXSBase)
+        TKDESTEP TKDEIGES TKXCAF TKVCAF TKLCAF TKCAF TKCDF TKXSBase)
 endif()
