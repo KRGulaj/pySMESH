@@ -58,6 +58,7 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -110,6 +111,7 @@
 #include <BRepPrimAPI_MakeWedge.hxx>
 #include <BRepTools.hxx>
 #include <BRepTools_History.hxx>
+#include <BRepTools_WireExplorer.hxx>
 #include <BRepTools_ReShape.hxx>
 #include <BRepTopAdaptor_FClass2d.hxx>
 #include <BRep_Builder.hxx>
@@ -163,6 +165,8 @@
 #include <gp_Ax2.hxx>
 #include <gp_Ax3.hxx>
 #include <gp_Circ.hxx>
+#include <gp_Cone.hxx>
+#include <gp_Cylinder.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Elips.hxx>
 #include <gp_GTrsf.hxx>
@@ -170,6 +174,8 @@
 #include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Pnt2d.hxx>
+#include <gp_Sphere.hxx>
+#include <gp_Torus.hxx>
 #include <gp_Trsf.hxx>
 #include <gp_Vec.hxx>
 #include <gp_XYZ.hxx>
@@ -880,6 +886,20 @@ class Session {
   // a curve type for edges. Bulk, because a caller classifying a model wants every answer.
   py::dict entity_types(const std::string& kind) const;
 
+  // The analytic parameters of the named faces' underlying surfaces: frame, radii, and a
+  // cone's half angle. entity_types says a face is a Cylinder; this says how wide it is,
+  // which is what a feature filter ("fillets under 1 mm", "holes under 3 mm") actually reads.
+  //
+  // The frame is the SURFACE's own, taken unflipped from BRepAdaptor_Surface, so it agrees
+  // with the u/v that face_parameter_bounds and surface_at speak. It is therefore NOT the
+  // outward normal on a REVERSED face: `reversed` says which faces those are, and surface_at
+  // is the operation that already does the flip. Flipping only the axis here would leave the
+  // frame inconsistent with its own ref_dir and with the parametrisation.
+  //
+  // A parameter the surface type does not define reads NaN, never a stand-in value: a
+  // free-form face has no radius, and 0.0 would read as one to any filter.
+  py::dict surface_parameters(const std::vector<EntityId>& face_ids) const;
+
   // Bounding boxes alone, for every live entity of one kind. Deliberately separate from
   // entity_table: BRepBndLib is orders of magnitude cheaper than BRepGProp's mass
   // properties, and a caller culling or spatially indexing a model needs only the box.
@@ -902,6 +922,23 @@ class Session {
   // it is the boundary (a face's edges), towards a higher one it is the ancestors (an edge's
   // faces). One method rather than two, because they are one relation read from either end.
   py::dict adjacency(const std::string& kind, const std::string& other_kind) const;
+
+  // The wire loops of the named faces, as runs of edge ids.
+  //
+  // adjacency(FACE, EDGE) gives a face's edges as one flat set, which cannot answer the
+  // question a hole test asks: WHICH edges bound the outer boundary and which bound each
+  // inner loop. A wire is the loop, so this is the query that separates them.
+  //
+  // WIRE is not an entity kind — BRepTools_History fixes the tracked set at SOLID/FACE/EDGE/
+  // VERTEX — so a wire carries no id and is named by its owning face plus its row. Its edges
+  // are named by the ids they already have.
+  //
+  // Edges come in connection order, from BRepTools_WireExplorer. That explorer is documented
+  // to stop early on a defective wire (a loop, a branch, an INTERNAL edge), so its result is
+  // cross-checked against the wire's full edge map: when the two disagree the row falls back
+  // to the map's order and reports ordered=false, rather than silently returning a loop with
+  // edges missing from it.
+  py::dict face_wires(const std::vector<EntityId>& face_ids) const;
 
   // Positions and outward normals of a face at the given parameters. The normal is flipped
   // for a REVERSED face, so it points out of the body rather than along the surface's own
@@ -1141,8 +1178,21 @@ class Session {
   // A split entity is rejected rather than silently contributing several faces.
   std::vector<TopoDS_Shape> faces_of(const char* op, const std::vector<EntityId>& ids) const;
 
-  // The single face a query names.
+  // The single face a query names, in the orientation it has inside the live root.
+  //
+  // The orientation is why this goes through the root at all. The registry is keyed
+  // orientation-insensitively (TopTools_ShapeMapHasher compares with IsSame), so the shape an
+  // id record holds may carry the orientation an operation's history produced rather than the
+  // one the face has in the shape that exists now. For a bore those differ: the tool cylinder
+  // is FORWARD in the history and REVERSED inside the cut result, and a query reading the
+  // record's copy reports the bore's outward normal pointing into the material.
+  //
+  // The overload taking a map is for bulk queries, which hold the map across their whole
+  // loop. root_faces() itself caches, so a single-face query in a caller's own loop pays the
+  // traversal once for the model rather than once per call.
+  const ShapeSet& root_faces() const;
   TopoDS_Face sole_face(const char* op, EntityId id) const;
+  TopoDS_Face sole_face(const char* op, EntityId id, const ShapeSet& root_faces) const;
 
   // Bodies for a boolean-family operand list, whatever dimension they are. The boolean
   // family proper takes SOLID ids (solids_of); imprinting deliberately does not, because a
@@ -1320,6 +1370,13 @@ class Session {
   // whatever they last emitted, which is the right answer — their triangulations are still
   // whatever they were.
   std::unordered_map<const void*, EmittedFace> emitted_;
+
+  // The root's face map, kept across queries. Rebuilt only when the root itself changes, so
+  // a picking loop calling a single-face query once per face stays linear rather than
+  // quadratic in the model size. Mutable because it is a cache over state_ and nothing else:
+  // it is written under the GIL, on the same invariant that makes the queries lock-free.
+  mutable TopoDS_Shape faces_cached_for_;
+  mutable ShapeSet cached_root_faces_;
 };
 
 }  // namespace session

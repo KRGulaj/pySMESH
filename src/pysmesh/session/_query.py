@@ -28,9 +28,11 @@ from ._types import (
     MassTable,
     Points,
     Projection,
+    SurfaceParameterTable,
     SurfaceSample,
     TypeTable,
     Vec3,
+    WireTable,
     _DEFAULT_CLASSIFY_TOL,
     _DEFAULT_CURVATURE_SAMPLES,
     _ids,
@@ -62,6 +64,41 @@ class _QueryOps(_SessionBase):
             kind=kind,
             ids=cast("NDArray[np.int64]", raw["ids"]),
             types=tuple(cast("list[str]", raw["types"])),
+        )
+
+    def surface_parameters(self, face_ids: Sequence[EntityId]) -> SurfaceParameterTable:
+        """Analytic parameters of the named faces' underlying surfaces.
+
+        :meth:`entity_types` says a face is a ``"Cylinder"``. This says how wide it is, which
+        is the half a feature filter needs: "every fillet under 1 mm", "every hole under
+        3 mm". A radius, a cone's taper and a torus's two radii are read straight off the
+        surface, not estimated from a bounding box or a curvature sample.
+
+        A parameter the surface type does not define reads **NaN**, never 0.0 — a free-form
+        face has no radius, and a zero would pass a ``< 1 mm`` test. The frame is the
+        surface's own and is not flipped for a reversed face; see
+        :class:`SurfaceParameterTable`.
+
+        Args:
+            face_ids: Face entity ids. Each must denote exactly one face.
+
+        Returns:
+            One row per face, in the order named.
+
+        Raises:
+            PysmeshError: If an id is dead, is not a face, or was split.
+        """
+        raw = self._s.surface_parameters(_ids(face_ids))
+        return SurfaceParameterTable(
+            ids=cast("NDArray[np.int64]", raw["ids"]),
+            types=tuple(cast("list[str]", raw["types"])),
+            origin=cast("NDArray[np.float64]", raw["origin"]),
+            axis=cast("NDArray[np.float64]", raw["axis"]),
+            ref_dir=cast("NDArray[np.float64]", raw["ref_dir"]),
+            radius1=cast("NDArray[np.float64]", raw["radius1"]),
+            radius2=cast("NDArray[np.float64]", raw["radius2"]),
+            half_angle=cast("NDArray[np.float64]", raw["half_angle"]),
+            reversed=cast("NDArray[np.bool_]", raw["reversed"]),
         )
 
     def bounding_boxes(self, kind: EntityKind) -> BoundsTable:
@@ -166,6 +203,36 @@ class _QueryOps(_SessionBase):
             other_kind=other_kind,
             ids=cast("NDArray[np.int64]", raw["ids"]),
             related=cast("NDArray[np.int64]", raw["related"]),
+        )
+
+    def face_wires(self, face_ids: Sequence[EntityId]) -> WireTable:
+        """The wire loops of the named faces, as runs of edge ids.
+
+        :meth:`adjacency` gives a face's edges as one flat set, which cannot answer the
+        question a hole test asks: which edges bound the outer boundary, and which bound each
+        inner loop. A wire is the loop, so this is the query that separates them.
+
+        ``WIRE`` is not an :class:`EntityKind`, so a loop carries no id of its own. It is
+        named by its owning face plus its row, and its edges by the ids they already have.
+
+        Args:
+            face_ids: Face entity ids. Each must denote exactly one face.
+
+        Returns:
+            One row per wire, faces in the order named.
+
+        Raises:
+            PysmeshError: If an id is dead, is not a face, or was split; or if OCCT cannot
+                identify the outer wire of a face that has wires, which means that face's
+                boundary is malformed.
+        """
+        raw = self._s.face_wires(_ids(face_ids))
+        return WireTable(
+            face_id=cast("NDArray[np.int64]", raw["face_id"]),
+            is_outer=cast("NDArray[np.bool_]", raw["is_outer"]),
+            ordered=cast("NDArray[np.bool_]", raw["ordered"]),
+            edge_range=cast("NDArray[np.int32]", raw["edge_range"]),
+            edge_id=cast("NDArray[np.int64]", raw["edge_id"]),
         )
 
     def surface_at(

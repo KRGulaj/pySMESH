@@ -39,6 +39,26 @@ double cell_centre(double lo, double hi, int i, int n) {
   return lo + (hi - lo) * (static_cast<double>(i) + 0.5) / static_cast<double>(n);
 }
 
+// "This surface does not define that parameter." Not 0.0: a filter reading `radius1 < 1.0`
+// treats 0.0 as a very small radius and picks up every plane in the model.
+constexpr double kUndefined = std::numeric_limits<double>::quiet_NaN();
+
+// Write one gp_Ax3 into the origin / axis / ref_dir rows of a surface-parameter table.
+void write_frame(const gp_Ax3& frame, double* origin, double* axis, double* ref_dir) {
+  const gp_Pnt& o = frame.Location();
+  const gp_Dir& d = frame.Direction();
+  const gp_Dir& x = frame.XDirection();
+  origin[0] = o.X();
+  origin[1] = o.Y();
+  origin[2] = o.Z();
+  axis[0] = d.X();
+  axis[1] = d.Y();
+  axis[2] = d.Z();
+  ref_dir[0] = x.X();
+  ref_dir[1] = x.Y();
+  ref_dir[2] = x.Z();
+}
+
 }  // namespace
 
 py::dict Session::entity_types(const std::string& kind) const {
@@ -68,6 +88,123 @@ py::dict Session::entity_types(const std::string& kind) const {
   py::dict out;
   out["ids"] = ids_array(ids);
   out["types"] = types;
+  return out;
+}
+
+py::dict Session::surface_parameters(const std::vector<EntityId>& face_ids) const {
+  const auto n = static_cast<py::ssize_t>(face_ids.size());
+  const auto three = static_cast<py::ssize_t>(3);
+  py::array_t<double> origin({n, three});
+  py::array_t<double> axis({n, three});
+  py::array_t<double> ref_dir({n, three});
+  py::array_t<double> radius1(n);
+  py::array_t<double> radius2(n);
+  py::array_t<double> half_angle(n);
+  py::array_t<bool> reversed(n);
+
+  double* op = origin.mutable_data();
+  double* ap = axis.mutable_data();
+  double* xp = ref_dir.mutable_data();
+  double* r1 = radius1.mutable_data();
+  double* r2 = radius2.mutable_data();
+  double* ha = half_angle.mutable_data();
+  bool* rv = reversed.mutable_data();
+
+  // Every cell starts undefined and only the ones the surface type actually defines are
+  // written. The default has to be NaN rather than zero — see kUndefined.
+  std::fill(op, op + 3 * n, kUndefined);
+  std::fill(ap, ap + 3 * n, kUndefined);
+  std::fill(xp, xp + 3 * n, kUndefined);
+  std::fill(r1, r1 + n, kUndefined);
+  std::fill(r2, r2 + n, kUndefined);
+  std::fill(ha, ha + n, kUndefined);
+
+  py::list types;
+  const ShapeSet& faces_in_root = root_faces();
+  for (py::ssize_t i = 0; i < n; ++i) {
+    const TopoDS_Face face = sole_face("surface_parameters",
+                                       face_ids[static_cast<std::size_t>(i)], faces_in_root);
+    // BRepAdaptor_Surface is the transformed adaptor, so Plane()/Cylinder()/... come back in
+    // model coordinates rather than in the underlying Geom_Surface's local frame.
+    const BRepAdaptor_Surface surf(face);
+    const GeomAbs_SurfaceType type = surf.GetType();
+    types.append(py::str(surface_type_name(type)));
+    rv[i] = face.Orientation() == TopAbs_REVERSED;
+
+    double* o = op + 3 * i;
+    double* a = ap + 3 * i;
+    double* x = xp + 3 * i;
+    switch (type) {
+      case GeomAbs_Plane:
+        write_frame(surf.Plane().Position(), o, a, x);
+        break;
+      case GeomAbs_Cylinder: {
+        const gp_Cylinder c = surf.Cylinder();
+        write_frame(c.Position(), o, a, x);
+        r1[i] = c.Radius();
+        break;
+      }
+      case GeomAbs_Cone: {
+        const gp_Cone c = surf.Cone();
+        write_frame(c.Position(), o, a, x);
+        // RefRadius, not "the radius": a cone has one radius per station along its axis, and
+        // this is the one at the frame's origin. SemiAngle is signed — its sign says which
+        // way along the axis the cone widens, so it must not be reported as a magnitude.
+        r1[i] = c.RefRadius();
+        ha[i] = c.SemiAngle();
+        break;
+      }
+      case GeomAbs_Sphere: {
+        const gp_Sphere sp = surf.Sphere();
+        write_frame(sp.Position(), o, a, x);
+        r1[i] = sp.Radius();
+        break;
+      }
+      case GeomAbs_Torus: {
+        const gp_Torus t = surf.Torus();
+        write_frame(t.Position(), o, a, x);
+        r1[i] = t.MajorRadius();
+        r2[i] = t.MinorRadius();
+        break;
+      }
+      case GeomAbs_SurfaceOfRevolution: {
+        // No radius — the profile curve decides that, and it varies along the axis. The axis
+        // itself is well defined, and it is the half a consumer can use.
+        const gp_Ax1 ax = surf.AxeOfRevolution();
+        const gp_Pnt& loc = ax.Location();
+        const gp_Dir& dir = ax.Direction();
+        o[0] = loc.X();
+        o[1] = loc.Y();
+        o[2] = loc.Z();
+        a[0] = dir.X();
+        a[1] = dir.Y();
+        a[2] = dir.Z();
+        break;
+      }
+      case GeomAbs_SurfaceOfExtrusion: {
+        // The sweep direction. There is no origin: the basis curve is anywhere along it.
+        const gp_Dir dir = surf.Direction();
+        a[0] = dir.X();
+        a[1] = dir.Y();
+        a[2] = dir.Z();
+        break;
+      }
+      default:
+        // Bezier, BSpline, Offset, Other: no analytic parameters at all. The row stays NaN.
+        break;
+    }
+  }
+
+  py::dict out;
+  out["ids"] = ids_array(face_ids);
+  out["types"] = types;
+  out["origin"] = origin;
+  out["axis"] = axis;
+  out["ref_dir"] = ref_dir;
+  out["radius1"] = radius1;
+  out["radius2"] = radius2;
+  out["half_angle"] = half_angle;
+  out["reversed"] = reversed;
   return out;
 }
 
@@ -138,9 +275,10 @@ py::array_t<double> Session::face_parameter_bounds(
   const auto n = static_cast<py::ssize_t>(face_ids.size());
   py::array_t<double> out({n, static_cast<py::ssize_t>(4)});
   double* p = out.mutable_data();
+  const ShapeSet& faces_in_root = root_faces();
   for (py::ssize_t i = 0; i < n; ++i) {
-    const BRepAdaptor_Surface s(
-        sole_face("face_parameter_bounds", face_ids[static_cast<std::size_t>(i)]));
+    const BRepAdaptor_Surface s(sole_face(
+        "face_parameter_bounds", face_ids[static_cast<std::size_t>(i)], faces_in_root));
     p[4 * i + 0] = s.FirstUParameter();
     p[4 * i + 1] = s.LastUParameter();
     p[4 * i + 2] = s.FirstVParameter();
@@ -239,6 +377,96 @@ py::dict Session::adjacency(const std::string& kind, const std::string& other_ki
   return out;
 }
 
+py::dict Session::face_wires(const std::vector<EntityId>& face_ids) const {
+  std::vector<EntityId> wire_face;
+  std::vector<char> is_outer;  // char, not bool: std::vector<bool> has no writable data()
+  std::vector<char> ordered;
+  std::vector<std::int32_t> range;  // start, end interleaved
+  std::vector<EntityId> edge_ids;
+
+  const ShapeSet& faces_in_root = root_faces();
+  for (EntityId face_id : face_ids) {
+    const TopoDS_Face face = sole_face("face_wires", face_id, faces_in_root);
+    const TopoDS_Wire outer = BRepTools::OuterWire(face);
+
+    std::size_t wires_here = 0;
+    std::size_t outers_here = 0;
+    for (TopExp_Explorer ex(face, TopAbs_WIRE); ex.More(); ex.Next()) {
+      const TopoDS_Wire wire = TopoDS::Wire(ex.Current());
+      ++wires_here;
+
+      // The wire's full edge set, orientation-insensitive: this is the count the traversal
+      // has to reproduce to be trusted.
+      ShapeSet all;
+      TopExp::MapShapes(wire, TopAbs_EDGE, all);
+
+      // Connection order. A seam edge belongs to its wire twice, once per orientation, so
+      // the traversal visits it twice and the second visit is dropped — an id cannot carry
+      // an orientation, and the same id listed twice in one loop reads as a duplicate rather
+      // than as a seam.
+      std::vector<TopoDS_Shape> walked;
+      ShapeSet seen;
+      for (BRepTools_WireExplorer we(wire, face); we.More(); we.Next()) {
+        const TopoDS_Edge& e = we.Current();
+        if (!seen.Contains(e)) {
+          seen.Add(e);
+          walked.push_back(e);
+        }
+      }
+
+      const bool complete = walked.size() == static_cast<std::size_t>(all.Extent());
+      const auto start = static_cast<std::int32_t>(edge_ids.size());
+      if (complete) {
+        for (const TopoDS_Shape& e : walked) {
+          edge_ids.push_back(label_of("face_wires", e));
+        }
+      } else {
+        // BRepTools_WireExplorer stopped early — the wire has a defect it does not walk
+        // past. Emit the map's order instead, so the caller still gets every edge of the
+        // loop, and say so on the row rather than shipping a loop with edges missing.
+        for (int i = 1; i <= all.Extent(); ++i) {
+          edge_ids.push_back(label_of("face_wires", all.FindKey(i)));
+        }
+      }
+
+      const bool this_is_outer = wire.IsSame(outer);
+      outers_here += this_is_outer ? 1u : 0u;
+      wire_face.push_back(face_id);
+      is_outer.push_back(this_is_outer ? 1 : 0);
+      ordered.push_back(complete ? 1 : 0);
+      range.push_back(start);
+      range.push_back(static_cast<std::int32_t>(edge_ids.size()));
+    }
+
+    // A face with wires but no outer one would answer "this face has only holes", which is
+    // a wrong answer rather than a partial one. Raise instead: every hole test downstream is
+    // built on the outer/inner split, and a silent zero there is unrecoverable.
+    if (wires_here > 0 && outers_here == 0) {
+      throw PysmeshError("Session.face_wires: OCCT could not identify the outer wire of face "
+                         + std::to_string(face_id) + ", which has " +
+                         std::to_string(wires_here) +
+                         " wires. The face's boundary is malformed; heal it before asking "
+                         "which of its loops is the outer one.");
+    }
+  }
+
+  const auto w = static_cast<py::ssize_t>(wire_face.size());
+  py::array_t<bool> outer_arr(w);
+  py::array_t<bool> ordered_arr(w);
+  py::array_t<std::int32_t> range_arr({w, static_cast<py::ssize_t>(2)});
+  std::copy(is_outer.begin(), is_outer.end(), outer_arr.mutable_data());
+  std::copy(ordered.begin(), ordered.end(), ordered_arr.mutable_data());
+  std::copy(range.begin(), range.end(), range_arr.mutable_data());
+
+  py::dict out;
+  out["face_id"] = ids_array(wire_face);
+  out["is_outer"] = outer_arr;
+  out["ordered"] = ordered_arr;
+  out["edge_range"] = range_arr;
+  out["edge_id"] = ids_array(edge_ids);
+  return out;
+}
+
 py::dict Session::surface_at(EntityId face_id, const PointArray& uv) const {
   const TopoDS_Face face = sole_face("surface_at", face_id);
   const std::vector<std::pair<double, double>> params = pairs_of("surface_at", "uv", uv);
@@ -301,8 +529,9 @@ py::dict Session::curvature(const std::vector<EntityId>& face_ids, int samples) 
   // session's live state.
   std::vector<TopoDS_Face> faces;
   faces.reserve(face_ids.size());
+  const ShapeSet& faces_in_root = root_faces();
   for (EntityId id : face_ids) {
-    faces.push_back(sole_face("curvature", id));
+    faces.push_back(sole_face("curvature", id, faces_in_root));
   }
 
   const auto n = static_cast<py::ssize_t>(faces.size());

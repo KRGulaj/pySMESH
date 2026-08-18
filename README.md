@@ -103,6 +103,27 @@ handoff = s.export_handoff()  # brep bytes + per-entity id arrays, ready for Mes
 history, fillet and chamfer, transforms, healing, defeaturing, imprinting, tessellation,
 and geometric queries. See `src/pysmesh/session/__init__.py` for the full API.
 
+Two queries answer the questions a feature filter asks. `surface_parameters` reads a
+face's analytic parameters off its surface: a radius, a cone's taper, a torus's two radii.
+`face_wires` splits a face's boundary into its loops, so an inner loop (a hole) is
+distinguishable from the outer one. A parameter the surface type does not define reads
+`NaN`, never a stand-in value.
+
+```python
+import numpy as np
+
+faces = s.entities(EntityKind.FACE)
+params = s.surface_parameters(faces)
+
+# every cylindrical face under 1 mm across: fillets and small bores
+small = params.ids[(np.array(params.types) == "Cylinder") & (params.radius1 < 1.0)]
+
+wires = s.face_wires(faces)
+for row in np.flatnonzero(~wires.is_outer):        # one row per hole
+    lo, hi = wires.edge_range[row]
+    hole_edges = wires.edge_id[lo:hi]
+```
+
 ## Mesh generation and editing
 
 `Mesher` builds a volume or surface mesh from a shape, using SMESH's own algorithm and

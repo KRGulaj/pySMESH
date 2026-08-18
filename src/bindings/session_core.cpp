@@ -823,7 +823,24 @@ std::vector<TopoDS_Shape> Session::faces_of(const char* op,
   return out;
 }
 
+const ShapeSet& Session::root_faces() const {
+  // IsEqual, not IsSame: an operation that rebuilds the root produces a new TShape, and a
+  // restore that puts back the very same shape puts back the very same faces too. Either way
+  // the test is exact — there is no window in which the cache outlives the root it maps.
+  if (!state_.root.IsNull() && faces_cached_for_.IsEqual(state_.root)) {
+    return cached_root_faces_;
+  }
+  cached_root_faces_.Clear();
+  TopExp::MapShapes(state_.root, TopAbs_FACE, cached_root_faces_);
+  faces_cached_for_ = state_.root;
+  return cached_root_faces_;
+}
+
 TopoDS_Face Session::sole_face(const char* op, EntityId id) const {
+  return sole_face(op, id, root_faces());
+}
+
+TopoDS_Face Session::sole_face(const char* op, EntityId id, const ShapeSet& faces) const {
   const EntityRecord& rec = require_alive(op, id);
   if (rec.kind != TopAbs_FACE) {
     throw PysmeshError(std::string("Session.") + op + ": entity " + std::to_string(id) +
@@ -833,7 +850,16 @@ TopoDS_Face Session::sole_face(const char* op, EntityId id) const {
     throw PysmeshError(std::string("Session.") + op + ": face " + std::to_string(id) +
                        " was split and denotes several faces; name one of them.");
   }
-  return TopoDS::Face(rec.shapes.front());
+  // The root's own copy, for its orientation — see the declaration. The map is keyed with
+  // IsSame, so this can only ever swap the orientation, never the surface or the trimming.
+  const int i = faces.FindIndex(rec.shapes.front());
+  if (i == 0) {
+    throw PysmeshError(std::string("Session.") + op + ": face " + std::to_string(id) +
+                       " is alive in the registry but is not a face of the session root. "
+                       "The registry and the root have diverged; this is a bug, not a "
+                       "caller error.");
+  }
+  return TopoDS::Face(faces.FindKey(i));
 }
 
 // Bodies for a boolean-family operand list, whatever dimension they are.

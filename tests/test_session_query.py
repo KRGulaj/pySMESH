@@ -61,6 +61,23 @@ CONE_HALF_ANGLE: float = math.atan((CONE_R1 - CONE_R2) / CONE_H)
 
 HOLE_RADIUS: float = 0.5
 
+# Analytic surfaces the parameter query is asserted against.
+SPHERE_R: float = 4.0
+TORUS_MAJOR: float = 5.0
+TORUS_MINOR: float = 1.5
+
+# Free-form geometry: no analytic parameters exist for any of it.
+FREEFORM_RIM: np.ndarray = np.array(
+    [[0.0, 0.0, 0.0], [4.0, 0.0, 1.0], [4.0, 5.0, 0.0], [0.0, 5.0, 2.0]]
+)
+EXTRUDE_PROFILE: np.ndarray = np.array(
+    [[0.0, 0.0, 0.0], [1.0, 2.0, 0.0], [3.0, 1.0, 0.0], [5.0, 3.0, 0.0]]
+)
+EXTRUDE_VECTOR: tuple[float, float, float] = (0.0, 0.0, 4.0)
+REVOLVE_PROFILE: np.ndarray = np.array(
+    [[2.0, 0.0, 0.0], [2.5, 0.0, 1.0], [2.2, 0.0, 2.0], [3.0, 0.0, 3.0]]
+)
+
 
 # ---- oracles -------------------------------------------------------------------------- #
 
@@ -587,6 +604,407 @@ def test_containment_rejects_a_non_positive_tolerance(box: Session) -> None:
         box.contains([solid], [BOX_CENTRE], tol=0.0)
 
 
+# ========================================================= Analytic surface parameters ==
+
+
+def test_surface_parameters_types_agree_with_entity_types(bored_box: Session) -> None:
+    faces = ids_of(bored_box, EntityKind.FACE)
+
+    params = bored_box.surface_parameters(faces)
+    table = bored_box.entity_types(EntityKind.FACE)
+
+    by_id = dict(zip(table.ids.tolist(), table.types))
+    assert params.ids.tolist() == [int(f) for f in faces]
+    assert params.types == tuple(by_id[int(f)] for f in faces)
+
+
+def test_surface_parameters_read_a_bores_radius_off_the_surface(
+    bored_box: Session,
+) -> None:
+    """The headline use: a hole's size, exact rather than estimated from a box or a sample."""
+    bore = face_of_type(bored_box, "Cylinder")
+
+    params = bored_box.surface_parameters([bore])
+
+    assert params.radius1[0] == pytest.approx(HOLE_RADIUS, rel=EXACT_RTOL)
+    assert np.isnan(params.radius2[0])
+    assert np.isnan(params.half_angle[0])
+    assert params.axis[0] == pytest.approx([0.0, 0.0, 1.0], abs=1e-12)
+
+
+def test_surface_parameters_of_a_cone_reproduce_its_taper(cone: Session) -> None:
+    """radius1 is the radius at ``origin``; half_angle carries the taper, sign included.
+
+    The gate is the cone's own definition -- ``r(t) = radius1 + t * tan(half_angle)`` -- so it
+    fails on a magnitude-only half_angle, which is the plausible wrong implementation.
+    """
+    face = face_of_type(cone, "Cone")
+
+    params = cone.surface_parameters([face])
+
+    r_at_far_end = params.radius1[0] + CONE_H * math.tan(params.half_angle[0])
+    assert params.radius1[0] == pytest.approx(CONE_R1, rel=EXACT_RTOL)
+    assert r_at_far_end == pytest.approx(CONE_R2, rel=CURVED_RTOL)
+    assert abs(params.half_angle[0]) == pytest.approx(CONE_HALF_ANGLE, rel=CURVED_RTOL)
+
+
+def test_surface_parameters_of_a_sphere_give_the_radius_its_area_implies() -> None:
+    """Checked against the closed-form area 4*pi*R^2, measured independently."""
+    s = Session()
+    s.add_sphere(SPHERE_R)
+    face = face_of_type(s, "Sphere")
+
+    params = s.surface_parameters([face])
+    area = s.mass_properties([face]).measure[0]
+
+    assert params.radius1[0] == pytest.approx(SPHERE_R, rel=EXACT_RTOL)
+    assert area == pytest.approx(4.0 * math.pi * params.radius1[0] ** 2, rel=CURVED_RTOL)
+    assert np.isnan(params.radius2[0])
+
+
+def test_surface_parameters_of_a_torus_give_both_radii_the_right_way_round() -> None:
+    """Major and minor are not interchangeable.
+
+    ``4*pi^2*R*r`` is symmetric in the two, so the area alone cannot say which is which; the
+    ordering is asserted alongside it.
+    """
+    s = Session()
+    s.add_torus(TORUS_MAJOR, TORUS_MINOR)
+    face = face_of_type(s, "Torus")
+
+    params = s.surface_parameters([face])
+    area = s.mass_properties([face]).measure[0]
+
+    assert params.radius1[0] == pytest.approx(TORUS_MAJOR, rel=EXACT_RTOL)
+    assert params.radius2[0] == pytest.approx(TORUS_MINOR, rel=EXACT_RTOL)
+    assert params.radius1[0] > params.radius2[0]
+    assert area == pytest.approx(
+        4.0 * math.pi**2 * TORUS_MAJOR * TORUS_MINOR, rel=CURVED_RTOL
+    )
+
+
+def test_a_planes_axis_and_reversed_flag_give_the_outward_normal(box: Session) -> None:
+    """The frame is the surface's, unflipped, so ``axis`` alone is not the outward normal.
+
+    ``reversed`` is what closes the gap, and it must agree with the flip
+    :meth:`Session.surface_at` already applies -- on every face, not on average.
+    """
+    faces = ids_of(box, EntityKind.FACE)
+
+    params = box.surface_parameters(faces)
+
+    for i, face in enumerate(faces):
+        sign = -1.0 if params.reversed[i] else 1.0
+        expected = box.surface_at(face, face_centre_uv(box, face)).normals[0]
+        assert params.axis[i] * sign == pytest.approx(expected, abs=1e-12)
+
+
+def test_a_planes_origin_lies_on_the_plane(box: Session) -> None:
+    faces = ids_of(box, EntityKind.FACE)
+
+    params = box.surface_parameters(faces)
+    centroids = box.mass_properties(faces).centroid
+
+    for i in range(len(faces)):
+        in_plane = centroids[i] - params.origin[i]
+        assert float(np.dot(in_plane, params.axis[i])) == pytest.approx(0.0, abs=1e-9)
+        assert np.linalg.norm(params.axis[i]) == pytest.approx(1.0, rel=EXACT_RTOL)
+        assert float(np.dot(params.axis[i], params.ref_dir[i])) == pytest.approx(
+            0.0, abs=1e-12
+        )
+
+
+def test_a_free_form_face_reports_no_parameters_at_all() -> None:
+    """NaN, not 0.0 -- the distinction a size filter depends on.
+
+    A zero radius passes ``radius1 < 1.0``, so a filter looking for small fillets would
+    collect every free-form face in the model. NaN fails every comparison instead.
+    """
+    s = Session()
+    s.add_polyline(FREEFORM_RIM, closed=True)
+    s.make_filling(ids_of(s, EntityKind.EDGE))
+    face = face_of_type(s, "BSpline")
+
+    params = s.surface_parameters([face])
+
+    assert np.all(np.isnan(params.origin[0]))
+    assert np.all(np.isnan(params.axis[0]))
+    assert np.all(np.isnan(params.ref_dir[0]))
+    assert np.isnan(params.radius1[0])
+    assert not bool(params.radius1[0] < 1.0)  # the filter must not pick it up
+
+
+def test_surface_parameters_of_an_extrusion_name_its_sweep_line() -> None:
+    """OCCT may store the basis direction negated.
+
+    The sweep line is therefore contract; its sense is not.
+    """
+    s = Session()
+    profile = s.add_spline(EXTRUDE_PROFILE)
+    s.extrude([EntityId(int(i)) for i in profile.created], EXTRUDE_VECTOR)
+    face = face_of_type(s, "Extrusion")
+
+    params = s.surface_parameters([face])
+
+    unit = np.asarray(EXTRUDE_VECTOR) / np.linalg.norm(EXTRUDE_VECTOR)
+    assert abs(float(np.dot(params.axis[0], unit))) == pytest.approx(1.0, rel=CURVED_RTOL)
+    assert np.all(np.isnan(params.origin[0]))
+    assert np.isnan(params.radius1[0])
+
+
+def test_surface_parameters_of_a_revolution_give_only_its_axis() -> None:
+    """A revolved free-form profile has an axis and no radius: the radius varies along it."""
+    s = Session()
+    profile = s.add_spline(REVOLVE_PROFILE)
+    s.revolve(
+        [EntityId(int(i)) for i in profile.created], (0.0, 0.0, 0.0), (0.0, 0.0, 1.0)
+    )
+    face = face_of_type(s, "Revolution")
+
+    params = s.surface_parameters([face])
+
+    assert params.origin[0] == pytest.approx([0.0, 0.0, 0.0], abs=1e-12)
+    assert abs(float(params.axis[0][2])) == pytest.approx(1.0, rel=EXACT_RTOL)
+    assert np.isnan(params.radius1[0])
+    assert np.all(np.isnan(params.ref_dir[0]))
+
+
+def test_surface_parameters_follow_the_order_named(bored_box: Session) -> None:
+    faces = ids_of(bored_box, EntityKind.FACE)
+    shuffled = list(reversed(faces))
+
+    params = bored_box.surface_parameters(shuffled)
+
+    assert params.ids.tolist() == [int(f) for f in shuffled]
+
+
+def test_surface_parameters_rejects_an_edge_id(box: Session) -> None:
+    edge = ids_of(box, EntityKind.EDGE)[0]
+
+    with pytest.raises(ps.PysmeshError, match="not a FACE"):
+        box.surface_parameters([edge])
+
+
+def test_a_bores_outward_normal_points_into_the_hole(bored_box: Session) -> None:
+    """The registry may hold a face in the orientation an operation's history produced.
+
+    Inside a cut result the bore is REVERSED, and reading the history's copy makes the
+    outward normal point into the material -- the opposite of what every consumer of a normal
+    means. Gated by stepping off the surface both ways and asking the solid which side it
+    owns, so it cannot be satisfied by agreeing with a stored flag.
+    """
+    solid = ids_of(bored_box, EntityKind.SOLID)[0]
+    bore = face_of_type(bored_box, "Cylinder")
+    step = 1e-3
+
+    sample = bored_box.surface_at(bore, face_centre_uv(bored_box, bore))
+    point, normal = sample.points[0], sample.normals[0]
+
+    outward = bored_box.contains([solid], [point + step * normal])
+    inward = bored_box.contains([solid], [point - step * normal])
+    assert not bool(outward[0, 0]), "the normal points into the material"
+    assert bool(inward[0, 0])
+    assert bool(bored_box.surface_parameters([bore]).reversed[0])
+
+
+# ================================================================== Wire loops ==
+
+
+def test_a_box_face_has_one_wire_of_four_edges(box: Session) -> None:
+    faces = ids_of(box, EntityKind.FACE)
+
+    wires = box.face_wires(faces)
+
+    assert wires.face_id.tolist() == [int(f) for f in faces]
+    assert wires.is_outer.all()
+    assert wires.ordered.all()
+    assert (wires.edge_range[:, 1] - wires.edge_range[:, 0]).tolist() == [4] * 6
+    assert wires.edge_id.size == 24
+
+
+def test_a_bored_faces_hole_is_a_separate_inner_wire(bored_box: Session) -> None:
+    """The whole point of the query: adjacency cannot tell the hole from the boundary."""
+    faces = ids_of(bored_box, EntityKind.FACE)
+
+    wires = bored_box.face_wires(faces)
+
+    inner = np.flatnonzero(~wires.is_outer)
+    assert inner.size == 2, "the two end faces each carry one hole"
+    for row in inner:
+        lo, hi = wires.edge_range[row]
+        hole = [EntityId(int(e)) for e in wires.edge_id[lo:hi]]
+        assert len(hole) == 1
+        length = bored_box.mass_properties(hole).measure[0]
+        assert length == pytest.approx(TAU * HOLE_RADIUS, rel=CURVED_RTOL)
+
+
+def test_the_hole_edges_are_circles_of_the_bores_radius(bored_box: Session) -> None:
+    """Cross-checks the two new queries against each other.
+
+    The loop the hole is bounded by must be a circle of exactly the radius the bore's
+    surface reports.
+    """
+    faces = ids_of(bored_box, EntityKind.FACE)
+    bore = face_of_type(bored_box, "Cylinder")
+
+    wires = bored_box.face_wires(faces)
+    radius = bored_box.surface_parameters([bore]).radius1[0]
+    edge_types = bored_box.entity_types(EntityKind.EDGE)
+
+    named = dict(zip(edge_types.ids.tolist(), edge_types.types))
+    for row in np.flatnonzero(~wires.is_outer):
+        lo, hi = wires.edge_range[row]
+        edge = EntityId(int(wires.edge_id[lo]))
+        assert named[int(edge)] == "Circle"
+        length = bored_box.mass_properties([edge]).measure[0]
+        assert length == pytest.approx(TAU * radius, rel=CURVED_RTOL)
+
+
+def test_every_face_has_exactly_one_outer_wire(bored_box: Session) -> None:
+    faces = ids_of(bored_box, EntityKind.FACE)
+
+    wires = bored_box.face_wires(faces)
+
+    for face in faces:
+        rows = wires.face_id == int(face)
+        assert int(wires.is_outer[rows].sum()) == 1, f"face {face}"
+
+
+def test_a_faces_wires_partition_its_adjacency_edges(bored_box: Session) -> None:
+    """Loops and the flat edge set are two readings of one boundary, so they must agree."""
+    faces = ids_of(bored_box, EntityKind.FACE)
+
+    wires = bored_box.face_wires(faces)
+    pairs = bored_box.adjacency(EntityKind.FACE, EntityKind.EDGE)
+
+    for face in faces:
+        rows = np.flatnonzero(wires.face_id == int(face))
+        from_wires: list[int] = []
+        for row in rows:
+            lo, hi = wires.edge_range[row]
+            from_wires.extend(int(e) for e in wires.edge_id[lo:hi])
+        from_adjacency = set(pairs.related[pairs.ids == int(face)].tolist())
+        assert len(from_wires) == len(set(from_wires)), f"face {face} lists an edge twice"
+        assert set(from_wires) == from_adjacency, f"face {face}"
+
+
+def test_a_seam_edge_is_listed_once_in_its_wire(bored_box: Session) -> None:
+    """The bore is closed, so its single wire crosses the seam twice.
+
+    An id cannot carry an orientation, so the seam is listed once: two circles plus one
+    seam edge, three distinct ids.
+    """
+    bore = face_of_type(bored_box, "Cylinder")
+
+    wires = bored_box.face_wires([bore])
+
+    assert wires.face_id.size == 1
+    lo, hi = wires.edge_range[0]
+    edges = wires.edge_id[lo:hi].tolist()
+    assert len(edges) == 3
+    assert len(set(edges)) == 3
+
+
+def test_an_ordered_wire_is_a_closed_chain_of_edges(box: Session) -> None:
+    """``ordered`` claims a traversal.
+
+    Consecutive edges must therefore share a vertex, and the last must close back onto the
+    first.
+    """
+    faces = ids_of(box, EntityKind.FACE)
+
+    wires = box.face_wires(faces)
+    pairs = box.adjacency(EntityKind.EDGE, EntityKind.VERTEX)
+
+    ends = {
+        int(e): set(pairs.related[pairs.ids == int(e)].tolist())
+        for e in set(pairs.ids.tolist())
+    }
+    for row in range(len(wires.face_id)):
+        assert bool(wires.ordered[row])
+        lo, hi = wires.edge_range[row]
+        loop = [int(e) for e in wires.edge_id[lo:hi]]
+        for a, b in zip(loop, loop[1:] + loop[:1]):
+            assert ends[a] & ends[b], f"edges {a} and {b} are not joined"
+
+
+def test_face_wires_follow_the_order_named(bored_box: Session) -> None:
+    faces = ids_of(bored_box, EntityKind.FACE)
+    shuffled = list(reversed(faces))
+
+    wires = bored_box.face_wires(shuffled)
+
+    seen: list[int] = []
+    for face in wires.face_id.tolist():
+        if face not in seen:
+            seen.append(face)
+    assert seen == [int(f) for f in shuffled]
+
+
+def test_the_edge_ranges_tile_the_edge_array(bored_box: Session) -> None:
+    """CSR contract: the ranges are contiguous, in order, and cover every id exactly once."""
+    wires = bored_box.face_wires(ids_of(bored_box, EntityKind.FACE))
+
+    assert wires.edge_range.dtype == np.int32
+    assert wires.edge_range[0, 0] == 0
+    assert int(wires.edge_range[-1, 1]) == wires.edge_id.size
+    assert np.array_equal(wires.edge_range[1:, 0], wires.edge_range[:-1, 1])
+    assert np.all(wires.edge_range[:, 1] > wires.edge_range[:, 0])
+
+
+def test_face_wires_of_no_faces_is_empty(box: Session) -> None:
+    wires = box.face_wires([])
+
+    assert wires.face_id.size == 0
+    assert wires.edge_id.size == 0
+    assert wires.edge_range.shape == (0, 2)
+
+
+def test_face_wires_rejects_an_edge_id(box: Session) -> None:
+    edge = ids_of(box, EntityKind.EDGE)[0]
+
+    with pytest.raises(ps.PysmeshError, match="not a FACE"):
+        box.face_wires([edge])
+
+
+# ============================================== The root the queries resolve against ==
+
+
+def test_a_query_after_an_edit_sees_the_new_topology(box: Session) -> None:
+    """The face queries resolve ids against the live root, and that resolution is cached.
+
+    A cache that outlived its root would answer from the shape before the edit, so the gate
+    queries once to fill it, edits, and requires the second answer to describe the result.
+    """
+    before = box.surface_parameters(ids_of(box, EntityKind.FACE))
+    assert len(before.ids) == 6
+
+    box.add_cylinder(HOLE_RADIUS, BOX_DZ + 2.0, origin=(*BOX_CENTRE[:2], -1.0))
+    solid, tool = ids_of(box, EntityKind.SOLID)
+    box.cut([solid], [tool])
+
+    after = box.surface_parameters(ids_of(box, EntityKind.FACE))
+    wires = box.face_wires(ids_of(box, EntityKind.FACE))
+    assert "Cylinder" in after.types
+    assert int((~wires.is_outer).sum()) == 2
+
+
+def test_a_query_after_a_restore_sees_the_restored_topology(box: Session) -> None:
+    """Restore puts an earlier root back, and the queries must follow it back."""
+    mark = box.snapshot()
+    box.add_cylinder(HOLE_RADIUS, BOX_DZ + 2.0, origin=(*BOX_CENTRE[:2], -1.0))
+    solid, tool = ids_of(box, EntityKind.SOLID)
+    box.cut([solid], [tool])
+    assert "Cylinder" in box.surface_parameters(ids_of(box, EntityKind.FACE)).types
+
+    box.restore(mark)
+
+    after = box.surface_parameters(ids_of(box, EntityKind.FACE))
+    wires = box.face_wires(ids_of(box, EntityKind.FACE))
+    assert after.types == ("Plane",) * 6
+    assert bool(wires.is_outer.all())
+
+
 # ====================================================== Queries are queries ==
 
 
@@ -608,6 +1026,8 @@ def test_no_query_advances_the_session(box: Session) -> None:
     box.face_parameter_bounds([face])
     box.edge_parameter_bounds([edge])
     box.adjacency(EntityKind.FACE, EntityKind.EDGE)
+    box.surface_parameters([face])
+    box.face_wires([face])
     box.surface_at(face, face_centre_uv(box, face))
     box.curvature([face], samples=4)
     box.project_on_face(face, [BOX_CENTRE])

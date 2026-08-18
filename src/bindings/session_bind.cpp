@@ -126,11 +126,13 @@ void bind_session(py::module_& m) {
            py::arg("unify_faces"), py::arg("unify_edges"), py::arg("concat_bsplines"),
            py::arg("linear_tol"), py::arg("angular_tol_rad"))
       .def("entity_types", &Session::entity_types, py::arg("kind"))
+      .def("surface_parameters", &Session::surface_parameters, py::arg("face_ids"))
       .def("bounding_boxes", &Session::bounding_boxes, py::arg("kind"))
       .def("mass_properties", &Session::mass_properties, py::arg("entity_ids"))
       .def("face_parameter_bounds", &Session::face_parameter_bounds, py::arg("face_ids"))
       .def("edge_parameter_bounds", &Session::edge_parameter_bounds, py::arg("edge_ids"))
       .def("adjacency", &Session::adjacency, py::arg("kind"), py::arg("other_kind"))
+      .def("face_wires", &Session::face_wires, py::arg("face_ids"))
       .def("surface_at", &Session::surface_at, py::arg("face_id"), py::arg("uv"))
       .def("curvature", &Session::curvature, py::arg("face_ids"), py::arg("samples"))
       .def("project_on_face", &Session::project_on_face, py::arg("face_id"),

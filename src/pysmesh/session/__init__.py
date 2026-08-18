@@ -97,9 +97,11 @@ from ._types import (
     Resolution,
     ResolutionStatus,
     SnapshotMark,
+    SurfaceParameterTable,
     SurfaceSample,
     TypeTable,
     Vec3,
+    WireTable,
 )
 
 
@@ -166,7 +168,9 @@ __all__ = [
     "ResolutionStatus",
     "Session",
     "SnapshotMark",
+    "SurfaceParameterTable",
     "SurfaceSample",
     "TypeTable",
     "Vec3",
+    "WireTable",
 ]

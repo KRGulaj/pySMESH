@@ -250,8 +250,10 @@ from .session import (  # noqa: E402 - must follow the VTK check (imports _core)
     ResolutionStatus,
     Session,
     SnapshotMark,
+    SurfaceParameterTable,
     SurfaceSample,
     TypeTable,
+    WireTable,
 )
 from .step import (  # noqa: E402 - must follow the VTK check (imports _core)
     EntityLabel,
@@ -433,6 +435,7 @@ __all__ = [
     "SubMeshCount",
     "SubShape",
     "SubShapeKind",
+    "SurfaceParameterTable",
     "SurfaceSample",
     "Taper",
     "TessellateParams",
@@ -449,6 +452,7 @@ __all__ = [
     "ViscousLayers2D",
     "Volume",
     "Warping",
+    "WireTable",
     "block_parameters",
     "block_points",
     "block_shapes",

@@ -341,6 +341,69 @@ class TypeTable:
 
 
 @dataclass(frozen=True)
+class SurfaceParameterTable:
+    """Analytic parameters of named faces' underlying surfaces, in the order named.
+
+    :class:`TypeTable` says a face is a ``"Cylinder"``. This says how wide it is, which is
+    what a feature filter reads — "every fillet under 1 mm", "every hole under 3 mm".
+
+    **A parameter the surface type does not define is NaN, never 0.0.** A free-form face has
+    no radius at all, and a zero there would read as a very small one to the comparison a
+    caller writes. Filter on the type first, or on ``np.isfinite``.
+
+    **The frame is the surface's own, not the face's.** It is taken unflipped, so it agrees
+    with the ``(u, v)`` that :meth:`Session.face_parameter_bounds` and
+    :meth:`Session.surface_at` speak. On a reversed face ``axis`` is therefore *not* the
+    outward normal: :attr:`reversed` says which faces those are, and
+    :meth:`Session.surface_at` is the operation that already returns outward normals.
+
+    What each type fills in:
+
+    ==============  ==================================================================
+    ``Plane``       ``origin``, ``axis`` (the normal), ``ref_dir``
+    ``Cylinder``    the frame, and ``radius1`` = the radius
+    ``Cone``        the frame, ``radius1`` = the radius at ``origin``, ``half_angle``
+    ``Sphere``      the frame, and ``radius1`` = the radius
+    ``Torus``       the frame, ``radius1`` = major radius, ``radius2`` = minor radius
+    ``Revolution``  ``origin`` and ``axis`` — the profile decides the rest, and varies
+    ``Extrusion``   ``axis`` — the sweep direction **up to sign**; the basis curve has no
+                    one origin
+    everything      nothing; the whole row is NaN
+    else
+    ==============  ==================================================================
+
+    Attributes:
+        ids: (N,) int64, as given.
+        types: One surface type name per row, spelled exactly as :class:`TypeTable` spells
+            it.
+        origin: (N, 3) float64 — the frame's origin.
+        axis: (N, 3) float64 — the frame's main direction: a plane's normal, a cylinder's,
+            cone's or torus's axis, a sphere's pole axis, an extrusion's sweep direction.
+            An extrusion's is the underlying surface's own direction, which OCCT may store
+            negated against the vector the extrusion was built from: it names the line, not
+            the sense.
+        ref_dir: (N, 3) float64 — the frame's first in-plane direction, the one ``u`` is
+            measured from. Needed to reconstruct the parametrisation, not just the shape.
+        radius1: (N,) float64 — see the table above.
+        radius2: (N,) float64 — a torus's minor radius, and nothing else.
+        half_angle: (N,) float64 — a cone's semi-angle in radians. **Signed**: the sign says
+            which way along ``axis`` the cone widens, so do not take its magnitude.
+        reversed: (N,) bool — whether the face is REVERSED against its surface. Multiply
+            ``axis`` by ``-1`` on these rows to get a plane's outward normal.
+    """
+
+    ids: NDArray[np.int64]
+    types: tuple[str, ...]
+    origin: NDArray[np.float64]
+    axis: NDArray[np.float64]
+    ref_dir: NDArray[np.float64]
+    radius1: NDArray[np.float64]
+    radius2: NDArray[np.float64]
+    half_angle: NDArray[np.float64]
+    reversed: NDArray[np.bool_]
+
+
+@dataclass(frozen=True)
 class BoundsTable:
     """Bounding box of every live entity of one kind.
 
@@ -393,6 +456,48 @@ class AdjacencyPairs:
     other_kind: EntityKind
     ids: NDArray[np.int64]
     related: NDArray[np.int64]
+
+
+@dataclass(frozen=True)
+class WireTable:
+    """The wire loops of named faces, as runs of edge ids.
+
+    :meth:`Session.adjacency` gives a face's edges as one flat set, which cannot answer the
+    question a hole test asks: which edges bound the outer boundary, and which bound each
+    inner loop. A wire *is* the loop, so this is the query that separates them.
+
+    **A wire has no id.** ``WIRE`` is not an :class:`EntityKind` — ``BRepTools_History``
+    fixes the tracked set at solids, faces, edges and vertices — so a loop is named by its
+    owning face plus its row here, and its edges by the ids they already have.
+
+    Row ``i`` covers one wire: it belongs to ``face_id[i]``, and its edges are
+    ``edge_id[edge_range[i, 0]:edge_range[i, 1]]``. A face contributes one row per loop, so a
+    solid box gives 6 rows and a bored box gives 8 — the bore's two end faces have two loops
+    each.
+
+    **Each edge is listed once per wire.** A seam edge belongs to its wire twice, once per
+    orientation, and an id cannot carry an orientation: listing it twice would read as a
+    duplicate rather than as a seam.
+
+    Attributes:
+        face_id: (W,) int64 — the face each wire bounds, repeated once per loop, in the order
+            the faces were named.
+        is_outer: (W,) bool — whether this is the face's outer boundary. Exactly one row per
+            face is True; the rest are holes. From ``BRepTools::OuterWire``.
+        ordered: (W,) bool — whether ``edge_id`` for this row is a real traversal of the
+            loop, each edge joined to the previous one. False means OCCT's wire explorer
+            stopped early on a defect in the wire, and the row fell back to the wire's edge
+            map: every edge of the loop is still there, in an arbitrary order. A consumer
+            that only needs the *set* of edges may ignore this; one walking the loop must not.
+        edge_range: (W, 2) int32 — ``[start, end)`` into ``edge_id``.
+        edge_id: (E,) int64 — every wire's edges, concatenated.
+    """
+
+    face_id: NDArray[np.int64]
+    is_outer: NDArray[np.bool_]
+    ordered: NDArray[np.bool_]
+    edge_range: NDArray[np.int32]
+    edge_id: NDArray[np.int64]
 
 
 @dataclass(frozen=True)
