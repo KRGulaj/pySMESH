@@ -10,7 +10,11 @@ channels:
   - nodefaults
 dependencies:
   - python=3.13
-  # --- THE PIN — exact match to the host application's vtk, for connectivity ---
+  # --- VTK: bundled privately into the wheel since 4.0.0, no longer a host coupling ---
+  # Pinned so the headers compiled against and the DLLs delvewheel bundles come from one
+  # environment. It is free to move on its own schedule now: bumping it changes only what
+  # ships inside the wheel, and no consumer has to follow. ci/check_vtk_pin.py asserts this
+  # pin matches the binary that was actually built.
   - vtk=9.6.2
   # --- static-linked into _core.pyd: free to resolve ---
   - occt=8.0.0

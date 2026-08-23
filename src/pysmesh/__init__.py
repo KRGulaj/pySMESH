@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Kajetan R. Gulaj
 # Created: 2026-07-03
 
-"""pySMESH — standalone SMESH ViscousLayers + OCCT same-domain healing bindings.
+"""pySMESH — standalone SMESH meshing + OCCT geometry bindings.
 
 Public surface: :func:`load_brep`, :class:`Shape`, :class:`Mesh`, and the per-entity info
 types for geometry query and surface-mesh injection; :func:`compute_viscous_layers` (with
@@ -11,54 +11,24 @@ generation; :func:`unify_same_domain` (with :class:`UnifyParams` / :class:`Unify
 B-rep same-domain face/edge merging; and :class:`PysmeshError` for every library failure, with
 :class:`PysmeshCancelled` for the subset a caller stopped.
 
-Import-time contract: ``_core`` links VTK dynamically against whatever VTK the host
-process provides. The build was compiled against a specific VTK version; importing into an
-environment with a different VTK is an ABI hazard, so the version is hard-checked here and
-raises :class:`ImportError` on mismatch rather than risking a silent crash.
+Runtime contract (changed in 4.0.0): pySMESH has **no shared native dependency**. VTK, OCCT
+and Boost are all private to ``_core``: their DLLs are bundled into the wheel and
+name-mangled, so nothing here resolves against, or can collide with, a VTK the host process
+loaded for its own use. Installing the wheel therefore adds one pip entry and imposes no
+version constraint on the host.
+
+That privacy holds only while no VTK object crosses this boundary. Every result leaves as a
+NumPy array or BREP bytes. Returning a live ``vtkUnstructuredGrid`` built inside ``_core``
+would hand out an instance of a class from the private, name-mangled VTK copy, which is a
+different C++ type from the host's ``vtkUnstructuredGrid`` even at an identical version
+string. ``tests/test_vtk_privacy.py`` enforces this.
 """
 
 from __future__ import annotations
 
-import os
-import sys
-from pathlib import Path
+from . import _build_info as _build_info
 
-from . import _build_info
-
-# --- Locate the dynamic dependencies (VTK/OCCT/Boost DLLs live in the conda env) ------- #
-# conda's Python already has its Library/bin on the DLL search path; this is belt-and-
-# suspenders for embedded / Nuitka hosts. It never adds a second VTK — only makes the
-# host's own DLLs findable.
-_dll_dir = Path(sys.prefix) / "Library" / "bin"
-if _dll_dir.is_dir() and hasattr(os, "add_dll_directory"):
-    os.add_dll_directory(str(_dll_dir))
-
-
-def _check_vtk_version() -> None:
-    """Fail loudly if the host VTK differs from the one ``_core`` was built against."""
-    try:
-        # VTK ships no py.typed marker; the untyped-import ignore is expected and honest.
-        import vtk  # type: ignore[import-untyped]  # noqa: PLC0415 - lazy host dependency
-    except ImportError as exc:  # pragma: no cover - environment-specific
-        raise ImportError(
-            "pysmesh requires VTK "
-            f"{_build_info.VTK_VERSION} in the host environment, but VTK is not "
-            "importable. Install the matching conda-forge vtk build."
-        ) from exc
-
-    host = vtk.VTK_VERSION
-    if host != _build_info.VTK_VERSION:
-        raise ImportError(
-            "pysmesh was built against VTK "
-            f"{_build_info.VTK_VERSION} but the host environment provides VTK {host}. "
-            "These share an ABI-bound datastructure (vtkUnstructuredGrid); rebuild "
-            "pysmesh against the host VTK or align the versions."
-        )
-
-
-_check_vtk_version()
-
-from ._core import (  # noqa: E402 - must follow the VTK check
+from ._core import (
     EdgeInfo,
     FaceInfo,
     Mesh,
@@ -69,21 +39,21 @@ from ._core import (  # noqa: E402 - must follow the VTK check
     VertexInfo,
     load_brep,
 )
-from .classify import (  # noqa: E402 - must follow the VTK check (imports _core)
+from .classify import (
     point_in_solid,
 )
-from .distance import (  # noqa: E402 - must follow the VTK check (imports _core)
+from .distance import (
     ShapeDistanceResult,
     free_boundary_edges,
     shape_distance,
 )
-from .iges import (  # noqa: E402 - must follow the VTK check (imports _core)
+from .iges import (
     IGES_UNITS,
     IgesImport,
     read_iges,
     write_iges,
 )
-from .mesher import (  # noqa: E402 - must follow the VTK check (imports _core)
+from .mesher import (
     Adaptive1D,
     Algorithm,
     And,
@@ -220,7 +190,7 @@ from .mesher import (  # noqa: E402 - must follow the VTK check (imports _core)
     select,
     write_gmf,
 )
-from .offset import (  # noqa: E402 - must follow the VTK check (imports _core)
+from .offset import (
     OffsetParams,
     OffsetResult,
     ThickSolidParams,
@@ -228,7 +198,7 @@ from .offset import (  # noqa: E402 - must follow the VTK check (imports _core)
     make_thick_solid,
     offset_shape,
 )
-from .session import (  # noqa: E402 - must follow the VTK check (imports _core)
+from .session import (
     AdjacencyPairs,
     BoundsTable,
     CurvatureTable,
@@ -255,23 +225,23 @@ from .session import (  # noqa: E402 - must follow the VTK check (imports _core)
     TypeTable,
     WireTable,
 )
-from .step import (  # noqa: E402 - must follow the VTK check (imports _core)
+from .step import (
     EntityLabel,
     StepImport,
     read_step_xde,
     write_step_xde,
 )
-from .tessellate import (  # noqa: E402 - must follow the VTK check (imports _core)
+from .tessellate import (
     TessellateParams,
     TessellateResult,
     tessellate,
 )
-from .unify import (  # noqa: E402 - must follow the VTK check (imports _core)
+from .unify import (
     UnifyParams,
     UnifyResult,
     unify_same_domain,
 )
-from .viscous import (  # noqa: E402 - must follow the VTK check (imports _core)
+from .viscous import (
     ExtrusionMethod,
     VLParams,
     VLResult,

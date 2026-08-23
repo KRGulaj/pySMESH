@@ -32,7 +32,7 @@ jobs:
         with:
           arch: x64
 
-      - name: Create build env (conda-forge; vtk PINNED, occt/boost free)
+      - name: Create build env (conda-forge; vtk/occt/boost are all build-time only)
         uses: mamba-org/setup-micromamba@v2
         with:
           environment-file: ci/environment.yml
@@ -46,19 +46,31 @@ jobs:
           PYSMESH_DEV_ASSERTS: "ON" # extra input validation in CI only
         run: pip wheel . --no-build-isolation --no-deps -w dist
 
-      - name: Bundle OCCT/Boost DLLs, EXCLUDE VTK
-        # delvewheel vendors _core.pyd's DLL deps into the wheel. vtk*.dll is excluded on
-        # purpose: it is resolved at runtime from the host env (the one shared dependency).
+      - name: Bundle every native dependency (OCCT + Boost + VTK)
+        # delvewheel vendors _core.pyd's whole DLL closure into the wheel and name-mangles
+        # each one. Before 4.0.0 vtk*.dll was excluded here and resolved from the host env.
+        # It is now bundled like the rest: no VTK object ever crosses the Python boundary
+        # (tests/test_vtk_privacy.py enforces that), so a private, mangled copy cannot
+        # collide with a VTK the host loaded for its own use. _core links only three VTK
+        # components (CommonCore, CommonDataModel, FiltersVerdict), so the closure stays
+        # small: no rendering, no IO, no Python wrappers.
         run: |
           for whl in dist/*.whl; do
             delvewheel repair \
               --add-path "$CONDA_PREFIX/Library/bin" \
-              --exclude "vtk*.dll" \
               -w dist/repaired "$whl"
           done
 
-      - name: Assert the repaired wheel bundles OCCT/Boost but not VTK
+      - name: Assert the repaired wheel is self-contained (OCCT + Boost + VTK, honest ABI tag)
         run: python ci/check_wheel.py dist/repaired/*.whl
+
+      - name: Report bundled wheel size
+        # The size cost of private VTK is a stated trade-off, so measure it every build
+        # rather than quoting an estimate. PyPI rejects any file over 100 MB.
+        run: |
+          for whl in dist/repaired/*.whl; do
+            python ci/report_wheel_size.py "$whl"
+          done
 
       - name: Install repaired wheel + run tests
         run: |
@@ -68,10 +80,21 @@ jobs:
           python examples/box_bl.py
           python examples/split_box_unify.py
 
+      - name: Assert the wheel imports with NO host VTK on the path
+        # The 4.0.0 contract in one check: pysmesh must import and mesh in an environment
+        # that has no vtk package at all. Runs in a bare venv (not the conda build env),
+        # so nothing but the wheel's own bundled DLLs can satisfy _core.
+        run: |
+          python -m venv "$GITHUB_WORKSPACE/novtk-venv"
+          VENV_PY="$GITHUB_WORKSPACE/novtk-venv/Scripts/python.exe"
+          "$VENV_PY" -m pip install --quiet numpy
+          "$VENV_PY" -m pip install --quiet --no-deps dist/repaired/*.whl
+          "$VENV_PY" ci/assert_no_host_vtk.py
+
       - name: mypy --strict against the shipped stubs
         run: mypy --strict src/pysmesh/viscous.py src/pysmesh/unify.py src/pysmesh/session src/pysmesh/mesher src/pysmesh/__init__.py src/pysmesh/_core.pyi
 
-      - name: VTK pin-drift check (only cross-repo coupling)
+      - name: VTK pin self-consistency (build pin vs compiled binary)
         run: python ci/check_vtk_pin.py
 
       - name: Upload wheel artifact
@@ -85,3 +108,48 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/repaired/*.whl
+
+  # ---------------------------------------------------------------------------------------
+  # Publishing. Both jobs are tag-gated, so nothing leaves this repo until a `v*` tag is
+  # pushed. Authentication is PyPI Trusted Publishing (OIDC): no API token is stored here.
+  # `id-token: write` is what lets the job prove its identity to PyPI; without it the
+  # upload fails with a permissions error.
+  #
+  # A pre-release tag (v4.0.0rc1) goes to TestPyPI only. A final tag (v4.0.0) goes to both.
+  # That ordering is deliberate: a version number on PyPI can be yanked but never reused,
+  # so every release rehearses on TestPyPI first.
+  # ---------------------------------------------------------------------------------------
+
+  publish-testpypi:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pysmesh-wheel
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          # TestPyPI accumulates rehearsal uploads; re-running a tag must not fail the job.
+          skip-existing: true
+
+  publish-pypi:
+    needs: [build, publish-testpypi]
+    # Final releases only. `contains(...rc)` also screens a/b tags out by convention:
+    # keep pre-release tags in the vN.N.NrcN form.
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, 'rc')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pysmesh-wheel
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
