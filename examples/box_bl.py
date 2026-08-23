@@ -5,8 +5,8 @@ on every wall, and prints the result summary. Run from the repo root::
 
     python examples/box_bl.py
 
-Requires the ``pysmesh`` package importable (``src`` on ``PYTHONPATH`` for a dev build) and
-the matching host VTK (checked at import).
+Requires only the ``pysmesh`` package importable (``src`` on ``PYTHONPATH`` for a dev
+build). Since 4.0.0 there is no host VTK requirement; the wheel carries its own.
 """
 
 from __future__ import annotations

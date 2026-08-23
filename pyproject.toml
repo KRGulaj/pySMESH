@@ -4,16 +4,18 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "pysmesh"
-version = "3.4.0"
+version = "4.0.0"
 description = "Python bindings to SALOME SMESH meshing (algorithms, editing, search, medial axis) and OCCT geometry operations"
 readme = "README.md"
 requires-python = ">=3.13"
 license = "LGPL-2.1-only"
 authors = [{ name = "Kajetan R. Gulaj" }]
 keywords = ["mesh", "cfd", "viscous-layers", "smesh", "occt", "prism"]
-# NOTE: VTK is intentionally NOT a dependency. It is resolved at runtime from the host
-# environment and its version is hard-checked at import; bundling or
-# pip-installing a second VTK would defeat the whole purpose of pySMESH.
+# NOTE: VTK is intentionally NOT a dependency, and since 4.0.0 that is because it is
+# bundled privately inside the wheel (name-mangled, alongside OCCT and Boost) rather than
+# resolved from the host environment. No VTK object crosses the Python boundary
+# (tests/test_vtk_privacy.py enforces this), so a private copy cannot collide with a VTK the
+# host loaded for its own use. numpy is the only runtime dependency.
 dependencies = ["numpy>=1.26"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -28,6 +30,8 @@ classifiers = [
 [project.urls]
 Homepage = "https://github.com/KRGulaj/pySMESH"
 Source = "https://github.com/KRGulaj/pySMESH"
+Issues = "https://github.com/KRGulaj/pySMESH/issues"
+Changelog = "https://github.com/KRGulaj/pySMESH/releases"
 
 [tool.pytest.ini_options]
 # Registered so `-m "not slow"` works locally without an unknown-marker warning. CI runs the
@@ -45,5 +49,10 @@ build-dir = "build/{wheel_tag}"
 # explicit step (see .github/workflows/ci.yml). It is not re-run by the build backend.
 
 [tool.scikit-build.wheel]
-py-api = "cp313"
+# NOTE: no `py-api` on purpose. `py-api = "cp313"` would tag the wheel `cp313-abi3`, which
+# promises the CPython stable ABI and tells pip the wheel runs on 3.13 AND every later
+# version. pybind11 does not support Py_LIMITED_API, and `pybind11_add_module` emits a
+# version-locked `_core.cp313-win_amd64.pyd`, so that promise was never true: pip would
+# accept the wheel on 3.14 and the import would then fail. Leaving this unset yields the
+# honest `cp313-cp313` tag. `ci/check_wheel.py` asserts it and fails if abi3 ever returns.
 packages = ["src/pysmesh"]

@@ -15,7 +15,7 @@ Full upstream URLs, commits, and the patch index are in [PROVENANCE.md](PROVENAN
 | **MEFISTO2** `trte.c` (f2c) + **pthread** shim | LGPL-2.1 | **static** in `_core.pyd` | Source in `extern/mefisto2/`, `extern/pthread/` (via `looooo/SMESH`). |
 | **Open CASCADE Technology (OCCT) 8.0.0** | LGPL-2.1 **with the exception** | **dynamic**, DLLs **bundled into the wheel** | LGPL static-linking exception is not even relied on (OCCT is dynamic); the relinking right holds because pySMESH is fully open and rebuildable. Build recipe in PROVENANCE.md. |
 | **Boost 1.90** | BSL-1.0 | **dynamic**, DLLs **bundled into the wheel** | BSL-1.0 is permissive (notice only); this entry is the notice. |
-| **VTK 9.6.2** | BSD-3-Clause | **dynamic**, resolved from the **host** env — **never bundled** | The one runtime dependency shared with the host application, for ABI connectivity: SMESH's SMDS is built on `vtkUnstructuredGrid`, so two VTK copies in one process is the hazard that must be avoided. The version is pinned and hard-checked at import. |
+| **VTK 9.6.2** | BSD-3-Clause | **dynamic**, DLLs **bundled into the wheel** | BSD-3-Clause is permissive (notice only); this entry is the notice. Private to `_core.pyd` since 4.0.0, name-mangled like OCCT/Boost. Only three components are linked (`CommonCore`, `CommonDataModel`, `FiltersVerdict`), so the bundle carries no rendering, IO, or Python-wrapper modules. |
 | **pybind11 3.0.3** | BSD-3-Clause | header-only (compile time) | Notice only; this entry is the notice. |
 | **NumPy** | BSD-3-Clause | runtime (pip dependency) | Notice only. |
 
@@ -49,15 +49,26 @@ import entry per *used* symbol, so a toolkit named in the link line but not refe
 `ci/check_wheel.py` therefore asserts the toolkits that ship today and names these three as
 the ones to add alongside their bindings.
 
-## Why VTK is treated differently from OCCT/Boost
+## Why VTK is now treated the same as OCCT/Boost
 
-OCCT and Boost are private implementation details of `_core.pyd`: their DLLs are bundled
-into the wheel (at repair time) and nothing else in the host process links them, so their
-version is invisible to the host and free to resolve at build time. VTK is **not** private —
-`vtkUnstructuredGrid` objects are shared across the SMESH/host boundary, so the wheel must
-link the *same* VTK the host already loaded. That is enforced by an exact version match
-checked at `import pysmesh` (see `src/pysmesh/__init__.py`); a mismatch raises `ImportError`
-rather than risking a silent ABI crash.
+Up to 3.4.0, VTK was the one shared runtime dependency. The wheel linked the host's VTK and
+`import pysmesh` enforced an exact version match, because `vtkUnstructuredGrid` was assumed
+to be shared across the SMESH/host boundary.
+
+That assumption did not hold. No VTK object ever crossed the boundary. `_core` links only
+three VTK components (`CommonCore`, `CommonDataModel`, `FiltersVerdict`) and every result
+leaves as a NumPy array or BREP bytes, so the host and `_core` never touch each other's VTK
+objects. The sharing bought nothing and cost every consumer an exact-version constraint.
+
+Since 4.0.0 all three of OCCT, Boost and VTK are private implementation details of
+`_core.pyd`. Their DLLs are bundled into the wheel at repair time and name-mangled, so their
+versions are invisible to the host and free to resolve at build time. A consumer may run any
+VTK, or none.
+
+This is safe for exactly one reason, and it is the reason to protect: **no VTK object may
+cross the Python boundary.** The bundled copy is name-mangled, so a `vtkUnstructuredGrid`
+built inside `_core` is a different C++ type from the host's, even at an identical version
+string. `tests/test_vtk_privacy.py` fails the build if a binding ever exports one.
 
 ## Full license texts
 

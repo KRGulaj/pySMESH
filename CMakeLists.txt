@@ -6,8 +6,10 @@
 #   cmake/{Kernel,Geom,SMESH}/CMakeLists.txt     per-module static-lib definitions
 #   src/bindings/                                pybind11 module
 #
-# OCCT + VTK + Boost are dynamic (conda-forge is shared). VTK is resolved at runtime from the
-# host env and MUST NOT be bundled into the wheel; OCCT + Boost DLLs are bundled at repair.
+# OCCT + VTK + Boost are dynamic (conda-forge is shared) and are all build-time only: every
+# one of their DLLs is bundled into the wheel at repair time and name-mangled, so none is
+# resolved from the host env. Before 4.0.0, VTK alone was excluded from the bundle and taken
+# from the host; see docs/reports/v4.md for why that changed.
 
 cmake_minimum_required(VERSION 3.27)
 project(pysmesh LANGUAGES C CXX)
@@ -195,8 +197,9 @@ target_link_libraries(_core PRIVATE
     ${Boost_LIBRARIES})
 
 # --------------------------------------------------------------------------- #
-# _build_info.py — dependency versions + provenance. VTK_VERSION is the ONLY value
-# checked at import (see src/pysmesh/__init__.py); the rest are informational.
+# _build_info.py — dependency versions + provenance. Every value is informational since
+# 4.0.0: VTK is bundled privately into the wheel, so VTK_VERSION records what this binary
+# was built against and is no longer checked against a host at import.
 # --------------------------------------------------------------------------- #
 if(NOT DEFINED PYSMESH_VTK_VERSION)
     set(PYSMESH_VTK_VERSION "${VTK_VERSION}")

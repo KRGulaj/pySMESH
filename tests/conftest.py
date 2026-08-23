@@ -5,12 +5,16 @@
 """Shared pytest setup for pySMESH.
 
 Makes the ``pysmesh`` package (with its native ``_core`` extension and generated
-``_build_info.py``) importable, and its dynamic dependencies (VTK/OCCT/Boost DLLs from the
-host conda env) discoverable on Windows.
+``_build_info.py``) importable.
 
 The CMake build copies ``_core.pyd`` and ``_build_info.py`` into ``src/pysmesh`` for
 in-place import (see the root ``CMakeLists.txt``); here we only need to put the repo's
 ``src`` directory on ``sys.path``.
+
+The ``add_dll_directory`` call below serves the **dev build only**. A local CMake build
+leaves ``_core.pyd`` linked against the conda env's OCCT/Boost/VTK DLLs, which live in
+``Library/bin``. An installed wheel needs none of this: since 4.0.0 delvewheel bundles the
+whole native closure inside the package, so nothing is resolved from the environment.
 """
 
 from __future__ import annotations
