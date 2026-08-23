@@ -301,12 +301,14 @@ the host's, even at an identical version string.
 [tests/test_vtk_privacy.py](tests/test_vtk_privacy.py) fails the build if a
 binding ever exports one.
 
-> **Binary size:** `_core.pyd` is a few MB, and the bundled OCCT, Boost and
-> VTK DLLs add tens of MB. That is the deliberate trade for zero native
-> footprint in the host environment. `_core` links only three VTK components
-> (`CommonCore`, `CommonDataModel`, `FiltersVerdict`), so the bundle carries
-> no rendering, IO, or Python-wrapper modules. CI reports the exact
-> breakdown on every build.
+> **Binary size:** the 4.0.0 wheel is **41 MB**, holding 75 bundled DLLs.
+> OCCT is the largest share at 18.7 MB; private VTK costs 15.7 MB. That is
+> the deliberate trade for zero native footprint in the host environment.
+> `_core` links only three VTK components (`CommonCore`, `CommonDataModel`,
+> `FiltersVerdict`), so the bundle carries no rendering, IO, or
+> Python-wrapper modules: 17 VTK DLLs out of the 187 MB a full VTK install
+> would put in your environment. CI reports the breakdown on every build and
+> fails if the wheel would exceed PyPI's 100 MB limit.
 
 ## Build from source
 
