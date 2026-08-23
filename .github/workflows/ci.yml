@@ -125,6 +125,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/repaired/*.whl
+          # An rc tag must not present itself as the stable download. Without this the
+          # release lands as "Latest" and a visitor grabs a pre-release by default.
+          # Same `rc` convention the publish-pypi gate uses.
+          prerelease: ${{ contains(github.ref, 'rc') }}
 
   # ---------------------------------------------------------------------------------------
   # Publishing. Both jobs are tag-gated, so nothing leaves this repo until a `v*` tag is
