@@ -18,6 +18,9 @@ Reference spec:
 
 from __future__ import annotations
 
+import tempfile
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -164,6 +167,7 @@ def test_write_step_roundtrip_name_and_color(box_brep: bytes) -> None:
     """Names and colours written to STEP survive a read_step_xde round-trip."""
     step_bytes = write_step_xde(
         box_brep,
+        unit="MM",
         name="wing",
         face_names={2: "inlet"},
         face_colors={1: (0.0, 1.0, 0.0)},
@@ -178,7 +182,7 @@ def test_write_step_roundtrip_name_and_color(box_brep: bytes) -> None:
 
 def test_write_step_returns_bytes(box_brep: bytes) -> None:
     """The writer returns STEP file content as bytes beginning with the ISO-10303 header."""
-    step_bytes = write_step_xde(box_brep, name="part")
+    step_bytes = write_step_xde(box_brep, unit="MM", name="part")
     assert isinstance(step_bytes, bytes)
     assert step_bytes.startswith(b"ISO-10303-21;")
 
@@ -186,7 +190,7 @@ def test_write_step_returns_bytes(box_brep: bytes) -> None:
 def test_write_step_bad_face_id_raises(box_brep: bytes) -> None:
     """An out-of-range face id is rejected."""
     with pytest.raises(PysmeshError):
-        write_step_xde(box_brep, face_colors={999: (1.0, 0.0, 0.0)})
+        write_step_xde(box_brep, unit="MM", face_colors={999: (1.0, 0.0, 0.0)})
 
 
 # ---------------------------------------------------------------------------
@@ -228,3 +232,128 @@ def test_public_namespace_exports() -> None:
     assert hasattr(pysmesh, "StepImport")
     assert hasattr(pysmesh, "EntityLabel")
     assert hasattr(pysmesh, "SolidInfo")
+
+
+# ---------------------------------------------------------------------------
+# write_step_xde: the declared length unit (4.0.0)
+#
+# Mirrors the IGES unit contract in test_iges.py. Before 4.0.0 write_step_xde
+# took no unit and emitted OCCT's global default of millimetres whatever the
+# coordinates were, so a metre model round-tripped 1000x smaller with nothing
+# to warn the caller. These tests fail on that behaviour.
+# ---------------------------------------------------------------------------
+
+
+def _solid_extent(brep: bytes) -> np.ndarray:
+    """Bounding-box extent of the first solid, in the BREP's own coordinates."""
+    session = pysmesh.Session()
+    session.add_brep(brep)
+    bbox = session.bounding_boxes(pysmesh.EntityKind.SOLID).bbox[0]
+    return np.asarray(bbox[3:] - bbox[:3], dtype=float)
+
+
+@pytest.mark.parametrize("unit_name", ["MM", "CM", "M", "INCH", "FT", "KM"])
+def test_write_step_does_not_rescale_coordinates(box_brep: bytes, unit_name: str) -> None:
+    """``unit`` labels the coordinates; it never scales them."""
+    before = _solid_extent(box_brep)
+
+    after = _solid_extent(read_step_xde(write_step_xde(box_brep, unit=unit_name)).brep)
+
+    assert np.allclose(after, before, rtol=1e-9)
+
+
+@pytest.mark.parametrize(
+    ("unit_name", "expected_factor"),
+    [("MM", 1.0e-3), ("CM", 1.0e-2), ("M", 1.0), ("INCH", 0.0254), ("FT", 0.3048)],
+)
+def test_write_step_header_declares_requested_unit(
+    box_brep: bytes, unit_name: str, expected_factor: float
+) -> None:
+    """A file written in ``unit`` reads back reporting that unit's factor."""
+    result = read_step_xde(write_step_xde(box_brep, unit=unit_name))
+
+    assert result.length_unit == pytest.approx(expected_factor, rel=1e-12)
+    assert result.unit_name == unit_name
+
+
+def test_write_step_unit_is_case_insensitive(box_brep: bytes) -> None:
+    """Unit names are matched case-insensitively, as in write_iges."""
+    lower = read_step_xde(write_step_xde(box_brep, unit="inch"))
+    upper = read_step_xde(write_step_xde(box_brep, unit="INCH"))
+
+    assert lower.length_unit == upper.length_unit == pytest.approx(0.0254, rel=1e-12)
+
+
+def test_write_step_unknown_unit_raises(box_brep: bytes) -> None:
+    """An unrecognised unit fails loudly rather than falling back to millimetres."""
+    with pytest.raises(PysmeshError, match="unit"):
+        write_step_xde(box_brep, unit="FURLONG")
+
+
+@pytest.mark.parametrize("fixture_name", ["named_box_mm.step", "named_box_m.step"])
+def test_write_step_roundtrip_preserves_physical_size(
+    fixtures_dir: Path, fixture_name: str
+) -> None:
+    """Read a STEP file, re-export it in its own unit, and the physical size survives.
+
+    This is the regression test for the 4.0.0 fix. On the metre fixture the pre-4.0.0
+    writer produced a file 1000x smaller, because it declared millimetres regardless.
+    """
+    original = read_step_xde(str(fixtures_dir / fixture_name))
+    physical_before = _solid_extent(original.brep) * original.length_unit
+
+    reread = read_step_xde(write_step_xde(original.brep, unit=original.unit_name))
+    physical_after = _solid_extent(reread.brep) * reread.length_unit
+
+    assert reread.unit_name == original.unit_name
+    assert reread.length_unit == pytest.approx(original.length_unit, rel=1e-12)
+    assert np.allclose(physical_after, physical_before, rtol=1e-6)
+
+
+def test_read_step_unit_name_matches_length_unit(named_box_m_step_path: str) -> None:
+    """``unit_name`` and ``length_unit`` describe the same unit."""
+    from pysmesh import IGES_UNITS
+
+    result = read_step_xde(named_box_m_step_path)
+
+    assert result.unit_name == "M"
+    assert IGES_UNITS[result.unit_name] == pytest.approx(result.length_unit, rel=1e-12)
+
+
+def test_write_step_unit_does_not_leak_into_iges(box_brep: bytes) -> None:
+    """Writing STEP in one unit must not disturb the IGES writer's unit.
+
+    Both bindings set their unit on their own model rather than on OCCT's global
+    ``Interface_Static``, so neither can affect the other inside one process.
+    """
+    from pysmesh import read_iges, write_iges
+
+    write_step_xde(box_brep, unit="KM")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "after_step.igs"
+        path.write_bytes(write_iges(box_brep, unit="MM"))
+        result = read_iges(str(path))
+
+    assert result.unit_name == "MM"
+    assert result.length_unit == pytest.approx(1.0e-3, rel=1e-12)
+
+
+@pytest.mark.parametrize("unit_name", ["UM", "MIL", "UIN"])
+def test_write_step_extreme_ratio_units_keep_the_unit_but_lose_digits(
+    box_brep: bytes, unit_name: str
+) -> None:
+    """The unit survives on extreme-ratio units; the coordinates lose a little precision.
+
+    A microinch is 2.54e-8 m. OCCT normalises STEP geometry to millimetres internally, so a
+    round trip through such a unit divides and re-multiplies by ~1e-5 and the low digits do
+    not survive. The declared unit is still exact, and the drift is well under a part in 100.
+    Practical CAD units (MM, CM, M, INCH, FT, KM) round-trip exactly; those are covered by
+    ``test_write_step_does_not_rescale_coordinates``.
+    """
+    before = _solid_extent(box_brep)
+
+    result = read_step_xde(write_step_xde(box_brep, unit=unit_name))
+
+    assert result.unit_name == unit_name
+    assert np.allclose(_solid_extent(result.brep), before, rtol=1e-2)

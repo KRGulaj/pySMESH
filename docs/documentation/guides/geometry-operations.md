@@ -32,15 +32,16 @@ colours by their 1-based face id:
 ```python
 data = pysmesh.write_step_xde(
     imported.brep,
+    unit=imported.unit_name,
     name="blade",
     face_names={1: "inlet"},
     face_colors={1: (0.0, 1.0, 0.0)},
 )
 ```
 
-`write_step_xde` has no unit argument. See
-[Units](../concepts/units.md#the-write-contract-differs-between-the-two-formats) for what
-that means in practice.
+`unit` is required and names the unit the coordinates are already in. It labels them and
+never rescales them. Passing `imported.unit_name` makes the export a round trip. See
+[Units](../concepts/units.md#the-write-contract) for the full contract.
 
 ## IGES: `read_iges` / `write_iges`
 
@@ -52,10 +53,10 @@ igs.unit_name       # "MM", "INCH", "M", ...
 pysmesh.write_iges(igs.brep, unit=igs.unit_name)   # re-export, unit-exact
 ```
 
-Unlike `write_step_xde`, `write_iges` takes the unit of the coordinates as an explicit
-argument and declares it in the header without rescaling. See
-[Units](../concepts/units.md) for the full contract, including why `read_iges` takes a path
-and not bytes.
+`write_iges` takes the unit of the coordinates as an explicit argument and declares it in
+the header without rescaling, exactly as `write_step_xde` does. Both accept the same ten
+names. See [Units](../concepts/units.md) for the full contract, including why `read_iges`
+takes a path and not bytes.
 
 ## Tessellation: `tessellate`
 

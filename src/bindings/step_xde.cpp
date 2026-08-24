@@ -8,7 +8,7 @@
 // product names, colours, and the file's length unit, read_step_xde carries all three across
 // the boundary so downstream tooling receives pre-tagged geometry.
 //
-//   read_step_xde(data_or_path) -> {brep, face_labels, solid_labels, length_unit}
+//   read_step_xde(data_or_path) -> {brep, face_labels, solid_labels, length_unit, unit_name}
 //     brep         : the transferred geometry as BREP bytes, in the STEP file's NATIVE length
 //                    unit (no silent rescale — OCCT's default mm scaling is reversed).
 //     length_unit  : metres per model unit (mm -> 0.001, m -> 1.0, inch -> 0.0254). Multiply
@@ -19,9 +19,15 @@
 //                    ids are the 1-based TopExp ordinals of the returned brep, so load_brep()
 //                    on `brep` reproduces exactly these Shape.faces()/.solids() ids.
 //
-//   write_step_xde(brep, face_names, face_colors, name) -> bytes
+//     unit_name    : that unit's name ("MM", "M", "INCH", ...), feedable to write_step_xde.
+//
+//   write_step_xde(brep, unit, face_names, face_colors, name) -> bytes
 //     The near-free XDE round-trip (report §6.6): tag a BREP with a product name and per-face
 //     names/colours and emit STEP bytes via STEPCAFControl_Writer.
+//     `unit` is the unit the coordinates ARE IN. It labels them and never rescales them, the
+//     same contract write_iges carries. Before 4.0.0 there was no unit argument and every
+//     file inherited OCCT's global default of millimetres, so a metre model round-tripped
+//     1000x smaller in silence.
 //
 // OCAF lifetime: the TDocStd_Document is created via the XCAFApp_Application singleton, kept
 // alive only for the read, and every label/colour/name is copied into plain C++ values before
@@ -39,10 +45,12 @@
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <IFSelect_ReturnStatus.hxx>
+#include <Interface_Static.hxx>
 #include <NCollection_Sequence.hxx>
 #include <Quantity_Color.hxx>
 #include <STEPCAFControl_Reader.hxx>
 #include <STEPCAFControl_Writer.hxx>
+#include <STEPControl_Controller.hxx>
 #include <STEPControl_Reader.hxx>
 #include <STEPControl_StepModelType.hxx>
 #include <TCollection_AsciiString.hxx>
@@ -58,7 +66,11 @@
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_ColorTool.hxx>
 #include <XCAFDoc_ColorType.hxx>
+#include <STEPControl_Writer.hxx>
+#include <UnitsMethods_LengthUnit.hxx>
+#include <StepData_StepModel.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
+#include <XCAFDoc_LengthUnit.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Trsf.hxx>
@@ -101,8 +113,105 @@ double metres_per_unit(const TCollection_AsciiString& raw) {
   if (s == "FT" || s == "FOOT" || s == "FEET") return 0.3048;
   if (s == "YD" || s == "YARD") return 0.9144;
   if (s == "MIL" || s == "THOU") return 2.54e-5;
+  if (s == "UIN" || s == "MICROINCH") return 2.54e-8;
+  if (s == "MI" || s == "MILE") return 1609.344;
   return 0.0;  // unknown -> caller keeps OCCT's millimetre normalisation
 }
+
+// The canonical unit name for a metres-per-unit factor, or "" when none matches. The names
+// are the IGES_UNITS keys, so read_step_xde's `unit_name` feeds straight back into
+// write_step_xde or write_iges: one vocabulary serves both formats.
+const char* unit_name_for_metres(double metres) {
+  struct Entry {
+    const char* name;
+    double metres;
+  };
+  // Ordered coarse-to-fine only for readability; lookup is an exact match on the factor,
+  // which is safe because every value here originates from metres_per_unit's own table.
+  static constexpr Entry kTable[] = {
+      {"UIN", 2.54e-8}, {"UM", 1.0e-6},  {"MIL", 2.54e-5}, {"MM", 1.0e-3},
+      {"CM", 1.0e-2},   {"INCH", 0.0254}, {"FT", 0.3048},  {"M", 1.0},
+      {"KM", 1.0e3},    {"MI", 1609.344},
+  };
+  for (const Entry& e : kTable) {
+    if (std::abs(metres - e.metres) <= 1.0e-15 * std::max(1.0, std::abs(e.metres))) {
+      return e.name;
+    }
+  }
+  return "";
+}
+
+// The write vocabulary: the ten IGES_UNITS names, each paired with its metres factor and
+// OCCT's own STEP write-unit code. OCCT's UnitsMethods_LengthUnit enumerates exactly these
+// ten, so the mapping is 1:1 and no unit is silently approximated.
+struct WriteUnit {
+  const char* name;
+  double metres;
+  UnitsMethods_LengthUnit code;
+};
+
+constexpr WriteUnit kWriteUnits[] = {
+    {"UIN", 2.54e-8, UnitsMethods_LengthUnit_Microinch},
+    {"UM", 1.0e-6, UnitsMethods_LengthUnit_Micron},
+    {"MIL", 2.54e-5, UnitsMethods_LengthUnit_Mil},
+    {"MM", 1.0e-3, UnitsMethods_LengthUnit_Millimeter},
+    {"CM", 1.0e-2, UnitsMethods_LengthUnit_Centimeter},
+    {"INCH", 0.0254, UnitsMethods_LengthUnit_Inch},
+    {"FT", 0.3048, UnitsMethods_LengthUnit_Foot},
+    {"M", 1.0, UnitsMethods_LengthUnit_Meter},
+    {"KM", 1.0e3, UnitsMethods_LengthUnit_Kilometer},
+    {"MI", 1609.344, UnitsMethods_LengthUnit_Mile},
+};
+
+// Look up a write unit by name, case-insensitively. Throws with the accepted vocabulary
+// rather than falling back, because a silent fallback here is exactly the mislabelling this
+// argument exists to prevent.
+const WriteUnit& write_unit(const std::string& name) {
+  TCollection_AsciiString upper(name.c_str());
+  upper.UpperCase();
+  const std::string key(upper.ToCString());
+  for (const WriteUnit& u : kWriteUnits) {
+    if (key == u.name) {
+      return u;
+    }
+  }
+  throw PysmeshError("write_step_xde: unknown unit '" + name +
+                     "'. Accepted: UIN, UM, MIL, MM, CM, INCH, FT, M, KM, MI.");
+}
+
+// Sets OCCT's "write.step.unit" for the duration of one export and restores the previous
+// value on every exit path, including an exception.
+//
+// This global is used reluctantly, and only because it is the single lever OCCT exposes for
+// the STEP header's declared unit. Everything else was tried and does not work:
+// StepData_StepModel::SetWriteLengthUnit and DESTEP_Parameters::WriteUnit are both discarded,
+// because STEPCAFControl_Writer::Transfer replaces the writer's model. The document-level
+// XCAFDoc_LengthUnit attribute governs the INPUT unit only.
+//
+// Restoring makes the global invisible outside this call, so concurrent or subsequent writers
+// see whatever they set, and pySMESH never leaves a process-wide unit behind. The GIL is held
+// by the caller for the whole guarded region, so two Python threads cannot interleave here.
+class StepWriteUnitGuard {
+ public:
+  explicit StepWriteUnitGuard(const char* unit_name) {
+    // "write.step.unit" only exists once the STEP controller has registered its statics.
+    // Init() is idempotent and cheap; without it SetCVal fails on a fresh process.
+    STEPControl_Controller::Init();
+    previous_ = Interface_Static::CVal("write.step.unit");
+    if (!Interface_Static::SetCVal("write.step.unit", unit_name)) {
+      throw PysmeshError(std::string("write_step_xde: OCCT rejected write.step.unit '") +
+                         unit_name + "'.");
+    }
+  }
+  ~StepWriteUnitGuard() {
+    Interface_Static::SetCVal("write.step.unit", previous_.ToCString());
+  }
+  StepWriteUnitGuard(const StepWriteUnitGuard&) = delete;
+  StepWriteUnitGuard& operator=(const StepWriteUnitGuard&) = delete;
+
+ private:
+  TCollection_AsciiString previous_;
+};
 
 // Name attached to a shape's XDE label, or "" if none.
 std::string name_of(const occ::handle<XCAFDoc_ShapeTool>& st, const TopoDS_Shape& s) {
@@ -278,6 +387,10 @@ py::dict read_step_xde(const py::object& data_or_path) {
   py::dict result;
   result["brep"] = py::bytes(brep_bytes);
   result["length_unit"] = length_unit;
+  // The same vocabulary write_step_xde and write_iges accept, so a re-export is a round trip
+  // rather than a conversion. "" only when the file declared a unit with no name in that
+  // table; length_unit still carries the factor in that case.
+  result["unit_name"] = std::string(unit_name_for_metres(length_unit));
   result["face_labels"] = face_out;
   result["solid_labels"] = solid_out;
   return result;
@@ -300,9 +413,12 @@ TopoDS_Shape read_brep(const py::bytes& data) {
   return shape;
 }
 
-py::bytes write_step_xde(const py::bytes& brep, const py::dict& face_names,
-                         const py::dict& face_colors, const std::string& name) {
+py::bytes write_step_xde(const py::bytes& brep, const std::string& unit,
+                         const py::dict& face_names, const py::dict& face_colors,
+                         const std::string& name) {
   const TopoDS_Shape shape = read_brep(brep);
+  // Validate before any OCCT work so a bad unit fails immediately and by name.
+  const WriteUnit& out_unit = write_unit(unit);
 
   // Materialise the Python maps into C++ before releasing the GIL.
   std::vector<std::pair<int, std::string>> names;
@@ -325,6 +441,21 @@ py::bytes write_step_xde(const py::bytes& brep, const py::dict& face_names,
     occ::handle<XCAFApp_Application> app = XCAFApp_Application::GetApplication();
     occ::handle<TDocStd_Document> doc;
     app->NewDocument(TCollection_ExtendedString("MDTV-XCAF"), doc);
+
+    // Declare the unit the coordinates are ALREADY in, as an XDE attribute on the document.
+    // STEPCAFControl_Writer::prepareUnit reads exactly this: "finds length units located in
+    // root of label; if it exists, initializes local length unit from it; else initializes
+    // according to Cascade length unit". Setting it on the writer's StepData_StepModel does
+    // NOT work, because prepareUnit re-derives the unit from the document and overwrites it.
+    //
+    // This is a document attribute, never Interface_Static, so OCCT's global
+    // "write.step.unit" is neither read nor written and two writers in one process cannot
+    // disturb each other. Before 4.0.0 no unit was declared at all and every file inherited
+    // that global default of millimetres whatever the coordinates were, so a 2 m box
+    // round-tripped into a 2 mm box with nothing to warn the caller.
+    XCAFDoc_LengthUnit::Set(doc->Main().Root(), TCollection_AsciiString(out_unit.name),
+                            out_unit.metres);
+
     occ::handle<XCAFDoc_ShapeTool> st = XCAFDoc_DocumentTool::ShapeTool(doc->Main());
     occ::handle<XCAFDoc_ColorTool> ct = XCAFDoc_DocumentTool::ColorTool(doc->Main());
 
@@ -354,9 +485,13 @@ py::bytes write_step_xde(const py::bytes& brep, const py::dict& face_names,
                    XCAFDoc_ColorSurf);
     }
 
+    // Declare the header unit for this export only; restored when the guard leaves scope.
+    const StepWriteUnitGuard unit_guard(out_unit.name);
+
     STEPCAFControl_Writer writer;
     writer.SetColorMode(true);
     writer.SetNameMode(true);
+
     if (!writer.Transfer(doc, STEPControl_AsIs)) {
       throw PysmeshError("write_step_xde: STEP transfer failed.");
     }
@@ -377,12 +512,13 @@ void bind_step_xde(py::module_& m) {
   m.def("read_step_xde", &read_step_xde, py::arg("data_or_path"),
         "Import a STEP file (bytes or path) via OCCT XDE. Returns a dict with 'brep' (BREP "
         "bytes in the file's native length unit), 'length_unit' (metres per model unit), "
-        "'face_labels' and 'solid_labels' (name/colour keyed to the returned brep's 1-based "
-        "TopExp ordinals).");
-  m.def("write_step_xde", &write_step_xde, py::arg("brep"), py::arg("face_names"),
-        py::arg("face_colors"), py::arg("name"),
-        "Export a BREP to STEP bytes via OCCT XDE, tagging the product with 'name' and each "
-        "face id (1-based TopExp ordinal) with a name and/or RGB colour.");
+        "'unit_name' (that unit's name, feedable to write_step_xde), 'face_labels' and "
+        "'solid_labels' (name/colour keyed to the returned brep's 1-based TopExp ordinals).");
+  m.def("write_step_xde", &write_step_xde, py::arg("brep"), py::arg("unit"),
+        py::arg("face_names"), py::arg("face_colors"), py::arg("name"),
+        "Export a BREP to STEP bytes via OCCT XDE. 'unit' names the unit the coordinates are "
+        "ALREADY in: it labels them in the header and never rescales them. Tags the product "
+        "with 'name' and each face id (1-based TopExp ordinal) with a name and/or RGB colour.");
 }
 
 }  // namespace pysmesh

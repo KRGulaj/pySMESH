@@ -230,13 +230,20 @@ same 1-based ordinals `Shape.faces()` / `.edges()` / `.solids()` use.
 - **`read_step_xde` / `write_step_xde`**: STEP import/export through OCCT's
   XDE stack, preserving product names, per-face colours, and the file's
   length unit.
-- **`read_iges` / `write_iges`**: IGES import/export. The reader returns
-  the geometry in the file's native unit plus `length_unit` (metres per
-  unit), exactly as `read_step_xde` does. The writer takes the unit of the
-  coordinates as an argument and declares it in the header without
-  rescaling. Neither side reads or writes OCCT's global
-  `Interface_Static` unit, so a file cannot arrive silently normalised or
-  leave silently mislabelled.
+- **`read_iges` / `write_iges`**: IGES import/export, on the same contract.
+
+  Both readers return the geometry in the file's native unit, plus
+  `length_unit` (metres per unit) and `unit_name`. Both writers take that
+  unit as a required argument and declare it in the header without
+  rescaling, so a file cannot arrive silently normalised or leave silently
+  mislabelled. The ten accepted names are the keys of `IGES_UNITS`.
+
+  Neither reader touches OCCT's global `Interface_Static` unit, and neither
+  does the IGES writer. The STEP writer is the one exception: OCCT exposes
+  no per-writer control over the STEP header's unit, so `write_step_xde`
+  sets that global for the duration of one export and restores the previous
+  value on every exit path, including an exception. Nothing leaks out of the
+  call.
 - **`tessellate`**: render-ready triangulation with per-vertex normals.
 - **`offset_shape` / `make_thick_solid`**: B-rep offset and hollowed
   thick-solid operations.
@@ -259,8 +266,11 @@ shape.faces()[0].surface_type   # "Plane" / "Cylinder" / "Cone" / "Sphere" / "To
 
 mask = pysmesh.point_in_solid(imp.brep, points, tol=1e-7)
 
-# IGES carries the same unit contract. Coordinates stay native; the factor comes back with
-# them, and a re-export declares the unit it was handed.
+# Both formats carry the same unit contract. Coordinates stay native, the unit comes back
+# with them, and a re-export declares the unit it was handed.
+imp.length_unit                              # 0.001 for an MM file, 1.0 for a metre file
+pysmesh.write_step_xde(imp.brep, unit=imp.unit_name)   # round trip, unit-exact
+
 igs = pysmesh.read_iges("housing.igs")
 igs.length_unit                              # 0.001 for an MM file, 0.0254 for an INCH file
 pysmesh.write_iges(igs.brep, unit=igs.unit_name)
