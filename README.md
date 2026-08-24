@@ -11,7 +11,7 @@ pipeline needs, as a normal `pip`-installable module.
 Meta:
 
 - **License:** LGPL-2.1-only (see [LICENSE](LICENSE), [NOTICE.md](NOTICE.md))
-- **Platform:** Windows x64, CPython 3.13
+- **Platform:** Windows x64, CPython 3.11 to 3.14
 - **Runtime dependencies:** NumPy. Nothing else. SMESH, OCCT, Boost and VTK all ship
   inside the wheel.
 
@@ -48,9 +48,17 @@ pip install pysmesh
 That is the whole procedure. The wheel is self-contained: SMESH, OCCT, Boost
 and VTK all ship inside it. NumPy is the only thing pip pulls in.
 
-**Platform:** Windows x64, CPython 3.13 only. There are no other wheels. Pip
-will refuse the wheel on any other interpreter rather than install something
-that cannot import.
+**Platform:** Windows x64, CPython 3.11 to 3.14. There is one wheel per
+interpreter and none for other platforms. Pip picks the right one, and
+refuses to install on anything unsupported rather than land something that
+cannot import.
+
+macOS and Linux are not built. The blocker is packaging, not the code: PyPI
+requires Linux wheels to be `manylinux`-tagged, and this build resolves
+OCCT, Boost and VTK from conda-forge, which is a different ABI baseline.
+Supporting Linux properly means building those dependencies from source
+inside a manylinux container. That is planned separately, not skipped by
+oversight.
 
 Wheels are also attached to every
 [GitHub Release](https://github.com/KRGulaj/pySMESH/releases), for pinning a

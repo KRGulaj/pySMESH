@@ -1,7 +1,12 @@
 name: build-test-wheel
 
-# Builds the cp313-win_amd64 wheel, bundles OCCT/Boost (excluding VTK), runs the test suite,
-# and uploads the wheel. On a version tag, the wheel is attached to a GitHub Release.
+# Builds one self-contained win_amd64 wheel per supported CPython (3.11 - 3.14), bundling
+# the whole native closure (OCCT + Boost + VTK), runs the test suite against each, and
+# uploads them. On a version tag the wheels are attached to a GitHub Release and published.
+#
+# One wheel per interpreter is required, not optional: pybind11 has no Py_LIMITED_API
+# support, so `_core` is version-locked (`_core.cp313-win_amd64.pyd`) and no abi3 wheel can
+# cover the range. ci/check_wheel.py fails the build if an abi3 tag ever reappears.
 on:
   push:
     branches: [main]
@@ -20,6 +25,13 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
+    strategy:
+      # A failing leg must not cancel the others: when 3.14 breaks, the 3.11-3.13 results
+      # are the diagnostic that says whether it is version-specific or a real regression.
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12", "3.13", "3.14"]
+    name: build (py${{ matrix.python }})
     defaults:
       run:
         shell: bash -el {0} # login shell so the micromamba env is active
@@ -36,7 +48,14 @@ jobs:
         uses: mamba-org/setup-micromamba@v2
         with:
           environment-file: ci/environment.yml
+          # ci/environment.yml pins python=3.13 as the local-development default; this
+          # overrides it per matrix leg. conda-forge ships vtk 9.6.2 for py310-py314 on
+          # win-64, and OCCT/Boost carry no Python variant, so every leg resolves.
+          create-args: python=${{ matrix.python }}
           cache-environment: true
+          # Per-interpreter cache key. Without it the four legs would share one cache entry
+          # and thrash, each restoring an env built for a different Python.
+          cache-environment-key: env-py${{ matrix.python }}-${{ hashFiles('ci/environment.yml') }}
 
       - name: Assert the tag matches the version it will publish (tags only)
         # Runs before the build so a mismatched tag costs seconds, not a full compile. A
@@ -117,7 +136,9 @@ jobs:
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: pysmesh-wheel
+          # Per-leg name: upload-artifact@v4 rejects duplicate names, so a single shared
+          # name would fail the second leg to finish. The publish jobs glob these back.
+          name: pysmesh-wheel-py${{ matrix.python }}
           path: dist/repaired/*.whl
 
       - name: Attach wheel to GitHub Release (tags only)
@@ -151,8 +172,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: pysmesh-wheel
+          # Collect every matrix leg's wheel into one dist/ before uploading, so the whole
+          # interpreter range publishes as a single release.
+          pattern: pysmesh-wheel-py*
           path: dist
+          merge-multiple: true
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
@@ -171,6 +195,9 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: pysmesh-wheel
+          # Collect every matrix leg's wheel into one dist/ before uploading, so the whole
+          # interpreter range publishes as a single release.
+          pattern: pysmesh-wheel-py*
           path: dist
+          merge-multiple: true
       - uses: pypa/gh-action-pypi-publish@release/v1

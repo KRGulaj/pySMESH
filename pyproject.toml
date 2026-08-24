@@ -6,10 +6,14 @@ build-backend = "scikit_build_core.build"
 name = "pysmesh"
 # Pre-release for the TestPyPI rehearsal. Set back to "4.0.0" before tagging v4.0.0.
 # ci/check_tag_version.py enforces that this matches the tag, so the two cannot drift.
-version = "4.0.0rc1"
+# rc2 is the first rehearsal of the 3.11-3.14 matrix; rc1 was cp313 only.
+version = "4.0.0rc2"
 description = "Python bindings to SALOME SMESH meshing (algorithms, editing, search, medial axis) and OCCT geometry operations"
 readme = "README.md"
-requires-python = ">=3.13"
+# One wheel is built per interpreter in this range (see .github/workflows/ci.yml). pybind11
+# has no Py_LIMITED_API support, so no single abi3 wheel can cover it. 3.10 is deliberately
+# excluded: it reaches end of life in October 2026.
+requires-python = ">=3.11"
 license = "LGPL-2.1-only"
 authors = [{ name = "Kajetan R. Gulaj" }]
 keywords = ["mesh", "cfd", "viscous-layers", "smesh", "occt", "prism"]
@@ -24,7 +28,10 @@ classifiers = [
     # License is declared via the SPDX `license` field above (PEP 639); a `License ::`
     # classifier here would conflict with it.
     "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: C++",
     "Topic :: Scientific/Engineering",
 ]

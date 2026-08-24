@@ -9,7 +9,12 @@ channels:
   - conda-forge
   - nodefaults
 dependencies:
-  - python=3.13
+  # A RANGE, not a pin, and deliberately so. CI builds one wheel per interpreter and passes
+  # `create-args: python=3.X` per matrix leg; an exact pin here would hand the solver two
+  # conflicting python specs and make every non-3.13 leg unsolvable. The range covers the
+  # supported set, so each leg's exact version narrows it instead of contradicting it.
+  # Keep these bounds in lockstep with `requires-python` and the matrix in ci.yml.
+  - python >=3.11,<3.15
   # --- VTK: bundled privately into the wheel since 4.0.0, no longer a host coupling ---
   # Pinned so the headers compiled against and the DLLs delvewheel bundles come from one
   # environment. It is free to move on its own schedule now: bumping it changes only what
