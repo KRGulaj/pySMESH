@@ -525,6 +525,7 @@ def write_iges(brep: bytes, unit: str, brep_mode: bool) -> bytes: ...
 def read_step_xde(data_or_path: bytes | str) -> dict[str, object]: ...
 def write_step_xde(
     brep: bytes,
+    unit: str,
     face_names: dict[int, str],
     face_colors: dict[int, tuple[float, float, float]],
     name: str,

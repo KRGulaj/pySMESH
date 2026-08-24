@@ -61,12 +61,17 @@ class StepImport:
             with :func:`load_brep` to obtain a :class:`Shape` whose ids match the labels below.
         length_unit: Metres per model unit (mm → 0.001, m → 1.0, inch → 0.0254). Multiply BREP
             coordinates by this to reach SI metres.
+        unit_name: The name of that unit, one of the keys of :data:`pysmesh.IGES_UNITS`. Feed
+            it straight back to :func:`write_step_xde` to re-export in the same unit. Empty
+            only when the file declared a unit that table does not name; ``length_unit`` still
+            carries the factor in that case.
         face_labels: Labels for faces carrying a name or colour, keyed by face id.
         solid_labels: Labels for solids carrying a name or colour, keyed by solid id.
     """
 
     brep: bytes
     length_unit: float
+    unit_name: str
     face_labels: tuple[EntityLabel, ...]
     solid_labels: tuple[EntityLabel, ...]
 
@@ -101,6 +106,7 @@ def read_step_xde(data_or_path: StepSource) -> StepImport:
     return StepImport(
         brep=cast("bytes", raw["brep"]),
         length_unit=float(cast("float", raw["length_unit"])),
+        unit_name=str(cast("str", raw["unit_name"])),
         face_labels=tuple(
             _to_label(e, "face_id") for e in cast("list[Mapping[str, object]]", raw["face_labels"])
         ),
@@ -114,14 +120,28 @@ def read_step_xde(data_or_path: StepSource) -> StepImport:
 def write_step_xde(
     brep: bytes,
     *,
+    unit: str,
     name: str = "",
     face_names: Mapping[int, str] | None = None,
     face_colors: Mapping[int, tuple[float, float, float]] | None = None,
 ) -> bytes:
     """Export a BREP to STEP bytes via OCCT XDE, tagging the product and its faces.
 
+    The coordinates are written verbatim: ``unit`` labels them, it does not rescale them.
+    Pass the unit the BREP is actually in, ``"M"`` for an SI-metre model, or
+    ``imported.unit_name`` to re-export what :func:`read_step_xde` returned.
+
+    ``unit`` is required, and deliberately so. Before 4.0.0 this function took no unit and
+    every file went out labelled with OCCT's global default of millimetres, whatever the
+    coordinates were. A 2 m box round-tripped into a 2 mm box with nothing to warn the
+    caller. The unit is now set on this writer's own model, so the global
+    ``Interface_Static`` value is neither read nor written and cannot leak between calls.
+
     Args:
         brep: The shape to export, as BREP bytes.
+        unit: The unit the coordinates are already in, one of the keys of
+            :data:`pysmesh.IGES_UNITS` (``"MM"``, ``"M"``, ``"INCH"``, ...). The same
+            vocabulary :func:`write_iges` accepts.
         name: Product name for the whole shape (omitted when empty).
         face_names: Optional mapping of 1-based face id → name.
         face_colors: Optional mapping of 1-based face id → ``(r, g, b)`` in ``[0, 1]``.
@@ -130,6 +150,7 @@ def write_step_xde(
         The STEP file content as bytes.
 
     Raises:
-        PysmeshError: On a malformed BREP, an out-of-range face id, or a STEP write failure.
+        PysmeshError: On an unknown ``unit``, a malformed BREP, an out-of-range face id, or a
+            STEP write failure.
     """
-    return _write_step_xde(brep, dict(face_names or {}), dict(face_colors or {}), name)
+    return _write_step_xde(brep, unit, dict(face_names or {}), dict(face_colors or {}), name)
