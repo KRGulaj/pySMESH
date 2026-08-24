@@ -1,0 +1,94 @@
+site_name: pySMESH
+site_description: >-
+  Python bindings to SALOME SMESH meshing and Open CASCADE geometry, packaged as one
+  self-contained Windows wheel.
+site_author: Kajetan R. Gulaj
+repo_name: KRGulaj/pySMESH
+repo_url: https://github.com/KRGulaj/pySMESH
+edit_uri: edit/main/docs/documentation/
+copyright: Copyright (C) 2026 Kajetan R. Gulaj. Licensed LGPL-2.1-only.
+
+docs_dir: docs/documentation
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - content.action.edit
+    - toc.follow
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
+  - md_in_html
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            docstring_section_style: table
+            show_root_heading: true
+            show_root_full_path: false
+            show_source: false
+            show_signature_annotations: true
+            separate_signature: true
+            merge_init_into_class: true
+            group_by_category: true
+            members_order: source
+            show_if_no_docstring: false
+            filters:
+              - "!^_"
+
+nav:
+  - Home: index.md
+  - Concepts:
+      - Entity IDs and ordinals: concepts/entity-ids.md
+      - Session: concepts/session.md
+      - Meshing model: concepts/meshing-model.md
+      - Discrete meshes: concepts/discrete-meshes.md
+      - Units: concepts/units.md
+      - VTK privacy: concepts/vtk-privacy.md
+  - Guides:
+      - Getting started: guides/getting-started.md
+      - Geometry operations: guides/geometry-operations.md
+      - Mesh editing: guides/mesh-editing.md
+  - API Reference:
+      - Overview: reference/index.md
+      - Session: reference/session.md
+      - Mesher: reference/mesher.md
+      - Geometry functions: reference/geometry.md
