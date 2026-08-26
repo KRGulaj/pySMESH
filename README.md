@@ -2,6 +2,8 @@
 
 [![PyPI](https://img.shields.io/pypi/v/pysmesh)](https://pypi.org/project/pysmesh/)
 
+![pySMESH](docs/png/poster_frame0_2160p.png)
+
 Python bindings to SALOME SMESH and Open CASCADE (OCCT), packaged as one
 self-contained Windows wheel. No SALOME platform. No CORBA. No GUI.
 
