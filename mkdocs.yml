@@ -87,6 +87,8 @@ nav:
       - Getting started: guides/getting-started.md
       - Geometry operations: guides/geometry-operations.md
       - Mesh editing: guides/mesh-editing.md
+  - Benchmarks:
+      - Tessellation against gmsh: benchmarks/gmsh-vs-pysmesh.md
   - API Reference:
       - Overview: reference/index.md
       - Session: reference/session.md

@@ -65,12 +65,18 @@ lib_refs/
 *.pth
 *.su2
 *.vtu
-*.csv
 .claude/
 CLAUDE.md
 docs/research/
 docs/reports/
 test_files/
+
+# Benchmark harness. The scripts and the raw run data are tracked; the virtualenv, the
+# generated corpus (rebuild with corpus_gen.py) and the run logs are not.
+benchmark/.venv/
+benchmark/corpus/
+benchmark/__pycache__/
+benchmark/results/*.log
 
 # Logs
 logs/

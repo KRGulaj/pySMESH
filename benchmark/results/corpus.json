@@ -1,0 +1,152 @@
+[
+ {
+  "name": "spheres_00001.step",
+  "faces": 1,
+  "solids": 1,
+  "kib": 2.1,
+  "unit": "MM",
+  "length_unit": 0.001,
+  "diag_mm": 34.64,
+  "sha256_16": "85cd55aa071b7421"
+ },
+ {
+  "name": "spheres_00010.step",
+  "faces": 10,
+  "solids": 10,
+  "kib": 21.7,
+  "unit": "MM",
+  "length_unit": 0.001,
+  "diag_mm": 123.69,
+  "sha256_16": "dda438535efc2427"
+ },
+ {
+  "name": "spheres_00100.step",
+  "faces": 100,
+  "solids": 100,
+  "kib": 208.2,
+  "unit": "MM",
+  "length_unit": 0.001,
+  "diag_mm": 226.5,
+  "sha256_16": "8ff1a8de996190d9"
+ },
+ {
+  "name": "spheres_01000.step",
+  "faces": 1000,
+  "solids": 1000,
+  "kib": 2141.5,
+  "unit": "MM",
+  "length_unit": 0.001,
+  "diag_mm": 502.29,
+  "sha256_16": "81c90cebb36d81b7"
+ },
+ {
+  "name": "spheres_05000.step",
+  "faces": 5000,
+  "solids": 5000,
+  "kib": 10958.8,
+  "unit": "MM",
+  "length_unit": 0.001,
+  "diag_mm": 884.7,
+  "sha256_16": "ae1fbb5c463fdfb1"
+ },
+ {
+  "name": "cone.step",
+  "faces": 3,
+  "solids": 1,
+  "kib": 5.6,
+  "unit": "MM",
+  "length_unit": 0.001,
+  "diag_mm": 69.28,
+  "sha256_16": "0d582895e4481a1a"
+ },
+ {
+  "name": "part.step",
+  "faces": 26,
+  "solids": 1,
+  "kib": 60.5,
+  "unit": "M",
+  "length_unit": 1.0,
+  "diag_mm": 213.0,
+  "sha256_16": "46ea7d269b424ad7"
+ },
+ {
+  "name": "wrenchnut.stp",
+  "faces": 36,
+  "solids": 2,
+  "kib": 258.2,
+  "unit": "MM",
+  "length_unit": 0.001,
+  "diag_mm": 433.03,
+  "sha256_16": "dba15ffe7ec4fae9"
+ },
+ {
+  "name": "Kurbelwelle.stp",
+  "faces": 58,
+  "solids": 1,
+  "kib": 78.9,
+  "unit": "MM",
+  "length_unit": 0.001,
+  "diag_mm": 68.31,
+  "sha256_16": "e72b0f347184fbaa"
+ },
+ {
+  "name": "1385_Laufrad_1000.stp",
+  "faces": 123,
+  "solids": 1,
+  "kib": 372.6,
+  "unit": "MM",
+  "length_unit": 0.001,
+  "diag_mm": 2169.31,
+  "sha256_16": "e6003effb8d36766"
+ },
+ {
+  "name": "U_Joint_2.stp",
+  "faces": 133,
+  "solids": 1,
+  "kib": 1176.0,
+  "unit": "INCH",
+  "length_unit": 0.0254,
+  "diag_mm": 138.66,
+  "sha256_16": "b607a4886a1820e9"
+ },
+ {
+  "name": "Zylkopf.stp",
+  "faces": 137,
+  "solids": 1,
+  "kib": 248.1,
+  "unit": "MM",
+  "length_unit": 0.001,
+  "diag_mm": 42.05,
+  "sha256_16": "cd0ced947da2f617"
+ },
+ {
+  "name": "917_fusee.stp",
+  "faces": 249,
+  "solids": 1,
+  "kib": 726.3,
+  "unit": "M",
+  "length_unit": 1.0,
+  "diag_mm": 472.41,
+  "sha256_16": "10c201b8b406a756"
+ },
+ {
+  "name": "Block.stp",
+  "faces": 533,
+  "solids": 1,
+  "kib": 908.1,
+  "unit": "MM",
+  "length_unit": 0.001,
+  "diag_mm": 84.21,
+  "sha256_16": "03de4b2e21961e1f"
+ },
+ {
+  "name": "assembly_5606f.step",
+  "faces": 5606,
+  "solids": 117,
+  "kib": 16296.8,
+  "unit": "M",
+  "length_unit": 1.0,
+  "diag_mm": 5853.43,
+  "sha256_16": "5c64e2ae06d21fcb"
+ }
+]

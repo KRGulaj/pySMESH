@@ -1,0 +1,6 @@
+# Pinned to the exact versions the published results were measured with.
+# Changing any of these invalidates comparison against docs/documentation/benchmarks/.
+gmsh==4.15.2
+pysmesh==4.0.0
+numpy==2.5.3
+psutil==7.2.2
