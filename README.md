@@ -301,7 +301,7 @@ a plain, pip-installable module.
 Doing that also solves a packaging problem. SMESH pulls in OCCT, Boost and
 VTK as dependencies. Installing those directly into a host application's
 environment can trigger a dependency solver cascade that downgrades
-unrelated packages: Qt bindings, MKL, and more. pySMESH's build makes that
+unrelated packages. pySMESH's build makes that
 impossible by construction.
 
 - **SMESH and KERNEL are statically linked** into a single `_core.pyd`.
