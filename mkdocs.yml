@@ -71,6 +71,7 @@ plugins:
             group_by_category: true
             members_order: source
             show_if_no_docstring: false
+            inherited_members: true
             filters:
               - "!^_"
 
