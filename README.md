@@ -144,6 +144,31 @@ for row in np.flatnonzero(~wires.is_outer):        # one row per hole
     hole_edges = wires.edge_id[lo:hi]
 ```
 
+Three queries answer about edges and about the space between entities.
+`curve_geometry` is the curve-side `surface_parameters`: a line's direction, a
+circle's or an ellipse's centre, plane normal and radii, with `NaN` on any
+free-form curve. `curve_at` gives the point and unit tangent at each parameter
+of one edge — along increasing parameter, never flipped for a reversed edge,
+because an edge shared by two faces is FORWARD in one and REVERSED in the
+other. `distance` is the exact minimum distance between any two entities, with
+the witness point on each.
+
+```python
+edges = s.entities(EntityKind.EDGE)
+curves = s.curve_geometry(edges)
+
+# every circular edge under 1 mm across: the rims of small bores
+is_circle = np.array(curves.type) == "Circle"
+rims = curves.edge_id[is_circle & (curves.radius[:, 0] < 1.0)]
+
+first, last = s.edge_parameter_bounds([edges[0]])[0]
+sample = s.curve_at(edges[0], np.linspace(first, last, 32))
+direction = sample.tangents[sample.defined]
+
+# the clearance between two entities, with the witness point on each
+gap = s.distance(faces[0], faces[2])   # gap.distance, gap.point_a, gap.point_b
+```
+
 ## Mesh generation and editing
 
 `Mesher` builds a volume or surface mesh from a shape, using SMESH's own

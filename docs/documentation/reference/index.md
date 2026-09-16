@@ -4,7 +4,7 @@ The concept and guide pages explain how pySMESH's pieces fit together. This sect
 generated reference: every public class and function, with its full Google-style docstring
 and typed signature, rendered directly from source by `mkdocstrings`.
 
-349 of pySMESH's 355 public entities carry a complete docstring, and `src/pysmesh/_core.pyi`
+355 of pySMESH's 361 public entities carry a complete docstring, and `src/pysmesh/_core.pyi`
 gives the native extension's full typed surface, the same file `mypy --strict` checks a
 consuming application against. Nothing here is hand-copied: this page and the three that
 follow it exist to point `mkdocstrings` at the right modules, not to restate what a

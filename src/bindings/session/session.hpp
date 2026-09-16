@@ -92,6 +92,7 @@
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepGProp.hxx>
@@ -170,6 +171,7 @@
 #include <gp_Dir.hxx>
 #include <gp_Elips.hxx>
 #include <gp_GTrsf.hxx>
+#include <gp_Lin.hxx>
 #include <gp_Mat.hxx>
 #include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
@@ -454,6 +456,23 @@ inline std::vector<gp_Pnt> points_of(const char* op, const char* argname,
   out.reserve(static_cast<std::size_t>(a.shape(0)));
   for (py::ssize_t i = 0; i < a.shape(0); ++i) {
     out.emplace_back(p[3 * i + 0], p[3 * i + 1], p[3 * i + 2]);
+  }
+  return out;
+}
+
+// A caller-supplied list of curve parameters: (N,) float64. Forcecast for the same reason
+// PointArray has it — a list of floats or a float32 array is accepted as given.
+inline std::vector<double> scalars_of(const char* op, const char* argname,
+                                      const PointArray& a) {
+  if (a.ndim() != 1) {
+    throw PysmeshError(std::string("Session.") + op + ": " + argname +
+                       " must be a (N,) array of parameters.");
+  }
+  const double* p = a.data();
+  std::vector<double> out;
+  out.reserve(static_cast<std::size_t>(a.shape(0)));
+  for (py::ssize_t i = 0; i < a.shape(0); ++i) {
+    out.push_back(p[i]);
   }
   return out;
 }
@@ -945,6 +964,40 @@ class Session {
   // parametrisation — which is the direction every consumer of a normal actually means.
   py::dict surface_at(EntityId face_id, const PointArray& uv) const;
 
+  // Minimum distance between two entities of any kind, with the witness points.
+  //
+  // The same BRepExtrema_DistShapeShape the stateless shape_distance runs, addressed by
+  // entity id rather than by a pair of BREP blobs. That is the whole difference and it is
+  // the one a session needs: the gap between one bore and one rib is a question about two
+  // sub-shapes of one model, and serialising each of them out to ask it costs more than the
+  // query.
+  //
+  // The two ids must differ. An entity's distance to itself is 0 by construction and its
+  // witness points are arbitrary, so the answer would be a well-formed lie.
+  py::dict distance(EntityId entity_id_a, EntityId entity_id_b) const;
+
+  // Position and unit tangent of one edge at the given parameters.
+  //
+  // The tangent points along INCREASING PARAMETER and is not flipped for a REVERSED edge —
+  // the one place this deliberately parts from surface_at, which does flip. A face belongs
+  // to one shell, so its orientation is a property of the face. An edge shared by two faces
+  // is FORWARD in one wire and REVERSED in the other, so its TopAbs orientation is a
+  // property of the occurrence the traversal happened to reach first, not of the edge. A
+  // flip keyed on it would make the tangent of a box edge depend on which face OCCT visited
+  // first, and would change under an operation that only reorders faces. Increasing
+  // parameter is intrinsic to the edge's own curve and agrees with edge_parameter_bounds.
+  py::dict curve_at(EntityId edge_id, const PointArray& t) const;
+
+  // The analytic parameters of the named edges' underlying curves: a line's direction, a
+  // circle's or an ellipse's centre, plane normal and radii. The curve-side counterpart of
+  // surface_parameters, and it reads the same way — entity_types says an edge is a Circle,
+  // this says how big it is and where.
+  //
+  // Analytic means Line, Circle or Ellipse. Everything else (a B-spline, a Bezier, a
+  // hyperbola, a parabola) reports analytic = false and a row of NaN rather than a stand-in
+  // value, for the reason kUndefined gives in session_query.cpp.
+  py::dict curve_geometry(const std::vector<EntityId>& edge_ids) const;
+
   // Peak absolute curvature of each named face, over an n x n grid of its parameter domain.
   //
   // The grid is the point of the operation. Sampling one point at a face's parametric centre
@@ -1194,6 +1247,21 @@ class Session {
   TopoDS_Face sole_face(const char* op, EntityId id) const;
   TopoDS_Face sole_face(const char* op, EntityId id, const ShapeSet& root_faces) const;
 
+  // The single edge a query names, as the live root holds it. The overload pair and the
+  // cache mirror sole_face's, so a bulk query holds the map across its loop and a per-edge
+  // one pays the traversal once for the model.
+  //
+  // What it does NOT do is fix an orientation. sole_face goes through the root because a
+  // face's orientation there is the one that decides its outward normal; an edge's is the
+  // one its first owning face gave it, which no query here reads (see curve_at). What the
+  // root lookup buys is the same divergence check sole_face makes: an id that is alive in
+  // the registry but names no edge of the shape that exists now is a torn registry, and a
+  // query answering from the record's detached copy would report geometry that is no longer
+  // in the model.
+  const ShapeSet& root_edges() const;
+  TopoDS_Edge sole_edge(const char* op, EntityId id) const;
+  TopoDS_Edge sole_edge(const char* op, EntityId id, const ShapeSet& root_edges) const;
+
   // Bodies for a boolean-family operand list, whatever dimension they are. The boolean
   // family proper takes SOLID ids (solids_of); imprinting deliberately does not, because a
   // face or a wire is a legitimate imprinting tool.
@@ -1377,6 +1445,12 @@ class Session {
   // it is written under the GIL, on the same invariant that makes the queries lock-free.
   mutable TopoDS_Shape faces_cached_for_;
   mutable ShapeSet cached_root_faces_;
+
+  // The root's edge map, on the same terms. Kept separate rather than folded into one
+  // multi-kind cache: the two are invalidated by the same event but a model has several
+  // times as many edges as faces, and a face query must not pay for the edge traversal.
+  mutable TopoDS_Shape edges_cached_for_;
+  mutable ShapeSet cached_root_edges_;
 };
 
 }  // namespace session

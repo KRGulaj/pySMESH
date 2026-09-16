@@ -134,6 +134,9 @@ void bind_session(py::module_& m) {
       .def("adjacency", &Session::adjacency, py::arg("kind"), py::arg("other_kind"))
       .def("face_wires", &Session::face_wires, py::arg("face_ids"))
       .def("surface_at", &Session::surface_at, py::arg("face_id"), py::arg("uv"))
+      .def("distance", &Session::distance, py::arg("entity_id_a"), py::arg("entity_id_b"))
+      .def("curve_at", &Session::curve_at, py::arg("edge_id"), py::arg("t"))
+      .def("curve_geometry", &Session::curve_geometry, py::arg("edge_ids"))
       .def("curvature", &Session::curvature, py::arg("face_ids"), py::arg("samples"))
       .def("project_on_face", &Session::project_on_face, py::arg("face_id"),
            py::arg("points"))

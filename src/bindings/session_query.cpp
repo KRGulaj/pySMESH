@@ -5,8 +5,9 @@
 // pySMESH binding — Session: the geometric query surface over the live shape.
 //
 // Everything a consumer reads from a modelling kernel — types, boxes, mass properties,
-// parameter ranges, adjacency, positions, normals, curvature, projections, containment —
-// answered against the session's own entity ids rather than positional ordinals.
+// parameter ranges, adjacency, positions, normals, tangents, curvature, projections,
+// distances, containment — answered against the session's own entity ids rather than
+// positional ordinals.
 //
 // Two conventions run through the file.
 //
@@ -42,6 +43,28 @@ double cell_centre(double lo, double hi, int i, int n) {
 // "This surface does not define that parameter." Not 0.0: a filter reading `radius1 < 1.0`
 // treats 0.0 as a very small radius and picks up every plane in the model.
 constexpr double kUndefined = std::numeric_limits<double>::quiet_NaN();
+
+// Below this, a first derivative is the null vector rather than a direction. The value is
+// OCCT's own linear null-vector tolerance for local properties — the Resolution argument
+// BRepLProp_SLProps takes, and the one surface_at already passes it.
+constexpr double kNullDerivative = 1e-7;
+
+// The single shape one id denotes, whatever kind it is.
+//
+// The kind-specific resolvers (sole_face, sole_edge) cannot serve a query that takes an
+// entity of any kind, and a split entity has to be refused here for the same reason they
+// refuse one: the caller named one thing and the registry holds several, so which of them
+// the answer is about is genuinely ambiguous.
+const TopoDS_Shape& sole_shape_of(const char* op, const char* argname, EntityId id,
+                                  const EntityRecord& rec) {
+  if (rec.shapes.size() != 1) {
+    throw PysmeshError(std::string("Session.") + op + ": " + argname + " entity " +
+                       std::to_string(id) + " denotes " +
+                       std::to_string(rec.shapes.size()) +
+                       " shapes (it was split); name one of them instead.");
+  }
+  return rec.shapes.front();
+}
 
 // Write one gp_Ax3 into the origin / axis / ref_dir rows of a surface-parameter table.
 void write_frame(const gp_Ax3& frame, double* origin, double* axis, double* ref_dir) {
@@ -513,6 +536,255 @@ py::dict Session::surface_at(EntityId face_id, const PointArray& uv) const {
   out["points"] = points;
   out["normals"] = normals;
   out["defined"] = defined;
+  return out;
+}
+
+py::dict Session::distance(EntityId entity_id_a, EntityId entity_id_b) const {
+  // Refused before either id is resolved, so naming one dead entity twice is reported as
+  // the caller's actual mistake rather than as a dead id.
+  if (entity_id_a == entity_id_b) {
+    throw PysmeshError(
+        "Session.distance: entity_id_a and entity_id_b are both " +
+        std::to_string(entity_id_a) +
+        ". An entity's distance to itself is 0 by construction and its witness points are "
+        "arbitrary; name two entities.");
+  }
+
+  // Resolved under the GIL, so the block below works on handles this call owns.
+  const TopoDS_Shape a =
+      sole_shape_of("distance", "entity_id_a", entity_id_a,
+                    require_alive("distance", entity_id_a));
+  const TopoDS_Shape b =
+      sole_shape_of("distance", "entity_id_b", entity_id_b,
+                    require_alive("distance", entity_id_b));
+
+  double value = 0.0;
+  gp_Pnt pa;
+  gp_Pnt pb;
+  std::int64_t solutions = 0;
+  std::string failure;
+  {
+    py::gil_scoped_release release;
+    try {
+      // The 2-shape constructor performs the computation (default deflection =
+      // Precision::Confusion()); F/A are obsolete per the OCCT 8.0 header. Same call as the
+      // stateless shape_distance, which this does not replace — that one still serves a
+      // caller holding two BREP blobs rather than one session.
+      BRepExtrema_DistShapeShape ext(a, b);
+      if (!ext.IsDone() || ext.NbSolution() < 1) {
+        failure = "BRepExtrema_DistShapeShape returned no solution.";
+      } else {
+        value = ext.Value();
+        solutions = ext.NbSolution();
+        pa = ext.PointOnShape1(1);
+        pb = ext.PointOnShape2(1);
+      }
+    } catch (const std::exception& e) {
+      failure = std::string("BRepExtrema_DistShapeShape raised: ") + e.what();
+    }
+  }
+  if (!failure.empty()) {
+    throw PysmeshError("Session.distance: OCCT found no distance between entities " +
+                           std::to_string(entity_id_a) + " and " +
+                           std::to_string(entity_id_b) + ".",
+                       failure,
+                       {static_cast<int>(entity_id_a), static_cast<int>(entity_id_b)});
+  }
+
+  py::array_t<double> point_a(3);
+  py::array_t<double> point_b(3);
+  double* ap = point_a.mutable_data();
+  double* bp = point_b.mutable_data();
+  ap[0] = pa.X();
+  ap[1] = pa.Y();
+  ap[2] = pa.Z();
+  bp[0] = pb.X();
+  bp[1] = pb.Y();
+  bp[2] = pb.Z();
+
+  py::dict out;
+  out["distance"] = value;
+  out["point_a"] = point_a;
+  out["point_b"] = point_b;
+  out["n_solutions"] = solutions;
+  return out;
+}
+
+py::dict Session::curve_at(EntityId edge_id, const PointArray& t) const {
+  const TopoDS_Edge edge = sole_edge("curve_at", edge_id);
+  const std::vector<double> params = scalars_of("curve_at", "t", t);
+
+  // Built here rather than inside the released-GIL block because the bounds check needs it
+  // first. It reads `edge`, which is this call's own copy, not the session's live state.
+  BRepAdaptor_Curve curve(edge);
+  const double first = curve.FirstParameter();
+  const double last = curve.LastParameter();
+  for (double param : params) {
+    // PConfusion of slack, so a parameter read straight back from edge_parameter_bounds
+    // cannot fail this test on its last bit. Anything further out is a caller error and is
+    // named: evaluating there would extrapolate the basis curve past the edge's trimming
+    // and report a point that is not on the edge.
+    if (param < first - Precision::PConfusion() ||
+        param > last + Precision::PConfusion()) {
+      throw PysmeshError("Session.curve_at: parameter " + std::to_string(param) +
+                         " is outside the bounds of edge " + std::to_string(edge_id) +
+                         " (" + std::to_string(first) + " to " + std::to_string(last) +
+                         "). Read the range from edge_parameter_bounds.");
+    }
+  }
+
+  const auto n = static_cast<py::ssize_t>(params.size());
+  py::array_t<double> points({n, static_cast<py::ssize_t>(3)});
+  py::array_t<double> tangents({n, static_cast<py::ssize_t>(3)});
+  py::array_t<bool> defined(n);
+  double* pp = points.mutable_data();
+  double* tp = tangents.mutable_data();
+  bool* dp = defined.mutable_data();
+
+  {
+    py::gil_scoped_release release;
+    for (py::ssize_t i = 0; i < n; ++i) {
+      gp_Pnt p;
+      gp_Vec d;
+      curve.D1(params[static_cast<std::size_t>(i)], p, d);
+      pp[3 * i + 0] = p.X();
+      pp[3 * i + 1] = p.Y();
+      pp[3 * i + 2] = p.Z();
+      // 1e-7 is the same linear null-vector tolerance surface_at hands BRepLProp_SLProps,
+      // which is what decides its IsNormalDefined. NOT gp::Resolution(): that is DBL_MIN,
+      // so it would pass anything that is not literally zero. A sphere's degenerate pole
+      // edge has |D1| around 1e-16 — rounding noise with a direction in it — and under
+      // gp::Resolution() that noise is reported as the edge's tangent, which is exactly
+      // the faked direction this flag exists to refuse.
+      //
+      // The test is on D1 alone, deliberately. OCCT's BRepLProp_CLProps falls through to D2
+      // and D3 when D1 vanishes, and at a cusp it answers with the first non-null
+      // derivative's direction — a real direction, but not the one the edge is traversed
+      // in, and its sign has nothing to do with increasing parameter. Answering with it
+      // would break the contract on the rows that need it most.
+      dp[i] = d.Magnitude() > kNullDerivative;
+      if (dp[i]) {
+        const gp_Dir dir(d);
+        tp[3 * i + 0] = dir.X();
+        tp[3 * i + 1] = dir.Y();
+        tp[3 * i + 2] = dir.Z();
+      } else {
+        tp[3 * i + 0] = tp[3 * i + 1] = tp[3 * i + 2] = 0.0;
+      }
+    }
+  }
+
+  py::dict out;
+  out["points"] = points;
+  out["tangents"] = tangents;
+  out["defined"] = defined;
+  return out;
+}
+
+py::dict Session::curve_geometry(const std::vector<EntityId>& edge_ids) const {
+  if (edge_ids.empty()) {
+    throw PysmeshError("Session.curve_geometry: edge_ids must name at least one edge.");
+  }
+
+  const auto n = static_cast<py::ssize_t>(edge_ids.size());
+  const auto three = static_cast<py::ssize_t>(3);
+  py::array_t<double> origin({n, three});
+  py::array_t<double> axis({n, three});
+  py::array_t<double> radius({n, static_cast<py::ssize_t>(2)});
+  py::array_t<bool> analytic(n);
+
+  double* op = origin.mutable_data();
+  double* ap = axis.mutable_data();
+  double* rp = radius.mutable_data();
+  bool* yp = analytic.mutable_data();
+
+  // Same contract as surface_parameters: a cell the curve type does not define is NaN, and
+  // only the cells its type actually fills are written. See kUndefined.
+  std::fill(op, op + 3 * n, kUndefined);
+  std::fill(ap, ap + 3 * n, kUndefined);
+  std::fill(rp, rp + 2 * n, kUndefined);
+
+  py::list types;
+  const ShapeSet& edges_in_root = root_edges();
+  for (py::ssize_t i = 0; i < n; ++i) {
+    const TopoDS_Edge edge =
+        sole_edge("curve_geometry", edge_ids[static_cast<std::size_t>(i)], edges_in_root);
+    // BRepAdaptor_Curve is the transformed adaptor, so Line()/Circle()/Ellipse() come back
+    // in model coordinates rather than in the underlying Geom_Curve's local frame. It also
+    // ignores the edge's orientation, which is what makes the axis below the curve's own:
+    // two edges cut from one circle report the same axis whichever way each is oriented.
+    const BRepAdaptor_Curve curve(edge);
+    const GeomAbs_CurveType type = curve.GetType();
+    types.append(py::str(curve_type_name(type)));
+
+    double* o = op + 3 * i;
+    double* a = ap + 3 * i;
+    double* r = rp + 2 * i;
+    switch (type) {
+      case GeomAbs_Line: {
+        const gp_Lin l = curve.Line();
+        const gp_Pnt& loc = l.Location();
+        const gp_Dir& dir = l.Direction();
+        o[0] = loc.X();
+        o[1] = loc.Y();
+        o[2] = loc.Z();
+        a[0] = dir.X();
+        a[1] = dir.Y();
+        a[2] = dir.Z();
+        // No radius, and the row keeps NaN there. A line is analytic all the same: origin
+        // and axis are its whole description.
+        yp[i] = true;
+        break;
+      }
+      case GeomAbs_Circle: {
+        const gp_Circ c = curve.Circle();
+        const gp_Pnt& loc = c.Location();
+        const gp_Dir& dir = c.Axis().Direction();
+        o[0] = loc.X();
+        o[1] = loc.Y();
+        o[2] = loc.Z();
+        a[0] = dir.X();
+        a[1] = dir.Y();
+        a[2] = dir.Z();
+        // Both cells, not one. A caller filtering on "major radius" must not have to know
+        // which of the two analytic types it is looking at to read the right column.
+        r[0] = c.Radius();
+        r[1] = c.Radius();
+        yp[i] = true;
+        break;
+      }
+      case GeomAbs_Ellipse: {
+        const gp_Elips e = curve.Ellipse();
+        const gp_Pnt& loc = e.Location();
+        const gp_Dir& dir = e.Axis().Direction();
+        o[0] = loc.X();
+        o[1] = loc.Y();
+        o[2] = loc.Z();
+        a[0] = dir.X();
+        a[1] = dir.Y();
+        a[2] = dir.Z();
+        r[0] = e.MajorRadius();
+        r[1] = e.MinorRadius();
+        yp[i] = true;
+        break;
+      }
+      default:
+        // Hyperbola, Parabola, Bezier, BSpline, Offset, Other. A hyperbola and a parabola do
+        // have analytic parameters, but not the (centre, axis, two radii) ones this table
+        // holds — a parabola has a focal length and no radius — so they are reported as
+        // non-analytic here rather than squeezed into columns that would misname them.
+        yp[i] = false;
+        break;
+    }
+  }
+
+  py::dict out;
+  out["edge_id"] = ids_array(edge_ids);
+  out["type"] = types;
+  out["analytic"] = analytic;
+  out["origin"] = origin;
+  out["axis"] = axis;
+  out["radius"] = radius;
   return out;
 }
 

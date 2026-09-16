@@ -20,10 +20,18 @@ The cone is the load-bearing fixture. Its sampled peak has a closed form at *eve
 must produce rather than a tolerance band, and the single-sample case falls out of it as
 ``n = 1``.
 
-Two OCCT behaviours are pinned here because a plausible implementation gets both wrong: the
+The curve queries carry the third claim: **an edge's tangent and its curve's axis are
+properties of the curve, not of the edge's orientation.** Six of a box's twelve edges sit
+REVERSED in the root's edge map, so an implementation that flipped on ``TopAbs_REVERSED`` —
+which is what ``surface_at`` correctly does for a *face* — would negate half those rows. That
+asymmetry is deliberate and is gated from both ends: against the line's own direction, and
+against the same line rebuilt as a free edge.
+
+Three OCCT behaviours are pinned here because a plausible implementation gets them wrong: the
 principal curvatures are *signed and ordered by value*, so a cylinder's larger one is 0 and a
-curvature map keyed on it reports every cylinder as flat; and a reversed face's surface
-normal points into the body.
+curvature map keyed on it reports every cylinder as flat; a reversed face's surface normal
+points into the body; and a sphere's degenerate pole edge has a first derivative of about
+1e-16, which is rounding noise with a direction in it rather than a tangent.
 
 Fixture sizing follows the project rule: a 3 x 7 x 11 box, never a unit cube.
 """
@@ -78,6 +86,37 @@ REVOLVE_PROFILE: np.ndarray = np.array(
     [[2.0, 0.0, 0.0], [2.5, 0.0, 1.0], [2.2, 0.0, 2.0], [3.0, 0.0, 3.0]]
 )
 
+# The box and sphere the distance gate is measured between. The sphere's centre is pushed
+# out along a direction with no zero, no repeated component and no simple ratio, and far
+# enough that it clears the box in all three axes at once: the nearest point is then a
+# corner, and the contact direction is oblique everywhere rather than along a face normal.
+GAP_BOX_LO: np.ndarray = np.array([0.37, -2.9, 4.2])
+GAP_BOX_HI: np.ndarray = GAP_BOX_LO + np.array([BOX_DX, BOX_DY, BOX_DZ])
+GAP_DIRECTION: np.ndarray = np.array([2.1, -4.3, 7.9])
+GAP_OFFSET: float = 9.0
+GAP_SPHERE_R: float = 0.83
+SPHERE_CENTRE: np.ndarray = 0.5 * (GAP_BOX_LO + GAP_BOX_HI) + GAP_OFFSET * (
+    GAP_DIRECTION / np.linalg.norm(GAP_DIRECTION)
+)
+
+# The gap between two stacked boxes, for the non-unique-minimum case.
+PLATE_GAP: float = 2.6
+
+# A circle and an ellipse in one tilted plane, neither at the origin nor axis-aligned.
+TILTED_CENTRE: tuple[float, float, float] = (1.7, -0.62, 2.35)
+TILTED_NORMAL: tuple[float, float, float] = (0.43, -0.91, 0.72)
+CIRCLE_R: float = 0.37
+ELLIPSE_CENTRE: tuple[float, float, float] = (-0.85, 1.43, -2.06)
+ELLIPSE_RX: float = 0.7
+ELLIPSE_RY: float = 0.37
+
+# A line and a B-spline, for the analytic / not-analytic split.
+LINE_START: tuple[float, float, float] = (0.31, -1.2, 0.4)
+LINE_END: tuple[float, float, float] = (2.83, 1.66, -0.95)
+SPLINE_POLES: np.ndarray = np.array(
+    [[0.31, -1.2, 0.4], [1.7, 0.9, -0.6], [3.1, -0.4, 1.9], [4.4, 2.2, 0.8]]
+)
+
 
 # ---- oracles -------------------------------------------------------------------------- #
 
@@ -112,6 +151,32 @@ def face_centre_uv(session: Session, face: EntityId) -> np.ndarray:
     return np.array([[0.5 * (umin + umax), 0.5 * (vmin + vmax)]])
 
 
+def circle_point(degrees: float) -> tuple[float, float, float]:
+    """A point on the tilted reference circle, at the given angle in its own plane.
+
+    The frame is built here rather than read back from the session, so an arc fitted through
+    three of these points is checked against geometry the test owns.
+    """
+    normal = np.asarray(TILTED_NORMAL) / np.linalg.norm(TILTED_NORMAL)
+    x_dir = np.cross(normal, [0.0, 0.0, 1.0])
+    x_dir /= np.linalg.norm(x_dir)
+    y_dir = np.cross(normal, x_dir)
+    angle = math.radians(degrees)
+    point = np.asarray(TILTED_CENTRE) + CIRCLE_R * (
+        math.cos(angle) * x_dir + math.sin(angle) * y_dir
+    )
+    return (float(point[0]), float(point[1]), float(point[2]))
+
+
+def face_at_height(session: Session, z: float) -> EntityId:
+    """The single horizontal face of the model lying at the given z."""
+    table = session.bounding_boxes(EntityKind.FACE)
+    flat = np.isclose(table.bbox[:, 2], z) & np.isclose(table.bbox[:, 5], z)
+    matches = [EntityId(int(i)) for i in table.ids[flat]]
+    assert len(matches) == 1, f"expected one face at z = {z}, got {len(matches)}"
+    return matches[0]
+
+
 # ---- fixtures ------------------------------------------------------------------------- #
 
 
@@ -139,6 +204,34 @@ def bored_box() -> Session:
     s.add_cylinder(HOLE_RADIUS, BOX_DZ + 2.0, origin=(*BOX_CENTRE[:2], -1.0))
     solid, tool = ids_of(s, EntityKind.SOLID)
     s.cut([solid], [tool])
+    return s
+
+
+@pytest.fixture
+def gapped() -> Session:
+    """A 3 x 7 x 11 box and a sphere of radius 0.83 set past one of its corners."""
+    s = Session()
+    s.add_box(BOX_DX, BOX_DY, BOX_DZ, origin=tuple(GAP_BOX_LO))
+    s.add_sphere(GAP_SPHERE_R, centre=tuple(SPHERE_CENTRE))
+    return s
+
+
+@pytest.fixture
+def tilted_circle() -> Session:
+    """One circular edge of radius 0.37, in a plane that is tilted to all three axes."""
+    s = Session()
+    s.add_circle(TILTED_CENTRE, TILTED_NORMAL, CIRCLE_R)
+    return s
+
+
+@pytest.fixture
+def curves() -> Session:
+    """One circle, one ellipse, one line and one B-spline, in that order."""
+    s = Session()
+    s.add_circle(TILTED_CENTRE, TILTED_NORMAL, CIRCLE_R)
+    s.add_ellipse(ELLIPSE_CENTRE, TILTED_NORMAL, ELLIPSE_RX, ELLIPSE_RY)
+    s.add_line(LINE_START, LINE_END)
+    s.add_bspline(SPLINE_POLES)
     return s
 
 
@@ -967,6 +1060,344 @@ def test_face_wires_rejects_an_edge_id(box: Session) -> None:
         box.face_wires([edge])
 
 
+# ================================================================ Entity distance ==
+
+
+def test_distance_between_a_box_and_a_sphere_matches_the_closed_form(
+    gapped: Session,
+) -> None:
+    """The gap has a closed form, so the gate asserts the value rather than a band.
+
+    The nearest point of an axis-aligned box to an exterior point is that point clamped
+    componentwise into the box, and the nearest point of a sphere is its centre pulled one
+    radius towards the target. The box-to-sphere gap is therefore
+    ``|clip(C, lo, hi) - C| - r``. The centre sits past a *corner* of the box, so the
+    contact direction is oblique in all three axes rather than along a face normal.
+    """
+    solid_a, solid_b = ids_of(gapped, EntityKind.SOLID)
+
+    result = gapped.distance(solid_a, solid_b)
+
+    nearest = np.clip(SPHERE_CENTRE, GAP_BOX_LO, GAP_BOX_HI)
+    expected = float(np.linalg.norm(nearest - SPHERE_CENTRE)) - GAP_SPHERE_R
+    assert result.distance == pytest.approx(expected, abs=1e-9)
+    assert result.n_solutions == 1
+
+
+def test_each_distance_witness_point_lies_on_its_own_entity(gapped: Session) -> None:
+    """A distance whose witness points are not ON the entities is a number, not a fact."""
+    solid_a, solid_b = ids_of(gapped, EntityKind.SOLID)
+
+    result = gapped.distance(solid_a, solid_b)
+
+    nearest = np.clip(SPHERE_CENTRE, GAP_BOX_LO, GAP_BOX_HI)
+    assert result.point_a == pytest.approx(nearest, abs=1e-9)
+    on_sphere = float(np.linalg.norm(result.point_b - SPHERE_CENTRE))
+    assert on_sphere == pytest.approx(GAP_SPHERE_R, abs=1e-9)
+    span = float(np.linalg.norm(result.point_b - result.point_a))
+    assert span == pytest.approx(result.distance, abs=1e-9)
+
+
+def test_a_vertex_of_a_solid_is_at_no_distance_from_a_face_that_owns_it(
+    box: Session,
+) -> None:
+    """Touching entities read exactly 0.0, not a tolerance-sized residue."""
+    face = ids_of(box, EntityKind.FACE)[0]
+    pairs = box.adjacency(EntityKind.FACE, EntityKind.VERTEX)
+    vertex = EntityId(int(pairs.related[pairs.ids == face][0]))
+
+    result = box.distance(vertex, face)
+
+    assert result.distance == 0.0
+
+
+def test_distance_reports_a_minimum_that_is_attained_more_than_once() -> None:
+    """Two facing parallel planes meet their minimum over a region, not at one point.
+
+    ``n_solutions`` is what says so. A caller reading only ``point_a`` would otherwise take
+    one arbitrary member of that region for the whole answer.
+    """
+    s = Session()
+    s.add_box(BOX_DX, BOX_DY, BOX_DZ, origin=tuple(GAP_BOX_LO))
+    lifted = GAP_BOX_LO[2] + BOX_DZ + PLATE_GAP
+    s.add_box(BOX_DX, BOX_DY, BOX_DZ, origin=(*GAP_BOX_LO[:2], lifted))
+    lower = face_at_height(s, GAP_BOX_LO[2] + BOX_DZ)
+    upper = face_at_height(s, lifted)
+
+    result = s.distance(lower, upper)
+
+    assert result.distance == pytest.approx(PLATE_GAP, rel=EXACT_RTOL)
+    assert result.n_solutions > 1
+
+
+def test_distance_from_an_entity_to_itself_is_refused(box: Session) -> None:
+    """0.0 with arbitrary witness points is a well-formed lie; the query refuses instead."""
+    solid = ids_of(box, EntityKind.SOLID)[0]
+
+    with pytest.raises(ps.PysmeshError, match="both"):
+        box.distance(solid, solid)
+
+
+def test_distance_rejects_an_id_the_session_never_issued(box: Session) -> None:
+    solid = ids_of(box, EntityKind.SOLID)[0]
+
+    with pytest.raises(ps.PysmeshError, match="ever issued"):
+        box.distance(solid, EntityId(10_000))
+
+
+# ================================================================== Curve sampling ==
+
+
+def test_curve_at_walks_a_tilted_circle(tilted_circle: Session) -> None:
+    """A circle's point and its tangent both have closed forms, and both are asserted.
+
+    For a circle of radius r about unit axis n, the radius vector at any parameter has
+    length r and is perpendicular to n, and the tangent along increasing parameter is
+    exactly ``n x (P - C) / r``. That identity pins the tangent's *direction*, not merely
+    its perpendicularity, so a sign error cannot pass. The parameter is the angle, so two
+    samples 136 degrees apart must subtend 136 degrees at the centre.
+    """
+    edge = ids_of(tilted_circle, EntityKind.EDGE)[0]
+    first = math.radians(31.0)
+    second = math.radians(167.0)
+
+    sample = tilted_circle.curve_at(edge, [first, second])
+
+    axis = tilted_circle.curve_geometry([edge]).axis[0]
+    radii = sample.points - np.asarray(TILTED_CENTRE)
+    assert np.linalg.norm(radii, axis=1) == pytest.approx(CIRCLE_R, abs=1e-12)
+    assert radii @ axis == pytest.approx([0.0, 0.0], abs=1e-12)
+    assert bool(sample.defined.all())
+    lengths = np.linalg.norm(sample.tangents, axis=1)
+    assert lengths == pytest.approx([1.0, 1.0], abs=1e-12)
+    assert np.cross(axis, radii) / CIRCLE_R == pytest.approx(sample.tangents, abs=1e-12)
+    subtended = math.acos(float(radii[0] @ radii[1]) / CIRCLE_R**2)
+    assert subtended == pytest.approx(second - first, abs=1e-12)
+
+
+def test_curve_at_reproduces_a_lines_own_parametrisation(box: Session) -> None:
+    """A line's parameter is arc length from its origin: ``P(t) = O + t * A``, exactly."""
+    edge = ids_of(box, EntityKind.EDGE)[0]
+    row = box.curve_geometry([edge])
+    first, last = box.edge_parameter_bounds([edge])[0]
+    params = np.array([first, 0.5 * (first + last), last])
+
+    sample = box.curve_at(edge, params)
+
+    expected = row.origin[0] + params[:, None] * row.axis[0]
+    assert sample.points == pytest.approx(expected, abs=1e-12)
+
+
+def test_a_tangent_is_not_flipped_by_the_edges_orientation(box: Session) -> None:
+    """The tangent follows increasing parameter whatever orientation the edge carries.
+
+    Six of a box's twelve edges sit REVERSED in the root's edge map — the traversal reaches
+    each through one of its two owning faces first — so an implementation that flipped on
+    ``TopAbs_REVERSED`` would negate the tangent on half of these rows. Every row must
+    instead agree with the underlying line's own direction, which ``curve_geometry`` reports
+    and which no orientation touches.
+    """
+    edges = ids_of(box, EntityKind.EDGE)
+    rows = box.curve_geometry(edges)
+    bounds = box.edge_parameter_bounds(edges)
+
+    for i, edge in enumerate(edges):
+        middle = 0.5 * (bounds[i, 0] + bounds[i, 1])
+        tangent = box.curve_at(edge, [middle]).tangents[0]
+        assert tangent == pytest.approx(rows.axis[i], abs=1e-12)
+
+
+def test_a_box_edge_and_the_same_line_as_a_free_edge_share_one_tangent(
+    box: Session,
+) -> None:
+    """The same geometry read from a solid and from a free edge must answer alike.
+
+    A free edge built by :meth:`Session.add_line` is FORWARD; a box edge may be REVERSED.
+    Each pair here is built from one line — same origin, same direction, same parameter
+    range — so an orientation-dependent tangent would show up as a sign flip between them.
+    """
+    edges = ids_of(box, EntityKind.EDGE)
+    rows = box.curve_geometry(edges)
+    bounds = box.edge_parameter_bounds(edges)
+
+    for i, edge in enumerate(edges):
+        first, last = bounds[i]
+        origin, axis = rows.origin[i], rows.axis[i]
+        free = Session()
+        free.add_line(tuple(origin + first * axis), tuple(origin + last * axis))
+        twin = ids_of(free, EntityKind.EDGE)[0]
+        twin_first, twin_last = free.edge_parameter_bounds([twin])[0]
+
+        in_solid = box.curve_at(edge, [0.5 * (first + last)]).tangents[0]
+        as_free = free.curve_at(twin, [0.5 * (twin_first + twin_last)]).tangents[0]
+
+        assert in_solid == pytest.approx(as_free, abs=1e-12)
+
+
+def test_a_degenerate_edge_reports_no_tangent() -> None:
+    """A sphere's pole edges collapse to a point, and a direction there would be invented.
+
+    Their first derivative is around 1e-16 — rounding noise that still has a direction in
+    it. The flag must read False and the row must be zeros, rather than that noise
+    normalised and passed off as the edge's tangent.
+    """
+    s = Session()
+    s.add_sphere(SPHERE_R, centre=(0.4, -1.1, 0.7))
+    edges = ids_of(s, EntityKind.EDGE)
+    lengths = s.mass_properties(edges).measure
+    degenerate = [e for e, length in zip(edges, lengths) if length < 1e-9]
+    assert len(degenerate) == 2, "a full sphere has two degenerate pole edges"
+
+    for edge in degenerate:
+        first, last = s.edge_parameter_bounds([edge])[0]
+        sample = s.curve_at(edge, np.linspace(first, last, 5))
+
+        assert not bool(sample.defined.any())
+        assert np.all(sample.tangents == 0.0)
+
+
+@pytest.mark.parametrize("past", [-0.25, TAU + 0.25])
+def test_curve_at_rejects_a_parameter_outside_the_edges_bounds(
+    tilted_circle: Session, past: float
+) -> None:
+    edge = ids_of(tilted_circle, EntityKind.EDGE)[0]
+
+    with pytest.raises(ps.PysmeshError, match="outside the bounds"):
+        tilted_circle.curve_at(edge, [past])
+
+
+def test_curve_at_accepts_both_ends_of_the_reported_range(
+    tilted_circle: Session,
+) -> None:
+    """A parameter read straight back from edge_parameter_bounds must not be refused."""
+    edge = ids_of(tilted_circle, EntityKind.EDGE)[0]
+    first, last = tilted_circle.edge_parameter_bounds([edge])[0]
+
+    sample = tilted_circle.curve_at(edge, [first, last])
+
+    assert sample.points.shape == (2, 3)
+    assert sample.points[0] == pytest.approx(sample.points[1], abs=1e-12)
+
+
+def test_curve_at_rejects_a_face_id(box: Session) -> None:
+    face = ids_of(box, EntityKind.FACE)[0]
+
+    with pytest.raises(ps.PysmeshError, match="not an EDGE"):
+        box.curve_at(face, [0.0])
+
+
+def test_curve_at_of_no_parameters_is_empty(box: Session) -> None:
+    edge = ids_of(box, EntityKind.EDGE)[0]
+
+    sample = box.curve_at(edge, [])
+
+    assert sample.points.shape == (0, 3)
+    assert sample.tangents.shape == (0, 3)
+    assert sample.defined.shape == (0,)
+
+
+# ========================================================= Analytic curve parameters ==
+
+
+def test_curve_geometry_reads_every_analytic_curve_in_one_call(curves: Session) -> None:
+    """One call over a circle, an ellipse, a line and a B-spline, asserted row by row."""
+    edges = ids_of(curves, EntityKind.EDGE)
+
+    table = curves.curve_geometry(edges)
+
+    assert table.type == ("Circle", "Ellipse", "Line", "BSpline")
+    assert table.analytic.tolist() == [True, True, True, False]
+    assert np.array_equal(table.edge_id, np.asarray(edges))
+
+    normal = np.asarray(TILTED_NORMAL) / np.linalg.norm(TILTED_NORMAL)
+    assert table.origin[0] == pytest.approx(TILTED_CENTRE, abs=1e-12)
+    assert table.axis[0] == pytest.approx(normal, abs=1e-12)
+    assert table.radius[0] == pytest.approx([CIRCLE_R, CIRCLE_R], abs=1e-12)
+
+    assert table.origin[1] == pytest.approx(ELLIPSE_CENTRE, abs=1e-12)
+    assert table.axis[1] == pytest.approx(normal, abs=1e-12)
+    assert table.radius[1] == pytest.approx([ELLIPSE_RX, ELLIPSE_RY], abs=1e-12)
+
+    span = np.asarray(LINE_END) - np.asarray(LINE_START)
+    assert table.origin[2] == pytest.approx(LINE_START, abs=1e-12)
+    assert table.axis[2] == pytest.approx(span / np.linalg.norm(span), abs=1e-12)
+    assert np.all(np.isnan(table.radius[2]))
+
+
+def test_a_free_form_edge_reports_no_curve_parameters_at_all(curves: Session) -> None:
+    """NaN, never 0.0 — a zero radius would pass a ``radius < 1.0`` filter."""
+    spline = ids_of(curves, EntityKind.EDGE)[3]
+
+    row = curves.curve_geometry([spline])
+
+    assert row.type == ("BSpline",)
+    assert not bool(row.analytic[0])
+    assert np.all(np.isnan(row.origin[0]))
+    assert np.all(np.isnan(row.axis[0]))
+    assert np.all(np.isnan(row.radius[0]))
+
+
+def test_two_edges_of_one_circle_report_the_same_axis() -> None:
+    """Two arcs of one circle describe the same circle, so they must describe it alike.
+
+    The axis is read off the curve rather than off the edge, so a consumer can group arcs
+    that share a bore by comparing centre, axis and radius. Both arcs run in the same
+    rotational sense: reversing the sense is a genuinely different plane orientation, not an
+    orientation flag on one curve.
+    """
+    s = Session()
+    s.add_arc(circle_point(10.0), circle_point(70.0), circle_point(130.0))
+    s.add_arc(circle_point(130.0), circle_point(240.0), circle_point(350.0))
+    first, second = ids_of(s, EntityKind.EDGE)
+
+    table = s.curve_geometry([first, second])
+
+    assert table.type == ("Circle", "Circle")
+    assert table.axis[0] == pytest.approx(table.axis[1], abs=1e-12)
+    assert table.origin[0] == pytest.approx(table.origin[1], abs=1e-12)
+    assert table.radius[0] == pytest.approx(table.radius[1], abs=1e-12)
+    assert table.origin[0] == pytest.approx(TILTED_CENTRE, abs=1e-12)
+    assert table.radius[0] == pytest.approx([CIRCLE_R, CIRCLE_R], abs=1e-12)
+
+
+def test_a_curves_axis_does_not_depend_on_the_edges_orientation(box: Session) -> None:
+    """Half of a box's root edges are REVERSED, and not one axis may point backwards.
+
+    A box's twelve edges run along +x, +y and +z. If the axis were taken from the edge
+    rather than from its curve, the six reversed ones would report the negated direction.
+    """
+    edges = ids_of(box, EntityKind.EDGE)
+
+    table = box.curve_geometry(edges)
+
+    assert set(table.type) == {"Line"}
+    for axis in table.axis:
+        matches = [a for a in np.eye(3) if np.allclose(axis, a, atol=1e-12)]
+        assert len(matches) == 1, f"axis {axis} is not one of +x, +y, +z"
+
+
+def test_curve_geometry_follows_the_order_named(curves: Session) -> None:
+    edges = ids_of(curves, EntityKind.EDGE)
+    reordered = [edges[2], edges[0], edges[3], edges[1]]
+
+    table = curves.curve_geometry(reordered)
+
+    assert np.array_equal(table.edge_id, np.asarray(reordered))
+    assert table.type == ("Line", "Circle", "BSpline", "Ellipse")
+
+
+def test_curve_geometry_rejects_an_empty_edge_list(box: Session) -> None:
+    with pytest.raises(ps.PysmeshError, match="at least one edge"):
+        box.curve_geometry([])
+
+
+def test_curve_geometry_rejects_a_face_id(box: Session) -> None:
+    face = ids_of(box, EntityKind.FACE)[0]
+
+    with pytest.raises(ps.PysmeshError, match="not an EDGE"):
+        box.curve_geometry([face])
+
+
 # ============================================== The root the queries resolve against ==
 
 
@@ -1029,6 +1460,9 @@ def test_no_query_advances_the_session(box: Session) -> None:
     box.surface_parameters([face])
     box.face_wires([face])
     box.surface_at(face, face_centre_uv(box, face))
+    box.curve_at(edge, [0.0])
+    box.curve_geometry([edge])
+    box.distance(solid, face)
     box.curvature([face], samples=4)
     box.project_on_face(face, [BOX_CENTRE])
     box.entities_in_box(EntityKind.FACE, (0.0, 0.0, 0.0), (1.0, 1.0, 1.0))

@@ -518,6 +518,83 @@ class SurfaceSample:
 
 
 @dataclass(frozen=True)
+class CurveSample:
+    """Positions and unit tangents of one edge at requested parameters.
+
+    **The tangent points along increasing parameter**, and is *not* flipped for a reversed
+    edge. This is the one place the curve surface parts from :class:`SurfaceSample`, which
+    does flip, and the asymmetry is deliberate. A face belongs to one shell, so REVERSED is a
+    property of that face and decides its outward normal. An edge shared by two faces is
+    FORWARD in one wire and REVERSED in the other, so its orientation is a property of the
+    occurrence OCCT's traversal reached first — flipping on it would make a box edge's
+    tangent depend on face order, and change it under an operation that only reorders faces.
+    Increasing parameter is intrinsic to the edge's own curve, and it is the direction
+    :meth:`Session.edge_parameter_bounds` measures.
+
+    Attributes:
+        points: (N, 3) float64 — the curve point at each parameter.
+        tangents: (N, 3) float64 — the unit tangent along increasing parameter. Zero where
+            ``defined`` is False.
+        defined: (N,) bool — whether a tangent exists at that parameter. It does not on a
+            degenerate edge, where the first derivative is the null vector: a sphere's pole,
+            a cone's apex.
+    """
+
+    points: NDArray[np.float64]
+    tangents: NDArray[np.float64]
+    defined: NDArray[np.bool_]
+
+
+@dataclass(frozen=True)
+class CurveParameterTable:
+    """Analytic parameters of named edges' underlying curves, in the order named.
+
+    The curve-side counterpart of :class:`SurfaceParameterTable`, and it reads the same way:
+    :class:`TypeTable` says an edge is a ``"Circle"``, this says how big it is and where.
+
+    **Analytic means Line, Circle or Ellipse.** Everything else — a B-spline, a Bezier, a
+    hyperbola, a parabola — reports ``analytic`` False with ``origin``, ``axis`` and
+    ``radius`` all NaN. A hyperbola and a parabola do have analytic parameters, but not the
+    centre-axis-radii ones this table holds, so they are reported as absent rather than
+    squeezed into columns that would misname them. Filter on ``analytic``, or on
+    ``np.isfinite``; never read a 0.0 that is not there.
+
+    **``axis`` is the curve's own, not the edge's.** It is taken unflipped, so two edges cut
+    from one circle report the same axis whichever way each is oriented.
+
+    What each type fills in:
+
+    ============  ====================================================================
+    ``Line``      ``origin`` = a point on the line, ``axis`` = its direction. ``radius``
+                  stays NaN.
+    ``Circle``    ``origin`` = the centre, ``axis`` = the normal of its plane,
+                  ``radius`` = ``(r, r)``.
+    ``Ellipse``   ``origin`` = the centre, ``axis`` = the normal of its plane,
+                  ``radius`` = ``(major, minor)``.
+    everything    nothing; the whole row is NaN and ``analytic`` is False.
+    else
+    ============  ====================================================================
+
+    Attributes:
+        edge_id: (N,) int64, as given.
+        type: One curve type name per row, spelled exactly as :class:`TypeTable` spells it.
+        analytic: (N,) bool — whether this row carries parameters at all.
+        origin: (N, 3) float64 — see the table above.
+        axis: (N, 3) float64 — unit. See the table above.
+        radius: (N, 2) float64 — major then minor. Both cells hold the same value for a
+            circle, so a filter on "major radius" reads one column for both analytic
+            curved types.
+    """
+
+    edge_id: NDArray[np.int64]
+    type: tuple[str, ...]
+    analytic: NDArray[np.bool_]
+    origin: NDArray[np.float64]
+    axis: NDArray[np.float64]
+    radius: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
 class CurvatureTable:
     """Peak absolute curvature of named faces, and where on each face it occurs.
 
@@ -552,6 +629,26 @@ class Projection:
     points: NDArray[np.float64]
     uv: NDArray[np.float64]
     distance: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class EntityDistance:
+    """Minimum distance between two entities, and the witness point on each.
+
+    Attributes:
+        distance: The minimum distance. ``0.0`` when the two entities touch or intersect.
+        point_a: (3,) float64 — the witness point on the first entity.
+        point_b: (3,) float64 — the witness point on the second.
+        n_solutions: How many solution pairs OCCT found. More than one means the minimum is
+            attained at several places — two parallel planar faces, a circle and its centre.
+            ``point_a`` and ``point_b`` are the first pair; the rest are not returned, and
+            this count is what says the answer is not the only one.
+    """
+
+    distance: float
+    point_a: NDArray[np.float64]
+    point_b: NDArray[np.float64]
+    n_solutions: int
 
 
 @dataclass(frozen=True)
@@ -705,6 +802,18 @@ def _pairs(
     return arr
 
 
+def _values(
+    name: str, values: NDArray[np.float64] | Sequence[float]
+) -> NDArray[np.float64]:
+    """Normalise a caller's parameter list to a C-contiguous (N,) float64 array."""
+    arr = np.ascontiguousarray(values, dtype=np.float64)
+    if arr.ndim != 1:
+        raise PysmeshError(
+            f"{name} must be a (N,) array of parameters (got {arr.shape})."
+        )
+    return arr
+
+
 def _surface_sample(raw: dict[str, object]) -> SurfaceSample:
     """Wrap a raw ``_core`` surface-sample dict in its frozen dataclass."""
     return SurfaceSample(
@@ -720,4 +829,23 @@ def _projection(raw: dict[str, object]) -> Projection:
         points=cast("NDArray[np.float64]", raw["points"]),
         uv=cast("NDArray[np.float64]", raw["uv"]),
         distance=cast("NDArray[np.float64]", raw["distance"]),
+    )
+
+
+def _curve_sample(raw: dict[str, object]) -> CurveSample:
+    """Wrap a raw ``_core`` curve-sample dict in its frozen dataclass."""
+    return CurveSample(
+        points=cast("NDArray[np.float64]", raw["points"]),
+        tangents=cast("NDArray[np.float64]", raw["tangents"]),
+        defined=cast("NDArray[np.bool_]", raw["defined"]),
+    )
+
+
+def _entity_distance(raw: dict[str, object]) -> EntityDistance:
+    """Wrap a raw ``_core`` distance dict in its frozen dataclass."""
+    return EntityDistance(
+        distance=cast("float", raw["distance"]),
+        point_a=cast("NDArray[np.float64]", raw["point_a"]),
+        point_b=cast("NDArray[np.float64]", raw["point_b"]),
+        n_solutions=cast("int", raw["n_solutions"]),
     )

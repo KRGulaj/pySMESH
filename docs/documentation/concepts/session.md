@@ -74,7 +74,7 @@ other.
 | Transforms | `translate`, `rotate`, `mirror`, `scale`, `copy` |
 | Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove` |
 | Tessellation | `tessellate` (the incremental render mesh) |
-| Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `face_wires`, `surface_at`, `curvature`, `project_on_face`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
+| Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
 | Handoff | `export_handoff`, `brep` |
 | Identity and introspection | `entities`, `entity_kind`, `is_alive`, `shape_count`, `name_of`, `origin`, `resolve`, `op_count`, `state_op_index`, `issued_id_count`, `entity_count` |
 
@@ -119,6 +119,44 @@ wires = s.face_wires(faces)
 for row in np.flatnonzero(~wires.is_outer):        # one row per hole
     lo, hi = wires.edge_range[row]
     hole_edges = wires.edge_id[lo:hi]
+```
+
+## The edge and clearance queries
+
+Three more queries answer about edges and about the space between entities. Each takes
+entity ids and returns arrays, so a worker holding one document can answer without
+serialising anything out.
+
+`curve_geometry` is the curve-side `surface_parameters`. It reads a line's direction, a
+circle's or an ellipse's centre, plane normal and radii. Only `"Line"`, `"Circle"` and
+`"Ellipse"` carry parameters; every other curve type reports `analytic` False and a row of
+`NaN`. The axis is the curve's own, so two arcs cut from one circle report the same axis.
+
+`curve_at` gives the point and unit tangent at each parameter of one edge. **The tangent
+follows increasing parameter and is not flipped for a reversed edge**, which is the opposite
+of `surface_at`. The asymmetry is in the geometry: a face belongs to one shell, so REVERSED
+is the face's own property and decides its outward normal, while an edge shared by two faces
+is FORWARD in one wire and REVERSED in the other. `defined` reads False on a degenerate edge,
+where the first derivative is the null vector and any direction would be invented.
+
+`distance` is the minimum distance between two entities of any kind, with the witness point
+on each. It is OCCT's exact shape-to-shape extremum, not a bounding-box estimate, so it is
+what a clearance check reads; `0.0` means the two entities touch or intersect.
+
+```python
+edges = s.entities(EntityKind.EDGE)
+curves = s.curve_geometry(edges)
+
+# Every circular edge under 1 mm across: the rims of small bores.
+is_circle = np.array(curves.type) == "Circle"
+small_rims = curves.edge_id[is_circle & (curves.radius[:, 0] < 1.0)]
+
+first, last = s.edge_parameter_bounds([edges[0]])[0]
+sample = s.curve_at(edges[0], np.linspace(first, last, 32))
+direction = sample.tangents[sample.defined]
+
+# The clearance between two entities, with the witness point on each.
+gap = s.distance(faces[0], faces[2])       # gap.distance, gap.point_a, gap.point_b
 ```
 
 ## Reaching a mesher

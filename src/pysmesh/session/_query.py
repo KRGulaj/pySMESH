@@ -23,6 +23,9 @@ from ._types import (
     AdjacencyPairs,
     BoundsTable,
     CurvatureTable,
+    CurveParameterTable,
+    CurveSample,
+    EntityDistance,
     EntityId,
     EntityKind,
     MassTable,
@@ -35,11 +38,14 @@ from ._types import (
     WireTable,
     _DEFAULT_CLASSIFY_TOL,
     _DEFAULT_CURVATURE_SAMPLES,
+    _curve_sample,
+    _entity_distance,
     _ids,
     _pairs,
     _points,
     _projection,
     _surface_sample,
+    _values,
 )
 
 
@@ -257,6 +263,96 @@ class _QueryOps(_SessionBase):
                 (N, 2).
         """
         return _surface_sample(self._s.surface_at(int(face_id), _pairs("uv", uv)))
+
+    def distance(
+        self, entity_id_a: EntityId, entity_id_b: EntityId
+    ) -> EntityDistance:
+        """Minimum distance between two entities, with the witness point on each.
+
+        Any two kinds: vertex to solid, edge to face, face to face. The answer is exact, not
+        a bounding-box estimate — it is OCCT's own shape-to-shape extremum — so it is the
+        query a clearance check reads. ``0.0`` means the two entities touch or intersect.
+
+        The stateless :func:`shape_distance` runs the same OCCT algorithm on two BREP blobs
+        and is not replaced by this. Use that one when the two shapes are separate documents;
+        use this one when they are two sub-shapes of one session, where serialising each out
+        to ask the question costs more than the question.
+
+        Args:
+            entity_id_a: The first entity, of any kind, denoting exactly one shape.
+            entity_id_b: The second. Must differ from ``entity_id_a`` — an entity's distance
+                to itself is 0 by construction and its witness points are arbitrary.
+
+        Returns:
+            The distance, the two witness points, and how many solutions OCCT found.
+
+        Raises:
+            PysmeshError: If either id is dead or was split, if the two ids are equal, or if
+                OCCT finds no solution.
+        """
+        return _entity_distance(
+            self._s.distance(int(entity_id_a), int(entity_id_b))
+        )
+
+    def curve_at(
+        self, edge_id: EntityId, t: NDArray[np.float64] | Sequence[float]
+    ) -> CurveSample:
+        """Positions and unit tangents of an edge at the given parameters.
+
+        The tangent points along **increasing parameter** and is not flipped for a reversed
+        edge. That is the opposite of :meth:`surface_at`, which does flip its normal, and the
+        difference is in the geometry rather than in the convention: a face belongs to one
+        shell so REVERSED is its own property, while an edge shared by two faces is FORWARD
+        in one wire and REVERSED in the other, and its stored orientation is whichever
+        occurrence OCCT's traversal reached first. A tangent keyed on that would flip when an
+        operation merely reordered faces. See :class:`CurveSample`.
+
+        Args:
+            edge_id: An edge entity id denoting exactly one edge.
+            t: (N,) parameters. Get the valid range from :meth:`edge_parameter_bounds`.
+
+        Returns:
+            The points, the tangents, and which of them are defined.
+
+        Raises:
+            PysmeshError: If the id is dead, is not an edge, was split, if ``t`` is not
+                (N,), or if a parameter lies outside the edge's bounds.
+        """
+        return _curve_sample(self._s.curve_at(int(edge_id), _values("t", t)))
+
+    def curve_geometry(
+        self, edge_ids: Sequence[EntityId]
+    ) -> CurveParameterTable:
+        """Analytic parameters of the named edges' underlying curves.
+
+        The curve-side counterpart of :meth:`surface_parameters`. :meth:`entity_types` says
+        an edge is a ``"Circle"``; this says where its centre is, which plane it lies in, and
+        how big it is — read off the curve, not fitted to a sample.
+
+        Only ``"Line"``, ``"Circle"`` and ``"Ellipse"`` carry parameters here. Every other
+        curve type reports ``analytic`` False and a row of **NaN**, never 0.0, for the same
+        reason :meth:`surface_parameters` does. The axis is the curve's own and is not
+        flipped, so two edges cut from one circle report the same axis.
+
+        Args:
+            edge_ids: Edge entity ids. Each must denote exactly one edge.
+
+        Returns:
+            One row per edge, in the order named.
+
+        Raises:
+            PysmeshError: On an empty ``edge_ids``, or an id that is dead, is not an edge,
+                or was split.
+        """
+        raw = self._s.curve_geometry(_ids(edge_ids))
+        return CurveParameterTable(
+            edge_id=cast("NDArray[np.int64]", raw["edge_id"]),
+            type=tuple(cast("list[str]", raw["type"])),
+            analytic=cast("NDArray[np.bool_]", raw["analytic"]),
+            origin=cast("NDArray[np.float64]", raw["origin"]),
+            axis=cast("NDArray[np.float64]", raw["axis"]),
+            radius=cast("NDArray[np.float64]", raw["radius"]),
+        )
 
     def curvature(
         self,

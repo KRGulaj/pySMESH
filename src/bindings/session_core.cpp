@@ -862,6 +862,42 @@ TopoDS_Face Session::sole_face(const char* op, EntityId id, const ShapeSet& face
   return TopoDS::Face(faces.FindKey(i));
 }
 
+const ShapeSet& Session::root_edges() const {
+  // IsEqual, for the reason root_faces() gives: a rebuilt root is a new TShape, and a
+  // restored one is literally the shape the cache was taken from.
+  if (!state_.root.IsNull() && edges_cached_for_.IsEqual(state_.root)) {
+    return cached_root_edges_;
+  }
+  cached_root_edges_.Clear();
+  TopExp::MapShapes(state_.root, TopAbs_EDGE, cached_root_edges_);
+  edges_cached_for_ = state_.root;
+  return cached_root_edges_;
+}
+
+TopoDS_Edge Session::sole_edge(const char* op, EntityId id) const {
+  return sole_edge(op, id, root_edges());
+}
+
+TopoDS_Edge Session::sole_edge(const char* op, EntityId id, const ShapeSet& edges) const {
+  const EntityRecord& rec = require_alive(op, id);
+  if (rec.kind != TopAbs_EDGE) {
+    throw PysmeshError(std::string("Session.") + op + ": entity " + std::to_string(id) +
+                       " is a " + kind_name(rec.kind) + ", not an EDGE.");
+  }
+  if (rec.shapes.size() != 1) {
+    throw PysmeshError(std::string("Session.") + op + ": edge " + std::to_string(id) +
+                       " was split and denotes several edges; name one of them.");
+  }
+  const int i = edges.FindIndex(rec.shapes.front());
+  if (i == 0) {
+    throw PysmeshError(std::string("Session.") + op + ": edge " + std::to_string(id) +
+                       " is alive in the registry but is not an edge of the session root. "
+                       "The registry and the root have diverged; this is a bug, not a "
+                       "caller error.");
+  }
+  return TopoDS::Edge(edges.FindKey(i));
+}
+
 // Bodies for a boolean-family operand list, whatever dimension they are.
 std::vector<TopoDS_Shape> Session::operand_bodies(const char* op, const char* argname,
                                                   const std::vector<EntityId>& ids) const {
