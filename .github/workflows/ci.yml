@@ -64,6 +64,12 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         run: python ci/check_tag_version.py
 
+      - name: Assert every public entity is documented
+        # Cheap, pure-Python, and before the compile: a missing docstring costs seconds
+        # here rather than a full build. Also the source of the count quoted in
+        # docs/documentation/reference/index.md, so that number cannot drift again.
+        run: python ci/count_documented.py
+
       - name: Stage + patch vendored sources
         run: python prepare.py
 
