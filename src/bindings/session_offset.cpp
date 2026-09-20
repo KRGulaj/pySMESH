@@ -178,34 +178,51 @@ std::vector<TopoDS_Shape> invalid_faces(const TopoDS_Shape& result) {
 // Opening every face of a solid does the same thing at every thickness measured, -0.05
 // through -3.0.
 //
-// The two statements below are what a thick solid *is*. Neither is a rule about how large a
+// The three statements below are what a thick solid *is*. None is a rule about how large a
 // thickness may be: a magnitude rule would have to know the body's smallest feature, and
 // would have to refuse the thin wall at -1.40 — cavity 8.064 of 231 — that OCCT builds
 // correctly.
 //
-//   1. Hollowed inward, the wall lies inside the boundary it was built from, so its volume
+//   1. It is a solid, and a solid's volume is positive. A negative one is the same wall
+//      turned inside out. Measured on the box with every face but one opened and a positive
+//      thickness: the plate comes back as -(the unopened face's area x thickness), -38.5 at
+//      +0.5, and 4.1.1 committed it, so the session reported a body of negative volume.
+//   2. Hollowed inward, the wall lies inside the boundary it was built from, so its volume
 //      is strictly less than that body's. Outward the wall lies outside instead, and its
 //      volume stands in no fixed relation to the input's — a box opened at one face and
 //      thickened by 2.0 gives 770 against an input of 231, by 0.5 gives 137 — so the
 //      statement is made for a negative thickness only, which is the sign it is derived for.
-//   2. The result carries the walls the offset built: at least one face that is neither a
+//   3. The result carries the walls the offset built: at least one face that is neither a
 //      face of the input nor a rim generated from an opened face. Vacuous when every face
-//      was opened, because then there is no wall to build and statement 1 carries the case.
+//      was opened, because then there is no wall to build and statement 2 carries the case.
 //
-// Both are made, because each catches a measured case the other misses. Opening every face
-// of the box at -0.5 leaves no wall to look for, and only statement 1 sees it. Opening the
-// two walls normal to y and the top at -3.0 returns the input solid measuring
+// All three are made, because each catches a measured case the others miss. Opening every
+// face of the box at -0.5 leaves no wall to look for, and only statement 2 sees it. Opening
+// the two walls normal to y and the top at -3.0 returns the input solid measuring
 // 230.99999999999997 against the input's 231 — under it by 2.8e-14, which is round-off, not
-// a cavity — and only statement 2 sees that.
+// a cavity — and only statement 3 sees that. The inside-out plate has a cavity and has its
+// walls, and only statement 1 sees it.
 std::string not_a_thick_solid(const TopoDS_Shape& owner, const TopoDS_Shape& result,
                               double thickness, const ShapeSet& opened,
                               const Handle(BRepTools_History) & hist) {
   std::vector<std::string> broken;
 
+  int solids = 0;
   double volume = 0.0;
+  double least = 0.0;
   for (TopExp_Explorer ex(result, TopAbs_SOLID); ex.More(); ex.Next()) {
-    volume += measure_of(ex.Current());
+    const double v = measure_of(ex.Current());
+    least = (solids == 0) ? v : std::min(least, v);
+    volume += v;
+    ++solids;
   }
+  if (solids == 0) {
+    broken.push_back("It holds no solid at all.");
+  } else if (least <= 0.0) {
+    broken.push_back("It holds a solid of volume " + std::to_string(least) +
+                     ", so the wall came back turned inside out.");
+  }
+
   const double input_volume = measure_of(owner);
   if (thickness < 0.0 && volume >= input_volume) {
     broken.push_back("Its volume " + std::to_string(volume) +

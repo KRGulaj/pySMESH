@@ -86,12 +86,17 @@ class _OffsetOps(_SessionBase):
                 from on ``.face_ids`` — ids the caller already holds, rather than ordinals
                 into a shape that was never committed. A result that is not a hollowed solid
                 puts ``face_ids`` itself there, because nothing in the result is broken to
-                trace a blame back through: OCCT reported success, the shape passed
-                ``BRepCheck_Analyzer``, and what came back is the body the wall was to be
-                built from — same volume, no cavity, no inner wall. That is what an inward
-                ``thickness`` beyond the body's reach returns, and what opening every face of
-                a solid returns at any thickness. The message names the thickness, both
-                volumes and both face counts. No partial result is ever returned.
+                trace a blame back through: OCCT reported success and the shape passed
+                ``BRepCheck_Analyzer``, yet it is not a wall. Three things make it one, and
+                each is checked. It is a solid of positive volume — a negative one is the
+                same wall turned inside out, which is what every face but one opened and a
+                positive ``thickness`` returns. Hollowed inward it has less volume than the
+                body it was built from — an inward ``thickness`` beyond the body's reach
+                returns that body itself, and so does opening every face at any thickness.
+                And it carries at least one wall the offset built, rather than only the
+                input's own faces and a rim at each opening. The message names the
+                thickness, both volumes and both face counts. No partial result is ever
+                returned.
         """
         return _delta(
             self._s.make_thick_solid(_ids(face_ids), thickness, tol, progress, cancel)

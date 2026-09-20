@@ -802,6 +802,27 @@ def test_make_thick_solid_that_returns_the_input_within_round_off_raises() -> No
     assert _whole_state(session) == before
 
 
+@pytest.mark.parametrize("thickness", [0.05, 0.5, 2.0])
+def test_make_thick_solid_that_returns_an_inside_out_wall_raises(
+    placed_box_session: Session, thickness: float
+) -> None:
+    faces = _ids(placed_box_session, EntityKind.FACE)
+    unopened = placed_box_session.entity_table(EntityKind.FACE).measure[0]
+    opened = [EntityId(i) for i in faces[1:]]
+    before = _whole_state(placed_box_session)
+
+    # Every face but one opened, thickened outward: the wall is the one remaining face
+    # raised into a plate, and OCCT builds it with its orientation reversed. 4.1.1 committed
+    # it, so the session reported a body of volume -(area x thickness) — -38.5 at +0.5 on
+    # the face of area 77. A caller taking that for a mass gets a negative one.
+    with pytest.raises(ps.PysmeshError, match="turned inside out") as excinfo:
+        placed_box_session.make_thick_solid(opened, thickness)
+
+    assert f"{-unopened * thickness:.6f}" in str(excinfo.value)
+    assert list(excinfo.value.face_ids) == opened
+    assert _whole_state(placed_box_session) == before
+
+
 def test_make_thick_solid_hollows_just_under_half_the_smallest_extent(
     placed_box_session: Session,
 ) -> None:
