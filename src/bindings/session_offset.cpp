@@ -152,6 +152,77 @@ Handle(BRepTools_History) offset_history(const TopoDS_Shape& argument,
   return hist;
 }
 
+// The radius an analytic face's own surface has now, and the one the offset would give it.
+//
+// `analytic` is false for every surface that has no closed-form radius — a plane, a B-spline,
+// a surface of revolution — and those faces are not the subject of this check at all.
+//
+// Two things about the arithmetic, both measured rather than assumed:
+//
+//   * BRepOffset_Skin moves every face along its **outward** normal, and a REVERSED face's
+//     outward normal is its surface's own negated. So a bore shrinks where a boss grows.
+//     Measured on a tube of radii 3 and 1: at distance -0.5 the outer wall comes back at
+//     2.5 and the bore at 1.5; at +0.5, 3.5 and 0.5. A rule that read the sign off the
+//     distance alone would refuse every legitimate hollow part, and would miss the bore of
+//     radius 1 collapsing at +1.5 — which OCCT commits, as a spurious bore of radius 0.5.
+//   * A cone's radius moves by `d * cos(SemiAngle)` over the face's own parameter range,
+//     not by `d`. Measured on a cone of radii 2 and 0.7: at -0.5 the surface comes back with
+//     RefRadius 1.5160887466058641, and 2 - 0.5 * cos(-0.25436805855326594) is
+//     1.5160887466058641 exactly. The offset cone keeps its SemiAngle and slides its origin
+//     along the axis, which is the same cone described from a different station.
+//
+// A cone's radius varies along the face, so the smallest one over the face's own parameter
+// range is what has to survive: r(v) = RefRadius + v * sin(SemiAngle), linear in v, so the
+// minimum is at one of the two ends.
+struct FaceRadius {
+  bool analytic = false;
+  const char* surface = "";
+  double before = 0.0;
+  double after = 0.0;
+};
+
+FaceRadius offset_radius(const TopoDS_Face& face, double distance) {
+  FaceRadius out;
+  const BRepAdaptor_Surface surf(face);
+  const double d = (face.Orientation() == TopAbs_REVERSED) ? -distance : distance;
+  switch (surf.GetType()) {
+    case GeomAbs_Cylinder:
+      out.analytic = true;
+      out.surface = "cylinder";
+      out.before = surf.Cylinder().Radius();
+      out.after = out.before + d;
+      break;
+    case GeomAbs_Sphere:
+      out.analytic = true;
+      out.surface = "sphere";
+      out.before = surf.Sphere().Radius();
+      out.after = out.before + d;
+      break;
+    case GeomAbs_Torus:
+      // The minor radius: the tube's own. The major radius is the ring's and an offset
+      // leaves it where it is, measured on a torus of radii 5 and 1.5 at -0.5, -1.0 and
+      // -1.4 — major 5.0 every time.
+      out.analytic = true;
+      out.surface = "torus";
+      out.before = surf.Torus().MinorRadius();
+      out.after = out.before + d;
+      break;
+    case GeomAbs_Cone: {
+      const gp_Cone c = surf.Cone();
+      const double s = std::sin(c.SemiAngle());
+      out.analytic = true;
+      out.surface = "cone";
+      out.before = std::min(c.RefRadius() + surf.FirstVParameter() * s,
+                            c.RefRadius() + surf.LastVParameter() * s);
+      out.after = out.before + d * std::cos(c.SemiAngle());
+      break;
+    }
+    default:
+      break;
+  }
+  return out;
+}
+
 // Faces of the result that BRepCheck_Analyzer rejects on their own.
 //
 // Reached only when the whole-shape check has already failed, so the per-face pass costs
@@ -427,6 +498,69 @@ std::vector<EntityId> Session::face_ids_of(const TopoDS_Shape& body) const {
   return out;
 }
 
+// The pre-condition both offsets share: an analytic face's own radius has to survive.
+//
+// This is the one failure in the family that no post-condition can catch, because the shape
+// OCCT hands back is a valid solid of positive volume with the topology the caller asked
+// for. Past the radius, OCCT builds the surface at the **absolute value** of the negative
+// one it computed — the cylinder mirrored through its own axis. Measured on a cylinder of
+// radius 2 and height 7: `offset` at -2.01 commits a body of volume 0.0009361946107697187,
+// which is exactly the r = 0.01 cylinder, and at -2.5 and -3.0 the result's own surface
+// comes back with radius 0.5 and 1.0 where r + d is -0.5 and -1.0.
+//
+// It is reached from two entry points and it is the same arithmetic in both. `offset` moves
+// every face of the body. `make_thick_solid` moves every face the caller did not open, so a
+// wall thicker than the cylinder's radius collapses the same way even at a thickness the
+// body could carry if the opening were somewhere else: opened at a planar cap, radius 2,
+// thickness -2.10, 4.1.2 commits 87.81 against the solid's own 87.96.
+//
+// Checked before OCCT is driven, so nothing is built and the session is untouched by
+// construction rather than by unwinding.
+//
+// Only the four surfaces with a closed-form radius are checked. A plane has none, and a
+// B-spline or a surface of revolution has no one radius to test; those stay with the
+// post-conditions that commit() and the two `not_a_*` checks already apply.
+void Session::require_surviving_radii(const char* op, const std::vector<TopoDS_Shape>& faces,
+                                      double distance, double tol) const {
+  std::vector<EntityId> blamed;
+  std::string worst;
+  double margin = std::numeric_limits<double>::max();
+  for (const TopoDS_Shape& s : faces) {
+    if (s.ShapeType() != TopAbs_FACE) {
+      continue;
+    }
+    const FaceRadius r = offset_radius(TopoDS::Face(s), distance);
+    if (!r.analytic || r.after > tol) {
+      continue;
+    }
+    std::vector<EntityId> here;
+    ids_on(s, here);
+    blamed.insert(blamed.end(), here.begin(), here.end());
+    if (r.after < margin) {
+      margin = r.after;
+      worst = std::string(r.surface) + " of radius " + std::to_string(r.before) +
+              (here.empty() ? std::string()
+                            : " (face " + std::to_string(here.front()) + ")") +
+              " would be left with " + std::to_string(r.after);
+    }
+  }
+  if (blamed.empty()) {
+    return;
+  }
+  std::sort(blamed.begin(), blamed.end());
+  blamed.erase(std::unique(blamed.begin(), blamed.end()), blamed.end());
+  throw PysmeshError(
+      std::string("Session.") + op + ": " + std::to_string(blamed.size()) +
+          " of the faces being offset by " + std::to_string(distance) +
+          " do not survive it. The " + worst + ".",
+      "An offset takes an analytic face's radius to that face's own side of zero and no "
+      "further: at zero the surface degenerates, and past it OCCT rebuilds it at the "
+      "absolute value of the negative radius — the same surface mirrored through its own "
+      "axis, which is a valid solid that is not the offset of anything. Reduce the "
+      "magnitude, or offset a face set whose radii survive. Nothing was built.",
+      ids_as_int(blamed));
+}
+
 // Neither an offset distance nor a wall thickness has a meaning at zero: the algorithm would
 // build the input again and the operation would report a rebuild of the whole body as its
 // answer. Refused here rather than forwarded.
@@ -464,6 +598,16 @@ py::dict Session::make_thick_solid(const std::vector<EntityId>& face_ids, double
   for (const TopoDS_Shape& f : faces) {
     opened.Add(f);
   }
+
+  // Every face the caller did not open is the one that gets an inner wall, so those are the
+  // faces whose radii have to survive. The openings are removed rather than offset.
+  std::vector<TopoDS_Shape> walled;
+  for (TopExp_Explorer ex(owner, TopAbs_FACE); ex.More(); ex.Next()) {
+    if (!opened.Contains(ex.Current())) {
+      walled.push_back(ex.Current());
+    }
+  }
+  require_surviving_radii("make_thick_solid", walled, thickness, tol);
 
   ProgressDriver driver("make_thick_solid", hooks_of("make_thick_solid", progress, cancel));
   TopoDS_Shape result;
@@ -594,6 +738,13 @@ py::dict Session::offset(const std::vector<EntityId>& entity_ids, double distanc
   // replace: it is what a failure blames when OCCT leaves no history to trace one through.
   const std::vector<EntityId> body_faces = face_ids_of(owner);
   const std::vector<TopoDS_Shape> survivors = bodies_excluding({owner});
+
+  // A uniform offset moves every face of the body, so every one of them has to survive it.
+  std::vector<TopoDS_Shape> all_faces;
+  for (TopExp_Explorer ex(owner, TopAbs_FACE); ex.More(); ex.Next()) {
+    all_faces.push_back(ex.Current());
+  }
+  require_surviving_radii("offset", all_faces, distance, tol);
 
   ProgressDriver driver("offset", hooks_of("offset", progress, cancel));
   TopoDS_Shape result;

@@ -56,9 +56,13 @@ class _OffsetOps(_SessionBase):
                 lies inside the original boundary and the outer faces stay where they were.
                 Positive thickens outward. Same convention as ``ThickSolidParams.thickness``.
                 A negative value must be smaller in magnitude than half the body's smallest
-                extent, and smaller than its smallest radius of curvature. Past that the
-                inner walls fold through each other: OCCT then either declines, or returns
-                the input body unhollowed, and both are refused rather than committed.
+                extent, and it must leave every walled face's own radius standing. Past the
+                first the inner walls fold through each other, and OCCT either declines or
+                returns the input body unhollowed. Past the second an analytic face's radius
+                goes through zero, and OCCT rebuilds that face at the absolute value of the
+                negative radius — the same surface mirrored through its own axis. All three
+                are refused rather than committed; the radius is checked before OCCT is
+                driven, so nothing is built.
             tol: Coincidence tolerance for the offset, in model units (> 0).
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the operation runs. ``None`` reports nothing.
@@ -77,9 +81,19 @@ class _OffsetOps(_SessionBase):
         Raises:
             PysmeshError: If an id is dead or is not a face, if the faces straddle two
                 bodies, if their body is not a solid, on a zero or non-finite ``thickness``,
-                on a non-positive ``tol``, if OCCT leaves a named face in the result instead
-                of opening it, if the offset self-intersects, or if the result is not a
-                hollowed solid at all.
+                on a non-positive ``tol``, if a walled face's own radius does not survive the
+                thickness, if OCCT leaves a named face in the result instead of opening it,
+                if the offset self-intersects, or if the result is not a hollowed solid at
+                all.
+
+                The radius check runs first, before OCCT is driven, and covers every face the
+                hollowing walls — that is, every face the caller did not open. A cylinder,
+                a sphere and a torus each have one radius to spend; a cone's varies along the
+                face, and the smallest one over that face is what has to survive.
+                ``.face_ids`` then carries the faces whose radius does not. Opening a
+                cylinder at a planar cap and asking for a wall thicker than its radius is the
+                case this exists for: before 4.1.3 it committed a body indistinguishable from
+                an unhollowed one.
 
                 The last two are different failures and carry different ids. A
                 self-intersection puts the *input* faces that the broken result faces came
@@ -125,11 +139,14 @@ class _OffsetOps(_SessionBase):
             entities: Any live entities of the body to offset. They must all belong to one
                 body, which must be a solid or a shell.
             distance: Signed offset, non-zero. Positive enlarges, negative shrinks. A
-                negative value larger than half the body's smallest extent, or larger than
-                its smallest radius of curvature, makes the offset faces cross. Past that
-                OCCT either declines, or returns a body turned inside out, or one that grew
-                where the distance said shrink; all three are refused rather than
-                committed.
+                value larger than half the body's smallest extent makes the offset faces
+                cross, and one that spends more than a face's own radius takes that radius
+                through zero. Which sign does that depends on the face, not on the distance:
+                an inward offset closes a boss and opens a bore, so a *positive* distance is
+                what closes a bore. Past either limit OCCT declines, or returns a body turned
+                inside out, or one that grew where the distance said shrink, or one rebuilt
+                at the absolute value of a negative radius. All of them are refused rather
+                than committed.
             tol: Coincidence tolerance for the offset, in model units (> 0).
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the operation runs. ``None`` reports nothing.
@@ -147,8 +164,15 @@ class _OffsetOps(_SessionBase):
         Raises:
             PysmeshError: If an id is dead, if the entities straddle two bodies, if their
                 body is neither a solid nor a shell, on a zero or non-finite ``distance``, on
-                a non-positive ``tol``, if the offset self-intersects, or if the result is
-                not that body offset.
+                a non-positive ``tol``, if a face's own radius does not survive the distance,
+                if the offset self-intersects, or if the result is not that body offset.
+
+                The radius check runs first, before OCCT is driven, and covers every face of
+                the body, since a uniform offset moves all of them. It speaks only for the
+                four surfaces that have a closed-form radius — cylinder, cone, sphere and
+                torus. A plane has none, and a B-spline or a surface of revolution has no one
+                radius to test, so those faces stay with the post-conditions below.
+                ``.face_ids`` carries the faces whose radius does not survive.
 
                 A self-intersection puts the input faces the broken result faces came from on
                 ``.face_ids``, or every face of the body when OCCT declined before producing
