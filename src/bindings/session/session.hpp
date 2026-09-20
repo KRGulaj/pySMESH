@@ -37,6 +37,7 @@
 //   session_boolean.cpp    — the boolean family, fillet and chamfer;
 //   session_transform.cpp  — the relocation and rebuild transform paths, and copy;
 //   session_heal.cpp       — healing, sewing, defeaturing, imprinting and removal;
+//   session_offset.cpp     — the offset family: hollowing and uniform offsetting;
 //   session_query.cpp      — the geometric query surface over the live shape;
 //   session_tessellate.cpp — the render mesh, and the incremental delta over it;
 //   session_handoff.cpp    — the export to a mesher, and the id-to-ordinal bijection;
@@ -99,8 +100,11 @@
 #include <BRepLProp_SLProps.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepOffsetAPI_MakeFilling.hxx>
+#include <BRepOffsetAPI_MakeOffsetShape.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
+#include <BRepOffsetAPI_MakeThickSolid.hxx>
+#include <BRepOffset_Mode.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
@@ -123,6 +127,7 @@
 #include <GeomAPI_PointsToBSpline.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomAbs_CurveType.hxx>
+#include <GeomAbs_JoinType.hxx>
 #include <GeomAbs_Shape.hxx>
 #include <GeomAbs_SurfaceType.hxx>
 #include <GeomLProp_SLProps.hxx>
@@ -695,6 +700,18 @@ class Session {
   // Join loose edges and wires into one wire, consuming them.
   py::dict make_wire(const std::vector<EntityId>& edge_ids);
 
+  // Copy the named edges into one new loose wire body, leaving the originals in place.
+  //
+  // The one primitive that gets a wire out of a solid or a face. make_wire, make_face and
+  // make_filling all refuse an edge that belongs to one, because they consume the body they
+  // are given; the sweeps refuse a SOLID spine for the same reason. So nothing could sweep
+  // along an edge of an imported part, and nothing could cap a hole loop of a solid. This
+  // consumes nothing, so it accepts any owner.
+  //
+  // Committed with no history, exactly like copy() and for the same reason: relating a
+  // duplicate to its original would move the original's id onto the duplicate.
+  py::dict extract_edges(const std::vector<EntityId>& edge_ids);
+
   // A planar face bounded by the named edges, consuming them.
   py::dict make_face(const std::vector<EntityId>& edge_ids);
 
@@ -779,6 +796,24 @@ class Session {
                    const std::optional<double>& distance_end,
                    const std::optional<EntityId>& face_id, const py::object& progress,
                    const py::object& cancel);
+
+  // ---- offsets ---------------------------------------------------------------------- //
+  //
+  // Both drive TKOffset's BRepOffsetAPI with BRepOffset_Skin and GeomAbs_Intersection, the
+  // same two modes the stateless make_thick_solid and offset_shape use. What the session
+  // adds is identity: a wall the offset rebuilds keeps the id it had.
+
+  // Hollow the solid owning the named faces: those faces become the openings, and every
+  // other face of the body gets an offset inner wall at `thickness`. Negative hollows
+  // inward, positive thickens outward.
+  py::dict make_thick_solid(const std::vector<EntityId>& face_ids, double thickness,
+                            double tol, const py::object& progress,
+                            const py::object& cancel);
+
+  // Offset every face of the body owning the named entities by a signed distance. A solid
+  // in gives a solid out; a shell gives a shell.
+  py::dict offset(const std::vector<EntityId>& entity_ids, double distance, double tol,
+                  const py::object& progress, const py::object& cancel);
 
   // ---- transforms ------------------------------------------------------------------- //
 
@@ -1099,6 +1134,11 @@ class Session {
 
   static void require_non_negative(const char* name, double v);
 
+  // An offset distance or a wall thickness. Zero is refused because the algorithm would
+  // rebuild the input and report it as the answer; NaN and infinity because neither is a
+  // distance.
+  static void require_non_zero(const char* op, const char* name, double v);
+
   // A partial primitive sweeps through angle_rad about its axis; the full solid is 2*pi.
   // OCCT clamps silently outside that band, which would hand back a shape the caller did
   // not ask for, so it is refused here instead.
@@ -1211,6 +1251,30 @@ class Session {
 
   NCollection_List<TopoDS_Shape> solids_of(const char* op, const char* argname,
                                            const std::vector<EntityId>& ids) const;
+
+  // ---- offset helpers --------------------------------------------------------------- //
+
+  // The ids of the input faces that the named broken result faces came from.
+  //
+  // A failed offset has to blame something, and the faces it broke on are faces of a result
+  // that will never be committed, so they carry no EntityId. The stateless module answers
+  // with their 1-based ordinals in the result; an ordinal put on PysmeshError.face_ids here
+  // would be read as an EntityId and would denote somebody else's entity — the exact
+  // confusion the session exists to remove. So each one is walked back through the history
+  // to the input face it came from, and that face's id is reported instead. `fallback` is
+  // used when nothing traces back.
+  std::vector<int> offset_blame(const TopoDS_Shape& argument,
+                                const Handle(BRepTools_History) & hist,
+                                const std::vector<TopoDS_Shape>& blamed,
+                                const std::vector<EntityId>& fallback) const;
+
+  // Every live id on one sub-shape, appended. A merge leaves several on one shape, and each
+  // of them names it, so each is reported.
+  void ids_on(const TopoDS_Shape& s, std::vector<EntityId>& out) const;
+
+  // The live ids of a body's faces, ascending. What an offset blames when OCCT declines
+  // outright and leaves no history to trace a failure through.
+  std::vector<EntityId> face_ids_of(const TopoDS_Shape& body) const;
 
   // ---- healing helpers -------------------------------------------------------------- //
 

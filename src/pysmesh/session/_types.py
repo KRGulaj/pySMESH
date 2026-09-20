@@ -115,6 +115,13 @@ _DEFAULT_ANGULAR_TOL_DEG: Final[float] = 0.0
 # Boundary tolerance for point classification: OCCT's ``Precision::Confusion``.
 _DEFAULT_CLASSIFY_TOL: Final[float] = 1.0e-7
 
+# Coincidence tolerance for the offset family, matching the stateless ``offset_shape`` and
+# ``make_thick_solid`` and OCCT's own ``Precision::Confusion``. It decides when two offset
+# surfaces are treated as meeting rather than as two surfaces with a gap between them, so it
+# belongs to the kernel's length scale and not to the model's: raising it does not make a
+# self-intersecting offset succeed, it makes the result's topology arbitrary.
+_DEFAULT_OFFSET_TOL: Final[float] = 1.0e-7
+
 # Curvature sampling density per parametric direction. 8 x 8 is enough to find the peak of a
 # smoothly varying face to a few percent; a face whose curvature varies sharply wants more,
 # and the cost is quadratic in this number.

@@ -223,6 +223,7 @@ class Session:
         dy: float,
     ) -> dict[str, object]: ...
     def make_wire(self, edge_ids: list[int]) -> dict[str, object]: ...
+    def extract_edges(self, edge_ids: list[int]) -> dict[str, object]: ...
     def make_face(self, edge_ids: list[int]) -> dict[str, object]: ...
     def make_filling(
         self, edge_ids: list[int], progress: object, cancel: object
@@ -332,6 +333,22 @@ class Session:
         distance: float,
         distance_end: float | None,
         face_id: int | None,
+        progress: object,
+        cancel: object,
+    ) -> dict[str, object]: ...
+    def make_thick_solid(
+        self,
+        face_ids: list[int],
+        thickness: float,
+        tol: float,
+        progress: object,
+        cancel: object,
+    ) -> dict[str, object]: ...
+    def offset(
+        self,
+        entity_ids: list[int],
+        distance: float,
+        tol: float,
         progress: object,
         cancel: object,
     ) -> dict[str, object]: ...
