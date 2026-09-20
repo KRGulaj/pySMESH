@@ -37,7 +37,7 @@
 //   session_boolean.cpp    — the boolean family, fillet and chamfer;
 //   session_transform.cpp  — the relocation and rebuild transform paths, and copy;
 //   session_heal.cpp       — healing, sewing, defeaturing, imprinting and removal;
-//   session_offset.cpp     — the uniform offset of a whole body;
+//   session_offset.cpp     — the offset family: hollowing and uniform offsetting;
 //   session_query.cpp      — the geometric query surface over the live shape;
 //   session_tessellate.cpp — the render mesh, and the incremental delta over it;
 //   session_handoff.cpp    — the export to a mesher, and the id-to-ordinal bijection;
@@ -103,6 +103,7 @@
 #include <BRepOffsetAPI_MakeOffsetShape.hxx>
 #include <BRepOffsetAPI_MakePipe.hxx>
 #include <BRepOffsetAPI_MakePipeShell.hxx>
+#include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <BRepOffset_Mode.hxx>
 #include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
@@ -796,11 +797,18 @@ class Session {
                    const std::optional<EntityId>& face_id, const py::object& progress,
                    const py::object& cancel);
 
-  // ---- offset ---------------------------------------------------------------------- //
+  // ---- offsets ---------------------------------------------------------------------- //
   //
-  // Drives TKOffset's BRepOffsetAPI with BRepOffset_Skin and GeomAbs_Intersection, the
-  // same two modes the stateless offset_shape uses. What the session adds is
-  // identity: a face the offset rebuilds keeps the id it had.
+  // Both drive TKOffset's BRepOffsetAPI with BRepOffset_Skin and GeomAbs_Intersection, the
+  // same two modes the stateless make_thick_solid and offset_shape use. What the session
+  // adds is identity: a wall the offset rebuilds keeps the id it had.
+
+  // Hollow the solid owning the named faces: those faces become the openings, and every
+  // other face of the body gets an offset inner wall at `thickness`. Negative hollows
+  // inward, positive thickens outward.
+  py::dict make_thick_solid(const std::vector<EntityId>& face_ids, double thickness,
+                            double tol, const py::object& progress,
+                            const py::object& cancel);
 
   // Offset every face of the body owning the named entities by a signed distance. A solid
   // in gives a solid out; a shell gives a shell.

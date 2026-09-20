@@ -336,6 +336,14 @@ class Session:
         progress: object,
         cancel: object,
     ) -> dict[str, object]: ...
+    def make_thick_solid(
+        self,
+        face_ids: list[int],
+        thickness: float,
+        tol: float,
+        progress: object,
+        cancel: object,
+    ) -> dict[str, object]: ...
     def offset(
         self,
         entity_ids: list[int],

@@ -430,8 +430,249 @@ def test_a_dead_id_cannot_be_used_as_an_operand(two_box_session: Session) -> Non
 
 
 # --------------------------------------------------------------------------------------- #
-# offset
+# The offset family: make_thick_solid and offset
 # --------------------------------------------------------------------------------------- #
+
+
+def _face_sharing_an_edge(session: Session, face: EntityId) -> tuple[EntityId, EntityId]:
+    """A neighbour of ``face``, and the edge the two of them share."""
+    pairs = session.adjacency(EntityKind.FACE, EntityKind.EDGE)
+    edges: dict[int, set[int]] = {}
+    for f, e in zip(pairs.ids.tolist(), pairs.related.tolist(), strict=True):
+        edges.setdefault(f, set()).add(e)
+    for other, theirs in edges.items():
+        shared = edges[int(face)] & theirs
+        if other != int(face) and shared:
+            return EntityId(other), EntityId(min(shared))
+    raise AssertionError("a box face has neighbours")
+
+
+def test_make_thick_solid_leaves_the_closed_form_wall_volume(
+    placed_box_session: Session,
+) -> None:
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+    # A box's first face is the one at x = xmin, so the cavity loses a wall on five sides
+    # and none on the sixth.
+    thickness = 0.5
+    expected = BOX_VOLUME - (BOX_DX - thickness) * (BOX_DY - 2 * thickness) * (
+        BOX_DZ - 2 * thickness
+    )
+
+    placed_box_session.make_thick_solid([face], -thickness)
+
+    volume = placed_box_session.entity_table(EntityKind.SOLID).measure[0]
+    assert volume == pytest.approx(expected)
+
+
+def test_make_thick_solid_with_a_positive_thickness_grows_the_wall_outward(
+    placed_box_session: Session,
+) -> None:
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+    thickness = 0.5
+    expected = (BOX_DX + thickness) * (BOX_DY + 2 * thickness) * (
+        BOX_DZ + 2 * thickness
+    ) - BOX_VOLUME
+
+    placed_box_session.make_thick_solid([face], thickness)
+
+    volume = placed_box_session.entity_table(EntityKind.SOLID).measure[0]
+    assert volume == pytest.approx(expected)
+
+
+def test_make_thick_solid_delta_names_every_id_it_moved(
+    placed_box_session: Session,
+) -> None:
+    opened = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+    solid = _sole(placed_box_session, EntityKind.SOLID)
+    before = {k: _ids(placed_box_session, k) for k in EntityKind}
+
+    delta = placed_box_session.make_thick_solid([opened], -0.5)
+
+    assert delta.deleted.tolist() == [opened]
+    assert delta.modified.tolist() == [solid]
+    assert delta.split.tolist() == []
+    assert delta.merged.tolist() == []
+    assert delta.valid is True
+    # A hollow at one face adds five inner walls plus the rim at the opening, with a full
+    # set of edges and vertices for them, and adds no solid: the body is the same body.
+    created = delta.created.tolist()
+    kinds = [placed_box_session.entity_kind(EntityId(i)) for i in created]
+    assert kinds.count(EntityKind.SOLID) == 0
+    assert kinds.count(EntityKind.FACE) == 6
+    assert kinds.count(EntityKind.EDGE) == 12
+    assert kinds.count(EntityKind.VERTEX) == 8
+    # Every surviving id, one by one: the solid, the five faces that were not opened, and
+    # every edge and vertex of the original box.
+    new_faces = [
+        i
+        for i in created
+        if placed_box_session.entity_kind(EntityId(i)) == EntityKind.FACE
+    ]
+    assert _ids(placed_box_session, EntityKind.SOLID) == [solid]
+    assert _ids(placed_box_session, EntityKind.FACE) == sorted(
+        [i for i in before[EntityKind.FACE] if i != opened] + new_faces
+    )
+    assert set(before[EntityKind.EDGE]) <= set(_ids(placed_box_session, EntityKind.EDGE))
+    assert set(before[EntityKind.VERTEX]) <= set(
+        _ids(placed_box_session, EntityKind.VERTEX)
+    )
+
+
+def test_make_thick_solid_kills_an_edge_only_the_opened_faces_carried(
+    placed_box_session: Session,
+) -> None:
+    first = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+    second, shared = _face_sharing_an_edge(placed_box_session, first)
+
+    delta = placed_box_session.make_thick_solid([first, second], -0.5)
+
+    # That edge belonged to those two faces and to nothing else, so it goes with them.
+    assert delta.deleted.tolist() == sorted([first, second, shared])
+    assert not placed_box_session.is_alive(shared)
+
+
+def test_make_thick_solid_keeps_the_unopened_walls_where_they_were(
+    placed_box_session: Session,
+) -> None:
+    table = placed_box_session.entity_table(EntityKind.FACE)
+    truth = {int(i): float(m) for i, m in zip(table.ids, table.measure, strict=True)}
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+
+    placed_box_session.make_thick_solid([face], -0.5)
+
+    after = placed_box_session.entity_table(EntityKind.FACE)
+    for i, m in zip(after.ids, after.measure, strict=True):
+        if int(i) in truth:
+            assert m == pytest.approx(truth[int(i)]), f"wall {i} changed area"
+
+
+def test_make_thick_solid_on_a_dead_id_raises(placed_box_session: Session) -> None:
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+    placed_box_session.make_thick_solid([face], -0.5)
+
+    with pytest.raises(ps.PysmeshError, match=f"entity {face} is dead"):
+        placed_box_session.make_thick_solid([face], -0.2)
+
+
+def test_make_thick_solid_on_an_edge_id_raises_naming_the_wrong_kind(
+    placed_box_session: Session,
+) -> None:
+    edge = EntityId(_ids(placed_box_session, EntityKind.EDGE)[0])
+
+    with pytest.raises(ps.PysmeshError, match=f"entity {edge} is a EDGE, not a FACE"):
+        placed_box_session.make_thick_solid([edge], -0.5)
+
+
+def test_make_thick_solid_across_two_bodies_raises(two_box_session: Session) -> None:
+    faces = _ids(two_box_session, EntityKind.FACE)
+
+    with pytest.raises(ps.PysmeshError, match="belong to 2 different bodies"):
+        two_box_session.make_thick_solid([EntityId(faces[0]), EntityId(faces[-1])], -0.2)
+
+
+def test_make_thick_solid_on_a_body_that_is_not_a_solid_raises(
+    placed_box_session: Session,
+) -> None:
+    delta = placed_box_session.add_rectangle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 2.0, 3.0)
+    face = EntityId(
+        next(
+            i
+            for i in delta.created.tolist()
+            if placed_box_session.entity_kind(EntityId(i)) == EntityKind.FACE
+        )
+    )
+
+    with pytest.raises(ps.PysmeshError, match="FACE body; hollowing needs a SOLID"):
+        placed_box_session.make_thick_solid([face], -0.2)
+
+
+@pytest.mark.parametrize("thickness", [0.0, float("nan"), float("inf")])
+def test_make_thick_solid_with_a_zero_or_non_finite_thickness_raises(
+    placed_box_session: Session, thickness: float
+) -> None:
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+
+    with pytest.raises(ps.PysmeshError, match="thickness must be a finite non-zero"):
+        placed_box_session.make_thick_solid([face], thickness)
+
+
+@pytest.mark.parametrize("tol", [0.0, -1.0e-7])
+def test_make_thick_solid_with_a_non_positive_tol_raises(
+    placed_box_session: Session, tol: float
+) -> None:
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+
+    with pytest.raises(ps.PysmeshError, match="tol must be > 0"):
+        placed_box_session.make_thick_solid([face], -0.5, tol=tol)
+
+
+def test_make_thick_solid_that_self_intersects_raises_naming_input_faces(
+    placed_box_session: Session,
+) -> None:
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+    live = set(_ids(placed_box_session, EntityKind.FACE))
+
+    # A wall as thick as the box's smallest extent folds the inner shell through itself.
+    with pytest.raises(ps.PysmeshError) as excinfo:
+        placed_box_session.make_thick_solid([face], -BOX_DX)
+
+    blamed = set(excinfo.value.face_ids)
+    assert blamed, "the failure must name the faces it broke on"
+    # Live EntityIds of the input, and fewer than all of them: the result's broken faces
+    # were traced back through the history rather than the whole selection being blamed.
+    assert blamed < live
+    assert blamed != {face}, "the blame must be traced, not the selection echoed back"
+
+
+def test_make_thick_solid_leaves_the_session_unchanged_when_it_fails(
+    placed_box_session: Session,
+) -> None:
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+    before = placed_box_session.brep()
+    entities_before = {k: _ids(placed_box_session, k) for k in EntityKind}
+
+    with pytest.raises(ps.PysmeshError):
+        placed_box_session.make_thick_solid([face], -BOX_DX)
+
+    assert placed_box_session.brep() == before
+    assert {k: _ids(placed_box_session, k) for k in EntityKind} == entities_before
+
+
+def test_a_cancelled_make_thick_solid_changes_nothing(
+    placed_box_session: Session,
+) -> None:
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+    before = (
+        placed_box_session.op_count,
+        placed_box_session.issued_id_count,
+        {k: _ids(placed_box_session, k) for k in EntityKind},
+        placed_box_session.brep(),
+    )
+
+    with pytest.raises(ps.PysmeshCancelled):
+        placed_box_session.make_thick_solid([face], -0.5, cancel=lambda: True)
+
+    assert (
+        placed_box_session.op_count,
+        placed_box_session.issued_id_count,
+        {k: _ids(placed_box_session, k) for k in EntityKind},
+        placed_box_session.brep(),
+    ) == before
+
+
+def test_make_thick_solid_round_trips_through_a_snapshot(
+    placed_box_session: Session,
+) -> None:
+    mark = placed_box_session.snapshot()
+    before = placed_box_session.brep()
+    entities_before = {k: _ids(placed_box_session, k) for k in EntityKind}
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+
+    placed_box_session.make_thick_solid([face], -0.5)
+    placed_box_session.restore(mark)
+
+    assert placed_box_session.brep() == before
+    assert {k: _ids(placed_box_session, k) for k in EntityKind} == entities_before
 
 
 def test_offset_enlarges_the_box_by_the_distance_on_every_side(

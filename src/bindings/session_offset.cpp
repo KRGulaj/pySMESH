@@ -2,15 +2,16 @@
 // Copyright (C) 2026 Kajetan R. Gulaj
 // Created: 2026-09-20
 
-// pySMESH binding — Session: the uniform offset of a whole body.
+// pySMESH binding — Session: the offset family, hollowing and uniform offsetting.
 //
-// offset drives TKOffset's BRepOffsetAPI_MakeOffsetShape with BRepOffset_Skin and
-// GeomAbs_Intersection, the same two modes the stateless offset_shape uses. What the session
-// adds is identity: a face the offset rebuilds keeps the id it had, so a boundary condition
-// or a mesh group named on the original body still names the same face afterwards.
+// Both operations drive TKOffset's BRepOffsetAPI with BRepOffset_Skin and
+// GeomAbs_Intersection, the same two modes the stateless make_thick_solid and offset_shape
+// use. What the session adds is identity: a wall the offset rebuilds keeps the id it had,
+// so a boundary condition or a mesh group named on the original body still names the same
+// wall afterwards.
 //
-// Two things about this operation are specific to it, and both are handled here rather than
-// by the shared plumbing:
+// Two things about this family are specific to it, and both are handled here rather than by
+// the shared plumbing:
 //
 //   * BRepOffsetAPI_MakeOffsetShape::PerformByJoin reports a face's offset through
 //     Generated(), not Modified() — measured on a box, where Modified() is empty for every
@@ -75,23 +76,34 @@ NCollection_List<TopoDS_Shape> related_to(BRepOffsetAPI_MakeOffsetShape& mk,
 // header gives. This reads the same two lists and re-files each target by dimension, which
 // is the rule BRepTools_History's own documentation states: a target of the same shape type
 // is a modification, one of a different type is a generation.
+//
+// `opened` names the faces a hollowing was asked to turn into openings, and is empty for a
+// uniform offset. Those faces are gone by the caller's own request, so none of them is
+// allowed to take a Modified relation however OCCT files it: MakeThickSolidByJoin reports
+// the rim it leaves behind — the opened face with the cavity cut out of it — as modified
+// from that face, and honouring it would slide the opening's id onto a wall of the result.
+// The rim is recorded as *generated* from the opened face instead, which keeps the
+// provenance without keeping the id.
 Handle(BRepTools_History) offset_history(const TopoDS_Shape& argument,
                                          BRepOffsetAPI_MakeOffsetShape& mk,
-                                         const ShapeSet& produced) {
+                                         const ShapeSet& produced, const ShapeSet& opened) {
   Handle(BRepTools_History) hist = new BRepTools_History;
   const ShapeSet args = shape_set(argument);
+  bool body_related = false;
   for (int i = 1; i <= args.Extent(); ++i) {
     const TopoDS_Shape& s = args(i);
     if (!BRepTools_History::IsSupportedType(s)) {
       continue;
     }
+    const bool is_body = s.IsSame(argument);
+    const bool is_opening = opened.Contains(s);
     bool related = false;
     if (!mk.IsDeleted(s)) {
       for (const TopoDS_Shape& t : related_to(mk, s)) {
         if (t.IsSame(s) || !produced.Contains(t) || !BRepTools_History::IsSupportedType(t)) {
           continue;
         }
-        if (t.ShapeType() == s.ShapeType()) {
+        if (t.ShapeType() == s.ShapeType() && !is_opening) {
           hist->AddModified(s, t);
           related = true;
         } else {
@@ -99,10 +111,33 @@ Handle(BRepTools_History) offset_history(const TopoDS_Shape& argument,
         }
       }
     }
-    // An input that the result neither contains nor descends from is gone, and saying so
-    // is what keeps its id from being carried onto whatever ends up in the same place.
+    if (is_body) {
+      body_related = related;
+      continue;
+    }
+    // An input that the result neither contains nor descends from is gone. Saying so is
+    // what puts a hollowed solid's opened faces in `deleted`, instead of leaving their ids
+    // to be carried onto whatever ends up in the same place.
     if (!related && !produced.Contains(s)) {
       hist->Remove(s);
+    }
+  }
+
+  // The body itself, when the algorithm said nothing about it.
+  //
+  // PerformByJoin does relate it — measured on a box, where the offset solid comes back
+  // through the solid's own Generated() — but MakeThickSolidByJoin relates nothing to the
+  // solid it was handed, so the body's id would die at every hollow and a caller's handle
+  // to "the part" would break. The result's solids are that body rebuilt, which is a
+  // modification by BRepTools_History's own definition: the dimension is unchanged. Two or
+  // more solids in the result make it a split, and the id survives on each, which is the
+  // session's existing answer to that shape of question rather than a new one.
+  if (!body_related && !produced.Contains(argument) &&
+      BRepTools_History::IsSupportedType(argument)) {
+    for (int i = 1; i <= produced.Extent(); ++i) {
+      if (produced(i).ShapeType() == argument.ShapeType()) {
+        hist->AddModified(argument, produced(i));
+      }
     }
   }
   return hist;
@@ -203,6 +238,117 @@ void Session::require_non_zero(const char* op, const char* name, double v) {
   }
 }
 
+// ---- make_thick_solid ------------------------------------------------------------------ //
+
+py::dict Session::make_thick_solid(const std::vector<EntityId>& face_ids, double thickness,
+                                   double tol, const py::object& progress,
+                                   const py::object& cancel) {
+  OpGuard guard(in_op_);
+  require_non_zero("make_thick_solid", "thickness", thickness);
+  require_positive("tol", tol);
+  const std::vector<TopoDS_Shape> faces = faces_of("make_thick_solid", face_ids);
+  const TopoDS_Shape owner = sole_body("make_thick_solid", face_ids);
+  if (owner.ShapeType() != TopAbs_SOLID) {
+    throw PysmeshError(
+        std::string("Session.make_thick_solid: the named faces belong to a ") +
+        std::string(TopAbs::ShapeTypeToString(owner.ShapeType())) +
+        " body; hollowing needs a SOLID. MakeThickSolidByJoin builds the wall between a "
+        "solid's boundary and its offset, and an open body has no such wall.");
+  }
+  const std::vector<TopoDS_Shape> survivors = bodies_excluding({owner});
+
+  ShapeSet opened;
+  for (const TopoDS_Shape& f : faces) {
+    opened.Add(f);
+  }
+
+  ProgressDriver driver("make_thick_solid", hooks_of("make_thick_solid", progress, cancel));
+  TopoDS_Shape result;
+  Handle(BRepTools_History) hist;
+  std::vector<TopoDS_Shape> bad;
+  std::vector<EntityId> unopened;
+  {
+    py::gil_scoped_release release;
+    BRepOffsetAPI_MakeThickSolid mk;
+    NCollection_List<TopoDS_Shape> closing;
+    for (const TopoDS_Shape& f : faces) {
+      closing.Append(f);
+    }
+    try {
+      mk.MakeThickSolidByJoin(owner, closing, thickness, tol, BRepOffset_Skin,
+                              /*Intersection=*/Standard_False,
+                              /*SelfInter=*/Standard_False, GeomAbs_Intersection,
+                              /*RemoveIntEdges=*/Standard_False, driver.range());
+    } catch (const std::exception& e) {
+      py::gil_scoped_acquire acquire;
+      throw PysmeshError(
+          std::string("Session.make_thick_solid: "
+                      "BRepOffsetAPI_MakeThickSolid::MakeThickSolidByJoin failed: ") +
+              e.what(),
+          "", ids_as_int(face_ids));
+    }
+    if (mk.IsDone()) {
+      result = mk.Shape();
+      if (!result.IsNull()) {
+        const ShapeSet produced = shape_set(result);
+        // The post-condition that makes the delta trustworthy: a face the caller named is
+        // an opening, so it must not still be a face of the result. If one is, OCCT did
+        // not open it, and committing would report an id as dead while the wall it names
+        // is still there.
+        for (std::size_t i = 0; i < faces.size(); ++i) {
+          if (produced.Contains(faces[i])) {
+            unopened.push_back(face_ids[i]);
+          }
+        }
+        hist = offset_history(owner, mk, produced, opened);
+        // Checked here rather than left to commit(), because only here does the history
+        // that traces a broken result face back to the input face it came from still
+        // exist. commit() re-checks and is what actually refuses the shape; this pass is
+        // what puts ids on the refusal.
+        if (validate_ && !BRepCheck_Analyzer(result).IsValid()) {
+          bad = invalid_faces(result);
+        }
+      }
+    }
+  }
+  driver.finish();
+  // Before either failure path: a hollowing the caller stopped produced nothing, and
+  // blaming the named faces for a self-intersection that was never computed would be a
+  // false diagnostic.
+  if (driver.cancelled()) {
+    ProgressDriver::raise_cancelled("make_thick_solid");
+  }
+  if (result.IsNull()) {
+    throw PysmeshError(
+        "Session.make_thick_solid: OCCT could not hollow the body at thickness " +
+            std::to_string(thickness) + ".",
+        "BRepOffsetAPI_MakeThickSolid::IsDone() is false. |thickness| is most likely "
+        "larger than the body's smallest feature, so the offset walls self-intersect. "
+        "No partial result is returned.",
+        ids_as_int(face_ids));
+  }
+  if (!unopened.empty()) {
+    throw PysmeshError(
+        "Session.make_thick_solid: OCCT left " + std::to_string(unopened.size()) +
+            " of the " + std::to_string(faces.size()) +
+            " named faces in the result instead of opening them.",
+        "MakeThickSolidByJoin reported success, but those faces are still faces of the "
+        "hollowed body. No partial result is returned.",
+        ids_as_int(unopened));
+  }
+  if (!bad.empty()) {
+    throw PysmeshError(
+        "Session.make_thick_solid: the hollowed solid is invalid (BRepCheck_Analyzer "
+        "rejected " +
+            std::to_string(bad.size()) + " of its faces); the session is unchanged.",
+        "The offset walls most likely self-intersect. Reduce |thickness|, or open a face "
+        "set whose walls do not fold onto each other. The ids reported are the input "
+        "faces the broken result faces came from.",
+        offset_blame(owner, hist, bad, face_ids));
+  }
+  return commit(concat(survivors, result), hist, "make_thick_solid", result);
+}
+
 // ---- offset ---------------------------------------------------------------------------- //
 
 py::dict Session::offset(const std::vector<EntityId>& entity_ids, double distance,
@@ -246,7 +392,7 @@ py::dict Session::offset(const std::vector<EntityId>& entity_ids, double distanc
       if (!result.IsNull()) {
         // No opened faces: a uniform offset removes nothing, so every face of the body is
         // free to keep its id.
-        hist = offset_history(owner, mk, shape_set(result));
+        hist = offset_history(owner, mk, shape_set(result), ShapeSet());
         if (validate_ && !BRepCheck_Analyzer(result).IsValid()) {
           bad = invalid_faces(result);
         }
