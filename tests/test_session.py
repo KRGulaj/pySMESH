@@ -1081,6 +1081,98 @@ def test_offset_leaves_the_session_unchanged_when_it_fails(
     assert {k: _ids(placed_box_session, k) for k in EntityKind} == entities_before
 
 
+# --------------------------------------------------------------------------------------- #
+# An offset that comes back inside out, or the wrong way
+#
+# `offset` does not have the hollowing's collapse: over 99 committed offsets of a box, a
+# cylinder, a cone, a sphere and a torus, from -1000.0 to +50.0, not one came back as the
+# input body. Two other things did, and 4.1.1 committed both. Shrinking a body past its
+# smallest radius of curvature turns it inside out — a sphere of radius 3 at -3.0 measures
+# 0.0 and at -5.0 measures -33.51 — and a torus shrunk far enough comes back *larger* than
+# it went in. The box's own limit, half its smallest extent, was already refused in 4.1.1
+# and stays covered by the two tests above.
+# --------------------------------------------------------------------------------------- #
+
+SPHERE_RADIUS: float = 3.0
+TORUS_RADII: tuple[float, float] = (5.0, 1.5)
+
+
+def _sphere_session() -> Session:
+    """A session holding one sphere of radius :data:`SPHERE_RADIUS`."""
+    s = Session()
+    s.add_sphere(SPHERE_RADIUS)
+    return s
+
+
+def _torus_session() -> Session:
+    """A session holding one torus of radii :data:`TORUS_RADII`."""
+    s = Session()
+    s.add_torus(*TORUS_RADII)
+    return s
+
+
+def test_offset_shrinks_a_sphere_to_the_closed_form_up_to_its_radius() -> None:
+    session = _sphere_session()
+    solid = _sole(session, EntityKind.SOLID)
+    distance = -2.5
+
+    session.offset([solid], distance)
+
+    # The regime the guard must leave alone: a sphere of radius 0.5 is still a sphere.
+    left = SPHERE_RADIUS + distance
+    assert session.entity_table(EntityKind.SOLID).measure[0] == pytest.approx(
+        4.0 / 3.0 * math.pi * left**3
+    )
+
+
+@pytest.mark.parametrize("distance", [-3.0, -3.5, -5.0])
+def test_offset_past_a_sphere_radius_raises_and_changes_nothing(distance: float) -> None:
+    session = _sphere_session()
+    solid = _sole(session, EntityKind.SOLID)
+    before = _whole_state(session)
+
+    # A sphere's smallest radius of curvature is its radius, so nothing is left at -3.0.
+    # OCCT reports success anyway and hands back a sphere turned inside out: volume 0.0 at
+    # -3.0, -0.523599 at -3.5, -33.510322 at -5.0, all of which 4.1.1 committed.
+    with pytest.raises(ps.PysmeshError, match="turned inside out") as excinfo:
+        session.offset([solid], distance)
+
+    assert f"{distance:.6f}" in str(excinfo.value)
+    assert set(excinfo.value.face_ids) == set(_ids(session, EntityKind.FACE))
+    assert _whole_state(session) == before
+
+
+@pytest.mark.parametrize("distance", [-1.5, -2.0])
+def test_offset_past_a_torus_tube_radius_raises_and_changes_nothing(
+    distance: float,
+) -> None:
+    session = _torus_session()
+    solid = _sole(session, EntityKind.SOLID)
+    before = _whole_state(session)
+
+    with pytest.raises(ps.PysmeshError, match="turned inside out"):
+        session.offset([solid], distance)
+
+    assert _whole_state(session) == before
+
+
+def test_offset_that_grows_a_body_it_was_told_to_shrink_raises() -> None:
+    session = _torus_session()
+    solid = _sole(session, EntityKind.SOLID)
+    volume = float(session.entity_table(EntityKind.SOLID).measure[0])
+    before = _whole_state(session)
+
+    # Far enough past the tube radius the sign stops meaning anything: the torus comes back
+    # at 8907.317972 against the 222.066099 it went in with, for a distance that shrinks.
+    # This one has a positive volume, so only the direction statement sees it.
+    with pytest.raises(ps.PysmeshError, match="though the distance shrinks it") as excinfo:
+        session.offset([solid], -11.0)
+
+    assert "turned inside out" not in str(excinfo.value)
+    assert f"{volume:.6f}" in str(excinfo.value)
+    assert _whole_state(session) == before
+
+
 def test_a_cancelled_offset_changes_nothing(placed_box_session: Session) -> None:
     solid = _sole(placed_box_session, EntityKind.SOLID)
     before = (

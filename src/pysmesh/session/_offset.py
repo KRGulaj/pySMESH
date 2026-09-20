@@ -126,7 +126,10 @@ class _OffsetOps(_SessionBase):
                 body, which must be a solid or a shell.
             distance: Signed offset, non-zero. Positive enlarges, negative shrinks. A
                 negative value larger than half the body's smallest extent, or larger than
-                its smallest radius of curvature, makes the offset faces cross.
+                its smallest radius of curvature, makes the offset faces cross. Past that
+                OCCT either declines, or returns a body turned inside out, or one that grew
+                where the distance said shrink; all three are refused rather than
+                committed.
             tol: Coincidence tolerance for the offset, in model units (> 0).
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the operation runs. ``None`` reports nothing.
@@ -144,9 +147,18 @@ class _OffsetOps(_SessionBase):
         Raises:
             PysmeshError: If an id is dead, if the entities straddle two bodies, if their
                 body is neither a solid nor a shell, on a zero or non-finite ``distance``, on
-                a non-positive ``tol``, or if the offset self-intersects. In that last case
-                ``.face_ids`` carries the input faces the broken result faces came from, or
-                every face of the body when OCCT declined before producing one. No partial
+                a non-positive ``tol``, if the offset self-intersects, or if the result is
+                not that body offset.
+
+                A self-intersection puts the input faces the broken result faces came from on
+                ``.face_ids``, or every face of the body when OCCT declined before producing
+                one. A result that is not the body offset puts every face of the body there,
+                since OCCT reported success and no result face is broken to trace a blame
+                back through. Two things make it the body offset when the body is a solid,
+                and both are checked: it is a solid of positive volume — shrinking a sphere
+                by its own radius returns one turned inside out — and a negative
+                ``distance`` leaves it strictly smaller while a positive one leaves it
+                strictly larger. A shell body carries no solid and is not checked. No partial
                 result is ever returned.
         """
         return _delta(
