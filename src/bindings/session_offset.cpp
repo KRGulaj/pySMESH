@@ -10,7 +10,7 @@
 // so a boundary condition or a mesh group named on the original body still names the same
 // wall afterwards.
 //
-// Two things about this family are specific to it, and both are handled here rather than by
+// Three things about this family are specific to it, and all are handled here rather than by
 // the shared plumbing:
 //
 //   * BRepOffsetAPI_MakeOffsetShape::PerformByJoin reports a face's offset through
@@ -22,6 +22,12 @@
 //     for a change of dimension. offset_history() below therefore reads both lists and
 //     files each target by the only thing that decides the relation — whether its shape
 //     type matches its source's.
+//   * A hollowing can succeed in OCCT's eyes and still hand back the body it was given.
+//     Past what the body can carry, MakeThickSolidByJoin collapses the inner shell, reports
+//     IsDone(), and returns the input solid with the faces that were to be opened re-issued
+//     under new ids. BRepCheck_Analyzer accepts it, and the `unopened` post-condition cannot
+//     see it, because the named faces really are gone. not_a_thick_solid() below refuses it
+//     on what a thick solid must be, rather than on how large a thickness may be.
 //   * A failed offset has to blame something, and the only ids that exist at that moment
 //     are the ones the operation was given. The stateless module answers with the 1-based
 //     ordinals of the result's invalid faces; an ordinal put on PysmeshError.face_ids here
@@ -158,6 +164,105 @@ std::vector<TopoDS_Shape> invalid_faces(const TopoDS_Shape& result) {
   return out;
 }
 
+// What was observed, when the result of a hollowing is not a hollowed solid. Empty when it
+// is one.
+//
+// Measured on the released 4.1.1 wheel, a 3 x 7 x 11 box opened at the face of largest z:
+// once |thickness| passes 1.55 — the box's smallest extent is 3 — MakeThickSolidByJoin
+// collapses the inner shell, reports IsDone(), and hands back a shape BRepCheck_Analyzer
+// accepts and that *is* the input solid: volume 231, six faces, and the face that was to be
+// opened re-issued under a new id. The `unopened` post-condition above cannot see it: the
+// opened face is genuinely gone from the id space, and the face standing in its place is a
+// different shape. The session used to commit that, so a caller reading valid=True,
+// deleted=[opening] and a non-empty created had no way to tell it from a real shell.
+// Opening every face of a solid does the same thing at every thickness measured, -0.05
+// through -3.0.
+//
+// The two statements below are what a thick solid *is*. Neither is a rule about how large a
+// thickness may be: a magnitude rule would have to know the body's smallest feature, and
+// would have to refuse the thin wall at -1.40 — cavity 8.064 of 231 — that OCCT builds
+// correctly.
+//
+//   1. Hollowed inward, the wall lies inside the boundary it was built from, so its volume
+//      is strictly less than that body's. Outward the wall lies outside instead, and its
+//      volume stands in no fixed relation to the input's — a box opened at one face and
+//      thickened by 2.0 gives 770 against an input of 231, by 0.5 gives 137 — so the
+//      statement is made for a negative thickness only, which is the sign it is derived for.
+//   2. The result carries the walls the offset built: at least one face that is neither a
+//      face of the input nor a rim generated from an opened face. Vacuous when every face
+//      was opened, because then there is no wall to build and statement 1 carries the case.
+//
+// Both are made, because each catches a measured case the other misses. Opening every face
+// of the box at -0.5 leaves no wall to look for, and only statement 1 sees it. Opening the
+// two walls normal to y and the top at -3.0 returns the input solid measuring
+// 230.99999999999997 against the input's 231 — under it by 2.8e-14, which is round-off, not
+// a cavity — and only statement 2 sees that.
+std::string not_a_thick_solid(const TopoDS_Shape& owner, const TopoDS_Shape& result,
+                              double thickness, const ShapeSet& opened,
+                              const Handle(BRepTools_History) & hist) {
+  std::vector<std::string> broken;
+
+  double volume = 0.0;
+  for (TopExp_Explorer ex(result, TopAbs_SOLID); ex.More(); ex.Next()) {
+    volume += measure_of(ex.Current());
+  }
+  const double input_volume = measure_of(owner);
+  if (thickness < 0.0 && volume >= input_volume) {
+    broken.push_back("Its volume " + std::to_string(volume) +
+                     " is not less than the input solid's " + std::to_string(input_volume) +
+                     ", so no cavity was cut.");
+  }
+
+  // The walls: every face of the result that the offset built, rather than took from the
+  // input or left at an opening. `hist` files a rim as generated from the face it was opened
+  // out of, which is what makes the rim distinguishable from a wall here.
+  ShapeSet input_faces;
+  TopExp::MapShapes(owner, TopAbs_FACE, input_faces);
+  ShapeSet rims;
+  if (!hist.IsNull()) {
+    for (int i = 1; i <= opened.Extent(); ++i) {
+      for (const TopoDS_Shape& t : hist->Generated(opened(i))) {
+        rims.Add(t);
+      }
+      for (const TopoDS_Shape& t : hist->Modified(opened(i))) {
+        rims.Add(t);
+      }
+    }
+  }
+  int unopened_faces = 0;
+  for (int i = 1; i <= input_faces.Extent(); ++i) {
+    if (!opened.Contains(input_faces(i))) {
+      ++unopened_faces;
+    }
+  }
+  int walls = 0;
+  int result_faces = 0;
+  for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next()) {
+    ++result_faces;
+    if (!input_faces.Contains(ex.Current()) && !rims.Contains(ex.Current())) {
+      ++walls;
+    }
+  }
+  if (unopened_faces > 0 && walls == 0) {
+    broken.push_back("No face of it is a wall the offset built. Each one is a face of the "
+                     "input or a rim of an opening, and " +
+                     std::to_string(unopened_faces) +
+                     " faces were left unopened for walls to stand on.");
+  }
+
+  if (broken.empty()) {
+    return std::string();
+  }
+  std::string why;
+  for (const std::string& line : broken) {
+    why += line + " ";
+  }
+  return why + "The result has " + std::to_string(result_faces) + " faces and volume " +
+         std::to_string(volume) + "; the input solid had " +
+         std::to_string(input_faces.Extent()) + " faces and volume " +
+         std::to_string(input_volume) + ".";
+}
+
 }  // namespace
 
 // ---- the shared failure diagnostic ----------------------------------------------------- //
@@ -267,6 +372,7 @@ py::dict Session::make_thick_solid(const std::vector<EntityId>& face_ids, double
   Handle(BRepTools_History) hist;
   std::vector<TopoDS_Shape> bad;
   std::vector<EntityId> unopened;
+  std::string collapsed;
   {
     py::gil_scoped_release release;
     BRepOffsetAPI_MakeThickSolid mk;
@@ -308,6 +414,14 @@ py::dict Session::make_thick_solid(const std::vector<EntityId>& face_ids, double
         if (validate_ && !BRepCheck_Analyzer(result).IsValid()) {
           bad = invalid_faces(result);
         }
+        // Only when the shape passed: a result the analyzer already rejects is refused
+        // below on that verdict, and measuring a broken shape's volume would add nothing to
+        // the diagnostic. On a healthy result this is one GProp pass over each of the two
+        // shapes, which is what it costs to tell a hollowed solid from the body it was
+        // built from.
+        if (bad.empty()) {
+          collapsed = not_a_thick_solid(owner, result, thickness, opened, hist);
+        }
       }
     }
   }
@@ -345,6 +459,22 @@ py::dict Session::make_thick_solid(const std::vector<EntityId>& face_ids, double
         "set whose walls do not fold onto each other. The ids reported are the input "
         "faces the broken result faces came from.",
         offset_blame(owner, hist, bad, face_ids));
+  }
+  // After the analyzer refusal, and not before it: a shape the analyzer rejects is broken,
+  // which is the stronger thing to say about it. This one is the opposite case — OCCT
+  // reported success and the analyzer agreed, and the shape is still not a hollowed solid.
+  // The ids reported are the faces the caller named as openings: they are the operands, and
+  // there is no broken result face to trace a blame back through.
+  if (!collapsed.empty()) {
+    throw PysmeshError(
+        "Session.make_thick_solid: the result at thickness " + std::to_string(thickness) +
+            " is not a hollowed solid. " + collapsed + " The session is unchanged.",
+        "MakeThickSolidByJoin reported success and BRepCheck_Analyzer accepted the shape, "
+        "but the inner shell collapsed and what came back is the body it was built from. "
+        "|thickness| is more than this body can carry: keep it under half the body's "
+        "smallest extent, and leave at least one face unopened. No partial result is "
+        "returned.",
+        ids_as_int(face_ids));
   }
   return commit(concat(survivors, result), hist, "make_thick_solid", result);
 }
