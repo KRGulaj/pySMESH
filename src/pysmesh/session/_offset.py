@@ -55,8 +55,10 @@ class _OffsetOps(_SessionBase):
             thickness: Signed wall thickness, non-zero. Negative hollows inward, so the wall
                 lies inside the original boundary and the outer faces stay where they were.
                 Positive thickens outward. Same convention as ``ThickSolidParams.thickness``.
-                As a rule of thumb, a negative value must be smaller in magnitude than the
-                body's smallest feature, or the inner walls fold through each other.
+                A negative value must be smaller in magnitude than half the body's smallest
+                extent, and smaller than its smallest radius of curvature. Past that the
+                inner walls fold through each other: OCCT then either declines, or returns
+                the input body unhollowed, and both are refused rather than committed.
             tol: Coincidence tolerance for the offset, in model units (> 0).
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the operation runs. ``None`` reports nothing.
@@ -76,10 +78,25 @@ class _OffsetOps(_SessionBase):
             PysmeshError: If an id is dead or is not a face, if the faces straddle two
                 bodies, if their body is not a solid, on a zero or non-finite ``thickness``,
                 on a non-positive ``tol``, if OCCT leaves a named face in the result instead
-                of opening it, or if the offset self-intersects. In the last case
-                ``.face_ids`` carries the *input* faces that the broken result faces came
-                from — ids the caller already holds, rather than ordinals into a shape that
-                was never committed. No partial result is ever returned.
+                of opening it, if the offset self-intersects, or if the result is not a
+                hollowed solid at all.
+
+                The last two are different failures and carry different ids. A
+                self-intersection puts the *input* faces that the broken result faces came
+                from on ``.face_ids`` — ids the caller already holds, rather than ordinals
+                into a shape that was never committed. A result that is not a hollowed solid
+                puts ``face_ids`` itself there, because nothing in the result is broken to
+                trace a blame back through: OCCT reported success and the shape passed
+                ``BRepCheck_Analyzer``, yet it is not a wall. Three things make it one, and
+                each is checked. It is a solid of positive volume — a negative one is the
+                same wall turned inside out, which is what every face but one opened and a
+                positive ``thickness`` returns. Hollowed inward it has less volume than the
+                body it was built from — an inward ``thickness`` beyond the body's reach
+                returns that body itself, and so does opening every face at any thickness.
+                And it carries at least one wall the offset built, rather than only the
+                input's own faces and a rim at each opening. The message names the
+                thickness, both volumes and both face counts. No partial result is ever
+                returned.
         """
         return _delta(
             self._s.make_thick_solid(_ids(face_ids), thickness, tol, progress, cancel)
@@ -109,7 +126,10 @@ class _OffsetOps(_SessionBase):
                 body, which must be a solid or a shell.
             distance: Signed offset, non-zero. Positive enlarges, negative shrinks. A
                 negative value larger than half the body's smallest extent, or larger than
-                its smallest radius of curvature, makes the offset faces cross.
+                its smallest radius of curvature, makes the offset faces cross. Past that
+                OCCT either declines, or returns a body turned inside out, or one that grew
+                where the distance said shrink; all three are refused rather than
+                committed.
             tol: Coincidence tolerance for the offset, in model units (> 0).
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the operation runs. ``None`` reports nothing.
@@ -127,9 +147,18 @@ class _OffsetOps(_SessionBase):
         Raises:
             PysmeshError: If an id is dead, if the entities straddle two bodies, if their
                 body is neither a solid nor a shell, on a zero or non-finite ``distance``, on
-                a non-positive ``tol``, or if the offset self-intersects. In that last case
-                ``.face_ids`` carries the input faces the broken result faces came from, or
-                every face of the body when OCCT declined before producing one. No partial
+                a non-positive ``tol``, if the offset self-intersects, or if the result is
+                not that body offset.
+
+                A self-intersection puts the input faces the broken result faces came from on
+                ``.face_ids``, or every face of the body when OCCT declined before producing
+                one. A result that is not the body offset puts every face of the body there,
+                since OCCT reported success and no result face is broken to trace a blame
+                back through. Two things make it the body offset when the body is a solid,
+                and both are checked: it is a solid of positive volume — shrinking a sphere
+                by its own radius returns one turned inside out — and a negative
+                ``distance`` leaves it strictly smaller while a positive one leaves it
+                strictly larger. A shell body carries no solid and is not checked. No partial
                 result is ever returned.
         """
         return _delta(

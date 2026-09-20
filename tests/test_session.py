@@ -638,6 +638,244 @@ def test_make_thick_solid_leaves_the_session_unchanged_when_it_fails(
     assert {k: _ids(placed_box_session, k) for k in EntityKind} == entities_before
 
 
+# --------------------------------------------------------------------------------------- #
+# A hollowing that comes back as the body it was built from
+#
+# Measured on the released 4.1.1 wheel, this box opened at the face of largest z: at -1.50
+# the analyzer rejected the result, from -1.51 to -1.55 OCCT declined, and from -1.56 down
+# to -5.00 it reported success and handed back the input solid — volume 231, six faces, the
+# opened face re-issued under a new id. 4.1.1 committed that. The regime the guard has to
+# leave alone is the thin wall just above it: -1.40 hollows correctly to 222.936.
+# --------------------------------------------------------------------------------------- #
+
+# Half the box's smallest extent. The hollowing accepts every |thickness| under it and
+# refuses every one at or beyond it: measured on this fixture, the last accepted value is
+# -1.4999999991410775 and the first refused one is -1.4999999991410777.
+HALF_SMALLEST_EXTENT: float = BOX_DX / 2.0
+
+
+def _top_face(session: Session) -> EntityId:
+    """The face of largest z, which is the one every hollowing below opens."""
+    boxes = session.bounding_boxes(EntityKind.FACE)
+    top, height = -1, -math.inf
+    for i, b in zip(boxes.ids.tolist(), boxes.bbox.tolist(), strict=True):
+        if b[2] > height:
+            top, height = int(i), b[2]
+    assert top >= 0
+    return EntityId(top)
+
+
+def _whole_state(session: Session) -> tuple[object, ...]:
+    """The operation count, the id counter and every live id — what a refusal must keep.
+
+    The BREP bytes are deliberately not here. MakeThickSolidByJoin raises the *input*
+    shape's stored tolerances in place, from 1e-07 to 1.00000000111022e-07, for some
+    selections. That happens inside OCCT before any post-condition runs, it is the same in
+    4.1.1, and it changes no id and no geometry. The byte-for-byte contract is asserted by
+    :func:`test_make_thick_solid_leaves_the_session_unchanged_when_it_fails` on a selection
+    where it holds.
+    """
+    return (
+        session.op_count,
+        session.issued_id_count,
+        {k: _ids(session, k) for k in EntityKind},
+    )
+
+
+def test_make_thick_solid_at_a_thin_wall_leaves_the_closed_form_volume(
+    placed_box_session: Session,
+) -> None:
+    top = _top_face(placed_box_session)
+    thickness = 1.4
+    # Opened at the top, the cavity loses a wall on the four sides and on the bottom only.
+    expected = BOX_VOLUME - (BOX_DX - 2 * thickness) * (BOX_DY - 2 * thickness) * (
+        BOX_DZ - thickness
+    )
+
+    delta = placed_box_session.make_thick_solid([top], -thickness)
+
+    assert expected == pytest.approx(BOX_VOLUME - 0.2 * 4.2 * 9.6)
+    assert placed_box_session.entity_table(EntityKind.SOLID).measure[0] == pytest.approx(
+        expected
+    )
+    assert delta.valid is True
+    assert delta.deleted.tolist() == [top]
+    assert len(_ids(placed_box_session, EntityKind.FACE)) == 11
+
+
+def test_make_thick_solid_at_a_wall_that_clears_every_feature_hollows_the_box(
+    placed_box_session: Session,
+) -> None:
+    top = _top_face(placed_box_session)
+    thickness = 0.37
+    expected = BOX_VOLUME - (BOX_DX - 2 * thickness) * (BOX_DY - 2 * thickness) * (
+        BOX_DZ - thickness
+    )
+
+    delta = placed_box_session.make_thick_solid([top], -thickness)
+
+    assert delta.valid is True
+    assert delta.deleted.tolist() == [top]
+    # Five inner walls and the rim, with a full set of edges and vertices under them.
+    assert len(delta.created.tolist()) == 26
+    assert len(_ids(placed_box_session, EntityKind.FACE)) == 11
+    assert placed_box_session.entity_table(EntityKind.SOLID).measure[0] == pytest.approx(
+        expected
+    )
+
+
+def test_make_thick_solid_the_analyzer_rejects_raises_and_changes_nothing(
+    placed_box_session: Session,
+) -> None:
+    top = _top_face(placed_box_session)
+    before = _whole_state(placed_box_session)
+
+    # Exactly half the smallest extent: the inner shell meets itself, and the faces OCCT
+    # builds there are broken rather than absent.
+    with pytest.raises(ps.PysmeshError, match="rejected"):
+        placed_box_session.make_thick_solid([top], -HALF_SMALLEST_EXTENT)
+
+    assert _whole_state(placed_box_session) == before
+
+
+@pytest.mark.parametrize("thickness", [-1.6, -2.0, -3.0, -5.0])
+def test_make_thick_solid_that_returns_the_input_solid_raises_and_changes_nothing(
+    placed_box_session: Session, thickness: float
+) -> None:
+    top = _top_face(placed_box_session)
+    before = _whole_state(placed_box_session)
+
+    # OCCT reports success here and BRepCheck_Analyzer accepts the shape. What comes back is
+    # the input solid with the face that was to be opened re-issued under a new id, so
+    # neither the `unopened` post-condition nor the analyzer can see it.
+    with pytest.raises(ps.PysmeshError, match="is not a hollowed solid") as excinfo:
+        placed_box_session.make_thick_solid([top], thickness)
+
+    assert list(excinfo.value.face_ids) == [top]
+    assert f"{thickness:.6f}" in str(excinfo.value)
+    assert f"{BOX_VOLUME:.6f}" in str(excinfo.value)
+    assert _whole_state(placed_box_session) == before
+
+
+def test_make_thick_solid_opening_every_face_raises_and_changes_nothing(
+    placed_box_session: Session,
+) -> None:
+    faces = [EntityId(i) for i in _ids(placed_box_session, EntityKind.FACE)]
+    before = _whole_state(placed_box_session)
+
+    # Every face opened leaves no wall to build, and 4.1.1 committed the input solid for it
+    # at every thickness measured, -0.05 through -3.0. This thickness is one the same box
+    # hollows correctly when a single face is opened, so no magnitude rule would catch it.
+    with pytest.raises(ps.PysmeshError, match="is not a hollowed solid") as excinfo:
+        placed_box_session.make_thick_solid(faces, -0.5)
+
+    assert list(excinfo.value.face_ids) == faces
+    assert "no cavity was cut" in str(excinfo.value)
+    assert _whole_state(placed_box_session) == before
+
+
+def test_make_thick_solid_that_returns_the_input_within_round_off_raises() -> None:
+    # A second placement, and the only test that needs one: the volume a collapsed result
+    # measures is exact at :data:`BOX_ORIGIN` and a hair under the input here, so this is
+    # where the round-off case can be pinned at all.
+    session = Session()
+    session.add_box(BOX_DX, BOX_DY, BOX_DZ, origin=(0.37, -2.9, 1.3))
+    table = session.entity_table(EntityKind.FACE)
+    normal_to_y = [
+        EntityId(int(i))
+        for i, m in zip(table.ids.tolist(), table.measure.tolist(), strict=True)
+        if m == pytest.approx(BOX_DX * BOX_DZ)
+    ]
+    opened = sorted(normal_to_y + [_top_face(session)])
+    assert len(opened) == 3
+    before = _whole_state(session)
+
+    # The two walls normal to y and the top, opened at -3.0. 4.1.1 committed the input solid
+    # for this one too, but measured its volume as 230.99999999999997 — under the input's
+    # 231 by 2.8e-14. A volume rule cannot see a collapse that far inside round-off. The
+    # wall statement is what catches it, which is why the post-condition makes both.
+    with pytest.raises(ps.PysmeshError, match="wall the offset built") as excinfo:
+        session.make_thick_solid(opened, -3.0)
+
+    assert "no cavity was cut" not in str(excinfo.value)
+    assert list(excinfo.value.face_ids) == opened
+    assert _whole_state(session) == before
+
+
+@pytest.mark.parametrize("thickness", [0.05, 0.5, 2.0])
+def test_make_thick_solid_that_returns_an_inside_out_wall_raises(
+    placed_box_session: Session, thickness: float
+) -> None:
+    faces = _ids(placed_box_session, EntityKind.FACE)
+    unopened = placed_box_session.entity_table(EntityKind.FACE).measure[0]
+    opened = [EntityId(i) for i in faces[1:]]
+    before = _whole_state(placed_box_session)
+
+    # Every face but one opened, thickened outward: the wall is the one remaining face
+    # raised into a plate, and OCCT builds it with its orientation reversed. 4.1.1 committed
+    # it, so the session reported a body of volume -(area x thickness) — -38.5 at +0.5 on
+    # the face of area 77. A caller taking that for a mass gets a negative one.
+    with pytest.raises(ps.PysmeshError, match="turned inside out") as excinfo:
+        placed_box_session.make_thick_solid(opened, thickness)
+
+    assert f"{-unopened * thickness:.6f}" in str(excinfo.value)
+    assert list(excinfo.value.face_ids) == opened
+    assert _whole_state(placed_box_session) == before
+
+
+def test_make_thick_solid_hollows_just_under_half_the_smallest_extent(
+    placed_box_session: Session,
+) -> None:
+    top = _top_face(placed_box_session)
+    thickness = HALF_SMALLEST_EXTENT * (1.0 - 1.0e-8)
+
+    delta = placed_box_session.make_thick_solid([top], -thickness)
+
+    # The wall is the whole body bar a sliver, and it is still a hollowing: the cavity has a
+    # positive volume and the inner walls are all there.
+    assert delta.valid is True
+    assert len(_ids(placed_box_session, EntityKind.FACE)) == 11
+    volume = float(placed_box_session.entity_table(EntityKind.SOLID).measure[0])
+    assert 0.0 < BOX_VOLUME - volume < 1.0e-6
+
+
+@pytest.mark.parametrize("scale", [1.0, 1.0 + 1.0e-6, 1.04, 2.0, 10.0])
+def test_make_thick_solid_refuses_from_half_the_smallest_extent_on(
+    placed_box_session: Session, scale: float
+) -> None:
+    top = _top_face(placed_box_session)
+    before = _whole_state(placed_box_session)
+
+    # The boundary, pinned: every |thickness| from half the smallest extent on is refused,
+    # whichever of the three ways OCCT fails at it. 4.1.1 refused only as far as 1.55 and
+    # committed the input solid for everything past that, 1.04 x 1.5 = 1.56 included.
+    with pytest.raises(ps.PysmeshError):
+        placed_box_session.make_thick_solid([top], -HALF_SMALLEST_EXTENT * scale)
+
+    assert _whole_state(placed_box_session) == before
+
+
+def test_make_thick_solid_outward_past_the_smallest_extent_still_builds_the_wall(
+    placed_box_session: Session,
+) -> None:
+    top = _top_face(placed_box_session)
+    thickness = 2.0
+    expected = (BOX_DX + 2 * thickness) * (BOX_DY + 2 * thickness) * (
+        BOX_DZ + thickness
+    ) - BOX_VOLUME
+
+    delta = placed_box_session.make_thick_solid([top], thickness)
+
+    # Outward the wall lies outside the original boundary, so nothing bounds the thickness
+    # and the inward rule must not be read onto it.
+    assert expected == pytest.approx(770.0)
+    assert delta.valid is True
+    assert placed_box_session.entity_table(EntityKind.SOLID).measure[0] == pytest.approx(
+        expected
+    )
+    assert len(_ids(placed_box_session, EntityKind.FACE)) == 11
+
+
 def test_a_cancelled_make_thick_solid_changes_nothing(
     placed_box_session: Session,
 ) -> None:
@@ -841,6 +1079,98 @@ def test_offset_leaves_the_session_unchanged_when_it_fails(
 
     assert placed_box_session.brep() == before
     assert {k: _ids(placed_box_session, k) for k in EntityKind} == entities_before
+
+
+# --------------------------------------------------------------------------------------- #
+# An offset that comes back inside out, or the wrong way
+#
+# `offset` does not have the hollowing's collapse: over 99 committed offsets of a box, a
+# cylinder, a cone, a sphere and a torus, from -1000.0 to +50.0, not one came back as the
+# input body. Two other things did, and 4.1.1 committed both. Shrinking a body past its
+# smallest radius of curvature turns it inside out — a sphere of radius 3 at -3.0 measures
+# 0.0 and at -5.0 measures -33.51 — and a torus shrunk far enough comes back *larger* than
+# it went in. The box's own limit, half its smallest extent, was already refused in 4.1.1
+# and stays covered by the two tests above.
+# --------------------------------------------------------------------------------------- #
+
+SPHERE_RADIUS: float = 3.0
+TORUS_RADII: tuple[float, float] = (5.0, 1.5)
+
+
+def _sphere_session() -> Session:
+    """A session holding one sphere of radius :data:`SPHERE_RADIUS`."""
+    s = Session()
+    s.add_sphere(SPHERE_RADIUS)
+    return s
+
+
+def _torus_session() -> Session:
+    """A session holding one torus of radii :data:`TORUS_RADII`."""
+    s = Session()
+    s.add_torus(*TORUS_RADII)
+    return s
+
+
+def test_offset_shrinks_a_sphere_to_the_closed_form_up_to_its_radius() -> None:
+    session = _sphere_session()
+    solid = _sole(session, EntityKind.SOLID)
+    distance = -2.5
+
+    session.offset([solid], distance)
+
+    # The regime the guard must leave alone: a sphere of radius 0.5 is still a sphere.
+    left = SPHERE_RADIUS + distance
+    assert session.entity_table(EntityKind.SOLID).measure[0] == pytest.approx(
+        4.0 / 3.0 * math.pi * left**3
+    )
+
+
+@pytest.mark.parametrize("distance", [-3.0, -3.5, -5.0])
+def test_offset_past_a_sphere_radius_raises_and_changes_nothing(distance: float) -> None:
+    session = _sphere_session()
+    solid = _sole(session, EntityKind.SOLID)
+    before = _whole_state(session)
+
+    # A sphere's smallest radius of curvature is its radius, so nothing is left at -3.0.
+    # OCCT reports success anyway and hands back a sphere turned inside out: volume 0.0 at
+    # -3.0, -0.523599 at -3.5, -33.510322 at -5.0, all of which 4.1.1 committed.
+    with pytest.raises(ps.PysmeshError, match="turned inside out") as excinfo:
+        session.offset([solid], distance)
+
+    assert f"{distance:.6f}" in str(excinfo.value)
+    assert set(excinfo.value.face_ids) == set(_ids(session, EntityKind.FACE))
+    assert _whole_state(session) == before
+
+
+@pytest.mark.parametrize("distance", [-1.5, -2.0])
+def test_offset_past_a_torus_tube_radius_raises_and_changes_nothing(
+    distance: float,
+) -> None:
+    session = _torus_session()
+    solid = _sole(session, EntityKind.SOLID)
+    before = _whole_state(session)
+
+    with pytest.raises(ps.PysmeshError, match="turned inside out"):
+        session.offset([solid], distance)
+
+    assert _whole_state(session) == before
+
+
+def test_offset_that_grows_a_body_it_was_told_to_shrink_raises() -> None:
+    session = _torus_session()
+    solid = _sole(session, EntityKind.SOLID)
+    volume = float(session.entity_table(EntityKind.SOLID).measure[0])
+    before = _whole_state(session)
+
+    # Far enough past the tube radius the sign stops meaning anything: the torus comes back
+    # at 8907.317972 against the 222.066099 it went in with, for a distance that shrinks.
+    # This one has a positive volume, so only the direction statement sees it.
+    with pytest.raises(ps.PysmeshError, match="though the distance shrinks it") as excinfo:
+        session.offset([solid], -11.0)
+
+    assert "turned inside out" not in str(excinfo.value)
+    assert f"{volume:.6f}" in str(excinfo.value)
+    assert _whole_state(session) == before
 
 
 def test_a_cancelled_offset_changes_nothing(placed_box_session: Session) -> None:
