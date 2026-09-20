@@ -503,6 +503,38 @@ class _ConstructOps(_SessionBase):
         """
         return _delta(self._s.make_wire(_ids(edge_ids)))
 
+    def extract_edges(self, edge_ids: Sequence[EntityId]) -> HistoryDelta:
+        """Copy the named edges into one new loose wire body, leaving the originals alone.
+
+        The one primitive that gets a wire out of a solid or a face. :meth:`make_wire`,
+        :meth:`make_face` and :meth:`make_filling` all refuse an edge that belongs to one,
+        because they consume the body they are given; :meth:`pipe` and :meth:`pipe_shell`
+        refuse a spine naming a solid for the same reason. So nothing could sweep along an
+        edge of an imported part, and nothing could cap a hole loop of a solid. This consumes
+        nothing, so it accepts an edge of any owner, and its result is the wire those
+        operations want.
+
+        The copies carry no history relation to the originals, for the reason :meth:`copy`
+        gives: relating a duplicate to its original moves the original's id onto the
+        duplicate. The originals are untouched and stay alive.
+
+        Args:
+            edge_ids: Edges to copy. At least one, and they must join into one connected
+                wire — each sharing an end vertex with the chain, or having one within the
+                two vertices' tolerance, which is welded the way :meth:`make_wire` welds it.
+
+        Returns:
+            The delta; every entity of the new wire body — its edges and their vertices — is
+            in ``created``, and ``deleted``, ``modified``, ``split`` and ``merged`` are
+            empty. ``valid`` is OCCT's verdict on the wire that was built.
+
+        Raises:
+            PysmeshError: On an empty selection, a dead id, an id that is not an edge, or
+                edges that do not join into one connected wire — in which case ``.face_ids``
+                carries the ids left over once every edge that could be joined had been.
+        """
+        return _delta(self._s.extract_edges(_ids(edge_ids)))
+
     def make_face(self, edge_ids: Sequence[EntityId]) -> HistoryDelta:
         """Build a planar face bounded by the named edges, consuming them.
 

@@ -30,6 +30,11 @@ BOX_DZ: float = 11.0
 BOX_VOLUME: float = BOX_DX * BOX_DY * BOX_DZ
 BOX_FACE_AREAS: tuple[float, ...] = (21.0, 21.0, 33.0, 33.0, 77.0, 77.0)
 
+# Off the origin, and off it on every axis with a negative component among them. An
+# operation that rebuilds geometry in its own local frame and forgets to put it back lands
+# on the origin, and a fixture sitting there cannot tell the difference.
+BOX_ORIGIN: tuple[float, float, float] = (2.0, -3.0, 5.0)
+
 # A box carries 1 solid + 6 faces + 12 edges + 8 vertices.
 BOX_ENTITY_COUNT: int = 27
 
@@ -39,6 +44,14 @@ def box_session() -> Session:
     """A session holding one 3 x 7 x 11 box at the origin."""
     s = Session()
     s.add_box(BOX_DX, BOX_DY, BOX_DZ)
+    return s
+
+
+@pytest.fixture
+def placed_box_session() -> Session:
+    """A session holding one 3 x 7 x 11 box at :data:`BOX_ORIGIN`."""
+    s = Session()
+    s.add_box(BOX_DX, BOX_DY, BOX_DZ, origin=BOX_ORIGIN)
     return s
 
 
@@ -414,6 +427,218 @@ def test_a_dead_id_cannot_be_used_as_an_operand(two_box_session: Session) -> Non
 
     with pytest.raises(ps.PysmeshError, match="is dead"):
         two_box_session.entity_kind(dead)
+
+
+# --------------------------------------------------------------------------------------- #
+# extract_edges
+# --------------------------------------------------------------------------------------- #
+
+
+def _outer_loop(session: Session, face: EntityId) -> list[EntityId]:
+    """The edge ids of a face's outer wire, in traversal order."""
+    wires = session.face_wires([face])
+    assert bool(wires.ordered.all())
+    start, end = wires.edge_range[0]
+    return [EntityId(int(i)) for i in wires.edge_id[start:end].tolist()]
+
+
+def _stray_edge(session: Session) -> tuple[EntityId, EntityId]:
+    """An edge, and one that shares no vertex with it."""
+    pairs = session.adjacency(EntityKind.EDGE, EntityKind.VERTEX)
+    ends: dict[int, set[int]] = {}
+    for e, v in zip(pairs.ids.tolist(), pairs.related.tolist(), strict=True):
+        ends.setdefault(e, set()).add(v)
+    edges = _ids(session, EntityKind.EDGE)
+    first = edges[0]
+    return EntityId(first), EntityId(
+        next(e for e in edges if not ends[e] & ends[first])
+    )
+
+
+def test_extract_edges_copies_a_solids_face_loop_at_its_own_length(
+    placed_box_session: Session,
+) -> None:
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+    loop = _outer_loop(placed_box_session, face)
+
+    delta = placed_box_session.extract_edges(loop)
+
+    table = placed_box_session.entity_table(EntityKind.EDGE)
+    lengths = {int(i): float(m) for i, m in zip(table.ids, table.measure, strict=True)}
+    copied = [
+        i
+        for i in delta.created.tolist()
+        if placed_box_session.entity_kind(EntityId(i)) == EntityKind.EDGE
+    ]
+    # A box's first face is the one at x = xmin, so its boundary is the dy by dz rectangle.
+    assert sorted(lengths[i] for i in copied) == pytest.approx(
+        sorted([BOX_DY, BOX_DY, BOX_DZ, BOX_DZ])
+    )
+    assert sum(lengths[i] for i in copied) == pytest.approx(2.0 * (BOX_DY + BOX_DZ))
+
+
+def test_extract_edges_delta_creates_the_new_body_and_touches_nothing_else(
+    placed_box_session: Session,
+) -> None:
+    before = {k: _ids(placed_box_session, k) for k in EntityKind}
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+    loop = _outer_loop(placed_box_session, face)
+    high_water = placed_box_session.issued_id_count
+
+    delta = placed_box_session.extract_edges(loop)
+
+    assert delta.deleted.tolist() == []
+    assert delta.modified.tolist() == []
+    assert delta.split.tolist() == []
+    assert delta.merged.tolist() == []
+    # A closed four-edge loop copies to four edges and four vertices, and to nothing else.
+    assert delta.created.tolist() == list(range(high_water + 1, high_water + 9))
+    kinds = [placed_box_session.entity_kind(EntityId(i)) for i in delta.created.tolist()]
+    assert kinds.count(EntityKind.EDGE) == 4
+    assert kinds.count(EntityKind.VERTEX) == 4
+    # Every original id, one by one, is still exactly where it was.
+    new_edges = [
+        i
+        for i in delta.created.tolist()
+        if placed_box_session.entity_kind(EntityId(i)) == EntityKind.EDGE
+    ]
+    assert _ids(placed_box_session, EntityKind.SOLID) == before[EntityKind.SOLID]
+    assert _ids(placed_box_session, EntityKind.FACE) == before[EntityKind.FACE]
+    assert _ids(placed_box_session, EntityKind.EDGE) == sorted(
+        before[EntityKind.EDGE] + new_edges
+    )
+    for i in loop:
+        assert placed_box_session.is_alive(i)
+
+
+def test_extract_edges_leaves_the_original_edges_untouched(
+    placed_box_session: Session,
+) -> None:
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+    loop = _outer_loop(placed_box_session, face)
+    table = placed_box_session.entity_table(EntityKind.EDGE)
+    truth = {int(i): float(m) for i, m in zip(table.ids, table.measure, strict=True)}
+
+    placed_box_session.extract_edges(loop)
+
+    after = placed_box_session.entity_table(EntityKind.EDGE)
+    # Still there, one by one: a copy that consumed its source would leave this vacuous.
+    assert set(truth) <= set(after.ids.tolist())
+    for i, m in zip(after.ids, after.measure, strict=True):
+        if int(i) in truth:
+            assert m == pytest.approx(truth[int(i)]), f"edge {i} changed length"
+
+
+def test_an_extracted_edge_can_be_the_spine_of_a_pipe(
+    placed_box_session: Session,
+) -> None:
+    # The reason the operation exists: pipe refuses a spine that names a solid, so before
+    # this nothing could sweep along an edge of an imported part.
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+    edge = _outer_loop(placed_box_session, face)[0]
+    spine = [
+        EntityId(i)
+        for i in placed_box_session.extract_edges([edge]).created.tolist()
+        if placed_box_session.entity_kind(EntityId(i)) == EntityKind.EDGE
+    ]
+    profile = [
+        EntityId(i)
+        for i in placed_box_session.add_circle(
+            BOX_ORIGIN, (0.0, 0.0, 1.0), 0.25
+        ).created.tolist()
+        if placed_box_session.entity_kind(EntityId(i)) == EntityKind.EDGE
+    ]
+
+    delta = placed_box_session.pipe(spine, profile)
+
+    assert delta.created.size > 0
+    assert delta.valid is True
+
+
+def test_an_extracted_loop_caps_a_solids_face(placed_box_session: Session) -> None:
+    # The other reason: make_face refuses a solid's edges, so a hole loop could not be
+    # capped. A box's first face is at x = xmin, so its cap has area dy * dz.
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+    loop = _outer_loop(placed_box_session, face)
+    copied = [
+        EntityId(i)
+        for i in placed_box_session.extract_edges(loop).created.tolist()
+        if placed_box_session.entity_kind(EntityId(i)) == EntityKind.EDGE
+    ]
+
+    delta = placed_box_session.make_face(copied)
+
+    capped = EntityId(int(delta.created[0]))
+    table = placed_box_session.entity_table(EntityKind.FACE)
+    area = {int(i): float(m) for i, m in zip(table.ids, table.measure, strict=True)}
+    assert area[capped] == pytest.approx(BOX_DY * BOX_DZ)
+
+
+def test_extract_edges_with_an_empty_selection_raises(
+    placed_box_session: Session,
+) -> None:
+    with pytest.raises(ps.PysmeshError, match="must name at least one edge"):
+        placed_box_session.extract_edges([])
+
+
+def test_extract_edges_on_a_dead_id_raises(placed_box_session: Session) -> None:
+    edge = EntityId(_ids(placed_box_session, EntityKind.EDGE)[0])
+    placed_box_session.fillet([edge], 0.5)
+    assert not placed_box_session.is_alive(edge)
+
+    with pytest.raises(ps.PysmeshError, match=f"entity {edge} is dead"):
+        placed_box_session.extract_edges([edge])
+
+
+def test_extract_edges_on_a_face_id_raises_naming_the_wrong_kind(
+    placed_box_session: Session,
+) -> None:
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+
+    with pytest.raises(ps.PysmeshError, match=f"entity {face} is a FACE, not an EDGE"):
+        placed_box_session.extract_edges([face])
+
+
+def test_extract_edges_of_a_disconnected_selection_raises_naming_the_strays(
+    placed_box_session: Session,
+) -> None:
+    first, stray = _stray_edge(placed_box_session)
+
+    with pytest.raises(ps.PysmeshError, match="do not join the others") as excinfo:
+        placed_box_session.extract_edges([first, stray])
+
+    assert excinfo.value.face_ids == [stray]
+
+
+def test_extract_edges_leaves_the_session_unchanged_when_it_fails(
+    placed_box_session: Session,
+) -> None:
+    first, stray = _stray_edge(placed_box_session)
+    before = placed_box_session.brep()
+    entities_before = {k: _ids(placed_box_session, k) for k in EntityKind}
+    issued_before = placed_box_session.issued_id_count
+
+    with pytest.raises(ps.PysmeshError):
+        placed_box_session.extract_edges([first, stray])
+
+    assert placed_box_session.brep() == before
+    assert {k: _ids(placed_box_session, k) for k in EntityKind} == entities_before
+    assert placed_box_session.issued_id_count == issued_before
+
+
+def test_extract_edges_round_trips_through_a_snapshot(
+    placed_box_session: Session,
+) -> None:
+    mark = placed_box_session.snapshot()
+    before = placed_box_session.brep()
+    entities_before = {k: _ids(placed_box_session, k) for k in EntityKind}
+    face = EntityId(_ids(placed_box_session, EntityKind.FACE)[0])
+
+    placed_box_session.extract_edges(_outer_loop(placed_box_session, face))
+    placed_box_session.restore(mark)
+
+    assert placed_box_session.brep() == before
+    assert {k: _ids(placed_box_session, k) for k in EntityKind} == entities_before
 
 
 # --------------------------------------------------------------------------------------- #

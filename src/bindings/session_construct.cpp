@@ -410,6 +410,89 @@ py::dict Session::make_wire(const std::vector<EntityId>& edge_ids) {
   return commit(concat(survivors, wire), Handle(BRepTools_History)(), "make_wire", wire);
 }
 
+// Copy the named edges into one new loose wire body, leaving the originals alone.
+py::dict Session::extract_edges(const std::vector<EntityId>& edge_ids) {
+  OpGuard guard(in_op_);
+  // No require_curve_body: the whole point is to reach the edges of a solid or a face,
+  // which make_wire, make_face and make_filling all refuse because they consume what they
+  // are given. This consumes nothing, so any owner is legitimate.
+  const std::vector<TopoDS_Shape> edges = edges_of("extract_edges", edge_ids);
+
+  TopoDS_Shape wire;
+  std::vector<EntityId> disconnected;
+  {
+    py::gil_scoped_release release;
+    // Copied as one compound rather than edge by edge. A compound copy carries the sharing
+    // with it, so two edges that met at one vertex still meet at one vertex afterwards; copy
+    // them separately and every junction becomes two coincident vertices that the wire
+    // builder then has to weld.
+    TopoDS_Compound bundle;
+    BRep_Builder builder;
+    builder.MakeCompound(bundle);
+    for (const TopoDS_Shape& e : edges) {
+      builder.Add(bundle, e);
+    }
+    BRepBuilderAPI_Copy copier;
+    copier.Perform(bundle);
+    std::vector<TopoDS_Shape> copies;
+    for (TopoDS_Iterator it(copier.Shape()); it.More(); it.Next()) {
+      copies.push_back(it.Value());
+    }
+    if (copies.size() == edges.size()) {
+      // Added one at a time, sweeping until nothing more connects, rather than through
+      // Add(list). The list form reports DisconnectedWire while still returning IsDone()
+      // true over the part it managed to join, which would commit a fraction of the
+      // selection as the answer. Sweeping also says WHICH edges are left over, and does not
+      // depend on the order the caller happened to name them in: an edge that cannot join
+      // the chain yet gets another attempt once the chain has grown.
+      BRepBuilderAPI_MakeWire mk;
+      std::vector<bool> placed(copies.size(), false);
+      for (bool growing = true; growing;) {
+        growing = false;
+        for (std::size_t i = 0; i < copies.size(); ++i) {
+          if (placed[i]) {
+            continue;
+          }
+          mk.Add(TopoDS::Edge(copies[i]));
+          if (mk.IsDone()) {
+            placed[i] = true;
+            growing = true;
+          }
+        }
+      }
+      for (std::size_t i = 0; i < placed.size(); ++i) {
+        if (!placed[i]) {
+          disconnected.push_back(edge_ids[i]);
+        }
+      }
+      if (disconnected.empty()) {
+        wire = mk.Wire();
+      }
+    }
+  }
+  if (!disconnected.empty()) {
+    throw PysmeshError(
+        "Session.extract_edges: " + std::to_string(disconnected.size()) + " of the " +
+            std::to_string(edges.size()) +
+            " named edges do not join the others into one connected wire.",
+        "Every edge must share an end vertex with the chain, or have one within the two "
+        "vertices' tolerance. The ids reported are the edges left over once every edge "
+        "that could be joined had been.",
+        ids_as_int(disconnected));
+  }
+  if (wire.IsNull()) {
+    throw PysmeshError("Session.extract_edges: OCCT could not copy the named edges into a "
+                       "wire.",
+                       "BRepBuilderAPI_Copy or BRepBuilderAPI_MakeWire produced nothing.",
+                       ids_as_int(edge_ids));
+  }
+  // Committed with no history, for the reason copy() gives: a relation between an original
+  // and its duplicate would move the original's id onto the duplicate. The originals keep
+  // their ids because they are still in the model, untouched; every entity of the new wire
+  // is a new identity.
+  return add_bodies(wire, "extract_edges");
+}
+
 // A planar face bounded by the named edges, consuming them.
 py::dict Session::make_face(const std::vector<EntityId>& edge_ids) {
   OpGuard guard(in_op_);

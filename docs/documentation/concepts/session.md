@@ -67,7 +67,7 @@ other.
 | Family | Covers |
 |---|---|
 | Primitives | `add_box`, `add_cylinder`, `add_cone`, `add_sphere`, `add_torus`, `add_wedge`, `add_vertex` |
-| Curve and surface construction | `add_line`, `add_arc`, `add_circle`, `add_ellipse`, `add_polyline`, `add_spline`, `add_bspline`, `add_helix`, `add_rectangle`, `make_wire`, `make_face`, `make_filling` |
+| Curve and surface construction | `add_line`, `add_arc`, `add_circle`, `add_ellipse`, `add_polyline`, `add_spline`, `add_bspline`, `add_helix`, `add_rectangle`, `make_wire`, `extract_edges`, `make_face`, `make_filling` |
 | Sweeps | `extrude`, `revolve`, `pipe`, `pipe_shell`, `thru_sections` |
 | Booleans with history | `fuse`, `cut`, `common`, `section`, `split`, `fragment` |
 | Fillet and chamfer | `fillet`, `chamfer` |

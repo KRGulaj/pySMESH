@@ -60,6 +60,7 @@ void bind_session(py::module_& m) {
            py::arg("oz"), py::arg("nx"), py::arg("ny"), py::arg("nz"), py::arg("dx"),
            py::arg("dy"))
       .def("make_wire", &Session::make_wire, py::arg("edge_ids"))
+      .def("extract_edges", &Session::extract_edges, py::arg("edge_ids"))
       .def("make_face", &Session::make_face, py::arg("edge_ids"))
       .def("make_filling", &Session::make_filling, py::arg("edge_ids"), py::arg("progress"),
            py::arg("cancel"))

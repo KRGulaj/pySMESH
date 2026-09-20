@@ -695,6 +695,18 @@ class Session {
   // Join loose edges and wires into one wire, consuming them.
   py::dict make_wire(const std::vector<EntityId>& edge_ids);
 
+  // Copy the named edges into one new loose wire body, leaving the originals in place.
+  //
+  // The one primitive that gets a wire out of a solid or a face. make_wire, make_face and
+  // make_filling all refuse an edge that belongs to one, because they consume the body they
+  // are given; the sweeps refuse a SOLID spine for the same reason. So nothing could sweep
+  // along an edge of an imported part, and nothing could cap a hole loop of a solid. This
+  // consumes nothing, so it accepts any owner.
+  //
+  // Committed with no history, exactly like copy() and for the same reason: relating a
+  // duplicate to its original would move the original's id onto the duplicate.
+  py::dict extract_edges(const std::vector<EntityId>& edge_ids);
+
   // A planar face bounded by the named edges, consuming them.
   py::dict make_face(const std::vector<EntityId>& edge_ids);
 
