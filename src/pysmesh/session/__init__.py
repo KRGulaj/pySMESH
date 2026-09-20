@@ -55,6 +55,7 @@ a change on either side has an obvious counterpart on the other:
 ``_boolean``         the boolean family, fillet and chamfer
 ``_transform``       the transforms, and copy
 ``_heal``            healing, sewing, defeaturing, imprinting and removal
+``_offset``          hollowing a solid, and offsetting a body
 ``_query``           the geometric query surface over the live shape
 ``_render``          the render mesh, and the incremental delta over it
 ``_handoff``         the export to a mesher, and its id-to-ordinal map
@@ -71,6 +72,7 @@ from ._boolean import _BooleanOps
 from ._construct import _ConstructOps
 from ._handoff import _HandoffOps
 from ._heal import _HealOps
+from ._offset import _OffsetOps
 from ._query import _QueryOps
 from ._render import _RenderOps
 from ._state import _StateOps
@@ -113,6 +115,7 @@ class Session(
     _ConstructOps,
     _HandoffOps,
     _HealOps,
+    _OffsetOps,
     _QueryOps,
     _RenderOps,
     _StateOps,

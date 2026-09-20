@@ -71,6 +71,7 @@ other.
 | Sweeps | `extrude`, `revolve`, `pipe`, `pipe_shell`, `thru_sections` |
 | Booleans with history | `fuse`, `cut`, `common`, `section`, `split`, `fragment` |
 | Fillet and chamfer | `fillet`, `chamfer` |
+| Offsets | `offset` |
 | Transforms | `translate`, `rotate`, `mirror`, `scale`, `copy` |
 | Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove` |
 | Tessellation | `tessellate` (the incremental render mesh) |

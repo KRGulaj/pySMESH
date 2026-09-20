@@ -430,6 +430,212 @@ def test_a_dead_id_cannot_be_used_as_an_operand(two_box_session: Session) -> Non
 
 
 # --------------------------------------------------------------------------------------- #
+# offset
+# --------------------------------------------------------------------------------------- #
+
+
+def test_offset_enlarges_the_box_by_the_distance_on_every_side(
+    placed_box_session: Session,
+) -> None:
+    solid = _sole(placed_box_session, EntityKind.SOLID)
+    d = 0.5
+
+    placed_box_session.offset([solid], d)
+
+    table = placed_box_session.entity_table(EntityKind.SOLID)
+    assert table.measure[0] == pytest.approx(
+        (BOX_DX + 2 * d) * (BOX_DY + 2 * d) * (BOX_DZ + 2 * d)
+    )
+    box = placed_box_session.bounding_boxes(EntityKind.SOLID).bbox[0]
+    assert box.tolist() == pytest.approx(
+        [
+            BOX_ORIGIN[0] - d,
+            BOX_ORIGIN[1] - d,
+            BOX_ORIGIN[2] - d,
+            BOX_ORIGIN[0] + BOX_DX + d,
+            BOX_ORIGIN[1] + BOX_DY + d,
+            BOX_ORIGIN[2] + BOX_DZ + d,
+        ],
+        abs=1.0e-6,
+    )
+
+
+def test_offset_with_a_negative_distance_shrinks_the_box(
+    placed_box_session: Session,
+) -> None:
+    solid = _sole(placed_box_session, EntityKind.SOLID)
+    d = 0.5
+
+    placed_box_session.offset([solid], -d)
+
+    assert placed_box_session.entity_table(EntityKind.SOLID).measure[0] == pytest.approx(
+        (BOX_DX - 2 * d) * (BOX_DY - 2 * d) * (BOX_DZ - 2 * d)
+    )
+
+
+def test_offset_of_a_solid_gives_a_solid_not_a_shell(
+    placed_box_session: Session,
+) -> None:
+    # The property a boolean or a mesh on the offset body depends on: neither takes a loose
+    # shell where a volume was meant.
+    solid = _sole(placed_box_session, EntityKind.SOLID)
+
+    placed_box_session.offset([solid], 0.5)
+
+    assert _ids(placed_box_session, EntityKind.SOLID) == [solid]
+    assert placed_box_session.entity_table(EntityKind.SOLID).measure[0] > 0.0
+
+
+def test_offset_delta_keeps_every_id_and_creates_none(
+    placed_box_session: Session,
+) -> None:
+    before = {k: _ids(placed_box_session, k) for k in EntityKind}
+    everything = sorted(i for ids in before.values() for i in ids)
+    solid = _sole(placed_box_session, EntityKind.SOLID)
+
+    delta = placed_box_session.offset([solid], 0.5)
+
+    assert delta.created.tolist() == []
+    assert delta.deleted.tolist() == []
+    assert delta.split.tolist() == []
+    assert delta.merged.tolist() == []
+    assert delta.valid is True
+    # Every entity of the box was rebuilt at the new distance and kept its id: the solid,
+    # all six faces, all twelve edges, all eight vertices.
+    assert delta.modified.tolist() == everything
+    assert {k: _ids(placed_box_session, k) for k in EntityKind} == before
+
+
+def test_offset_of_a_shell_gives_a_shell(open_box_shell_brep: bytes) -> None:
+    s = Session()
+    s.add_brep(open_box_shell_brep)
+    before = {k: _ids(s, k) for k in EntityKind}
+    face = EntityId(_ids(s, EntityKind.FACE)[0])
+
+    delta = s.offset([face], 0.1)
+
+    assert before[EntityKind.SOLID] == []
+    assert _ids(s, EntityKind.SOLID) == []
+    assert _ids(s, EntityKind.FACE) == before[EntityKind.FACE]
+    assert delta.created.tolist() == []
+    assert delta.deleted.tolist() == []
+
+
+def test_offset_on_a_dead_id_raises(placed_box_session: Session) -> None:
+    edge = EntityId(_ids(placed_box_session, EntityKind.EDGE)[0])
+    placed_box_session.fillet([edge], 0.5)
+    assert not placed_box_session.is_alive(edge)
+
+    with pytest.raises(ps.PysmeshError, match=f"entity {edge} is dead"):
+        placed_box_session.offset([edge], 0.2)
+
+
+def test_offset_across_two_bodies_raises(two_box_session: Session) -> None:
+    solids = _ids(two_box_session, EntityKind.SOLID)
+
+    with pytest.raises(ps.PysmeshError, match="belong to 2 different bodies"):
+        two_box_session.offset([EntityId(solids[0]), EntityId(solids[1])], 0.2)
+
+
+def test_offset_of_a_body_that_is_not_a_solid_or_shell_raises(
+    placed_box_session: Session,
+) -> None:
+    delta = placed_box_session.add_rectangle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 2.0, 3.0)
+    face = EntityId(
+        next(
+            i
+            for i in delta.created.tolist()
+            if placed_box_session.entity_kind(EntityId(i)) == EntityKind.FACE
+        )
+    )
+
+    with pytest.raises(ps.PysmeshError, match="FACE body; a uniform offset needs"):
+        placed_box_session.offset([face], 0.2)
+
+
+@pytest.mark.parametrize("distance", [0.0, float("nan"), float("-inf")])
+def test_offset_with_a_zero_or_non_finite_distance_raises(
+    placed_box_session: Session, distance: float
+) -> None:
+    solid = _sole(placed_box_session, EntityKind.SOLID)
+
+    with pytest.raises(ps.PysmeshError, match="distance must be a finite non-zero"):
+        placed_box_session.offset([solid], distance)
+
+
+@pytest.mark.parametrize("tol", [0.0, -1.0e-7])
+def test_offset_with_a_non_positive_tol_raises(
+    placed_box_session: Session, tol: float
+) -> None:
+    solid = _sole(placed_box_session, EntityKind.SOLID)
+
+    with pytest.raises(ps.PysmeshError, match="tol must be > 0"):
+        placed_box_session.offset([solid], 0.5, tol=tol)
+
+
+def test_offset_that_self_intersects_raises_naming_input_faces(
+    placed_box_session: Session,
+) -> None:
+    solid = _sole(placed_box_session, EntityKind.SOLID)
+    live = set(_ids(placed_box_session, EntityKind.FACE))
+
+    # Half the smallest extent: the two faces normal to x meet and cross.
+    with pytest.raises(ps.PysmeshError) as excinfo:
+        placed_box_session.offset([solid], -BOX_DX / 2.0)
+
+    blamed = set(excinfo.value.face_ids)
+    assert blamed, "the failure must name the faces it broke on"
+    assert blamed < live
+
+
+def test_offset_leaves_the_session_unchanged_when_it_fails(
+    placed_box_session: Session,
+) -> None:
+    solid = _sole(placed_box_session, EntityKind.SOLID)
+    before = placed_box_session.brep()
+    entities_before = {k: _ids(placed_box_session, k) for k in EntityKind}
+
+    with pytest.raises(ps.PysmeshError):
+        placed_box_session.offset([solid], -BOX_DX / 2.0)
+
+    assert placed_box_session.brep() == before
+    assert {k: _ids(placed_box_session, k) for k in EntityKind} == entities_before
+
+
+def test_a_cancelled_offset_changes_nothing(placed_box_session: Session) -> None:
+    solid = _sole(placed_box_session, EntityKind.SOLID)
+    before = (
+        placed_box_session.op_count,
+        placed_box_session.issued_id_count,
+        {k: _ids(placed_box_session, k) for k in EntityKind},
+        placed_box_session.brep(),
+    )
+
+    with pytest.raises(ps.PysmeshCancelled):
+        placed_box_session.offset([solid], 0.5, cancel=lambda: True)
+
+    assert (
+        placed_box_session.op_count,
+        placed_box_session.issued_id_count,
+        {k: _ids(placed_box_session, k) for k in EntityKind},
+        placed_box_session.brep(),
+    ) == before
+
+
+def test_offset_round_trips_through_a_snapshot(placed_box_session: Session) -> None:
+    mark = placed_box_session.snapshot()
+    before = placed_box_session.brep()
+    entities_before = {k: _ids(placed_box_session, k) for k in EntityKind}
+    solid = _sole(placed_box_session, EntityKind.SOLID)
+
+    placed_box_session.offset([solid], 0.5)
+    placed_box_session.restore(mark)
+
+    assert placed_box_session.brep() == before
+    assert {k: _ids(placed_box_session, k) for k in EntityKind} == entities_before
+
+
+# --------------------------------------------------------------------------------------- #
 # extract_edges
 # --------------------------------------------------------------------------------------- #
 

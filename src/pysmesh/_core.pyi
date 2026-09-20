@@ -336,6 +336,14 @@ class Session:
         progress: object,
         cancel: object,
     ) -> dict[str, object]: ...
+    def offset(
+        self,
+        entity_ids: list[int],
+        distance: float,
+        tol: float,
+        progress: object,
+        cancel: object,
+    ) -> dict[str, object]: ...
     def translate(
         self, dx: float, dy: float, dz: float, entity_ids: list[int] | None
     ) -> dict[str, object]: ...

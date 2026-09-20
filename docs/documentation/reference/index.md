@@ -4,7 +4,7 @@ The concept and guide pages explain how pySMESH's pieces fit together. This sect
 generated reference: every public class and function, with its full Google-style docstring
 and typed signature, rendered directly from source by `mkdocstrings`.
 
-All 352 of pySMESH's public entities carry a complete docstring. That is not a remembered
+All 353 of pySMESH's public entities carry a complete docstring. That is not a remembered
 figure: `ci/count_documented.py` defines what counts as a public entity, recomputes both
 numbers, and fails the build if one ever goes undocumented. `src/pysmesh/_core.pyi` gives
 the native extension's full typed surface, the same file `mypy --strict` checks a

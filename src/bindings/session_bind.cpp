@@ -99,6 +99,8 @@ void bind_session(py::module_& m) {
       .def("chamfer", &Session::chamfer, py::arg("edge_ids"), py::arg("distance"),
            py::arg("distance_end"), py::arg("face_id"), py::arg("progress"),
            py::arg("cancel"))
+      .def("offset", &Session::offset, py::arg("entity_ids"), py::arg("distance"),
+           py::arg("tol"), py::arg("progress"), py::arg("cancel"))
       .def("translate", &Session::translate, py::arg("dx"), py::arg("dy"), py::arg("dz"),
            py::arg("entity_ids"))
       .def("rotate", &Session::rotate, py::arg("ox"), py::arg("oy"), py::arg("oz"),
