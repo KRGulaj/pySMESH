@@ -124,6 +124,7 @@ pybind11_add_module(_core
     src/bindings/unify.cpp
     src/bindings/tessellate.cpp
     src/bindings/offset.cpp
+    src/bindings/offset_guard.cpp
     src/bindings/distance.cpp
     src/bindings/classify.cpp
     src/bindings/step_xde.cpp

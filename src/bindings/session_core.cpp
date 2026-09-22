@@ -555,6 +555,45 @@ py::dict Session::commit(const std::vector<TopoDS_Shape>& bodies,
   return delta_dict(delta, op_index, op_name);
 }
 
+// Carry every id of one body onto a copy of it, and swap the copy into the model.
+//
+// A pure renaming: the same ids on the same kinds, over a body of identical geometry. It is
+// not an operation and reports nothing, because nothing the caller can see has changed. The
+// offset family uses it to adopt the body it handed OCCT, which it does only once OCCT's
+// answer has passed every check — until then the session holds the shape the caller gave it,
+// untouched, which is what makes a refused offset a no-op in fact and not only in the delta.
+//
+// Root and registry move together. A registry naming sub-shapes that the root does not hold
+// would be a model in two minds, and the next operation would read ids off shapes nothing
+// contains.
+void Session::relabel_body(const TopoDS_Shape& body, const TopoDS_Shape& twin,
+                           const ShapeKeyed<TopoDS_Shape>& remap) {
+  std::vector<TopoDS_Shape> bodies;
+  for (const TopoDS_Shape& b : root_bodies(state_.root)) {
+    bodies.push_back(b.IsSame(body) ? twin : b);
+  }
+
+  auto next = std::make_shared<RegistryState>();
+  for (const auto& [id, rec] : state_.registry->alive) {
+    EntityRecord out;
+    out.kind = rec.kind;
+    for (const TopoDS_Shape& s : rec.shapes) {
+      const auto it = remap.find(s);
+      out.shapes.push_back(it == remap.end() ? s : it->second);
+    }
+    for (const TopoDS_Shape& s : out.shapes) {
+      next->by_shape[s].push_back(id);
+    }
+    next->alive.emplace(id, std::move(out));
+  }
+  for (auto& [shape, ids] : next->by_shape) {
+    std::sort(ids.begin(), ids.end());
+  }
+
+  state_.registry = std::move(next);
+  state_.root = make_root(bodies);
+}
+
 Delta Session::carry_registry(const TopoDS_Shape& new_root,
                               const Handle(BRepTools_History) & hist, std::int64_t op_index) {
   const std::vector<TopoDS_Shape> new_order = registered_subshapes(new_root);

@@ -1264,13 +1264,30 @@ class Session {
   // to the input face it came from, and that face's id is reported instead. `fallback` is
   // used when nothing traces back.
   std::vector<int> offset_blame(const TopoDS_Shape& argument,
+                                const ShapeKeyed<TopoDS_Shape>& to_work,
                                 const Handle(BRepTools_History) & hist,
                                 const std::vector<TopoDS_Shape>& blamed,
                                 const std::vector<EntityId>& fallback) const;
 
+  // Carry every id of one body onto a copy of it, and put that copy in the model in its
+  // place. Not an operation: no delta, no op index, no history. It is how the offset family
+  // adopts the body it handed OCCT, once OCCT's answer has been accepted — see OffsetWork
+  // in session_offset.cpp for why the algorithm is never given the caller's own shape.
+  void relabel_body(const TopoDS_Shape& body, const TopoDS_Shape& twin,
+                    const ShapeKeyed<TopoDS_Shape>& remap);
+
   // Every live id on one sub-shape, appended. A merge leaves several on one shape, and each
   // of them names it, so each is reported.
   void ids_on(const TopoDS_Shape& s, std::vector<EntityId>& out) const;
+
+  // Refuse, before OCCT is driven, an offset that takes an analytic face's own radius to
+  // zero or through it. The one failure in this family no post-condition can catch: past
+  // the radius OCCT rebuilds the surface at the absolute value of the negative one, which
+  // is a valid solid of the right topology and the wrong shape. Shared by both offsets,
+  // because it is the same arithmetic reached from two entry points.
+  void require_surviving_radii(const char* op, const TopoDS_Shape& owner,
+                               const std::vector<TopoDS_Shape>& faces, double distance,
+                               double tol) const;
 
   // The live ids of a body's faces, ascending. What an offset blames when OCCT declines
   // outright and leaves no history to trace a failure through.

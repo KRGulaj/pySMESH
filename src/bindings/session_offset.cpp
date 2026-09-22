@@ -43,6 +43,8 @@
 
 #include "session/session.hpp"
 
+#include "offset_guard.hpp"
+
 namespace pysmesh {
 namespace session {
 
@@ -167,198 +169,95 @@ std::vector<TopoDS_Shape> invalid_faces(const TopoDS_Shape& result) {
   return out;
 }
 
-// What was observed, when the result of a hollowing is not a hollowed solid. Empty when it
-// is one.
+
+// A body of the algorithm's own, so that a refusal cannot reach the caller's.
 //
-// Measured on the released 4.1.1 wheel, a 3 x 7 x 11 box opened at the face of largest z:
-// once |thickness| passes 1.55 — the box's smallest extent is 3 — MakeThickSolidByJoin
-// collapses the inner shell, reports IsDone(), and hands back a shape BRepCheck_Analyzer
-// accepts and that *is* the input solid: volume 231, six faces, and the face that was to be
-// opened re-issued under a new id. The `unopened` post-condition above cannot see it: the
-// opened face is genuinely gone from the id space, and the face standing in its place is a
-// different shape. The session used to commit that, so a caller reading valid=True,
-// deleted=[opening] and a non-empty created had no way to tell it from a real shell.
-// Opening every face of a solid does the same thing at every thickness measured, -0.05
-// through -3.0.
+// BRepOffset_MakeOffset does not treat the shape it is given as read-only. On some inputs
+// it raises stored tolerances, nudges stored vertex points and adds a sub-shape to the
+// input's own tree, all in place, before any of this file's post-conditions run. Measured
+// across 648 refusals of seven primitives: 46 of them left the body changed. A cylinder of
+// radius 2 opened at its wall and its top cap and thickened by +0.5 comes back with 15
+// TShapes where it had 14 and a vertex tolerance of 0.001 where it had 1e-07 — four orders
+// of magnitude. Every entity id, every entity count and every measure survives, so the
+// damage is invisible to the delta, but it is not invisible to what comes next: on that
+// cylinder a later fillet returns 1778 bytes of BREP against the 1760 the undamaged body
+// gives, and a later heal 1125 against 1093. A refused operation that changes what the next
+// operation produces is not a refused operation.
 //
-// The three statements below are what a thick solid *is*. None is a rule about how large a
-// thickness may be: a magnitude rule would have to know the body's smallest feature, and
-// would have to refuse the thin wall at -1.40 — cavity 8.064 of 231 — that OCCT builds
-// correctly.
+// So OCCT is handed a copy and never the caller's shape. On the failure path there is
+// nothing to undo: the body the session holds was never passed to the algorithm. On the
+// success path the copy becomes the session's body — relabel_body() carries every id onto
+// it — and the result is committed against that, which leaves the history, the delta and
+// every id exactly as they were before this change. The copy's own sub-shapes are what the
+// result keeps where it keeps anything, which is why the relabel has to happen before
+// commit() and not after.
 //
-//   1. It is a solid, and a solid's volume is positive. A negative one is the same wall
-//      turned inside out. Measured on the box with every face but one opened and a positive
-//      thickness: the plate comes back as -(the unopened face's area x thickness), -38.5 at
-//      +0.5, and 4.1.1 committed it, so the session reported a body of negative volume.
-//   2. Hollowed inward, the wall lies inside the boundary it was built from, so its volume
-//      is strictly less than that body's. Outward the wall lies outside instead, and its
-//      volume stands in no fixed relation to the input's — a box opened at one face and
-//      thickened by 2.0 gives 770 against an input of 231, by 0.5 gives 137 — so the
-//      statement is made for a negative thickness only, which is the sign it is derived for.
-//   3. The result carries the walls the offset built: at least one face that is neither a
-//      face of the input nor a rim generated from an opened face. Vacuous when every face
-//      was opened, because then there is no wall to build and statement 2 carries the case.
-//
-// All three are made, because each catches a measured case the others miss. Opening every
-// face of the box at -0.5 leaves no wall to look for, and only statement 2 sees it. Opening
-// the two walls normal to y and the top at -3.0 returns the input solid measuring
-// 230.99999999999997 against the input's 231 — under it by 2.8e-14, which is round-off, not
-// a cavity — and only statement 3 sees that. The inside-out plate has a cavity and has its
-// walls, and only statement 1 sees it.
-struct SolidVolumes {
-  int count = 0;
-  double total = 0.0;
-  double least = 0.0;
+// The cost is one BRepBuilderAPI_Copy of one body per call, against an offset that is
+// several times more work on the same body. It is not paid twice and it is not paid on the
+// failure path only, because whether the path fails is not knowable before the algorithm
+// has run and done the damage.
+struct OffsetWork {
+  TopoDS_Shape shape;               // what OCCT is given
+  ShapeKeyed<TopoDS_Shape> to_work; // the caller's sub-shape -> this body's
+  std::string trouble;              // non-empty when the copy is not usable
+
+  // `shield = false` gives the algorithm the caller's own body, which is what every
+  // version before 4.2.0 did. It exists so that the red run has something to turn off.
+  void take(const TopoDS_Shape& owner, bool shield = true) {
+    if (!shield) {
+      shape = owner;
+      return;
+    }
+    BRepBuilderAPI_Copy copier;
+    copier.Perform(owner);
+    shape = copier.Shape();
+    if (shape.IsNull()) {
+      trouble = "BRepBuilderAPI_Copy produced a null shape";
+      return;
+    }
+    ShapeSet subs;
+    TopExp::MapShapes(owner, subs);
+    for (int i = 1; i <= subs.Extent(); ++i) {
+      const TopoDS_Shape& s = subs(i);
+      const NCollection_List<TopoDS_Shape>& made = copier.Modified(s);
+      if (made.Extent() != 1 || made.First().ShapeType() != s.ShapeType()) {
+        trouble = "BRepBuilderAPI_Copy did not reproduce the body's sub-shapes one for one";
+        return;
+      }
+      to_work.emplace(s, made.First());
+    }
+  }
+
+  // The copy's counterpart of one of the caller's sub-shapes. Identity when the body was
+  // not copied, and identity for anything that is not part of it.
+  TopoDS_Shape twin(const TopoDS_Shape& s) const {
+    const auto it = to_work.find(s);
+    return it == to_work.end() ? s : it->second;
+  }
 };
 
-// The volumes of a shape's solids: how many there are, what they add up to, and the
-// smallest of them. Every statement both post-conditions below make is made in these three
-// numbers and the input solid's own volume.
-SolidVolumes solid_volumes(const TopoDS_Shape& s) {
-  SolidVolumes out;
-  for (TopExp_Explorer ex(s, TopAbs_SOLID); ex.More(); ex.Next()) {
-    const double v = measure_of(ex.Current());
-    out.least = (out.count == 0) ? v : std::min(out.least, v);
-    out.total += v;
-    ++out.count;
+// The faces the algorithm left in place of the openings.
+//
+// `hist` files a rim — the opened face with the cavity cut out of it — as generated from the
+// face it was opened out of, and the session files it that way too rather than as modified,
+// so that the opening's id does not slide onto a wall. Both relations are read here, because
+// the post-condition's question is only "did this face come from an opening", and the answer
+// must not depend on which of the two lists OCCT chose.
+offset_guard::ShapeSet rims_of(const Handle(BRepTools_History) & hist,
+                               const offset_guard::ShapeSet& opened) {
+  offset_guard::ShapeSet rims;
+  if (hist.IsNull()) {
+    return rims;
   }
-  return out;
-}
-
-std::string not_a_thick_solid(const TopoDS_Shape& owner, const TopoDS_Shape& result,
-                              double thickness, const ShapeSet& opened,
-                              const Handle(BRepTools_History) & hist) {
-  std::vector<std::string> broken;
-
-  const SolidVolumes got = solid_volumes(result);
-  const double volume = got.total;
-  if (got.count == 0) {
-    broken.push_back("It holds no solid at all.");
-  } else if (got.least <= 0.0) {
-    broken.push_back("It holds a solid of volume " + std::to_string(got.least) +
-                     ", so the wall came back turned inside out.");
-  }
-
-  const double input_volume = measure_of(owner);
-  if (thickness < 0.0 && volume >= input_volume) {
-    broken.push_back("Its volume " + std::to_string(volume) +
-                     " is not less than the input solid's " + std::to_string(input_volume) +
-                     ", so no cavity was cut.");
-  }
-
-  // The walls: every face of the result that the offset built, rather than took from the
-  // input or left at an opening. `hist` files a rim as generated from the face it was opened
-  // out of, which is what makes the rim distinguishable from a wall here.
-  ShapeSet input_faces;
-  TopExp::MapShapes(owner, TopAbs_FACE, input_faces);
-  ShapeSet rims;
-  if (!hist.IsNull()) {
-    for (int i = 1; i <= opened.Extent(); ++i) {
-      for (const TopoDS_Shape& t : hist->Generated(opened(i))) {
-        rims.Add(t);
-      }
-      for (const TopoDS_Shape& t : hist->Modified(opened(i))) {
-        rims.Add(t);
-      }
+  for (int i = 1; i <= opened.Extent(); ++i) {
+    for (const TopoDS_Shape& t : hist->Generated(opened(i))) {
+      rims.Add(t);
+    }
+    for (const TopoDS_Shape& t : hist->Modified(opened(i))) {
+      rims.Add(t);
     }
   }
-  int unopened_faces = 0;
-  for (int i = 1; i <= input_faces.Extent(); ++i) {
-    if (!opened.Contains(input_faces(i))) {
-      ++unopened_faces;
-    }
-  }
-  int walls = 0;
-  int result_faces = 0;
-  for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next()) {
-    ++result_faces;
-    if (!input_faces.Contains(ex.Current()) && !rims.Contains(ex.Current())) {
-      ++walls;
-    }
-  }
-  if (unopened_faces > 0 && walls == 0) {
-    broken.push_back("No face of it is a wall the offset built. Each one is a face of the "
-                     "input or a rim of an opening, and " +
-                     std::to_string(unopened_faces) +
-                     " faces were left unopened for walls to stand on.");
-  }
-
-  if (broken.empty()) {
-    return std::string();
-  }
-  std::string why;
-  for (const std::string& line : broken) {
-    why += line + " ";
-  }
-  return why + "The result has " + std::to_string(result_faces) + " faces and volume " +
-         std::to_string(volume) + "; the input solid had " +
-         std::to_string(input_faces.Extent()) + " faces and volume " +
-         std::to_string(input_volume) + ".";
-}
-
-// What was observed, when the result of a uniform offset is not that body offset. Empty
-// when it is.
-//
-// The hollowing's collapse does not happen here: over 99 committed offsets of a box, a
-// cylinder, a cone, a sphere and a torus, from -1000.0 to +50.0, not one came back as the
-// input body. Two other things did, both committed by 4.1.1:
-//
-//   * a sphere of radius 3 shrunk by 3.0 comes back with volume 0.0, and by 5.0 with
-//     -33.51; a torus of radii 5 and 1.5 comes back negative from -1.5 down, -24.67 at
-//     -2.0. The body is inside out, and the session reported a negative volume for it.
-//   * the same torus at -11.0 and beyond comes back *larger* than it went in: 8907 against
-//     222, for a distance that shrinks.
-//
-// Unlike a hollowing, an offset keeps the body it was given, so the sign carries a statement
-// in both directions: a solid offset inward is the set of its own points at least |distance|
-// from its boundary, which is a proper subset, and offset outward it is a proper superset.
-// Hence two statements, and the first is the hollowing's own:
-//
-//   1. It is a solid, and a solid's volume is positive.
-//   2. A negative distance shrinks the body and a positive one grows it, strictly.
-//
-// A shell body is not checked. It carries no solid to measure, and a shell's area is not
-// monotone in the offset distance once the shell is not convex, so there is nothing to state
-// here that would be a theorem rather than a guess. Measured on the five-face open box
-// shell: every distance from -0.5 to +5.0 offsets correctly, and -1.0 and beyond is already
-// refused by the analyzer.
-std::string not_an_offset_body(const TopoDS_Shape& owner, const TopoDS_Shape& result,
-                               double distance) {
-  if (owner.ShapeType() != TopAbs_SOLID) {
-    return std::string();
-  }
-  std::vector<std::string> broken;
-
-  const SolidVolumes got = solid_volumes(result);
-  if (got.count == 0) {
-    broken.push_back("It holds no solid, though the body it was built from is one.");
-  } else if (got.least <= 0.0) {
-    broken.push_back("It holds a solid of volume " + std::to_string(got.least) +
-                     ", so the body came back turned inside out.");
-  }
-
-  const double input_volume = measure_of(owner);
-  if (distance < 0.0 && got.count > 0 && got.total >= input_volume) {
-    broken.push_back("Its volume " + std::to_string(got.total) +
-                     " is not less than the input solid's " + std::to_string(input_volume) +
-                     ", though the distance shrinks it.");
-  }
-  if (distance > 0.0 && got.count > 0 && got.total <= input_volume) {
-    broken.push_back("Its volume " + std::to_string(got.total) +
-                     " is not more than the input solid's " + std::to_string(input_volume) +
-                     ", though the distance grows it.");
-  }
-
-  if (broken.empty()) {
-    return std::string();
-  }
-  std::string why;
-  for (const std::string& line : broken) {
-    why += line + " ";
-  }
-  return why + "The result holds " + std::to_string(got.count) + " solid(s) of volume " +
-         std::to_string(got.total) + "; the input solid's volume was " +
-         std::to_string(input_volume) + ".";
+  return rims;
 }
 
 }  // namespace
@@ -373,6 +272,7 @@ std::string not_an_offset_body(const TopoDS_Shape& owner, const TopoDS_Shape& re
 // that are alive, that denote entities the caller already holds, and that name the region of
 // the input the offset could not handle. When nothing traces back, the operands are blamed.
 std::vector<int> Session::offset_blame(const TopoDS_Shape& argument,
+                                       const ShapeKeyed<TopoDS_Shape>& to_work,
                                        const Handle(BRepTools_History) & hist,
                                        const std::vector<TopoDS_Shape>& blamed,
                                        const std::vector<EntityId>& fallback) const {
@@ -382,13 +282,18 @@ std::vector<int> Session::offset_blame(const TopoDS_Shape& argument,
   }
   std::vector<EntityId> out;
   if (!hist.IsNull() && culprits.Extent() > 0) {
+    // The caller's faces are walked and the history is asked about their counterparts in
+    // the body OCCT was given. Both halves are needed: only the caller's face carries the
+    // id, and only the copy's face is a key the history knows.
     for (TopExp_Explorer ex(argument, TopAbs_FACE); ex.More(); ex.Next()) {
       const TopoDS_Shape& s = ex.Current();
+      const auto twin = to_work.find(s);
+      const TopoDS_Shape& key = (twin == to_work.end()) ? s : twin->second;
       bool hit = false;
-      for (const TopoDS_Shape& t : hist->Modified(s)) {
+      for (const TopoDS_Shape& t : hist->Modified(key)) {
         hit = hit || culprits.Contains(t);
       }
-      for (const TopoDS_Shape& t : hist->Generated(s)) {
+      for (const TopoDS_Shape& t : hist->Generated(key)) {
         hit = hit || culprits.Contains(t);
       }
       if (hit) {
@@ -425,6 +330,67 @@ std::vector<EntityId> Session::face_ids_of(const TopoDS_Shape& body) const {
   std::sort(out.begin(), out.end());
   out.erase(std::unique(out.begin(), out.end()), out.end());
   return out;
+}
+
+// The pre-condition both offsets share: an analytic face's own radius has to survive.
+//
+// This is the one failure in the family that no post-condition can catch, because the shape
+// OCCT hands back is a valid solid of positive volume with the topology the caller asked
+// for. Past the radius, OCCT builds the surface at the **absolute value** of the negative
+// one it computed — the cylinder mirrored through its own axis. Measured on a cylinder of
+// radius 2 and height 7: `offset` at -2.01 commits a body of volume 0.0009361946107697187,
+// which is exactly the r = 0.01 cylinder, and at -2.5 and -3.0 the result's own surface
+// comes back with radius 0.5 and 1.0 where r + d is -0.5 and -1.0.
+//
+// It is reached from two entry points and it is the same arithmetic in both. `offset` moves
+// every face of the body. `make_thick_solid` moves every face the caller did not open, so a
+// wall thicker than the cylinder's radius collapses the same way even at a thickness the
+// body could carry if the opening were somewhere else: opened at a planar cap, radius 2,
+// thickness -2.10, 4.1.2 commits 87.81 against the solid's own 87.96.
+//
+// Checked before OCCT is driven, so nothing is built and the session is untouched by
+// construction rather than by unwinding.
+//
+// Only the four surfaces with a closed-form radius are checked. A plane has none, and a
+// B-spline or a surface of revolution has no one radius to test; those stay with the
+// post-conditions that commit() and the two `not_a_*` checks already apply.
+//
+// `moving` is built from `faces` and `owner` supplies the edge-to-face map, because a cone's
+// end is bounded by a neighbouring cap whose own motion decides where that end lands. See
+// offset_guard::cone_end().
+void Session::require_surviving_radii(const char* op, const TopoDS_Shape& owner,
+                                      const std::vector<TopoDS_Shape>& faces, double distance,
+                                      double tol) const {
+  offset_guard::EdgeOwners edge_owners;
+  TopExp::MapShapesAndAncestors(owner, TopAbs_EDGE, TopAbs_FACE, edge_owners);
+  offset_guard::ShapeSet moving;
+  for (const TopoDS_Shape& f : faces) {
+    moving.Add(f);
+  }
+
+  const std::vector<std::pair<TopoDS_Shape, offset_guard::FaceRadius>> failing =
+      offset_guard::radii_that_vanish(faces, distance, edge_owners, moving, tol);
+  if (failing.empty()) {
+    return;
+  }
+
+  std::vector<EntityId> blamed;
+  for (const std::pair<TopoDS_Shape, offset_guard::FaceRadius>& f : failing) {
+    ids_on(f.first, blamed);
+  }
+  std::vector<EntityId> worst_ids;
+  ids_on(failing.front().first, worst_ids);
+  const std::string named =
+      worst_ids.empty() ? std::string() : " (face " + std::to_string(worst_ids.front()) + ")";
+
+  std::sort(blamed.begin(), blamed.end());
+  blamed.erase(std::unique(blamed.begin(), blamed.end()), blamed.end());
+  throw PysmeshError(
+      std::string("Session.") + op + ": " + std::to_string(blamed.size()) +
+          " of the faces being offset by " + std::to_string(distance) +
+          " do not survive it. The " +
+          offset_guard::radius_phrase(failing.front().second, named) + ".",
+      offset_guard::radius_detail(), ids_as_int(blamed));
 }
 
 // Neither an offset distance nor a wall thickness has a meaning at zero: the algorithm would
@@ -465,21 +431,48 @@ py::dict Session::make_thick_solid(const std::vector<EntityId>& face_ids, double
     opened.Add(f);
   }
 
+  // Every face the caller did not open is the one that gets an inner wall, so those are the
+  // faces whose radii have to survive. The openings are removed rather than offset.
+  std::vector<TopoDS_Shape> walled;
+  for (TopExp_Explorer ex(owner, TopAbs_FACE); ex.More(); ex.Next()) {
+    if (!opened.Contains(ex.Current())) {
+      walled.push_back(ex.Current());
+    }
+  }
+  require_surviving_radii("make_thick_solid", owner, walled, thickness, tol);
+
   ProgressDriver driver("make_thick_solid", hooks_of("make_thick_solid", progress, cancel));
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   std::vector<TopoDS_Shape> bad;
   std::vector<EntityId> unopened;
   std::string collapsed;
+  OffsetWork work;
+  ShapeSet opened_work;
+  {
+    py::gil_scoped_release release;
+    work.take(owner);
+    if (work.trouble.empty()) {
+      for (const TopoDS_Shape& f : faces) {
+        opened_work.Add(work.twin(f));
+      }
+    }
+  }
+  if (!work.trouble.empty()) {
+    throw PysmeshError("Session.make_thick_solid: " + work.trouble + ".",
+                       "The hollowing is run on a body of its own so that a refusal cannot "
+                       "change the caller's. Without that copy it cannot run at all.",
+                       ids_as_int(face_ids));
+  }
   {
     py::gil_scoped_release release;
     BRepOffsetAPI_MakeThickSolid mk;
     NCollection_List<TopoDS_Shape> closing;
     for (const TopoDS_Shape& f : faces) {
-      closing.Append(f);
+      closing.Append(work.twin(f));
     }
     try {
-      mk.MakeThickSolidByJoin(owner, closing, thickness, tol, BRepOffset_Skin,
+      mk.MakeThickSolidByJoin(work.shape, closing, thickness, tol, BRepOffset_Skin,
                               /*Intersection=*/Standard_False,
                               /*SelfInter=*/Standard_False, GeomAbs_Intersection,
                               /*RemoveIntEdges=*/Standard_False, driver.range());
@@ -500,11 +493,11 @@ py::dict Session::make_thick_solid(const std::vector<EntityId>& face_ids, double
         // not open it, and committing would report an id as dead while the wall it names
         // is still there.
         for (std::size_t i = 0; i < faces.size(); ++i) {
-          if (produced.Contains(faces[i])) {
+          if (produced.Contains(work.twin(faces[i]))) {
             unopened.push_back(face_ids[i]);
           }
         }
-        hist = offset_history(owner, mk, produced, opened);
+        hist = offset_history(work.shape, mk, produced, opened_work);
         // Checked here rather than left to commit(), because only here does the history
         // that traces a broken result face back to the input face it came from still
         // exist. commit() re-checks and is what actually refuses the shape; this pass is
@@ -518,7 +511,9 @@ py::dict Session::make_thick_solid(const std::vector<EntityId>& face_ids, double
         // shapes, which is what it costs to tell a hollowed solid from the body it was
         // built from.
         if (bad.empty()) {
-          collapsed = not_a_thick_solid(owner, result, thickness, opened, hist);
+          collapsed = offset_guard::not_a_thick_solid(work.shape, result, thickness,
+                                                     opened_work,
+                                                     rims_of(hist, opened_work));
         }
       }
     }
@@ -556,7 +551,7 @@ py::dict Session::make_thick_solid(const std::vector<EntityId>& face_ids, double
         "The offset walls most likely self-intersect. Reduce |thickness|, or open a face "
         "set whose walls do not fold onto each other. The ids reported are the input "
         "faces the broken result faces came from.",
-        offset_blame(owner, hist, bad, face_ids));
+        offset_blame(owner, work.to_work, hist, bad, face_ids));
   }
   // After the analyzer refusal, and not before it: a shape the analyzer rejects is broken,
   // which is the stronger thing to say about it. This one is the opposite case — OCCT
@@ -574,6 +569,12 @@ py::dict Session::make_thick_solid(const std::vector<EntityId>& face_ids, double
         "returned.",
         ids_as_int(face_ids));
   }
+
+  // Everything has passed, so the body OCCT was handed becomes the session's. It has to
+  // happen before commit(): a face the hollowing left untouched is the COPY's face in the
+  // result, and carry_registry() keeps an id by finding its shape in the new model. Without
+  // this the five outer walls of a hollowed box would each lose their id and be re-issued.
+  relabel_body(owner, work.shape, work.to_work);
   return commit(concat(survivors, result), hist, "make_thick_solid", result);
 }
 
@@ -595,16 +596,34 @@ py::dict Session::offset(const std::vector<EntityId>& entity_ids, double distanc
   const std::vector<EntityId> body_faces = face_ids_of(owner);
   const std::vector<TopoDS_Shape> survivors = bodies_excluding({owner});
 
+  // A uniform offset moves every face of the body, so every one of them has to survive it.
+  std::vector<TopoDS_Shape> all_faces;
+  for (TopExp_Explorer ex(owner, TopAbs_FACE); ex.More(); ex.Next()) {
+    all_faces.push_back(ex.Current());
+  }
+  require_surviving_radii("offset", owner, all_faces, distance, tol);
+
   ProgressDriver driver("offset", hooks_of("offset", progress, cancel));
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   std::vector<TopoDS_Shape> bad;
   std::string wrong_body;
+  OffsetWork work;
+  {
+    py::gil_scoped_release release;
+    work.take(owner);
+  }
+  if (!work.trouble.empty()) {
+    throw PysmeshError("Session.offset: " + work.trouble + ".",
+                       "The offset is run on a body of its own so that a refusal cannot "
+                       "change the caller's. Without that copy it cannot run at all.",
+                       ids_as_int(body_faces));
+  }
   {
     py::gil_scoped_release release;
     BRepOffsetAPI_MakeOffsetShape mk;
     try {
-      mk.PerformByJoin(owner, distance, tol, BRepOffset_Skin,
+      mk.PerformByJoin(work.shape, distance, tol, BRepOffset_Skin,
                        /*Intersection=*/Standard_False, /*SelfInter=*/Standard_False,
                        GeomAbs_Intersection, /*RemoveIntEdges=*/Standard_False,
                        driver.range());
@@ -621,14 +640,14 @@ py::dict Session::offset(const std::vector<EntityId>& entity_ids, double distanc
       if (!result.IsNull()) {
         // No opened faces: a uniform offset removes nothing, so every face of the body is
         // free to keep its id.
-        hist = offset_history(owner, mk, shape_set(result), ShapeSet());
+        hist = offset_history(work.shape, mk, shape_set(result), ShapeSet());
         if (validate_ && !BRepCheck_Analyzer(result).IsValid()) {
           bad = invalid_faces(result);
         }
         // Only when the shape passed, for the reason make_thick_solid gives: a result the
         // analyzer already rejects is refused below on that verdict.
         if (bad.empty()) {
-          wrong_body = not_an_offset_body(owner, result, distance);
+          wrong_body = offset_guard::not_an_offset_body(work.shape, result, distance);
         }
       }
     }
@@ -652,7 +671,7 @@ py::dict Session::offset(const std::vector<EntityId>& entity_ids, double distanc
             std::to_string(bad.size()) + " of its faces); the session is unchanged.",
         "The offset faces most likely self-intersect. Reduce |distance|. The ids reported "
         "are the input faces the broken result faces came from.",
-        offset_blame(owner, hist, bad, body_faces));
+        offset_blame(owner, work.to_work, hist, bad, body_faces));
   }
   // After the analyzer refusal, and not before it, for the reason make_thick_solid gives.
   // The ids reported are the body's own faces: OCCT reported success, so no result face is
@@ -667,6 +686,12 @@ py::dict Session::offset(const std::vector<EntityId>& entity_ids, double distanc
         "partial result is returned.",
         ids_as_int(body_faces));
   }
+
+  // Everything has passed, so the body OCCT was handed becomes the session's. It has to
+  // happen before commit(): a face the hollowing left untouched is the COPY's face in the
+  // result, and carry_registry() keeps an id by finding its shape in the new model. Without
+  // this the five outer walls of a hollowed box would each lose their id and be re-issued.
+  relabel_body(owner, work.shape, work.to_work);
   return commit(concat(survivors, result), hist, "offset", result);
 }
 
