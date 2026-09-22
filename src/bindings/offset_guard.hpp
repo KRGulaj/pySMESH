@@ -33,7 +33,9 @@
 #include <utility>
 #include <vector>
 
+#include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_IndexedMap.hxx>
+#include <NCollection_List.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
@@ -41,9 +43,20 @@
 namespace pysmesh {
 namespace offset_guard {
 
-// A set of shapes that answers "is this one of them". Spelled out so neither entry point
-// has to convert anything to call in here.
+// A set of shapes that answers "is this one of them", and a map from an edge to the faces
+// that own it. Both spell out the types the two entry points already hold, so neither has to
+// convert anything to call in here.
 using ShapeSet = NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>;
+using EdgeOwners = NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
+                                              TopTools_ShapeMapHasher>;
+
+// Why an analytic face does not survive the offset it was given.
+//
+//   Vanishes  its radius reaches zero, and past zero OCCT mirrors the surface.
+//   Spindle   a torus's tube reaches the ring's own axis of revolution, and the surface
+//             passes through itself. OCCT commits it, and reports the ring's volume for a
+//             body that no longer is one.
+enum class Fail : int { None = 0, Vanishes = 1, Spindle = 2 };
 
 // What an offset would do to one analytic face's own radius.
 //
@@ -54,14 +67,29 @@ struct FaceRadius {
   const char* surface = "";
   double before = 0.0;  // the radius the face carries now
   double after = 0.0;   // the radius the offset would leave it with
+  double limit = 0.0;   // a torus's major radius; zero for everything else
+  Fail fail = Fail::None;
+
+  // How much room the face has left. Negative means it has none, and the more negative it
+  // is the worse the case, so one ordering covers both kinds of failure.
+  double margin() const { return fail == Fail::Spindle ? limit - after : after; }
 };
 
 // What the offset leaves of one face's radius.
-FaceRadius offset_radius(const TopoDS_Face& face, double distance);
+//
+// `moving` names the faces this operation offsets — every face of the body for a uniform
+// offset, every face the caller did not open for a hollowing. It is read for the *other*
+// faces, the ones bounding the cone being measured: a cap that is offset too slides along
+// the axis and takes the end of the cone with it, and one that was opened stays where it is.
+// `edge_owners` maps each edge of the body to the faces that own it, and is what finds those
+// neighbours. Both are built once per operation by the caller.
+FaceRadius offset_radius(const TopoDS_Face& face, double distance, const EdgeOwners& edge_owners,
+                         const ShapeSet& moving, double tol);
 
 // Every face of `faces` whose radius does not survive `distance`, worst first.
 std::vector<std::pair<TopoDS_Shape, FaceRadius>> radii_that_vanish(
-    const std::vector<TopoDS_Shape>& faces, double distance, double tol);
+    const std::vector<TopoDS_Shape>& faces, double distance, const EdgeOwners& edge_owners,
+    const ShapeSet& moving, double tol);
 
 // One failing face in words. `named` is what the caller knows the face by, already
 // parenthesised — an EntityId in the session, a 1-based ordinal in the stateless module —

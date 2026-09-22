@@ -282,11 +282,22 @@ std::vector<EntityId> Session::face_ids_of(const TopoDS_Shape& body) const {
 // Only the four surfaces with a closed-form radius are checked. A plane has none, and a
 // B-spline or a surface of revolution has no one radius to test; those stay with the
 // post-conditions that commit() and the two `not_a_*` checks already apply.
+//
+// `moving` is built from `faces` and `owner` supplies the edge-to-face map, because a cone's
+// end is bounded by a neighbouring cap whose own motion decides where that end lands. See
+// offset_guard::cone_end().
+void Session::require_surviving_radii(const char* op, const TopoDS_Shape& owner,
+                                      const std::vector<TopoDS_Shape>& faces, double distance,
+                                      double tol) const {
+  offset_guard::EdgeOwners edge_owners;
+  TopExp::MapShapesAndAncestors(owner, TopAbs_EDGE, TopAbs_FACE, edge_owners);
+  offset_guard::ShapeSet moving;
+  for (const TopoDS_Shape& f : faces) {
+    moving.Add(f);
+  }
 
-void Session::require_surviving_radii(const char* op, const std::vector<TopoDS_Shape>& faces,
-                                      double distance, double tol) const {
   const std::vector<std::pair<TopoDS_Shape, offset_guard::FaceRadius>> failing =
-      offset_guard::radii_that_vanish(faces, distance, tol);
+      offset_guard::radii_that_vanish(faces, distance, edge_owners, moving, tol);
   if (failing.empty()) {
     return;
   }
@@ -356,7 +367,7 @@ py::dict Session::make_thick_solid(const std::vector<EntityId>& face_ids, double
       walled.push_back(ex.Current());
     }
   }
-  require_surviving_radii("make_thick_solid", walled, thickness, tol);
+  require_surviving_radii("make_thick_solid", owner, walled, thickness, tol);
 
   ProgressDriver driver("make_thick_solid", hooks_of("make_thick_solid", progress, cancel));
   TopoDS_Shape result;
@@ -494,7 +505,7 @@ py::dict Session::offset(const std::vector<EntityId>& entity_ids, double distanc
   for (TopExp_Explorer ex(owner, TopAbs_FACE); ex.More(); ex.Next()) {
     all_faces.push_back(ex.Current());
   }
-  require_surviving_radii("offset", all_faces, distance, tol);
+  require_surviving_radii("offset", owner, all_faces, distance, tol);
 
   ProgressDriver driver("offset", hooks_of("offset", progress, cancel));
   TopoDS_Shape result;

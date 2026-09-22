@@ -11,8 +11,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <limits>
 
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepGProp.hxx>
 #include <BRep_Tool.hxx>
@@ -21,11 +23,135 @@
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Edge.hxx>
 #include <gp_Cone.hxx>
+#include <gp_Dir.hxx>
+#include <gp_Pnt.hxx>
 #include <gp_Torus.hxx>
 
 namespace pysmesh {
 namespace offset_guard {
+
+namespace {
+
+// How square to the axis a neighbouring plane has to be before its motion is read as a pure
+// axial slide. A plane one part in 1e9 off square is square: the discrepancy is smaller than
+// the offset tolerance can express, and the alternative is to treat an exactly-modelled cap
+// as unknown because its normal came back 1 - 1e-16.
+constexpr double kSquare = 1.0e-9;
+
+double dot_axis(const gp_Pnt& p, const gp_Pnt& origin, const gp_Dir& axis) {
+  return (p.X() - origin.X()) * axis.X() + (p.Y() - origin.Y()) * axis.Y() +
+         (p.Z() - origin.Z()) * axis.Z();
+}
+
+// Does this edge lie wholly at one station along the axis?
+//
+// The end of a cone face is a circle at constant axial height. Its seam is not, and neither
+// is the straight edge of a cone cut to less than a full turn, so sampling one point would
+// pick those up as ends. Three points do not: an edge that is not at constant height fails
+// at the middle sample even when both of its vertices happen to sit at the same height.
+bool edge_at_station(const TopoDS_Edge& e, const gp_Pnt& origin, const gp_Dir& axis,
+                     double station) {
+  if (BRep_Tool::Degenerated(e)) {
+    return false;
+  }
+  const BRepAdaptor_Curve curve(e);
+  const double a = curve.FirstParameter();
+  const double b = curve.LastParameter();
+  const double slack = BRep_Tool::Tolerance(e) + 1.0e-7 * (1.0 + std::abs(station));
+  for (const double t : {a, 0.5 * (a + b), b}) {
+    if (std::abs(dot_axis(curve.Value(t), origin, axis) - station) > slack) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Where one end of a cone face is, and how far the face bounding it slides along the axis.
+struct ConeEnd {
+  double radius = 0.0;
+  bool sharp = false;        // the radius is already zero: an apex, with no cap to bound it
+  double slide = 0.0;        // the bounding plane's displacement along the cone's axis
+  bool slide_known = false;  // false when the neighbour is not a plane square to the axis
+};
+
+// The end of a cone face at parameter `v`, and what the offset does to the face that bounds
+// it.
+//
+// Reading the neighbour is the whole point. A cone's radius varies along the face, so where
+// the face *ends* after the offset decides the smallest radius it is left with — and that
+// end moves, because the cap bounding it is being offset too. Three cases, all measured on a
+// cone of radii 2 and 0.7 and height 5, whose small end carries radius 0.7:
+//
+//   * Uniform offset, both caps offset with the cone. The small cap slides inward along the
+//     axis by the distance, so the end lands where the cone is wider, and the radius that
+//     has to survive falls more slowly than the cone's own. The last honest distance is
+//     -0.9052731157730114 by the closed form below and -0.9063 by bisection against the
+//     exact frustum (the gap is the mirrored cone's volume vanishing cubically, below the
+//     comparison's own threshold).
+//   * Hollowing with the small cap opened. The cap is removed, not offset, so the end stays
+//     where it is and only the cone moves. Measured: the last honest thickness is
+//     -0.677475524887505 against the closed form's -0.6774757547517903.
+//   * Hollowing with the large cap opened. The small cap is a wall and still slides, so the
+//     boundary is the uniform offset's: measured -0.9077 by bisection, closed form
+//     -0.9052731157730114.
+//
+// A rule that ignored the slide would refuse the whole band from -0.7233 to -0.9053 on the
+// first and third, and would let the second run 0.046 past the point where OCCT stops
+// telling the truth.
+ConeEnd cone_end(const TopoDS_Face& face, const gp_Cone& cone, double v,
+                 const EdgeOwners& edge_owners, const ShapeSet& moving, double distance,
+                 double tol) {
+  ConeEnd end;
+  end.radius = cone.RefRadius() + v * std::sin(cone.SemiAngle());
+  if (end.radius <= tol) {
+    // An apex. There is no cap there to offset and nothing to intersect against, so with
+    // GeomAbs_Intersection the offset surface simply runs on to its own new apex. Measured
+    // on a sharp cone of base radius 3 and height 4 offset by +0.3: OCCT returns
+    // 65.14406526483796, which is the frustum from the offset base radius to zero over the
+    // offset apex's height, exactly. An end that is already degenerate cannot degenerate.
+    end.sharp = true;
+    return end;
+  }
+
+  const gp_Dir axis = cone.Position().Direction();
+  const gp_Pnt origin = cone.Position().Location();
+  const double station = v * std::cos(cone.SemiAngle());
+
+  for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+    const TopoDS_Edge e = TopoDS::Edge(ex.Current());
+    if (!edge_at_station(e, origin, axis, station) || !edge_owners.Contains(e)) {
+      continue;
+    }
+    for (const TopoDS_Shape& owner : edge_owners.FindFromKey(e)) {
+      if (owner.IsSame(face) || owner.ShapeType() != TopAbs_FACE) {
+        continue;
+      }
+      const TopoDS_Face neighbour = TopoDS::Face(owner);
+      const BRepAdaptor_Surface surf(neighbour);
+      if (surf.GetType() != GeomAbs_Plane) {
+        return end;
+      }
+      gp_Dir normal = surf.Plane().Axis().Direction();
+      if (neighbour.Orientation() == TopAbs_REVERSED) {
+        normal.Reverse();
+      }
+      const double along = normal.Dot(axis);
+      if (std::abs(std::abs(along) - 1.0) > kSquare) {
+        return end;
+      }
+      // The plane moves `distance` along its own outward normal, whose axial component is
+      // +1 or -1. A face the operation does not offset does not move at all.
+      end.slide = moving.Contains(neighbour) ? distance * along : 0.0;
+      end.slide_known = true;
+      return end;
+    }
+  }
+  return end;
+}
+
+}  // namespace
 
 // The radius an analytic face's own surface has now, and the one the offset would give it.
 //
@@ -37,16 +163,18 @@ namespace offset_guard {
 //     2.5 and the bore at 1.5; at +0.5, 3.5 and 0.5. A rule that read the sign off the
 //     distance alone would refuse every legitimate hollow part, and would miss the bore of
 //     radius 1 collapsing at +1.5 — which OCCT commits, as a spurious bore of radius 0.5.
-//   * A cone's radius moves by `d * cos(SemiAngle)` over the face's own parameter range,
-//     not by `d`. Measured on a cone of radii 2 and 0.7: at -0.5 the surface comes back with
-//     RefRadius 1.5160887466058641, and 2 - 0.5 * cos(-0.25436805855326594) is
-//     1.5160887466058641 exactly. The offset cone keeps its SemiAngle and slides its origin
-//     along the axis, which is the same cone described from a different station.
+//   * A cone's radius moves by `d / cos(SemiAngle)` at a fixed station along the axis, and
+//     the station itself moves with the cap that bounds it. Measured on a cone of radii 2
+//     and 0.7: at -0.5 the surface comes back with RefRadius 1.5160887466058641, and
+//     2 - 0.5 * cos(-0.25436805855326594) is 1.5160887466058641 exactly — the same statement
+//     read at the cone's own origin, where the station does not move. The offset cone keeps
+//     its SemiAngle and slides its origin along the axis, which is the same cone described
+//     from a different station. cone_end() above carries the full form.
 //
-// A cone's radius varies along the face, so the smallest one over the face's own parameter
-// range is what has to survive: r(v) = RefRadius + v * sin(SemiAngle), linear in v, so the
-// minimum is at one of the two ends.
-FaceRadius offset_radius(const TopoDS_Face& face, double distance) {
+// A cylinder, a sphere and a torus each have one radius over the whole face, so there is
+// nothing to trim and the arithmetic is `radius + d`. Only a cone has ends to think about.
+FaceRadius offset_radius(const TopoDS_Face& face, double distance, const EdgeOwners& edge_owners,
+                         const ShapeSet& moving, double tol) {
   FaceRadius out;
   const BRepAdaptor_Surface surf(face);
   const double d = (face.Orientation() == TopAbs_REVERSED) ? -distance : distance;
@@ -63,52 +191,85 @@ FaceRadius offset_radius(const TopoDS_Face& face, double distance) {
       out.before = surf.Sphere().Radius();
       out.after = out.before + d;
       break;
-    case GeomAbs_Torus:
-      // The minor radius: the tube's own. The major radius is the ring's and an offset
-      // leaves it where it is, measured on a torus of radii 5 and 1.5 at -0.5, -1.0 and
-      // -1.4 — major 5.0 every time.
+    case GeomAbs_Torus: {
+      // The minor radius is the tube's own, and the offset spends it. The major radius is
+      // the ring's and the offset leaves it where it is — measured on a torus of radii 5 and
+      // 1.5 at -0.5, -1.0 and -1.4, major 5.0 every time — but it is a second limit, not a
+      // spectator: a tube grown to the ring's own axis passes through itself.
+      const gp_Torus t = surf.Torus();
       out.analytic = true;
       out.surface = "torus";
-      out.before = surf.Torus().MinorRadius();
+      out.before = t.MinorRadius();
       out.after = out.before + d;
+      out.limit = (out.before < t.MajorRadius()) ? t.MajorRadius() : 0.0;
       break;
+    }
     case GeomAbs_Cone: {
       const gp_Cone c = surf.Cone();
-      const double s = std::sin(c.SemiAngle());
-      out.analytic = true;
+      const double sa = std::sin(c.SemiAngle());
+      const double ca = std::cos(c.SemiAngle());
       out.surface = "cone";
-      out.before = std::min(c.RefRadius() + surf.FirstVParameter() * s,
-                            c.RefRadius() + surf.LastVParameter() * s);
-      out.after = out.before + d * std::cos(c.SemiAngle());
+      for (const double v : {surf.FirstVParameter(), surf.LastVParameter()}) {
+        const ConeEnd end = cone_end(face, c, v, edge_owners, moving, distance, tol);
+        if (end.sharp) {
+          continue;
+        }
+        // The end slides `end.slide` along the axis, and the cone's radius changes by
+        // tan(SemiAngle) per unit of axial travel. Where the neighbour cannot be read, the
+        // slide is taken at the value that leaves the least radius, which is the one no
+        // arrangement of neighbours can undercut.
+        const double slid = end.slide_known ? end.slide * (sa / ca)
+                                            : -std::abs(distance * sa / ca);
+        const double after = end.radius + slid + d / ca;
+        if (!out.analytic || after < out.after) {
+          out.analytic = true;
+          out.before = end.radius;
+          out.after = after;
+        }
+      }
       break;
     }
     default:
       break;
   }
+
+  if (out.analytic) {
+    if (out.after <= tol) {
+      out.fail = Fail::Vanishes;
+    } else if (out.limit > 0.0 && out.after >= out.limit - tol) {
+      out.fail = Fail::Spindle;
+    }
+  }
   return out;
 }
 
 std::vector<std::pair<TopoDS_Shape, FaceRadius>> radii_that_vanish(
-    const std::vector<TopoDS_Shape>& faces, double distance, double tol) {
+    const std::vector<TopoDS_Shape>& faces, double distance, const EdgeOwners& edge_owners,
+    const ShapeSet& moving, double tol) {
   std::vector<std::pair<TopoDS_Shape, FaceRadius>> out;
   for (const TopoDS_Shape& s : faces) {
     if (s.ShapeType() != TopAbs_FACE) {
       continue;
     }
-    const FaceRadius r = offset_radius(TopoDS::Face(s), distance);
-    if (r.analytic && r.after <= tol) {
+    const FaceRadius r = offset_radius(TopoDS::Face(s), distance, edge_owners, moving, tol);
+    if (r.fail != Fail::None) {
       out.emplace_back(s, r);
     }
   }
   std::stable_sort(out.begin(), out.end(),
                    [](const std::pair<TopoDS_Shape, FaceRadius>& a,
                       const std::pair<TopoDS_Shape, FaceRadius>& b) {
-                     return a.second.after < b.second.after;
+                     return a.second.margin() < b.second.margin();
                    });
   return out;
 }
 
 std::string radius_phrase(const FaceRadius& r, const std::string& named) {
+  if (r.fail == Fail::Spindle) {
+    return std::string(r.surface) + " of minor radius " + std::to_string(r.before) + named +
+           " would be left with " + std::to_string(r.after) + ", which its major radius " +
+           std::to_string(r.limit) + " cannot carry";
+  }
   return std::string(r.surface) + " of radius " + std::to_string(r.before) + named +
          " would be left with " + std::to_string(r.after);
 }
@@ -117,8 +278,11 @@ const char* radius_detail() {
   return "An offset takes an analytic face's radius to that face's own side of zero and no "
          "further: at zero the surface degenerates, and past it OCCT rebuilds it at the "
          "absolute value of the negative radius — the same surface mirrored through its own "
-         "axis, which is a valid solid that is not the offset of anything. Reduce the "
-         "magnitude, or offset a face set whose radii survive. Nothing was built.";
+         "axis, which is a valid solid that is not the offset of anything. A torus has a "
+         "second limit in the same spirit: a tube grown to the ring's own axis passes "
+         "through itself, and OCCT reports the ring's volume for a body that is no longer "
+         "one. Reduce the magnitude, or offset a face set whose radii survive. Nothing was "
+         "built.";
 }
 
 SolidVolumes solid_volumes(const TopoDS_Shape& s) {

@@ -1316,7 +1316,33 @@ def test_offset_of_a_cone_uses_the_half_angle_not_the_bare_radius() -> None:
     assert len(_ids(session, EntityKind.SOLID)) == 1
 
 
-@pytest.mark.parametrize("distance", [-0.75, -1.0, -1.3, -2.1])
+def _cone_half_angle() -> float:
+    """The signed half-angle of :data:`CONE_RADII` by :data:`CONE_HEIGHT`."""
+    return math.atan2(CONE_RADII[1] - CONE_RADII[0], CONE_HEIGHT)
+
+
+def _cone_frustum(lower: float, upper: float, shift: float) -> float:
+    """Volume of the cone between two axial stations, its surface moved `shift` radially."""
+    tan_a = math.tan(_cone_half_angle())
+
+    def radius(z: float) -> float:
+        return CONE_RADII[0] + z * tan_a + shift
+
+    lo, hi = radius(lower), radius(upper)
+    return math.pi / 3.0 * (upper - lower) * (lo * lo + lo * hi + hi * hi)
+
+
+# Where the cone's small end is left, for each way its bounding cap can move. A cap that is
+# offset with the cone slides along the axis by the distance and carries the end to a wider
+# part of the cone; a cap that was opened stays put. Derived in offset_guard::cone_end() and
+# measured below.
+CONE_SLIDING_CAP: float = -CONE_RADII[1] * math.cos(_cone_half_angle()) / (
+    1.0 - abs(math.sin(_cone_half_angle()))
+)
+CONE_OPENED_CAP: float = -CONE_RADII[1] * math.cos(_cone_half_angle())
+
+
+@pytest.mark.parametrize("distance", [-0.91, -1.0, -1.3, -2.1])
 def test_offset_past_a_cone_small_radius_raises_and_changes_nothing(
     distance: float,
 ) -> None:
@@ -1325,15 +1351,145 @@ def test_offset_past_a_cone_small_radius_raises_and_changes_nothing(
     wall = _face_of_type(session, "Cone")
     before = _whole_state(session)
 
-    # -0.75 is the distance the spec says must refuse. Past the small end's radius OCCT
-    # builds the cone through its own apex and hands back the real cone plus the mirrored
-    # one beyond it: at -1.3, 4.1.2 committed 0.2449985963706531 where the honest answer is
-    # 0.1304735.
+    # Past the small end's radius OCCT builds the cone through its own apex and hands back
+    # the real cone plus the mirrored one beyond it: at -1.3, 4.1.2 committed
+    # 0.2449985963706531 where the honest answer is 0.1304735, and at -2.1 it committed
+    # 1.6982421844900932 where the honest answer is nothing at all.
     with pytest.raises(ps.PysmeshError, match="do not survive it") as excinfo:
         session.offset([solid], distance)
 
     assert list(excinfo.value.face_ids) == [wall]
     assert "cone of radius" in str(excinfo.value)
+    assert _whole_state(session) == before
+
+
+@pytest.mark.parametrize("distance", [-0.75, -0.85, -0.90])
+def test_offset_of_a_cone_follows_the_cap_that_slides_with_it(distance: float) -> None:
+    session = _cone_session()
+    solid = _sole(session, EntityKind.SOLID)
+
+    # The band a rule that judged the cone by its bare small radius would refuse. It must
+    # not: the small cap is offset too, so it slides down the axis and the end of the cone
+    # lands where the cone is wider. Measured against the exact frustum, OCCT is honest
+    # through all of it — at -0.75 it returns 4.395013884856736 against 4.395013884856732.
+    session.offset([solid], distance)
+
+    assert len(_ids(session, EntityKind.SOLID)) == 1
+    assert session.entity_table(EntityKind.SOLID).measure[0] == pytest.approx(
+        _cone_frustum(-distance, CONE_HEIGHT + distance,
+                      distance / math.cos(_cone_half_angle()))
+    )
+
+
+def test_offset_of_a_cone_is_refused_from_the_sliding_cap_boundary_on() -> None:
+    session = _cone_session()
+    solid = _sole(session, EntityKind.SOLID)
+
+    # The closed form is -0.9052731157730114 and the rule refuses at `radius + d <= tol`, so
+    # the boundary sits one tolerance short of it. Measured by bisection on the rule's own
+    # message: the last distance it lets through is -0.9052729864482805 and the first it
+    # refuses is -0.9052729864482806.
+    assert CONE_SLIDING_CAP == pytest.approx(-0.9052731157730114)
+
+    with pytest.raises(ps.PysmeshError, match="do not survive it") as excinfo:
+        session.offset([solid], -0.9052729864482806)
+    assert "cone of radius" in str(excinfo.value)
+
+    # One bit back the rule says nothing. OCCT then declines it on its own — the offset cone
+    # is left with 1e-7 of radius and the kernel will not build that — which is a refusal
+    # from somewhere else entirely, and that is the distinction under test.
+    other = _cone_session()
+    with pytest.raises(ps.PysmeshError, match="OCCT could not offset"):
+        other.offset([_sole(other, EntityKind.SOLID)], -0.9052729864482805)
+
+
+def test_make_thick_solid_on_a_cone_opened_at_its_small_cap_refuses_earlier() -> None:
+    session = _cone_session()
+    opened = _top_plane(session)
+    before = _whole_state(session)
+
+    # The opened cap is removed, not offset, so the end of the cone does not move and the
+    # wall has only the bare radius over cos(half_angle) to spend. Measured: the last
+    # honest thickness is -0.677475524887505 and the closed form is -0.6774757547517903,
+    # a quarter of the way in from where the sliding-cap boundary sits.
+    assert CONE_OPENED_CAP == pytest.approx(-0.6774757547517903)
+    assert CONE_OPENED_CAP > CONE_SLIDING_CAP
+
+    with pytest.raises(ps.PysmeshError, match="do not survive it") as excinfo:
+        session.make_thick_solid([opened], -0.68)
+
+    assert "cone of radius" in str(excinfo.value)
+    assert _whole_state(session) == before
+
+
+def test_make_thick_solid_on_a_cone_opened_at_its_small_cap_keeps_the_honest_wall() -> None:
+    session = _cone_session()
+    opened = _top_plane(session)
+
+    session.make_thick_solid([opened], -0.67)
+
+    # Cavity: the cone offset inward by -0.67, from the offset bottom cap up to the opening.
+    whole = _cone_frustum(0.0, CONE_HEIGHT, 0.0)
+    cavity = _cone_frustum(0.67, CONE_HEIGHT, -0.67 / math.cos(_cone_half_angle()))
+    assert session.entity_table(EntityKind.SOLID).measure[0] == pytest.approx(whole - cavity)
+
+
+def test_make_thick_solid_on_a_cone_opened_at_its_large_cap_uses_the_sliding_cap() -> None:
+    session = _cone_session()
+    ids = [EntityId(i) for i in _ids(session, EntityKind.FACE)]
+    boxes = session.bounding_boxes(EntityKind.FACE)
+    heights = {int(i): b[2] for i, b in zip(boxes.ids.tolist(), boxes.bbox.tolist(),
+                                            strict=True)}
+    table = session.surface_parameters(ids)
+    planes = [int(i) for i, t in zip(table.ids.tolist(), table.types, strict=True)
+              if t == "Plane"]
+    opened = EntityId(min(planes, key=lambda i: heights[i]))
+
+    # The small cap is a wall here, so it slides and the boundary is the uniform offset's.
+    # -0.90 is inside the band a rule reading the bare radius would refuse.
+    session.make_thick_solid([opened], -0.90)
+
+    whole = _cone_frustum(0.0, CONE_HEIGHT, 0.0)
+    cavity = _cone_frustum(0.0, CONE_HEIGHT - 0.90, -0.90 / math.cos(_cone_half_angle()))
+    assert session.entity_table(EntityKind.SOLID).measure[0] == pytest.approx(whole - cavity)
+
+
+def _sharp_cone_session() -> Session:
+    """A cone with an apex: base radius 3, no top cap, height 4."""
+    s = Session()
+    s.add_cone(3.0, 0.0, 4.0)
+    return s
+
+
+@pytest.mark.parametrize("distance", [-1.0, -1.4, 0.3, 2.0])
+def test_offset_of_a_sharp_cone_is_not_judged_by_its_apex(distance: float) -> None:
+    session = _sharp_cone_session()
+    solid = _sole(session, EntityKind.SOLID)
+
+    # An apex is a degenerate end with no cap to offset, so there is nothing there that the
+    # offset can take away: with GeomAbs_Intersection the surface simply runs on to its own
+    # new apex. A rule reading the smallest radius over the face would see zero and refuse
+    # every inward distance, and would refuse the outward ones too on a REVERSED face.
+    # Measured at +0.3: OCCT returns 65.14406526483796, the frustum from the offset base
+    # radius to zero over the offset apex's height, exactly.
+    session.offset([solid], distance)
+
+    assert len(_ids(session, EntityKind.SOLID)) == 1
+
+
+@pytest.mark.parametrize("distance", [-1.6, -1.9, -3.0])
+def test_offset_of_a_sharp_cone_is_refused_when_its_base_cannot_carry_it(
+    distance: float,
+) -> None:
+    session = _sharp_cone_session()
+    solid = _sole(session, EntityKind.SOLID)
+    before = _whole_state(session)
+
+    # The base is what binds: it carries radius 3, its cap slides up by the distance, and
+    # the two together spend it at -1.5. The apex end says nothing.
+    with pytest.raises(ps.PysmeshError, match="do not survive it"):
+        session.offset([solid], distance)
+
     assert _whole_state(session) == before
 
 
@@ -1399,6 +1555,47 @@ def test_offset_shrinks_a_torus_up_to_its_tube_radius() -> None:
     assert session.entity_table(EntityKind.SOLID).measure[0] == pytest.approx(
         2.0 * math.pi**2 * major * left**2
     )
+
+
+@pytest.mark.parametrize("distance", [3.6, 4.0, 6.0])
+def test_offset_outward_past_a_torus_major_radius_raises_and_changes_nothing(
+    distance: float,
+) -> None:
+    session = _torus_session()
+    solid = _sole(session, EntityKind.SOLID)
+    before = _whole_state(session)
+
+    # The tube has a second limit, and it is the ring's own radius: grown that far the tube
+    # reaches the axis it is swept about and the surface passes through itself. OCCT commits
+    # the spindle and GProp integrates the parametrisation blindly, so it reports the ring
+    # formula for a body that is no longer a ring: 2567.084104723342 at +3.6, and
+    # 5551.652475612765 at +6.0. Neither number is the volume of anything.
+    with pytest.raises(ps.PysmeshError, match="do not survive it") as excinfo:
+        session.offset([solid], distance)
+
+    assert "torus of minor radius" in str(excinfo.value)
+    assert "cannot carry" in str(excinfo.value)
+    assert _whole_state(session) == before
+
+
+def test_offset_outward_up_to_a_torus_major_radius_is_committed() -> None:
+    session = _torus_session()
+    solid = _sole(session, EntityKind.SOLID)
+    major, minor = TORUS_RADII
+
+    # Right up to the limit the body is still a ring and the formula still holds. The rule
+    # refuses at `minor + d >= major - tol`, so the boundary sits one tolerance short of
+    # major - minor = 3.5. Measured: last accepted 3.4999998999999993, first refused
+    # 3.4999998999999997.
+    session.offset([solid], 3.4)
+
+    assert session.entity_table(EntityKind.SOLID).measure[0] == pytest.approx(
+        2.0 * math.pi**2 * major * (minor + 3.4) ** 2
+    )
+
+    other = _torus_session()
+    with pytest.raises(ps.PysmeshError, match="do not survive it"):
+        other.offset([_sole(other, EntityKind.SOLID)], 3.4999998999999997)
 
 
 def test_offset_inward_leaves_a_bore_alone_and_shrinks_the_wall() -> None:

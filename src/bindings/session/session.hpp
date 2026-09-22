@@ -1277,8 +1277,9 @@ class Session {
   // the radius OCCT rebuilds the surface at the absolute value of the negative one, which
   // is a valid solid of the right topology and the wrong shape. Shared by both offsets,
   // because it is the same arithmetic reached from two entry points.
-  void require_surviving_radii(const char* op, const std::vector<TopoDS_Shape>& faces,
-                               double distance, double tol) const;
+  void require_surviving_radii(const char* op, const TopoDS_Shape& owner,
+                               const std::vector<TopoDS_Shape>& faces, double distance,
+                               double tol) const;
 
   // The live ids of a body's faces, ascending. What an offset blames when OCCT declines
   // outright and leaves no history to trace a failure through.
