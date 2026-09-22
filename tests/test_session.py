@@ -666,16 +666,17 @@ def _top_face(session: Session) -> EntityId:
 
 
 def _whole_state(session: Session) -> tuple[object, ...]:
-    """The operation count, the id counter and every live id — what a refusal must keep.
+    """The model itself, the operation count, the id counter and every live id.
 
-    The BREP bytes are deliberately not here. MakeThickSolidByJoin raises the *input*
-    shape's stored tolerances in place, from 1e-07 to 1.00000000111022e-07, for some
-    selections. That happens inside OCCT before any post-condition runs, it is the same in
-    4.1.1, and it changes no id and no geometry. The byte-for-byte contract is asserted by
-    :func:`test_make_thick_solid_leaves_the_session_unchanged_when_it_fails` on a selection
-    where it holds.
+    The BREP bytes are in here since 4.2.0. They could not be before: MakeThickSolidByJoin
+    and PerformByJoin edit the shape they are given — raising stored tolerances, nudging
+    stored points, adding a sub-shape — inside OCCT, before any post-condition can run, and
+    across 648 refusals of seven primitives 46 left the body changed. Both operations are
+    now run on a copy and never on the session's own shape, so a refusal leaves the model
+    byte for byte as it was and every test below asserts it.
     """
     return (
+        session.brep(),
         session.op_count,
         session.issued_id_count,
         {k: _ids(session, k) for k in EntityKind},
@@ -1663,6 +1664,83 @@ def test_offset_of_a_planar_body_is_not_touched_by_the_radius_rule(
     assert placed_box_session.entity_table(EntityKind.SOLID).measure[0] == pytest.approx(
         (BOX_DX - 2.98) * (BOX_DY - 2.98) * (BOX_DZ - 2.98)
     )
+
+
+# --------------------------------------------------------------------------------------- #
+# A refusal that reaches back into the caller's body
+#
+# BRepOffset_MakeOffset does not treat the shape it is given as read-only. Measured across
+# 648 refusals of seven primitives on 4.1.3, 46 left the input body changed: a cylinder of
+# radius 2 hollowed at +0.5 with its wall and its top cap opened came back with 15 TShapes
+# where it had 14, and a vertex tolerance of 0.001 where it had 1e-07. Every id, every
+# entity count and every measure survived, so nothing the delta reports could see it -- and
+# the next operation could: on that cylinder a later fillet returned 1778 bytes of BREP
+# against the 1760 the undamaged body gives, and a later heal 1125 against 1093.
+#
+# Both operations are now run on a copy of the body, so the session's own shape is never
+# handed to the algorithm at all.
+# --------------------------------------------------------------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("opened", "thickness"),
+    [((0, 1), 0.5), ((0, 2), 2.0), ((0, 1, 2), 5.0)],
+)
+def test_a_refused_hollowing_leaves_the_body_byte_for_byte(
+    opened: tuple[int, ...], thickness: float
+) -> None:
+    session = _cylinder_session()
+    faces = [EntityId(i) for i in _ids(session, EntityKind.FACE)]
+    before = session.brep()
+
+    with pytest.raises(ps.PysmeshError):
+        session.make_thick_solid([faces[i] for i in opened], thickness)
+
+    assert session.brep() == before
+
+
+def test_a_refused_hollowing_does_not_change_what_the_next_operation_makes() -> None:
+    clean = _cylinder_session()
+    damaged = _cylinder_session()
+    faces = [EntityId(i) for i in _ids(damaged, EntityKind.FACE)]
+
+    with pytest.raises(ps.PysmeshError):
+        damaged.make_thick_solid([faces[0], faces[1]], 0.5)
+
+    # The statement the byte comparison above stands for. A refused operation that changes
+    # what the next one produces has not refused anything.
+    for session in (clean, damaged):
+        session.fillet([EntityId(_ids(session, EntityKind.EDGE)[0])], 0.3)
+
+    assert damaged.brep() == clean.brep()
+
+
+def test_a_refused_hollowing_does_not_accumulate_damage() -> None:
+    session = _cylinder_session()
+    faces = [EntityId(i) for i in _ids(session, EntityKind.FACE)]
+    sizes = []
+
+    for _ in range(3):
+        with pytest.raises(ps.PysmeshError):
+            session.make_thick_solid([faces[0], faces[1]], 0.5)
+        sizes.append(len(session.brep()))
+
+    assert len(set(sizes)) == 1
+
+
+def test_an_accepted_hollowing_keeps_the_outer_walls_ids() -> None:
+    session = _cylinder_session()
+    cap = _top_plane(session)
+    walls = [i for i in _ids(session, EntityKind.FACE) if i != int(cap)]
+
+    delta = session.make_thick_solid([cap], -0.5)
+
+    # The other half of running on a copy: the body the algorithm was handed becomes the
+    # session's, so a face the hollowing left alone is still found in the model and keeps
+    # its id. Without that step every outer wall would be re-issued.
+    assert int(cap) not in _ids(session, EntityKind.FACE)
+    assert set(walls) <= set(_ids(session, EntityKind.FACE))
+    assert [int(i) for i in delta.deleted] == [int(cap)]
 
 
 def test_a_cancelled_offset_changes_nothing(placed_box_session: Session) -> None:
