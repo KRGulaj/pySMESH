@@ -87,13 +87,19 @@ class _OffsetOps(_SessionBase):
                 all.
 
                 The radius check runs first, before OCCT is driven, and covers every face the
-                hollowing walls — that is, every face the caller did not open. A cylinder,
-                a sphere and a torus each have one radius to spend; a cone's varies along the
-                face, and the smallest one over that face is what has to survive.
-                ``.face_ids`` then carries the faces whose radius does not. Opening a
-                cylinder at a planar cap and asking for a wall thicker than its radius is the
-                case this exists for: before 4.1.3 it committed a body indistinguishable from
-                an unhollowed one.
+                hollowing walls — that is, every face the caller did not open. ``.face_ids``
+                then carries the faces whose radius does not survive. Opening a cylinder at a
+                planar cap and asking for a wall thicker than its radius is the case this
+                exists for: before 4.1.3 it committed a body indistinguishable from an
+                unhollowed one. See :meth:`offset` for what the check says about each of the
+                four analytic surfaces, and for what it does not speak for.
+
+                A face the caller opens is removed rather than offset, so its own radius is
+                never spent and is not checked. It still decides what happens to the faces
+                that *are* offset: a cone's end is bounded by a cap, an offset cap slides
+                along the axis and carries that end with it, and a cap that was opened stays
+                where it is. The same cone therefore carries a thicker wall when the far cap
+                is opened than when the near one is.
 
                 The last two are different failures and carry different ids. A
                 self-intersection puts the *input* faces that the broken result faces came
@@ -169,8 +175,25 @@ class _OffsetOps(_SessionBase):
 
                 The radius check runs first, before OCCT is driven, and covers every face of
                 the body, since a uniform offset moves all of them. It speaks only for the
-                four surfaces that have a closed-form radius — cylinder, cone, sphere and
-                torus. A plane has none, and a B-spline or a surface of revolution has no one
+                four surfaces that have a closed-form radius, and says something different
+                about each:
+
+                * A **cylinder** and a **sphere** carry one radius over the whole face, and
+                  the offset spends it directly: the face survives while ``radius +
+                  distance`` stays above ``tol``.
+                * A **torus** spends its minor radius the same way, and has a second limit
+                  besides. A tube grown as wide as the ring it is swept about passes through
+                  itself, so ``minor + distance`` must also stay below the major radius.
+                * A **cone** has a different radius at each end, and each end is bounded by
+                  a cap that the offset moves as well. The end lands at ``r_end + slide *
+                  tan(half_angle) + distance / cos(half_angle)``, where ``slide`` is how far
+                  that cap travels along the cone's axis — the distance itself when the cap
+                  is offset too, and zero when it is an opening. Both ends are checked and
+                  the smaller result decides. An end whose radius is already zero is an apex
+                  with no cap to move: there is nothing there for the offset to spend, so
+                  that end is passed over.
+
+                A plane has no radius, and a B-spline or a surface of revolution has no one
                 radius to test, so those faces stay with the post-conditions below.
                 ``.face_ids`` carries the faces whose radius does not survive.
 
@@ -184,6 +207,14 @@ class _OffsetOps(_SessionBase):
                 ``distance`` leaves it strictly smaller while a positive one leaves it
                 strictly larger. A shell body carries no solid and is not checked. No partial
                 result is ever returned.
+
+                However the operation is refused, the body is left byte for byte as it was.
+                This is a guarantee, not a side effect: OCCT is handed a copy of the body and
+                never the session's own shape, because ``BRepOffset_MakeOffset`` edits the
+                shape it is given — raising stored tolerances, adding sub-shapes — before any
+                of these checks can run. Until 4.2.0 a refused offset could leave the body
+                looking identical, with every id, count and measure intact, and still change
+                what the next :meth:`fillet` or :meth:`heal` produced from it.
         """
         return _delta(
             self._s.offset(_ids(entities), distance, tol, progress, cancel)

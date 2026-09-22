@@ -106,6 +106,22 @@ A negative `thickness` hollows the solid; a positive one enlarges it. Both raise
 self-intersects, which happens once `abs(thickness)` exceeds the smallest feature it has to
 clear.
 
+Both also refuse a distance the body cannot carry, before and after the kernel runs. Every
+face with a closed-form radius — a cylinder, a cone, a sphere or a torus — has to keep that
+radius: past it OCCT rebuilds the face at the absolute value of the negative radius, which is
+the same surface mirrored through its own axis, and the result is a valid solid that is not
+the offset of anything. A cylinder of radius 1 shrunk by 1.01 used to come back as the
+r = 0.01 cylinder. The check runs before OCCT is driven and names the faces by their 1-based
+ordinal. Afterwards the result has to *be* the offset: a hollowing must return a solid of
+positive volume, smaller than the input, carrying a wall the offset built, and a uniform
+offset must return a body that shrank for a negative distance and grew for a positive one.
+Past what a body can carry `MakeThickSolidByJoin` returns the input solid unhollowed and
+`BRepCheck_Analyzer` accepts it, so the kernel's own verdict is not enough.
+
+`Session.offset` and `Session.make_thick_solid` apply the same rules, name the faces by
+entity id, and additionally guarantee that a refused operation leaves the body byte for byte
+as it was.
+
 ## Distance and leaks: `shape_distance` / `free_boundary_edges`
 
 `shape_distance` is the exact minimum distance between two shapes of any kind, with the
