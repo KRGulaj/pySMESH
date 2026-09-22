@@ -274,6 +274,141 @@ def test_offset_shape_malformed_brep_raises() -> None:
 
 
 # ---------------------------------------------------------------------------
+# What the result has to be (4.2.0)
+#
+# These are the statements Session has carried since 4.1.2, on the module that
+# reaches the same two OCCT calls from the other side. Before 4.2.0 this module
+# had BRepOffsetAPI's own IsDone(), a null check and BRepCheck_Analyzer, and
+# committed every case below. A face is named here by its 1-based ordinal in
+# the input's face map, the same ordinal remove_face_ids is given in.
+#
+# The cylinder fixture is radius 1 by height 3, the sphere radius 1, and the
+# box 2 x 2 x 2.
+# ---------------------------------------------------------------------------
+
+
+def _volume(brep: bytes) -> float:
+    """Total volume of the solids in a BREP, through a throwaway session."""
+    from pysmesh import Session
+
+    s = Session()
+    s.add_brep(brep)
+    ids = [int(i) for i in s.entity_types("SOLID").ids]
+    return float(sum(s.mass_properties(ids).measure)) if ids else float("nan")
+
+
+@pytest.mark.parametrize("offset", [-1.0, -1.01, -1.5, -3.0])
+def test_offset_shape_past_a_cylinder_radius_raises(cylinder_brep: bytes,
+                                                    offset: float) -> None:
+    """Past its radius OCCT rebuilds the wall mirrored through its own axis.
+
+    Measured on a cylinder of radius 2 and height 7 -- the same surface, scaled --
+    a shrink of 2.01 committed 0.0009361946107697187, which is exactly the
+    r = 0.01 cylinder. The result is a valid solid of positive volume with the
+    right three faces, so only a statement made before OCCT runs can see it.
+    """
+    with pytest.raises(PysmeshError, match="do not survive it") as excinfo:
+        _offset(cylinder_brep, offset)
+
+    assert "cylinder of radius" in str(excinfo.value)
+    assert list(excinfo.value.face_ids) == [1]
+
+
+def test_offset_shape_up_to_a_cylinder_radius_still_commits(cylinder_brep: bytes) -> None:
+    """The regime the rule must leave alone: a sliver of a cylinder is still one."""
+    import math
+
+    result = _offset(cylinder_brep, -0.9)
+
+    assert _volume(result.brep) == pytest.approx(math.pi * 0.1**2 * (3.0 - 1.8))
+
+
+@pytest.mark.parametrize("offset", [-1.0, -1.5])
+def test_offset_shape_past_a_sphere_radius_raises(sphere_brep: bytes, offset: float) -> None:
+    """A sphere shrunk by its own radius has nothing left to be."""
+    with pytest.raises(PysmeshError, match="do not survive it") as excinfo:
+        _offset(sphere_brep, offset)
+
+    assert "sphere of radius" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("thickness", [-1.05, -1.5])
+def test_make_thick_solid_past_a_cylinder_radius_raises(cylinder_brep: bytes,
+                                                        thickness: float) -> None:
+    """Opened at a planar cap, the curved wall is what the thickness is spent on.
+
+    This is the case the opening's surface type used to decide: opened at the
+    curved wall OCCT declines, and opened at a cap it committed a wall thicker
+    than the body -- 87.81 against a solid of 87.96, measured on radius 2.
+    """
+    with pytest.raises(PysmeshError, match="do not survive it") as excinfo:
+        _thick(cylinder_brep, (2,), thickness)
+
+    assert "cylinder of radius" in str(excinfo.value)
+    assert list(excinfo.value.face_ids) == [1]
+
+
+def test_make_thick_solid_does_not_judge_the_faces_it_opens(cylinder_brep: bytes) -> None:
+    """An opened face is removed, not offset, so its radius is not spent.
+
+    Opening the curved wall leaves two caps with no wall between them, which OCCT
+    declines on its own. The point under test is which refusal arrives: the radius
+    rule must not be the one speaking, because the face carrying the radius is the
+    one being removed.
+    """
+    with pytest.raises(PysmeshError) as excinfo:
+        _thick(cylinder_brep, (1,), -1.05)
+
+    assert "do not survive it" not in str(excinfo.value)
+    assert "IsDone() is false" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("thickness", [-1.0, -2.0, -5.0])
+def test_make_thick_solid_refuses_a_result_that_is_the_input(box_brep: bytes,
+                                                             thickness: float) -> None:
+    """Past what the box can carry, the inner shell collapses and the input comes back.
+
+    MakeThickSolidByJoin reports IsDone(), BRepCheck_Analyzer accepts the shape,
+    and the shape is the 2 x 2 x 2 box itself: volume 8.0 against an input of 8.0,
+    with the opened face re-issued under a new ordinal. Half the box's smallest
+    extent is 1.0, which is where it starts.
+    """
+    with pytest.raises(PysmeshError, match="is not a hollowed solid") as excinfo:
+        _thick(box_brep, (1,), thickness)
+
+    assert "no cavity was cut" in str(excinfo.value)
+    assert list(excinfo.value.face_ids) == [1]
+
+
+def test_make_thick_solid_refuses_a_plate_that_came_back_inside_out(box_brep: bytes) -> None:
+    """Every face but one opened, thickened outward: the plate has negative volume."""
+    with pytest.raises(PysmeshError, match="is not a hollowed solid") as excinfo:
+        _thick(box_brep, (1, 2, 3, 4, 5), 0.5)
+
+    assert "turned inside out" in str(excinfo.value)
+
+
+def test_make_thick_solid_refuses_an_opening_of_the_whole_boundary(box_brep: bytes) -> None:
+    """With every face opened there is no wall to build, and the input comes back."""
+    with pytest.raises(PysmeshError, match="is not a hollowed solid"):
+        _thick(box_brep, (1, 2, 3, 4, 5, 6), -0.3)
+
+
+def test_make_thick_solid_still_hollows_what_the_box_can_carry(box_brep: bytes) -> None:
+    """The thin wall the statements must not touch: 2 x 2 x 2 walled by 0.3."""
+    result = _thick(box_brep, (1,), -0.3)
+
+    cavity = (2.0 - 0.6) * (2.0 - 0.6) * (2.0 - 0.3)
+    assert _volume(result.brep) == pytest.approx(8.0 - cavity)
+
+
+def test_offset_shape_still_grows_and_shrinks_the_box(box_brep: bytes) -> None:
+    """Both signs of the volume statement, on distances the box carries."""
+    assert _volume(_offset(box_brep, 0.5).brep) == pytest.approx(3.0**3)
+    assert _volume(_offset(box_brep, -0.4).brep) == pytest.approx(1.2**3)
+
+
+# ---------------------------------------------------------------------------
 # Public namespace
 # ---------------------------------------------------------------------------
 

@@ -422,7 +422,12 @@ std::string not_a_thick_solid(const TopoDS_Shape& owner, const TopoDS_Shape& res
 // refused by the analyzer.
 std::string not_an_offset_body(const TopoDS_Shape& owner, const TopoDS_Shape& result,
                                double distance) {
-  if (owner.ShapeType() != TopAbs_SOLID) {
+  // Whether there is a volume to speak about, not what the top-level shape is called. The
+  // session hands a SOLID or a SHELL; the stateless module hands whatever the caller's BREP
+  // held, which is a COMPOUND as often as not. A compound of solids has a total volume and
+  // the statements below hold of it; a shell has none and they do not.
+  const SolidVolumes was = solid_volumes(owner);
+  if (was.count == 0) {
     return std::string();
   }
   std::vector<std::string> broken;
@@ -435,7 +440,7 @@ std::string not_an_offset_body(const TopoDS_Shape& owner, const TopoDS_Shape& re
                      ", so the body came back turned inside out.");
   }
 
-  const double input_volume = solid_volumes(owner).total;
+  const double input_volume = was.total;
   if (distance < 0.0 && got.count > 0 && got.total >= input_volume) {
     broken.push_back("Its volume " + std::to_string(got.total) +
                      " is not less than the input solid's " + std::to_string(input_volume) +

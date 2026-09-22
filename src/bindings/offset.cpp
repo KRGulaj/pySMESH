@@ -44,6 +44,7 @@
 #include <TopoDS_Shape.hxx>
 
 #include "common.hpp"
+#include "offset_guard.hpp"
 
 namespace pysmesh {
 namespace {
@@ -137,6 +138,78 @@ static std::vector<int> invalid_new_face_ids(const TopoDS_Shape& shape,
   return bad;
 }
 
+// The radius pre-condition, in this module's own vocabulary.
+//
+// Identical to Session's, and deliberately so: it is the same arithmetic reached from a
+// second entry point, and offset_guard holds the arithmetic once. What differs is the name
+// a failing face is reported by. The session answers with an EntityId, which denotes the
+// face across every later operation; here there are no ids, so a face is named by its
+// 1-based ordinal in the input shape's face map — the same ordinal `remove_face_ids` is
+// given in and `face_map` is indexed by.
+static void require_surviving_radii(const char* op, const TopoDS_Shape& shape,
+                                    const TopTools_IndexedMapOfShape& faces, double distance,
+                                    double tol) {
+  offset_guard::EdgeOwners edge_owners;
+  TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edge_owners);
+
+  offset_guard::ShapeSet moving;
+  std::vector<TopoDS_Shape> list;
+  for (int i = 1; i <= faces.Extent(); ++i) {
+    moving.Add(faces.FindKey(i));
+    list.push_back(faces.FindKey(i));
+  }
+
+  const std::vector<std::pair<TopoDS_Shape, offset_guard::FaceRadius>> failing =
+      offset_guard::radii_that_vanish(list, distance, edge_owners, moving, tol);
+  if (failing.empty()) {
+    return;
+  }
+
+  // The ordinal is taken from the shape's own face map, not from `faces`, because a
+  // hollowing is handed only the faces it walls and the caller counts every face.
+  TopTools_IndexedMapOfShape all_faces;
+  TopExp::MapShapes(shape, TopAbs_FACE, all_faces);
+  std::vector<int> blamed;
+  for (const std::pair<TopoDS_Shape, offset_guard::FaceRadius>& f : failing) {
+    const int idx = all_faces.FindIndex(f.first);
+    if (idx > 0) {
+      blamed.push_back(idx);
+    }
+  }
+  const int worst = all_faces.FindIndex(failing.front().first);
+  const std::string named =
+      worst > 0 ? " (face " + std::to_string(worst) + ")" : std::string();
+
+  std::sort(blamed.begin(), blamed.end());
+  blamed.erase(std::unique(blamed.begin(), blamed.end()), blamed.end());
+  throw PysmeshError(
+      std::string(op) + ": " + std::to_string(blamed.size()) +
+          " of the faces being offset by " + std::to_string(distance) +
+          " do not survive it. The " +
+          offset_guard::radius_phrase(failing.front().second, named) + ".",
+      offset_guard::radius_detail(), blamed);
+}
+
+// The faces the algorithm left in place of the openings.
+//
+// Modified() is queried first and Generated() second: BRepOffset_MakeOffset primes its
+// shared history map inside Modified(), and Generated() answers with an empty list when it
+// is called first. Both lists are read, because the post-condition's question is only "did
+// this face come from an opening".
+static offset_guard::ShapeSet rims_of(BRepOffsetAPI_MakeThickSolid& mk,
+                                      const TopTools_ListOfShape& opened) {
+  offset_guard::ShapeSet rims;
+  for (const TopoDS_Shape& f : opened) {
+    for (const TopoDS_Shape& t : mk.Modified(f)) {
+      rims.Add(t);
+    }
+    for (const TopoDS_Shape& t : mk.Generated(f)) {
+      rims.Add(t);
+    }
+  }
+  return rims;
+}
+
 // ---- make_thick_solid ----------------------------------------------------------------
 
 py::dict make_thick_solid(const py::bytes& brep, const std::vector<int>& remove_face_ids,
@@ -176,6 +249,27 @@ py::dict make_thick_solid(const py::bytes& brep, const std::vector<int>& remove_
     faces_to_remove.Append(old_faces.FindKey(fid));
   }
 
+  // Every face the caller did not open is the one that gets an inner wall, so those are the
+  // faces whose radii have to survive. The openings are removed rather than offset, and a
+  // cap that is removed does not slide, which is what decided the outcome before 4.2.0: a
+  // cylinder of radius 2 opened at its curved wall was declined by OCCT, and the same
+  // cylinder opened at a planar cap committed a wall thicker than the body — volume 87.81
+  // against the solid's own 87.96 at a thickness of -2.10.
+  TopTools_IndexedMapOfShape walled;
+  for (int i = 1; i <= nf; ++i) {
+    bool opened = false;
+    for (int fid : remove_face_ids) {
+      if (fid == i) {
+        opened = true;
+        break;
+      }
+    }
+    if (!opened) {
+      walled.Add(old_faces.FindKey(i));
+    }
+  }
+  require_surviving_radii("make_thick_solid", shape, walled, thickness, tol);
+
   // Run OCCT with GIL released — this is the expensive, pure-C++ step.
   BRepOffsetAPI_MakeThickSolid mk;
   {
@@ -211,6 +305,27 @@ py::dict make_thick_solid(const py::bytes& brep, const std::vector<int>& remove_
         "make_thick_solid produced an invalid shape (BRepCheck_Analyzer reported errors "
         "— likely self-intersecting offset; reduce |thickness| or simplify removed faces)",
         "", bad);
+  }
+
+  // What the result must be, beyond being valid. Past what the body can carry,
+  // MakeThickSolidByJoin collapses the inner shell, reports IsDone(), and hands back the
+  // input solid with the opened faces re-issued: a 3 x 7 x 11 box opened at one face and
+  // walled by -5.0 comes back measuring 231.0, the input exactly. BRepCheck_Analyzer
+  // accepts it, so only a statement about what a hollowed solid IS can see it.
+  offset_guard::ShapeSet opened_set;
+  for (const TopoDS_Shape& f : faces_to_remove) {
+    opened_set.Add(f);
+  }
+  const std::string collapsed = offset_guard::not_a_thick_solid(
+      shape, result, thickness, opened_set, rims_of(mk, faces_to_remove));
+  if (!collapsed.empty()) {
+    throw PysmeshError(
+        "make_thick_solid: the result at thickness " + std::to_string(thickness) +
+            " is not a hollowed solid. " + collapsed,
+        "MakeThickSolidByJoin reported success and BRepCheck_Analyzer accepted the shape, "
+        "but what came back is not the body hollowed. Reduce |thickness|, or open a "
+        "different face set. Nothing was returned.",
+        std::vector<int>(remove_face_ids));
   }
 
   // Build face_map: explicitly-removed face ids → -1 (deterministic, regardless of history);
@@ -271,6 +386,13 @@ py::dict offset_shape(const py::bytes& brep, double offset, double tol) {
   TopTools_IndexedMapOfShape old_faces;
   TopExp::MapShapes(shape, TopAbs_FACE, old_faces);
 
+  // A uniform offset moves every face of the body, so every one of them has to survive it.
+  // Measured on a cylinder of radius 2 and height 7: at -2.01 this module committed a body
+  // of volume 0.0009361946107697187, which is exactly the r = 0.01 cylinder — OCCT builds
+  // the surface at the absolute value of the negative radius, the cylinder mirrored through
+  // its own axis.
+  require_surviving_radii("offset_shape", shape, old_faces, offset, tol);
+
   BRepOffsetAPI_MakeOffsetShape mk;
   {
     py::gil_scoped_release release;
@@ -303,6 +425,19 @@ py::dict offset_shape(const py::bytes& brep, double offset, double tol) {
         "offset_shape produced an invalid shape (BRepCheck_Analyzer reported errors "
         "— likely self-intersecting offset; reduce |offset| or use a simpler shape)",
         "", bad);
+  }
+
+  // A solid offset inward is the set of its own points at least |offset| from its boundary,
+  // which is a proper subset, and offset outward it is a proper superset. The cover for
+  // every face the radius rule cannot speak for — a plane, a B-spline, a surface of
+  // revolution.
+  const std::string wrong = offset_guard::not_an_offset_body(shape, result, offset);
+  if (!wrong.empty()) {
+    throw PysmeshError(
+        "offset_shape: the result at distance " + std::to_string(offset) +
+            " is not that body offset. " + wrong,
+        "PerformByJoin reported success and BRepCheck_Analyzer accepted the shape, but what "
+        "came back is not the body offset. Reduce |offset|. Nothing was returned.");
   }
 
   py::dict out;
