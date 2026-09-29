@@ -240,6 +240,29 @@ class _HealOps(_SessionBase):
         verifies every named face actually went away and fails loud naming the ones that did
         not, rather than committing a no-op as a success.
 
+        **A removal must also change the body.** OCCT fills a feature by extending its
+        neighbours. A neighbour on the same surface extends straight back over the named
+        face. Name one half of a hole whose wall is two faces, and OCCT deletes that half and
+        rebuilds the other half as the whole wall. The face's id is gone, but the body is the
+        one that went in. So each removal is measured over the faces it changed. It is
+        refused when it changes the volume by no more than ``eps`` times the area of the
+        patch it replaced, and the area by no more than ``2 * eps`` times the length of the
+        named faces' edges. ``eps`` is OCCT's confusion distance, 1e-7 model units. A patch
+        that moved less than that is, to the kernel, the patch that was there.
+
+        The tolerances belong to the patch, not to the body, so a small feature on a large
+        body is still removable. Removing a fillet of radius 0.01 from a 61 x 37 x 7 plate
+        changes the volume by 1.5e-4, against a tolerance of 1.4e-8.
+
+        A feature is a set of named faces connected through shared edges, which is how OCCT
+        groups them. If one call names several features, each one is judged on its own, and
+        only those that changed nothing are refused. The complete features beside them are
+        not removed either: no partial result is ever returned.
+
+        A face that only splits one surface with its neighbour is refused the same way. Such
+        a split comes from an imprint or an import. Removing that face changes nothing, and
+        :meth:`unify_same_domain` is the operation that merges it, keeping its id.
+
         Args:
             face_ids: Faces of the features to remove. At least one, all on one body.
             parallel: Run OCCT's internal steps in parallel.
@@ -253,9 +276,13 @@ class _HealOps(_SessionBase):
             The delta for this operation.
 
         Raises:
-            PysmeshError: If an id is dead or is not a face, if the faces straddle two
-                bodies, or if OCCT removed nothing for any named face — in which case those
-                faces' ids are carried on ``.face_ids``. No partial result is ever returned.
+            PysmeshError: If an id is dead or is not a face, or if the faces straddle two
+                bodies. Also if OCCT removed nothing for any named face, or if removing a
+                named feature left the body's volume and area unchanged. In those two cases
+                ``.face_ids`` carries exactly the faces at fault. The message names the
+                neighbour OCCT extended over them when there is one, and ``.details`` gives
+                the measured changes and their tolerances. No partial result is ever
+                returned, and the session is left exactly as it was.
         """
         return _delta(self._s.defeature(_ids(face_ids), parallel, progress, cancel))
 
