@@ -872,7 +872,10 @@ class Session {
   // Remove the features the named faces belong to, closing the gaps with the surrounding
   // geometry. OCCT removes a *complete* feature: naming part of one leaves the shape
   // untouched while still reporting success, so this verifies every named face actually went
-  // away and fails loud naming the ones that did not.
+  // away and fails loud naming the ones that did not. It also verifies each named feature's
+  // removal changed the body: a face whose surface continues into a neighbour is "removed"
+  // by extending that neighbour back over it, which deletes the face and leaves the body as
+  // it was. See measure_removal() in session_heal.cpp for the tolerances.
   py::dict defeature(const std::vector<EntityId>& face_ids, bool parallel,
                      const py::object& progress, const py::object& cancel);
 

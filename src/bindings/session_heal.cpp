@@ -26,6 +26,12 @@
 
 #include "session/session.hpp"
 
+#include <iomanip>
+#include <numeric>
+
+#include <BOPTools_AlgoTools3D.hxx>
+#include <IntTools_Context.hxx>
+
 namespace pysmesh {
 namespace session {
 
@@ -172,20 +178,490 @@ py::dict Session::unify_same_domain(const std::optional<std::vector<EntityId>>& 
 
 // ---- defeaturing --------------------------------------------------------------------- //
 
+namespace {
+
+using EdgeFaces = NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
+                                             TopTools_ShapeMapHasher>;
+
+// GProp's adaptive rule falls back to its fixed rule for any Eps above 1e-3. The cap keeps
+// it adaptive when the precision derived below would exceed that.
+constexpr double kAdaptiveEpsCap = 1e-3;
+
+double edge_length_of(const TopoDS_Shape& s) {
+  double total = 0.0;
+  ShapeSet edges;
+  TopExp::MapShapes(s, TopAbs_EDGE, edges);
+  for (int i = 1; i <= edges.Extent(); ++i) {
+    const TopoDS_Edge& e = TopoDS::Edge(edges.FindKey(i));
+    if (BRep_Tool::Degenerated(e)) {
+      continue;
+    }
+    GProp_GProps length;
+    BRepGProp::LinearProperties(e, length);
+    total += length.Mass();
+  }
+  return total;
+}
+
+TopoDS_Compound compound_of(const std::vector<TopoDS_Shape>& shapes) {
+  TopoDS_Compound c;
+  BRep_Builder b;
+  b.MakeCompound(c);
+  for (const TopoDS_Shape& s : shapes) {
+    b.Add(c, s);
+  }
+  return c;
+}
+
+// What one removal did to its body, read off the faces it changed.
+//
+// Both measures are differences over the faces that differ between the input and the
+// result. Every other face is the same face in both — the same shape, or the same face
+// issued again (see changed_faces()) — so it contributes the same to both, and it is left
+// out rather than integrated twice and subtracted. What remains is the patch the removal
+// replaced: the named faces, and the neighbours OCCT extended over them.
+//
+// The tolerances come from Precision::Confusion(), eps, the distance below which OCCT treats
+// two points as one: a replacement patch that nowhere lies farther than eps from the patch
+// it replaced is, to the kernel, the same surface.
+//
+//   * Volume. The volume between two such patches is at most eps x the larger of their
+//     areas. The input's patch is the named faces, of area A; the result's is A + dA,
+//     because the neighbours are carried over otherwise. tol_volume = eps x max(A, A + dA).
+//   * Area. A removal that changes nothing only re-trims surfaces that were already there,
+//     and re-trimming along an edge moved by at most eps changes the area of each of the two
+//     faces it bounds by at most eps x its length. tol_area = 2 x eps x the length of the
+//     named faces' edges.
+//
+// A removal is judged to have changed nothing only inside BOTH tolerances. A real feature
+// leaves one of them: a hole or a pocket adds volume, a boss removes it, a fillet changes
+// both.
+//
+// The tolerances are taken over the patch, not over the body, because a feature is local.
+// eps x the body's whole area bounds what moving the WHOLE boundary by eps can do, and a
+// small real feature moves far less volume than that. Measured on the production STEP
+// assembly, a whole-body tolerance refused 14 of 48 single-face removals, among them a strip
+// of area 2.5e-5 whose removal moved it by 3.1e-5 on average — 310 x eps — on a body whose
+// whole-area tolerance was three times the change. Over the patch its tolerance is 2.5e-12,
+// and the change is 310 times that.
+struct Removal {
+  double d_volume = 0.0;
+  double d_area = 0.0;
+  double named_area = 0.0;
+  double named_edge_length = 0.0;
+  double tol_volume = 0.0;
+  double tol_area = 0.0;
+
+  bool unchanged() const {
+    return std::abs(d_volume) <= tol_volume && std::abs(d_area) <= tol_area;
+  }
+};
+
+// The faces a removal changed: `gone` from the input, `made` in the result.
+struct ChangedFaces {
+  std::vector<TopoDS_Shape> gone;
+  std::vector<TopoDS_Shape> made;
+};
+
+double area_of(const TopoDS_Shape& s) {
+  GProp_GProps props;
+  BRepGProp::SurfaceProperties(s, props);
+  return props.Mass();
+}
+
+// The faces of the input the result does not have, and the reverse, less every pair that is
+// one face issued twice.
+//
+// OCCT's defeaturing rebuilds the solid, and most faces come back as new shapes that are the
+// faces they were. Measured on a production body of 49 faces, 29 left the input and 28
+// arrived in the result for the removal of one small cylinder. Kept, each such pair costs
+// two integrations and contributes nothing but their round-off. A pair is dropped when both
+// faces lie on one surface — the same Geom_Surface, location and orientation — and their
+// areas agree within 2 x eps x the removed face's perimeter: by the tolerance below, that is
+// a face whose trimming moved less than eps, which is a face that did not change. A named
+// face is never paired: it is the patch being removed.
+ChangedFaces changed_faces(const TopoDS_Shape& owner, const TopoDS_Shape& result,
+                           const std::vector<TopoDS_Shape>& named) {
+  ShapeSet in_owner, in_result, named_set;
+  TopExp::MapShapes(owner, TopAbs_FACE, in_owner);
+  TopExp::MapShapes(result, TopAbs_FACE, in_result);
+  for (const TopoDS_Shape& f : named) {
+    named_set.Add(f);
+  }
+  ChangedFaces c;
+  ShapeSet seen;
+  for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next()) {
+    if (!in_owner.Contains(ex.Current()) && !seen.Contains(ex.Current())) {
+      seen.Add(ex.Current());
+      c.made.push_back(ex.Current());
+    }
+  }
+  std::vector<double> made_area(c.made.size(), -1.0);
+  std::vector<bool> paired(c.made.size(), false);
+  seen.Clear();
+  for (TopExp_Explorer ex(owner, TopAbs_FACE); ex.More(); ex.Next()) {
+    const TopoDS_Shape& g = ex.Current();
+    if (in_result.Contains(g) || seen.Contains(g)) {
+      continue;
+    }
+    seen.Add(g);
+    if (named_set.Contains(g)) {
+      c.gone.push_back(g);
+      continue;
+    }
+    TopLoc_Location g_loc;
+    const Handle(Geom_Surface) & g_surf = BRep_Tool::Surface(TopoDS::Face(g), g_loc);
+    const double g_area = area_of(g);
+    const double same = 2.0 * Precision::Confusion() * edge_length_of(g);
+    bool twin = false;
+    for (std::size_t j = 0; j < c.made.size() && !twin; ++j) {
+      if (paired[j] || c.made[j].Orientation() != g.Orientation()) {
+        continue;
+      }
+      TopLoc_Location m_loc;
+      const Handle(Geom_Surface) & m_surf =
+          BRep_Tool::Surface(TopoDS::Face(c.made[j]), m_loc);
+      if (m_surf != g_surf || !m_loc.IsEqual(g_loc)) {
+        continue;
+      }
+      if (made_area[j] < 0.0) {
+        made_area[j] = area_of(c.made[j]);
+      }
+      if (std::abs(made_area[j] - g_area) <= same) {
+        paired[j] = true;
+        twin = true;
+      }
+    }
+    if (!twin) {
+      c.gone.push_back(g);
+    }
+  }
+  std::vector<TopoDS_Shape> made;
+  for (std::size_t j = 0; j < c.made.size(); ++j) {
+    if (!paired[j]) {
+      made.push_back(c.made[j]);
+    }
+  }
+  c.made = std::move(made);
+  return c;
+}
+
+// Measure the removal that turned `owner` into `result` by deleting `named`.
+//
+// Both integrals use BRepGProp's adaptive rule. Its default rule integrates each face with a
+// fixed number of Gauss points, which is exact enough on an analytic face and not on a
+// free-form one: on a tube swept along a spline, whose B-spline wall is split in two on one
+// surface and whose half-wall "removal" is a no-op, the fixed rule measures a volume change
+// of 3.0e-6, well past the 1.9e-6 tolerance, where the adaptive rule measures 1.3e-8.
+//
+// The volume change is integrated in ONE call, over the result's changed faces together with
+// the input's changed faces reversed. Those bound exactly the region between the two
+// patches, a closed surface, so its volume is the change and does not depend on the point it
+// is taken about. Two separate calls would not do: the volume of an open patch does depend
+// on that point, and VolumeProperties picks its own from each shape it is given. Measured on
+// an imprinted box, the removed and the new patch over one 13 x 11 face came out 326.857
+// and 343.2 in two calls, for a change that is zero.
+//
+// Each integral is asked for a precision set by the tolerance it serves:
+//
+//   * Area. The rule refines each face until two steps agree to Eps relative, so over the
+//     changed faces, of area A_c, a tenth of tol_area asks for Eps = 0.1 x tol_area / A_c.
+//   * Volume. A face contributes (1/3) x the integral of (x - p).n over it, p the point
+//     VolumeProperties takes the volume about. OCCT does not document p, and its source is
+//     not in this tree; it is inferred from what VolumeProperties returns. A lone planar face
+//     measures exactly 0, so p lies in that face's own plane, which means p is taken from the
+//     shape and not fixed at the origin. Taken from the shape, p lies inside its bounding
+//     box, so |x - p| is at most D, the box's diagonal. Eps x D x A_c / 3 then bounds the
+//     error, and a tenth of eps x A asks for Eps = 0.3 x eps x A / (D x A_c).
+//
+// Both sides of the area difference are integrated with the same Eps, because the rule's
+// error is reproducible where it is not what the rule reports. On the tube, its whole-body
+// area wanders between 42.529 and 42.541 as Eps goes from 1e-6 to 1e-12, while it reports
+// reaching 1e-12, and yet at any one Eps the no-op's two sides agree to 2e-9. The check
+// compares a difference, so the difference is what has to be exact.
+Removal measure_removal(const TopoDS_Shape& owner, const TopoDS_Shape& result,
+                        const std::vector<TopoDS_Shape>& named) {
+  const double eps = Precision::Confusion();
+  Removal r;
+  const TopoDS_Compound named_faces = compound_of(named);
+  r.named_area = area_of(named_faces);
+  r.named_edge_length = edge_length_of(named_faces);
+  r.tol_area = 2.0 * eps * r.named_edge_length;
+
+  const ChangedFaces changed = changed_faces(owner, result, named);
+  const TopoDS_Compound gone = compound_of(changed.gone);
+  const TopoDS_Compound made = compound_of(changed.made);
+  std::vector<TopoDS_Shape> boundary = changed.made;
+  for (const TopoDS_Shape& g : changed.gone) {
+    boundary.push_back(g.Reversed());
+  }
+  const TopoDS_Compound between = compound_of(boundary);
+
+  // Guarded against a zero, not floored at a size: a floor would be a unit.
+  const double changed_area = std::max(area_of(between), eps);
+  Bnd_Box box;
+  BRepBndLib::Add(between, box);
+  const double diagonal = std::max(std::sqrt(box.SquareExtent()), eps);
+  const double area_eps = std::min(0.1 * r.tol_area / changed_area, kAdaptiveEpsCap);
+  const double volume_eps =
+      std::min(0.3 * eps * r.named_area / (diagonal * changed_area), kAdaptiveEpsCap);
+
+  GProp_GProps area_gone, area_made;
+  BRepGProp::SurfaceProperties(gone, area_gone, area_eps);
+  BRepGProp::SurfaceProperties(made, area_made, area_eps);
+  r.d_area = area_made.Mass() - area_gone.Mass();
+  GProp_GProps volume;
+  BRepGProp::VolumeProperties(between, volume, volume_eps);
+  r.d_volume = volume.Mass();
+  r.tol_volume = eps * std::max(r.named_area, r.named_area + r.d_area);
+  return r;
+}
+
+// The named faces grouped into features: sets connected through shared edges, as indices
+// into `faces`, each ascending, ordered by their first face.
+//
+// This is the grouping BOPAlgo_RemoveFeatures sorts its input into before it removes the
+// features one at a time, so a set here is what OCCT removes as one unit — the two
+// half-walls of a hole are one feature, two separate holes are two.
+std::vector<std::vector<std::size_t>> feature_blocks(const std::vector<TopoDS_Shape>& faces) {
+  std::vector<std::size_t> parent(faces.size());
+  std::iota(parent.begin(), parent.end(), std::size_t{0});
+  const auto root = [&parent](std::size_t i) {
+    while (parent[i] != i) {
+      parent[i] = parent[parent[i]];
+      i = parent[i];
+    }
+    return i;
+  };
+  ShapeKeyed<std::size_t> first_owner;
+  for (std::size_t i = 0; i < faces.size(); ++i) {
+    for (TopExp_Explorer ex(faces[i], TopAbs_EDGE); ex.More(); ex.Next()) {
+      const auto [it, inserted] = first_owner.emplace(ex.Current(), i);
+      if (!inserted) {
+        const std::size_t a = root(i);
+        const std::size_t b = root(it->second);
+        parent[std::max(a, b)] = std::min(a, b);
+      }
+    }
+  }
+  std::vector<std::vector<std::size_t>> blocks;
+  std::vector<std::size_t> slot(faces.size(), faces.size());
+  for (std::size_t i = 0; i < faces.size(); ++i) {
+    const std::size_t r = root(i);
+    if (slot[r] == faces.size()) {
+      slot[r] = blocks.size();
+      blocks.emplace_back();
+    }
+    blocks[slot[r]].push_back(i);
+  }
+  return blocks;
+}
+
+// Whether a feature's surface still bounds the defeatured body, and through which face.
+struct Probe {
+  // True when the feature has to be removed on its own to be judged: a point inside one of
+  // its faces lies on a face OCCT extended, or no point inside a face could be placed.
+  bool candidate = false;
+  // The face of the input body whose extension the point lies on, or null.
+  TopoDS_Shape absorber;
+};
+
+// Look for the one way a removal can leave a feature's surface where it was: OCCT fills a
+// feature by extending the faces adjacent to it, and a neighbour lying on the same surface
+// extends straight back over the feature. So a point inside each named face is taken, and
+// the neighbours' extended images are asked whether they pass through it.
+//
+// A real removal takes the named face's interior off the boundary — into the material for
+// a hole, out of it for a boss — and the extended neighbours meet it along its edges at
+// most, so the point, being inside the face, lies off them by a distance of the feature's
+// own size. The test is a filter, not the verdict: a candidate is only refused once
+// removing it on its own has been measured to change nothing. A face that no interior
+// point can be placed on is made a candidate for the same reason: being wrong in that
+// direction costs one more removal, and being wrong in the other would commit a no-op.
+Probe probe_feature(const std::vector<TopoDS_Shape>& block, const EdgeFaces& edge_faces,
+                    const Handle(BRepTools_History) & hist,
+                    const Handle(IntTools_Context) & context) {
+  ShapeSet own;
+  for (const TopoDS_Shape& f : block) {
+    own.Add(f);
+  }
+  Probe out;
+  for (const TopoDS_Shape& f : block) {
+    const TopoDS_Face& face = TopoDS::Face(f);
+    gp_Pnt p;
+    gp_Pnt2d uv;
+    if (hist.IsNull() || BOPTools_AlgoTools3D::PointInFace(face, p, uv, context) != 0) {
+      out.candidate = true;
+      continue;
+    }
+    const TopoDS_Vertex point = BRepBuilderAPI_MakeVertex(p);
+    for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+      const NCollection_List<TopoDS_Shape>* owners = edge_faces.Seek(ex.Current());
+      if (owners == nullptr) {
+        continue;
+      }
+      for (const TopoDS_Shape& neighbour : *owners) {
+        if (own.Contains(neighbour)) {
+          continue;
+        }
+        for (const TopoDS_Shape& image : hist->Modified(neighbour)) {
+          if (image.ShapeType() != TopAbs_FACE) {
+            continue;
+          }
+          BRepExtrema_DistShapeShape d(point, image);
+          const double on = Precision::Confusion() +
+                            std::max(BRep_Tool::Tolerance(face),
+                                     BRep_Tool::Tolerance(TopoDS::Face(image)));
+          if (d.IsDone() && d.Value() <= on) {
+            out.candidate = true;
+            if (out.absorber.IsNull()) {
+              out.absorber = neighbour;
+            }
+          }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// Remove one feature on its own. Null when OCCT declines it or keeps any of its faces.
+TopoDS_Shape remove_alone(const TopoDS_Shape& owner, const std::vector<TopoDS_Shape>& block,
+                          bool parallel, const Message_ProgressRange& range) {
+  BRepAlgoAPI_Defeaturing op;
+  op.SetShape(owner);
+  NCollection_List<TopoDS_Shape> to_remove;
+  for (const TopoDS_Shape& f : block) {
+    to_remove.Append(f);
+  }
+  op.AddFacesToRemove(to_remove);
+  op.SetToFillHistory(true);
+  op.SetRunParallel(parallel);
+  op.Build(range);
+  if (!op.IsDone() || op.HasErrors()) {
+    return TopoDS_Shape();
+  }
+  for (const TopoDS_Shape& f : block) {
+    if (!op.IsDeleted(f)) {
+      return TopoDS_Shape();
+    }
+  }
+  return op.Shape();
+}
+
+// A named feature whose removal changed nothing.
+struct IdleFeature {
+  std::vector<std::size_t> faces;  // indices into the named faces
+  TopoDS_Shape absorber;           // the input face extended over it, or null
+  Removal removal;                 // what removing it did
+  bool declined_alone = false;     // OCCT removes nothing for it on its own
+};
+
+std::vector<TopoDS_Shape> pick(const std::vector<TopoDS_Shape>& faces,
+                               const std::vector<std::size_t>& idx) {
+  std::vector<TopoDS_Shape> out;
+  for (std::size_t i : idx) {
+    out.push_back(faces[i]);
+  }
+  return out;
+}
+
+// The named features whose removal changed nothing. Empty when every one changed the body.
+//
+// Judged per feature, because one call can name a real feature and a no-op together, and
+// the real one's change would hide the other's. The verdict is always measure_removal(),
+// applied to a removal that isolates the feature:
+//
+//   * If the whole removal changed nothing, no named feature changed anything, and all of
+//     them are returned. With one feature — the common case — this is the only test, and it
+//     costs one measurement of the faces the removal changed.
+//   * Otherwise, with several features, each one probe_feature() cannot clear is removed
+//     from the input on its own and measured. A legitimate call clears every probe and pays
+//     no extra removal; a candidate pays one.
+std::vector<IdleFeature> idle_features(const TopoDS_Shape& owner,
+                                       const std::vector<TopoDS_Shape>& faces,
+                                       const std::vector<std::vector<std::size_t>>& blocks,
+                                       const TopoDS_Shape& result,
+                                       const Handle(BRepTools_History) & hist,
+                                       bool parallel, const Message_ProgressRange& range) {
+  const Removal whole = measure_removal(owner, result, faces);
+  if (blocks.size() == 1 && !whole.unchanged()) {
+    return {};
+  }
+  EdgeFaces edge_faces;
+  TopExp::MapShapesAndAncestors(owner, TopAbs_EDGE, TopAbs_FACE, edge_faces);
+  Handle(IntTools_Context) context = new IntTools_Context;
+
+  std::vector<IdleFeature> out;
+  if (whole.unchanged()) {
+    for (const std::vector<std::size_t>& block : blocks) {
+      const Probe probe = probe_feature(pick(faces, block), edge_faces, hist, context);
+      out.push_back({block, probe.absorber, whole, false});
+    }
+    return out;
+  }
+  std::vector<std::pair<std::size_t, Probe>> candidates;
+  for (std::size_t b = 0; b < blocks.size(); ++b) {
+    Probe probe = probe_feature(pick(faces, blocks[b]), edge_faces, hist, context);
+    if (probe.candidate) {
+      candidates.emplace_back(b, probe);
+    }
+  }
+  Message_ProgressScope each(range, nullptr,
+                             static_cast<double>(std::max<std::size_t>(candidates.size(), 1)));
+  for (const auto& [b, probe] : candidates) {
+    if (!each.More()) {
+      break;  // cancelled: the caller raises that before it reads anything returned here
+    }
+    const std::vector<TopoDS_Shape> block = pick(faces, blocks[b]);
+    const TopoDS_Shape alone = remove_alone(owner, block, parallel, each.Next());
+    if (alone.IsNull()) {
+      out.push_back({blocks[b], probe.absorber, Removal(), true});
+      continue;
+    }
+    const Removal removal = measure_removal(owner, alone, block);
+    if (removal.unchanged()) {
+      out.push_back({blocks[b], probe.absorber, removal, false});
+    }
+  }
+  return out;
+}
+
+std::string format_g(double v, int digits) {
+  std::ostringstream s;
+  s << std::setprecision(digits) << v;
+  return s.str();
+}
+
+std::string face_list(const std::vector<EntityId>& ids) {
+  std::string out = ids.size() == 1 ? "face " : "faces ";
+  for (std::size_t i = 0; i < ids.size(); ++i) {
+    out += (i == 0 ? "" : ", ") + std::to_string(ids[i]);
+  }
+  return out;
+}
+
+}  // namespace
+
 py::dict Session::defeature(const std::vector<EntityId>& face_ids, bool parallel,
                             const py::object& progress, const py::object& cancel) {
   OpGuard guard(in_op_);
   const std::vector<TopoDS_Shape> faces = faces_of("defeature", face_ids);
   const TopoDS_Shape owner = sole_owner_body(body_of_subshape(), faces);
   const std::vector<TopoDS_Shape> survivors = bodies_excluding({owner});
+  const std::vector<std::vector<std::size_t>> blocks = feature_blocks(faces);
 
   ProgressDriver driver("defeature", hooks_of("defeature", progress, cancel));
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   std::string diagnostics;
   std::vector<std::size_t> kept;
+  std::vector<IdleFeature> idle;
   {
     py::gil_scoped_release release;
+    // One step for one feature, so its progress is the removal's own. Two for several: the
+    // removal, then the removals that isolate a feature the probe could not clear.
+    Message_ProgressScope steps(driver.range(), nullptr, blocks.size() > 1 ? 2.0 : 1.0);
     BRepAlgoAPI_Defeaturing op;
     op.SetShape(owner);
     NCollection_List<TopoDS_Shape> to_remove;
@@ -196,31 +672,39 @@ py::dict Session::defeature(const std::vector<EntityId>& face_ids, bool parallel
     op.SetToFillHistory(true);
     op.SetRunParallel(parallel);
     try {
-      op.Build(driver.range());
+      op.Build(steps.Next());
+      std::ostringstream s;
+      op.DumpErrors(s);
+      op.DumpWarnings(s);
+      diagnostics = s.str();
+      if (op.IsDone() && !op.HasErrors()) {
+        // The first post-condition. Handed an incomplete feature — a blind hole's wall
+        // without the flat face capping it — OCCT reports the refusal as a *warning*,
+        // leaves IsDone() true and HasErrors() false, and returns the input unchanged.
+        // Believing IsDone() would commit a no-op as a success and tell the caller their
+        // feature is gone when it is still there.
+        for (std::size_t i = 0; i < faces.size(); ++i) {
+          if (!op.IsDeleted(faces[i])) {
+            kept.push_back(i);
+          }
+        }
+        if (kept.empty()) {
+          result = op.Shape();
+          hist = op.History();
+          // The second, and the one that reads the body rather than the faces' ids. A face
+          // whose surface continues into a neighbour is "removed" by extending that
+          // neighbour straight back over it: IsDeleted() is true, and the body is the one
+          // that went in. Measured on a plate whose hole wall is two half-cylinders: naming
+          // one of them deleted it, grew the other to the full wall, and changed the volume
+          // by 0 of 415.43.
+          idle = idle_features(owner, faces, blocks, result, hist, parallel,
+                               blocks.size() > 1 ? steps.Next() : Message_ProgressRange());
+        }
+      }
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(std::string("Session.defeature: OCCT's defeaturing threw: ") +
                          e.what());
-    }
-    std::ostringstream s;
-    op.DumpErrors(s);
-    op.DumpWarnings(s);
-    diagnostics = s.str();
-    if (op.IsDone() && !op.HasErrors()) {
-      // The post-condition that makes the operation trustworthy. Handed an incomplete
-      // feature — a blind hole's wall without the flat face capping it — OCCT reports the
-      // refusal as a *warning*, leaves IsDone() true and HasErrors() false, and returns the
-      // input unchanged. Believing IsDone() would commit a no-op as a success and tell the
-      // caller their feature is gone when it is still there.
-      for (std::size_t i = 0; i < faces.size(); ++i) {
-        if (!op.IsDeleted(faces[i])) {
-          kept.push_back(i);
-        }
-      }
-      if (kept.empty()) {
-        result = op.Shape();
-        hist = op.History();
-      }
     }
   }
   driver.finish();
@@ -243,6 +727,66 @@ py::dict Session::defeature(const std::vector<EntityId>& face_ids, bool parallel
                           "including the flats that cap a blind hole.")
             : diagnostics,
         ids_as_int(blamed));
+  }
+  if (!idle.empty()) {
+    // What the body measures, quoted in the message so the caller sees what was left
+    // unchanged. Only a refusal pays for it, and GProp's fixed rule is precise enough for a
+    // number printed to six digits.
+    GProp_GProps body_volume, body_area;
+    BRepGProp::VolumeProperties(owner, body_volume);
+    BRepGProp::SurfaceProperties(owner, body_area);
+    std::vector<std::size_t> blamed_idx;
+    std::string message = "Session.defeature: ";
+    std::string details;
+    for (std::size_t k = 0; k < idle.size(); ++k) {
+      const IdleFeature& f = idle[k];
+      std::vector<EntityId> named;
+      for (std::size_t i : f.faces) {
+        named.push_back(face_ids[i]);
+        blamed_idx.push_back(i);
+      }
+      std::vector<EntityId> absorber_ids;
+      if (!f.absorber.IsNull()) {
+        ids_on(f.absorber, absorber_ids);
+      }
+      const bool plural = named.size() > 1;
+      message += k == 0 ? "removing " : " Removing ";
+      if (f.declined_alone) {
+        message += face_list(named) + " on " + (plural ? "their" : "its") +
+                   " own removes nothing: OCCT declines it";
+      } else {
+        message += face_list(named) + " left the body's volume " +
+                   format_g(body_volume.Mass(), 6) + " and area " +
+                   format_g(body_area.Mass(), 6) + " unchanged";
+        details += face_list(named) + ": the removal changed the volume by " +
+                   format_g(f.removal.d_volume, 3) + " (tolerance " +
+                   format_g(f.removal.tol_volume, 3) + ") and the area by " +
+                   format_g(f.removal.d_area, 3) + " (tolerance " +
+                   format_g(f.removal.tol_area, 3) + "). ";
+      }
+      if (!absorber_ids.empty()) {
+        // A merge can leave several ids on the face; the lowest is its label.
+        const EntityId label = *std::min_element(absorber_ids.begin(), absorber_ids.end());
+        message += std::string("; ") + (plural ? "their" : "its") +
+                   " surface continues into face " + std::to_string(label) +
+                   ", so OCCT extended that face over " + (plural ? "them" : "it");
+      }
+      message += ".";
+    }
+    message +=
+        " Name every face of the feature. A face that only splits one surface with its "
+        "neighbour is not a feature: unify_same_domain merges it.";
+    details +=
+        "A removal is refused when it changes the volume by no more than "
+        "Precision::Confusion() x the area of the patch it replaced, and the area by no more "
+        "than 2 x Precision::Confusion() x the length of the named faces' edges: that is all "
+        "moving the patch by the confusion distance can change. The session is unchanged.";
+    std::sort(blamed_idx.begin(), blamed_idx.end());
+    std::vector<EntityId> blamed;
+    for (std::size_t i : blamed_idx) {
+      blamed.push_back(face_ids[i]);
+    }
+    throw PysmeshError(message, details, ids_as_int(blamed));
   }
   if (result.IsNull()) {
     throw PysmeshError("Session.defeature: the defeaturing failed; no partial result is "

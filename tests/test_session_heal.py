@@ -435,6 +435,321 @@ def test_defeaturing_an_empty_selection_raises(bored_box: Session) -> None:
         bored_box.defeature([])
 
 
+# ---- defeaturing: a removal must change the body ------------------------------------- #
+#
+# OCCT fills a removed feature by extending its neighbours, and a neighbour on the same
+# surface extends straight back over the named face. The face is deleted and the body is
+# the one that went in. These gates pin the refusal of that no-op, per feature, and pin that
+# a real feature — however small against its body — still goes.
+
+PLATE_DX: float = 13.0
+PLATE_DY: float = 11.0
+PLATE_DZ: float = 3.0
+PLATE_ORIGIN: tuple[float, float, float] = (0.37, -2.9, 1.3)
+SPLIT_RADIUS: float = 1.2
+SPLIT_AXIS: tuple[float, float] = (6.47, 2.4)
+SECOND_RADIUS: float = 0.8
+SECOND_AXIS: tuple[float, float] = (2.5, 0.0)
+CUTTER_Z0: float = 0.3
+CUTTER_HEIGHT: float = 5.0
+
+FILLET_PLATE: tuple[float, float, float] = (61.0, 37.0, 7.0)
+
+
+def created(session: Session, delta: ps.HistoryDelta, kind: EntityKind) -> list[EntityId]:
+    """The ids of one kind that an operation issued."""
+    return [
+        EntityId(int(i))
+        for i in delta.created
+        if session.entity_kind(EntityId(int(i))) is kind
+    ]
+
+
+def half_cylinder(
+    session: Session, start: float, axis: tuple[float, float], radius: float
+) -> EntityId:
+    """A half-cylinder about +z, built by revolving an axial rectangle through pi."""
+    cx, cy = axis
+    ux, uy = math.cos(start), math.sin(start)
+    corners = np.array(
+        [
+            [cx, cy, CUTTER_Z0],
+            [cx + radius * ux, cy + radius * uy, CUTTER_Z0],
+            [cx + radius * ux, cy + radius * uy, CUTTER_Z0 + CUTTER_HEIGHT],
+            [cx, cy, CUTTER_Z0 + CUTTER_HEIGHT],
+        ],
+        dtype=np.float64,
+    )
+    edges = created(session, session.add_polyline(corners, closed=True), EntityKind.EDGE)
+    face = created(session, session.make_face(edges), EntityKind.FACE)
+    swept = session.revolve(face, (cx, cy, 0.0), (0.0, 0.0, 1.0), math.pi)
+    return created(session, swept, EntityKind.SOLID)[0]
+
+
+def cut_split_hole(
+    session: Session, body: EntityId, axis: tuple[float, float], radius: float
+) -> None:
+    """Cut a through hole whose wall is two half-cylinder faces on one surface."""
+    first = half_cylinder(session, 0.0, axis, radius)
+    second = half_cylinder(session, math.pi, axis, radius)
+    session.fuse([first], [second])
+    tools = [
+        EntityId(int(i))
+        for i in session.entities(EntityKind.SOLID)
+        if int(i) != int(body)
+    ]
+    session.cut([body], tools)
+
+
+def cylinder_faces(session: Session) -> list[EntityId]:
+    """Every cylindrical face, ascending."""
+    table = session.entity_types(EntityKind.FACE)
+    return [
+        EntityId(int(i)) for i, t in zip(table.ids, table.types) if t == "Cylinder"
+    ]
+
+
+def unchanged_state(session: Session) -> tuple[int, int, set[int], bytes]:
+    """Everything a refused operation must leave exactly as it was."""
+    return session.op_count, session.issued_id_count, live_ids(session), session.brep()
+
+
+@pytest.fixture
+def split_wall_plate() -> Session:
+    """A 13 x 11 x 3 plate with one through hole whose wall is two half-cylinders."""
+    s = Session()
+    box = s.add_box(PLATE_DX, PLATE_DY, PLATE_DZ, PLATE_ORIGIN)
+    body = created(s, box, EntityKind.SOLID)
+    cut_split_hole(s, body[0], SPLIT_AXIS, SPLIT_RADIUS)
+    return s
+
+
+def test_the_split_wall_plate_is_the_plate_its_closed_form_describes(
+    split_wall_plate: Session,
+) -> None:
+    """Fixture check: V = 13 x 11 x 3 - pi r^2 x 3, and two wall faces of pi r h each."""
+    walls = cylinder_faces(split_wall_plate)
+
+    areas = split_wall_plate.mass_properties(walls).measure
+
+    assert model_volume(split_wall_plate) == pytest.approx(
+        PLATE_DX * PLATE_DY * PLATE_DZ - math.pi * SPLIT_RADIUS**2 * PLATE_DZ,
+        rel=EXACT_RTOL,
+    )
+    assert len(walls) == 2
+    assert areas == pytest.approx([math.pi * SPLIT_RADIUS * PLATE_DZ] * 2, rel=EXACT_RTOL)
+
+
+def test_defeaturing_one_half_of_a_split_wall_is_refused_and_changes_nothing(
+    split_wall_plate: Session,
+) -> None:
+    """The measured 4.2.0 defect: deleting one half grew the other into the whole wall.
+
+    OCCT deleted the named face, extended its sibling over the region it covered, and
+    reported success with a volume change of 0 of 415.43.
+    """
+    first, second = cylinder_faces(split_wall_plate)
+    before = unchanged_state(split_wall_plate)
+
+    with pytest.raises(ps.PysmeshError, match="left the body's volume") as excinfo:
+        split_wall_plate.defeature([first])
+
+    assert excinfo.value.face_ids == [int(first)]
+    assert f"continues into face {int(second)}" in str(excinfo.value)
+    assert "unify_same_domain" in str(excinfo.value)
+    assert "tolerance" in excinfo.value.details
+    assert unchanged_state(split_wall_plate) == before
+
+
+def test_defeaturing_both_halves_of_a_split_wall_removes_the_hole(
+    split_wall_plate: Session,
+) -> None:
+    """Both halves are the complete feature: the hole goes, the volume grows pi r^2 h."""
+    walls = cylinder_faces(split_wall_plate)
+    volume_before = model_volume(split_wall_plate)
+
+    delta = split_wall_plate.defeature(walls)
+
+    grown = model_volume(split_wall_plate) - volume_before
+    assert grown == pytest.approx(math.pi * SPLIT_RADIUS**2 * PLATE_DZ, rel=1e-12)
+    assert {int(w) for w in walls} <= set(delta.deleted.tolist())
+    assert cylinder_faces(split_wall_plate) == []
+
+
+@pytest.mark.parametrize("radius", [0.7, 0.01])
+def test_defeaturing_a_small_fillet_on_a_large_plate_still_removes_it(
+    radius: float,
+) -> None:
+    """A real feature passes however small it is against its body.
+
+    The closed form of a fillet of radius r along a straight edge of length L is
+    (1 - pi/4) r^2 L. At r = 0.7 that is 0.736 of 15798, 4.7e-5 relative. At r = 0.01 it is
+    1.5e-4, under 1e-7 x the plate's whole area (5.9e-4), against a patch tolerance of
+    1.4e-8. Its area change, (2 - pi/2) r L = 0.03, is what a body tolerance would still
+    see; the dimple test below takes that away as well.
+    """
+    dx, dy, dz = FILLET_PLATE
+    s = Session()
+    s.add_box(dx, dy, dz)
+    edges = ids_of(s, EntityKind.EDGE)
+    props = s.mass_properties(edges)
+    corner = [
+        e
+        for e, length, c in zip(edges, props.measure, props.centroid)
+        if length == pytest.approx(dz) and c[0] > dx / 2.0 and c[1] > dy / 2.0
+    ]
+    s.fillet(corner, radius)
+    fillet = cylinder_faces(s)
+    volume_before = model_volume(s)
+
+    s.defeature(fillet)
+
+    removed = (1.0 - math.pi / 4.0) * radius**2 * dz
+    assert model_volume(s) - volume_before == pytest.approx(removed, rel=1e-6)
+    assert model_volume(s) == pytest.approx(dx * dy * dz, rel=EXACT_RTOL)
+
+
+def test_defeaturing_a_shallow_dimple_is_judged_on_its_own_patch_not_the_body() -> None:
+    """A feature whose volume AND area changes both sit under a whole-body tolerance.
+
+    A sphere of radius R = 2500 dipped h = 2e-4 into the 61 x 37 x 7 plate leaves a dimple
+    of chord radius 1. Its cap volume pi h^2 (3R - h) / 3 = 3.14e-4 is under 1e-7 x the
+    plate's area (5.9e-4), and its area change 1.3e-7 is under 2e-7 x the plate's edge
+    length (8.6e-5), so a tolerance taken over the body refuses it. Over the dimple's own
+    patch the volume tolerance is 3.1e-7, a thousandth of the change.
+    """
+    radius, depth = 2500.0, 2e-4
+    dx, dy, dz = FILLET_PLATE
+    s = Session()
+    plate = created(s, s.add_box(dx, dy, dz), EntityKind.SOLID)
+    ball = s.add_sphere(radius, centre=(dx / 2.0, dy / 2.0, dz + radius - depth))
+    s.cut(plate, created(s, ball, EntityKind.SOLID))
+    table = s.entity_types(EntityKind.FACE)
+    dimple = [EntityId(int(i)) for i, t in zip(table.ids, table.types) if t == "Sphere"]
+    volume_before = model_volume(s)
+
+    s.defeature(dimple)
+
+    cap = math.pi * depth**2 * (3.0 * radius - depth) / 3.0
+    assert model_volume(s) - volume_before == pytest.approx(cap, rel=1e-6)
+    assert model_counts(s) == (1, 6, 12, 8)
+
+
+def test_defeaturing_refuses_only_the_half_wall_beside_a_complete_hole(
+    split_wall_plate: Session,
+) -> None:
+    """Per feature, not per call: the complete hole's change must not hide the no-op."""
+    solid = ids_of(split_wall_plate, EntityKind.SOLID)[0]
+    first, _ = cylinder_faces(split_wall_plate)
+    cutter = split_wall_plate.add_cylinder(
+        SECOND_RADIUS, CUTTER_HEIGHT, origin=(*SECOND_AXIS, CUTTER_Z0)
+    )
+    split_wall_plate.cut([solid], created(split_wall_plate, cutter, EntityKind.SOLID))
+    walls = cylinder_faces(split_wall_plate)
+    radii = split_wall_plate.surface_parameters(walls).radius1
+    complete = [w for w, r in zip(walls, radii) if r == pytest.approx(SECOND_RADIUS)]
+    assert len(complete) == 1
+    before = unchanged_state(split_wall_plate)
+
+    with pytest.raises(ps.PysmeshError, match="left the body's volume") as excinfo:
+        split_wall_plate.defeature([complete[0], first])
+
+    assert excinfo.value.face_ids == [int(first)]
+    assert unchanged_state(split_wall_plate) == before
+
+
+def test_defeaturing_refuses_every_half_wall_named_together(
+    split_wall_plate: Session,
+) -> None:
+    """Two separate no-ops in one call: both are named, and nothing else is."""
+    solid = ids_of(split_wall_plate, EntityKind.SOLID)[0]
+    cut_split_hole(split_wall_plate, solid, SECOND_AXIS, SECOND_RADIUS)
+    a_first, a_second, b_first, b_second = cylinder_faces(split_wall_plate)
+    before = unchanged_state(split_wall_plate)
+
+    with pytest.raises(ps.PysmeshError, match="left the body's volume") as excinfo:
+        split_wall_plate.defeature([b_first, a_first, b_second])
+
+    assert excinfo.value.face_ids == [int(a_first)]
+    assert unchanged_state(split_wall_plate) == before
+
+    with pytest.raises(ps.PysmeshError, match="left the body's volume") as excinfo:
+        split_wall_plate.defeature([a_first, b_first])
+
+    assert excinfo.value.face_ids == [int(a_first), int(b_first)]
+    assert unchanged_state(split_wall_plate) == before
+
+
+@pytest.mark.parametrize("piece_area", [16.0, 127.0])
+def test_defeaturing_one_piece_of_an_imprinted_face_is_refused(piece_area: float) -> None:
+    """The zero-volume removal: a face split by an imprint only merges back when removed.
+
+    That is a same-domain merge, not a feature removal, so it is refused and the message
+    names the operation that does it. Pieces are named on a fresh session loaded from the
+    imprinted BREP, as an imported model presents them: inside the imprinting session one
+    id denotes both pieces and cannot name either alone.
+    """
+    source = Session()
+    source.add_box(PLATE_DX, PLATE_DY, PLATE_DZ)
+    tool = source.add_rectangle((4.0, 3.0, PLATE_DZ), (0.0, 0.0, 1.0), 4.0, 4.0)
+    source.imprint(
+        ids_of(source, EntityKind.SOLID)[:1], created(source, tool, EntityKind.FACE)
+    )
+    source.remove(created(source, tool, EntityKind.FACE))
+    s = Session()
+    s.add_brep(source.brep())
+    faces = ids_of(s, EntityKind.FACE)
+    piece = [f for f, a in zip(faces, s.mass_properties(faces).measure) if a == piece_area]
+    assert len(piece) == 1
+    before = unchanged_state(s)
+
+    with pytest.raises(ps.PysmeshError, match="unify_same_domain") as excinfo:
+        s.defeature(piece)
+
+    assert excinfo.value.face_ids == [int(piece[0])]
+    assert unchanged_state(s) == before
+    s.unify_same_domain()
+    assert model_counts(s) == (1, 6, 12, 8)
+    assert model_volume(s) == pytest.approx(PLATE_DX * PLATE_DY * PLATE_DZ, rel=EXACT_RTOL)
+
+
+def test_defeaturing_half_of_a_free_form_split_wall_is_refused() -> None:
+    """The no-op on a B-spline surface, where GProp's fixed rule is too coarse to see it.
+
+    A tube swept along a spline is imprinted by a plane and fused back, which leaves its
+    wall two B-spline faces on one surface. GProp's fixed Gauss rule measures the no-op's
+    volume change at 3.0e-6 against a tolerance of 1.9e-6, and 4.2.0 committed it.
+    """
+    sweep = Session()
+    spine = sweep.add_spline(
+        [(0.0, 0.0, 0.0), (0.0, 1.2, 2.0), (0.0, 0.4, 4.0), (0.0, 1.5, 6.0)]
+    )
+    circle = sweep.add_circle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 1.0)
+    profile = sweep.make_face(created(sweep, circle, EntityKind.EDGE))
+    tube = sweep.pipe(
+        created(sweep, spine, EntityKind.EDGE), created(sweep, profile, EntityKind.FACE)
+    )
+    plane = sweep.add_rectangle((-5.0, -5.0, 3.1), (0.0, 0.0, 1.0), 10.0, 10.0)
+    sweep.imprint(
+        created(sweep, tube, EntityKind.SOLID), created(sweep, plane, EntityKind.FACE)
+    )
+    sweep.remove(created(sweep, plane, EntityKind.FACE))
+    s = Session()
+    s.add_brep(sweep.brep())
+    s.fuse(ids_of(s, EntityKind.SOLID)[:1], ids_of(s, EntityKind.SOLID)[1:])
+    table = s.entity_types(EntityKind.FACE)
+    wall = [EntityId(int(i)) for i, t in zip(table.ids, table.types) if t == "BSpline"]
+    assert len(wall) == 2
+    before = unchanged_state(s)
+
+    for face in wall:
+        with pytest.raises(ps.PysmeshError, match="left the body's volume") as excinfo:
+            s.defeature([face])
+
+        assert excinfo.value.face_ids == [int(face)]
+        assert unchanged_state(s) == before
+
+
 # =========================================================================== Imprinting ==
 
 
