@@ -448,6 +448,43 @@ inline std::array<double, 3> centroid_of(const TopoDS_Shape& s) {
   return {p.X(), p.Y(), p.Z()};
 }
 
+// The volume a solid encloses, integrated precisely enough to trust its sign, and the least
+// volume it must enclose to have an inside at all.
+struct EnclosedVolume {
+  double volume = 0.0;
+  double area = 0.0;
+  // eps x area, eps = Precision::Confusion(). A solid enclosing no more than this has, on
+  // average, two sides closer than the distance at which OCCT treats two points as one.
+  double tolerance = 0.0;
+};
+
+// What a solid-making operation checks before it commits a solid: BRepCheck_Analyzer accepts
+// a solid whose shell bounds its complement, so it cannot be the check.
+//
+// The volume is integrated with GProp's adaptive rule, because the fixed rule can get its
+// sign wrong. It integrates each face about a point near the shape, so a face contributes up
+// to D x its area / 3, D the bounding-box diagonal, and the contributions cancel down to the
+// volume. A relative error e on them moves the volume by up to e x D x A / 3, while a sheet
+// of thickness t encloses t x A / 2, so the sign can go when t < 2 e D / 3. The fixed rule's
+// area error on one face of the production assembly was 26 %. The precision is the one the
+// defeature check derives: Eps x D x A / 3, the error bound, set to a tenth of eps x A, gives
+// Eps = 0.3 x eps / D.
+inline EnclosedVolume enclosed_volume(const TopoDS_Shape& solid) {
+  const double eps = Precision::Confusion();
+  EnclosedVolume out;
+  GProp_GProps surface;
+  BRepGProp::SurfaceProperties(solid, surface);
+  out.area = surface.Mass();
+  out.tolerance = eps * out.area;
+  Bnd_Box box;
+  BRepBndLib::Add(solid, box);
+  const double diagonal = std::max(std::sqrt(box.SquareExtent()), eps);
+  GProp_GProps volume;
+  BRepGProp::VolumeProperties(solid, volume, std::min(0.3 * eps / diagonal, kAdaptiveEpsCap));
+  out.volume = volume.Mass();
+  return out;
+}
+
 // A caller-supplied point list: (N, 3) float64, C-contiguous. Forcecast so a list of tuples
 // or a float32 array is accepted without the caller having to convert.
 using PointArray = py::array_t<double, py::array::c_style | py::array::forcecast>;
