@@ -30,6 +30,7 @@
 #include <numeric>
 
 #include <BOPTools_AlgoTools3D.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <IntTools_Context.hxx>
 
 namespace pysmesh {
@@ -46,6 +47,271 @@ Handle(BRepTools_History) history_of_context(const Handle(BRepTools_ReShape) & c
     return Handle(BRepTools_History)();
   }
   return context->History();
+}
+
+// ---- closing sewn shells into solids ----------------------------------------------- //
+
+// A closed shell of a sewing result, oriented, and the solid it bounds on its own.
+struct ClosedShell {
+  TopoDS_Shell shell;
+  TopoDS_Solid solid;
+  double volume = 0.0;
+  double area = 0.0;
+  Bnd_Box box;
+};
+
+// A closed shell that cannot become a solid, why, and the other shell it was placed against
+// when that is the reason (null otherwise). The reason names that shell as "{other}", which
+// the caller replaces with its face ids: only the caller holds the registry.
+struct ShellRefusal {
+  TopoDS_Shell shell;
+  std::string reason;
+  TopoDS_Shell other;
+};
+
+// What closing the shells of a sewing result gives: the shape to commit, or a refusal.
+struct Closure {
+  TopoDS_Shape result;
+  std::optional<ShellRefusal> refusal;
+};
+
+std::string six_digits(double v) {
+  std::ostringstream s;
+  s << std::setprecision(6) << v;
+  return s.str();
+}
+
+TopoDS_Solid solid_of(const TopoDS_Shell& shell) {
+  BRepBuilderAPI_MakeSolid mk(shell);
+  return mk.IsDone() ? mk.Solid() : TopoDS_Solid();
+}
+
+// Orient one closed shell so that the solid it bounds has its matter inside, then measure
+// that solid. Returns the reason it cannot be committed, or nothing.
+//
+// The orientation comes from BRepClass3d_SolidClassifier: the point at infinity is outside
+// every solid, so if it classifies IN, the shell bounds its complement and is reversed.
+// The shell is reversed rather than the solid, so the solid stays FORWARD, as every other
+// solid in the model is. BRepLib::OrientClosedSolid does the same classification, but its
+// header does not say which of the two it flips, and OCCT's source is not in this tree.
+//
+// The volume is then the check the classifier cannot give (enclosed_volume). Before 4.2.2 a
+// sewn tube was committed at -37.165 and a pillow of two coincident rectangles at 0, both
+// reported valid, because BRepCheck_Analyzer accepts either orientation. A solid is committed
+// only when it encloses more than eps x its area, eps = Precision::Confusion().
+std::optional<std::string> orient_and_measure(ClosedShell& c) {
+  const double eps = Precision::Confusion();
+  c.solid = solid_of(c.shell);
+  if (c.solid.IsNull()) {
+    return std::string("BRepBuilderAPI_MakeSolid could not build a solid from it");
+  }
+  BRepClass3d_SolidClassifier where(c.solid);
+  where.PerformInfinitePoint(eps);
+  if (where.State() == TopAbs_IN) {
+    c.shell.Reverse();
+    c.solid = solid_of(c.shell);
+  } else if (where.State() != TopAbs_OUT) {
+    return std::string("the point at infinity classifies neither inside nor outside it (") +
+           (where.State() == TopAbs_ON ? "ON" : "UNKNOWN") +
+           "), so it has no side to call its inside";
+  }
+
+  BRepBndLib::Add(c.shell, c.box);
+  const EnclosedVolume enclosed = enclosed_volume(c.solid);
+  c.volume = enclosed.volume;
+  c.area = enclosed.area;
+  const double tol = enclosed.tolerance;
+  if (c.volume > tol) {
+    return std::nullopt;
+  }
+  if (c.volume >= -tol) {
+    return "it encloses a volume of " + six_digits(c.volume) +
+           ", within Precision::Confusion() x its area (" + six_digits(tol) +
+           "): its faces bound no interior, so it has no inside to orient by";
+  }
+  return "the point at infinity classifies outside it, yet the solid it bounds has volume " +
+         six_digits(c.volume) +
+         ": the classifier and the volume disagree about its inside. A shell that crosses "
+         "itself does this";
+}
+
+// Keep every shape of a sewing result that is not a shell: a face that sewed to nothing,
+// a free edge. Before 4.2.2 the solid replaced the whole result, and those were deleted.
+void keep_all_but_shells(const TopoDS_Shape& s, const BRep_Builder& b, TopoDS_Compound& into) {
+  if (s.ShapeType() == TopAbs_SHELL) {
+    return;
+  }
+  if (s.ShapeType() == TopAbs_COMPOUND) {
+    for (TopoDS_Iterator it(s); it.More(); it.Next()) {
+      keep_all_but_shells(it.Value(), b, into);
+    }
+    return;
+  }
+  b.Add(into, s);
+}
+
+// Where one closed shell lies against another.
+enum class Placement { kOutside, kInside, kUndecided };
+
+// Where shell j lies against shell i, whose solid `where` classifies.
+//
+// j is a cavity of i only if no point of j is outside i, so any point of j outside i settles
+// that it is not: it touches i from outside, crosses it, or lies apart from it. The tests go
+// from cheap to dear, and each runs only when the one before settled nothing:
+//
+//   1. j's vertices. One outside settles it. Parts of an assembly that touch are settled here.
+//   2. The distance between the two surfaces. If they are apart, every point of j is on one
+//      side of i, and the vertices said which: inside.
+//   3. They meet. A point inside each face of j, as the defeature probe places one. One
+//      outside settles it. With none outside, j touches i from inside or crosses it where no
+//      point fell, and the points cannot tell which, so the placement is undecided.
+Placement place(const ClosedShell& j, const ClosedShell& i,
+                BRepClass3d_SolidClassifier& where,
+                const Handle(IntTools_Context) & context) {
+  const double eps = Precision::Confusion();
+  bool inside = false;
+  ShapeSet vertices;
+  TopExp::MapShapes(j.shell, TopAbs_VERTEX, vertices);
+  for (int k = 1; k <= vertices.Extent(); ++k) {
+    where.Perform(BRep_Tool::Pnt(TopoDS::Vertex(vertices.FindKey(k))), eps);
+    if (where.State() == TopAbs_OUT) {
+      return Placement::kOutside;
+    }
+    inside = inside || where.State() == TopAbs_IN;
+  }
+  BRepExtrema_DistShapeShape gap(i.shell, j.shell);
+  if (gap.IsDone() && gap.Value() > eps) {
+    return inside ? Placement::kInside : Placement::kUndecided;
+  }
+  for (TopExp_Explorer ex(j.shell, TopAbs_FACE); ex.More(); ex.Next()) {
+    gp_Pnt p;
+    gp_Pnt2d uv;
+    if (BOPTools_AlgoTools3D::PointInFace(TopoDS::Face(ex.Current()), p, uv, context) != 0) {
+      continue;
+    }
+    where.Perform(p, eps);
+    if (where.State() == TopAbs_OUT) {
+      return Placement::kOutside;
+    }
+  }
+  return Placement::kUndecided;
+}
+
+// Close every closed shell of a sewing result into a solid whose interior is on the inside.
+//
+// Each shell is oriented and measured on its own (orient_and_measure). Then the shells are
+// placed against each other (place). Shell j is a cavity candidate of shell i only when
+// their surfaces are apart and a point of j lies inside i. Shells that touch from outside
+// or cross are separate solids, which may overlap as two bodies of the model may. A shell
+// that meets another with no point outside it is refused. A shell's depth is the number of
+// shells it lies inside:
+//
+//   * even depth: it is the outer shell of its own solid, so disjoint shells are separate
+//     solids, and so is an island inside a cavity;
+//   * odd depth: it is a cavity of the shell it lies directly inside, the one of depth one
+//     less, reversed so that the matter of that solid is outside it.
+//
+// This is what the geometry says. Before 4.2.2 every closed shell went into one
+// BRepBuilderAPI_MakeSolid, so two disjoint tubes became one solid with two outer shells.
+// A solid is committed only when its outer volume less its cavities' is still above
+// eps x its area.
+Closure close_into_solids(const TopoDS_Shape& sewn, const std::vector<TopoDS_Shell>& shells) {
+  const double eps = Precision::Confusion();
+  const std::size_t n = shells.size();
+  std::vector<ClosedShell> closed(n);
+  Handle(IntTools_Context) context = new IntTools_Context;
+  for (std::size_t i = 0; i < n; ++i) {
+    closed[i].shell = shells[i];
+    if (std::optional<std::string> why = orient_and_measure(closed[i])) {
+      return {TopoDS_Shape(), ShellRefusal{shells[i], *why, TopoDS_Shell()}};
+    }
+  }
+
+  std::vector<std::vector<std::size_t>> containers(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    std::optional<BRepClass3d_SolidClassifier> where;
+    for (std::size_t j = 0; j < n; ++j) {
+      if (j == i || closed[i].box.IsOut(closed[j].box)) {
+        continue;
+      }
+      if (!where.has_value()) {
+        where.emplace(closed[i].solid);
+      }
+      const Placement placement = place(closed[j], closed[i], *where, context);
+      if (placement == Placement::kInside) {
+        containers[j].push_back(i);
+      } else if (placement == Placement::kUndecided) {
+        return {TopoDS_Shape(),
+                ShellRefusal{shells[j],
+                             "it meets the closed shell of faces [{other}], and no point of "
+                             "it lies outside that shell: whether it is a cavity of that "
+                             "shell or crosses it is undecided",
+                             shells[i]}};
+      }
+    }
+  }
+
+  std::vector<std::vector<std::size_t>> cavities(n);
+  for (std::size_t j = 0; j < n; ++j) {
+    const std::size_t depth = containers[j].size();
+    if (depth % 2 == 0) {
+      continue;
+    }
+    const auto parent =
+        std::find_if(containers[j].begin(), containers[j].end(),
+                     [&](std::size_t i) { return containers[i].size() + 1 == depth; });
+    if (parent == containers[j].end()) {
+      return {TopoDS_Shape(),
+              ShellRefusal{shells[j],
+                           "it lies inside " + std::to_string(depth) +
+                               " other closed shells, but directly inside none of them: the "
+                               "shells cross each other, so which of them it is a cavity of "
+                               "is undecided",
+                           TopoDS_Shell()}};
+    }
+    cavities[*parent].push_back(j);
+  }
+
+  std::vector<TopoDS_Shape> solids;
+  for (std::size_t i = 0; i < n; ++i) {
+    if (containers[i].size() % 2 != 0) {
+      continue;
+    }
+    BRepBuilderAPI_MakeSolid mk(closed[i].shell);
+    double volume = closed[i].volume;
+    double area = closed[i].area;
+    for (std::size_t j : cavities[i]) {
+      mk.Add(TopoDS::Shell(closed[j].shell.Reversed()));
+      volume -= closed[j].volume;
+      area += closed[j].area;
+    }
+    if (!mk.IsDone() || volume <= eps * area) {
+      return {TopoDS_Shape(),
+              ShellRefusal{shells[i],
+                           "less the cavities inside it, it encloses a volume of " +
+                               six_digits(volume) + ", within Precision::Confusion() x its "
+                               "area (" + six_digits(eps * area) + ")",
+                           TopoDS_Shell()}};
+    }
+    solids.push_back(mk.Solid());
+  }
+
+  BRep_Builder b;
+  TopoDS_Compound rest;
+  b.MakeCompound(rest);
+  keep_all_but_shells(sewn, b, rest);
+  if (solids.size() == 1 && !TopoDS_Iterator(rest).More()) {
+    return {solids.front(), std::nullopt};
+  }
+  TopoDS_Compound all;
+  b.MakeCompound(all);
+  for (const TopoDS_Shape& s : solids) {
+    b.Add(all, s);
+  }
+  for (TopoDS_Iterator it(rest); it.More(); it.Next()) {
+    b.Add(all, it.Value());
+  }
+  return {all, std::nullopt};
 }
 
 }  // namespace
@@ -91,10 +357,9 @@ py::dict Session::sew(const std::vector<EntityId>& entity_ids, double tolerance,
     throw PysmeshError("Session.sew: at least one entity must be named.");
   }
   return rework(entity_ids, "sew", hooks_of("sew", progress, cancel),
-                [tolerance, make_solid, non_manifold](const TopoDS_Shape& input,
-                                                      const Message_ProgressRange& range,
-                                                      TopoDS_Shape& out,
-                                                      Handle(BRepTools_History) & hist) {
+                [this, tolerance, make_solid, non_manifold](
+                    const TopoDS_Shape& input, const Message_ProgressRange& range,
+                    TopoDS_Shape& out, Handle(BRepTools_History) & hist) {
                   BRepBuilderAPI_Sewing sewing(tolerance, /*sewing=*/true,
                                                /*analysis=*/true, /*cutting=*/true,
                                                non_manifold);
@@ -112,19 +377,68 @@ py::dict Session::sew(const std::vector<EntityId>& entity_ids, double tolerance,
                   // Only a closed shell bounds a volume. An open one is left as a shell:
                   // wrapping it would produce a shape whose interior is undefined, and the
                   // validity check would then fail for a reason that hides the real one —
-                  // that the faces did not sew into a watertight surface.
-                  BRepBuilderAPI_MakeSolid mk;
-                  int shells = 0;
+                  // that the faces did not sew into a watertight surface. One open shell
+                  // leaves every shell open, as it always has.
+                  std::vector<TopoDS_Shell> shells;
                   for (TopExp_Explorer ex(out, TopAbs_SHELL); ex.More(); ex.Next()) {
                     if (!BRep_Tool::IsClosed(ex.Current())) {
                       return;
                     }
-                    mk.Add(TopoDS::Shell(ex.Current()));
-                    ++shells;
+                    shells.push_back(TopoDS::Shell(ex.Current()));
                   }
-                  if (shells > 0 && mk.IsDone()) {
-                    out = mk.Solid();
+                  if (shells.empty()) {
+                    return;
                   }
+                  const Closure closure = close_into_solids(out, shells);
+                  if (!closure.refusal.has_value()) {
+                    out = closure.result;
+                    return;
+                  }
+                  // A shell's faces are named by the ids of the faces they were sewn from.
+                  // Sewing rebuilds a face whose edges it replaced, so a face is matched
+                  // either as itself or through the history.
+                  const auto ids_of_shell = [&](const TopoDS_Shell& shell) {
+                    ShapeSet in_shell;
+                    TopExp::MapShapes(shell, TopAbs_FACE, in_shell);
+                    std::vector<EntityId> ids;
+                    for (TopExp_Explorer ex(input, TopAbs_FACE); ex.More(); ex.Next()) {
+                      bool hit = in_shell.Contains(ex.Current());
+                      if (!hist.IsNull()) {
+                        for (const TopoDS_Shape& m : hist->Modified(ex.Current())) {
+                          hit = hit || in_shell.Contains(m);
+                        }
+                      }
+                      if (hit) {
+                        ids_on(ex.Current(), ids);
+                      }
+                    }
+                    std::sort(ids.begin(), ids.end());
+                    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+                    return ids;
+                  };
+                  const auto listed = [](const std::vector<EntityId>& ids) {
+                    std::string text;
+                    for (EntityId id : ids) {
+                      text += (text.empty() ? "" : ", ") + std::to_string(id);
+                    }
+                    return text;
+                  };
+                  const ShellRefusal& refusal = *closure.refusal;
+                  const std::vector<EntityId> faces = ids_of_shell(refusal.shell);
+                  std::string reason = refusal.reason;
+                  const std::string token = "{other}";
+                  const std::size_t at = reason.find(token);
+                  if (at != std::string::npos) {
+                    reason.replace(at, token.size(), listed(ids_of_shell(refusal.other)));
+                  }
+                  throw PysmeshError(
+                      "Session.sew: make_solid cannot close the shell of faces [" +
+                          listed(faces) + "] into a solid: " + reason +
+                          ". Nothing is committed; the session is unchanged.",
+                      "A solid is committed only with its interior on the inside and a "
+                      "volume above Precision::Confusion() x its area. A closed shell is "
+                      "a cavity only when its surface is apart from the shell it lies in.",
+                      ids_as_int(faces));
                 });
 }
 
@@ -182,10 +496,6 @@ namespace {
 
 using EdgeFaces = NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
                                              TopTools_ShapeMapHasher>;
-
-// GProp's adaptive rule falls back to its fixed rule for any Eps above 1e-3. The cap keeps
-// it adaptive when the precision derived below would exceed that.
-constexpr double kAdaptiveEpsCap = 1e-3;
 
 double edge_length_of(const TopoDS_Shape& s) {
   double total = 0.0;
@@ -882,6 +1192,11 @@ py::dict Session::rework(const std::optional<std::vector<EntityId>>& entity_ids,
     py::gil_scoped_release release;
     try {
       run(input, driver.range(), result, hist);
+    } catch (const PysmeshError&) {
+      // A refusal the repair raised itself already names what it refused and carries its
+      // face ids, so it leaves as it is rather than as an OCCT failure.
+      py::gil_scoped_acquire acquire;
+      throw;
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(std::string("Session.") + op_name + ": OCCT's repair threw: " +

@@ -397,6 +397,13 @@ inline void append_unique(std::vector<TopoDS_Shape>& dst, const TopoDS_Shape& s)
   dst.push_back(s);
 }
 
+// GProp's adaptive rule falls back to its fixed rule for any Eps above 1e-3
+// (BRepGProp.hxx: "if Eps > 0.001 algorithm performs non-adaptive integration").
+constexpr double kAdaptiveEpsCap = 1e-3;
+
+// The measure of one shape by its own kind, with GProp's fixed Gauss rule. Exact on analytic
+// geometry; on a face trimmed by an intersection curve, or on a free-form edge, it is not.
+// Session.mass_properties integrates adaptively instead when the caller names a precision.
 inline double measure_of(const TopoDS_Shape& s) {
   GProp_GProps props;
   switch (s.ShapeType()) {
@@ -439,6 +446,61 @@ inline std::array<double, 3> centroid_of(const TopoDS_Shape& s) {
   }
   const gp_Pnt p = props.CentreOfMass();
   return {p.X(), p.Y(), p.Z()};
+}
+
+// The volume a solid encloses, integrated precisely enough to trust its sign, and the least
+// volume it must enclose to have an inside at all.
+struct EnclosedVolume {
+  double volume = 0.0;
+  double area = 0.0;
+  // eps x area, eps = Precision::Confusion(). A solid enclosing no more than this has, on
+  // average, two sides closer than the distance at which OCCT treats two points as one.
+  double tolerance = 0.0;
+};
+
+// What a solid-making operation checks before it commits a solid: BRepCheck_Analyzer accepts
+// a solid whose shell bounds its complement, so it cannot be the check.
+//
+// The volume is integrated with GProp's adaptive rule, because the fixed rule can get its
+// sign wrong. It integrates each face about a point near the shape, so a face contributes up
+// to D x its area / 3, D the bounding-box diagonal, and the contributions cancel down to the
+// volume. A relative error e on them moves the volume by up to e x D x A / 3, while a sheet
+// of thickness t encloses t x A / 2, so the sign can go when t < 2 e D / 3. The fixed rule's
+// area error on one face of the production assembly was 26 %.
+//
+// The integral is taken in two stages, because only the verdict against the tolerance
+// matters, and a tight precision costs: on the assembly's 436-face solid, 6.6 s at the
+// precision below against 1.2 s at kAdaptiveEpsCap.
+//
+//   * First at kAdaptiveEpsCap. With e the larger of that and the error GProp reports, the
+//     volume is settled when it clears the tolerance by more than e x D x A / 3. Over the
+//     assembly's 117 solids, the real error at this stage was at most 1/60 of that bound, and
+//     116 of them settle here.
+//   * Otherwise at the precision the defeature check derives: e x D x A / 3 set to a tenth of
+//     eps x A gives e = 0.3 x eps / D, so the verdict at the tolerance is the volume's own.
+inline EnclosedVolume enclosed_volume(const TopoDS_Shape& solid) {
+  const double eps = Precision::Confusion();
+  EnclosedVolume out;
+  GProp_GProps surface;
+  BRepGProp::SurfaceProperties(solid, surface);
+  out.area = surface.Mass();
+  out.tolerance = eps * out.area;
+  Bnd_Box box;
+  BRepBndLib::Add(solid, box);
+  const double diagonal = std::max(std::sqrt(box.SquareExtent()), eps);
+  // The most the faces' contributions can add up to, whatever cancels between them.
+  const double lever = diagonal * out.area / 3.0;
+  const double tight = std::min(0.3 * eps / diagonal, kAdaptiveEpsCap);
+  for (const double precision : {kAdaptiveEpsCap, tight}) {
+    GProp_GProps volume;
+    const double reached = BRepGProp::VolumeProperties(solid, volume, precision);
+    out.volume = volume.Mass();
+    if (std::abs(out.volume) > out.tolerance + std::max(precision, reached) * lever ||
+        precision <= tight) {
+      break;
+    }
+  }
+  return out;
 }
 
 // A caller-supplied point list: (N, 3) float64, C-contiguous. Forcecast so a list of tuples
@@ -966,7 +1028,12 @@ class Session {
   // volume for a solid, area for a face, length for an edge — never by walking a parent:
   // BRepGProp::LinearProperties on a SOLID visits every edge once per owning face and
   // silently doubles the answer.
-  py::dict mass_properties(const std::vector<EntityId>& entity_ids) const;
+  //
+  // With no precision, GProp's fixed Gauss rule, exactly as before 4.2.2. With one, every
+  // measure and centroid is integrated adaptively to that relative precision, and "error"
+  // carries the rule's own estimate of the relative error it reached.
+  py::dict mass_properties(const std::vector<EntityId>& entity_ids,
+                           const std::optional<double>& precision) const;
 
   // (N, 4) umin, umax, vmin, vmax for the named faces.
   py::array_t<double> face_parameter_bounds(const std::vector<EntityId>& face_ids) const;

@@ -30,6 +30,7 @@ Fixture sizing follows the project rule: a 3 x 7 x 11 box, never a unit cube.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import numpy as np
 import pytest
@@ -792,6 +793,40 @@ def test_thru_sections_naming_the_same_body_twice_raises() -> None:
 
     with pytest.raises(ps.PysmeshError, match="two different sections"):
         s.thru_sections([edges[:1], edges[1:]])
+
+
+def test_a_folded_ruled_loft_is_refused_and_changes_nothing(
+    folded_loft: Callable[[Session], list[list[EntityId]]],
+) -> None:
+    """A ruled loft that folds through itself is refused; 4.2.1 committed it inside-out.
+
+    It came back at volume -8.51073276, with a point inside it reading False and a point 1000
+    away reading True. BRepCheck_Analyzer accepted it.
+    """
+    s = Session()
+    sections = folded_loft(s)
+    before = (s.op_count, s.issued_id_count, s.brep())
+
+    with pytest.raises(ps.PysmeshError, match="encloses a volume of -8.51") as excinfo:
+        s.thru_sections(sections, solid=True, ruled=True)
+
+    assert "the session is unchanged" in str(excinfo.value)
+    assert (s.op_count, s.issued_id_count, s.brep()) == before
+
+
+def test_a_smooth_loft_through_the_same_sections_is_committed(
+    folded_loft: Callable[[Session], list[list[EntityId]]],
+) -> None:
+    """The refusal is about the folded surface, not about the sections."""
+    s = Session()
+    sections = folded_loft(s)
+
+    s.thru_sections(sections, solid=True, ruled=False)
+
+    solid = [EntityId(int(i)) for i in s.entities(EntityKind.SOLID)]
+    assert s.mass_properties(solid, precision=1e-9).measure[0] > 0.0
+    points = [(0.0, 0.0, 3.0), (1e3, 1e3, 1e3)]
+    assert s.contains(solid, points).tolist() == [[True, False]]
 
 
 # =============================================================== Booleans with history == #

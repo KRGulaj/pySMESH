@@ -438,11 +438,23 @@ class MassTable:
         measure: (N,) float64 — volume for a solid, area for a face, length for an edge,
             0.0 for a vertex. Summed over every shape a split entity denotes.
         centroid: (N, 3) float64, measure-weighted over a split entity's shapes.
+        error: (N,) float64 — the relative error the adaptive rule reports reaching on
+            ``measure``, when :meth:`Session.mass_properties` was given a ``precision``.
+            For a solid or a face it is GProp's own estimate: the relative change between
+            its last two refinement steps. For an edge it is the difference between the
+            15-point Kronrod and the nested 7-point Gauss estimates. That over-states the
+            error of the Kronrod value returned. Neither is a bound: on a tube swept along
+            a spline GProp reported 9e-9 on the area while the area still moved 1e-6 as
+            the precision tightened. A value above the precision means the rule stopped
+            before it reached it. Summed over a split entity's shapes, weighted by their
+            measures. 0.0 for a vertex. NaN without a precision: the fixed rule reports no
+            estimate.
     """
 
     ids: NDArray[np.int64]
     measure: NDArray[np.float64]
     centroid: NDArray[np.float64]
+    error: NDArray[np.float64]
 
 
 @dataclass(frozen=True)

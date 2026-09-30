@@ -133,7 +133,8 @@ void bind_session(py::module_& m) {
       .def("entity_types", &Session::entity_types, py::arg("kind"))
       .def("surface_parameters", &Session::surface_parameters, py::arg("face_ids"))
       .def("bounding_boxes", &Session::bounding_boxes, py::arg("kind"))
-      .def("mass_properties", &Session::mass_properties, py::arg("entity_ids"))
+      .def("mass_properties", &Session::mass_properties, py::arg("entity_ids"),
+           py::arg("precision"))
       .def("face_parameter_bounds", &Session::face_parameter_bounds, py::arg("face_ids"))
       .def("edge_parameter_bounds", &Session::edge_parameter_bounds, py::arg("edge_ids"))
       .def("adjacency", &Session::adjacency, py::arg("kind"), py::arg("other_kind"))

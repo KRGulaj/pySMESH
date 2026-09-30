@@ -31,6 +31,7 @@ Fixture sizing follows the project rule: a 3 x 7 x 11 box, never a unit cube.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import numpy as np
 import pytest
@@ -299,6 +300,306 @@ def test_sewing_an_empty_selection_raises() -> None:
 
     with pytest.raises(ps.PysmeshError, match="at least one"):
         s.sew([])
+
+
+# ------------------------------------ Sewing into solids: the interior is inside --- #
+
+# The 4.2.1 defect's fixture: an open tube about +z, and two planar caps copied from
+# its rims.
+TUBE_BASE: tuple[float, float, float] = (0.37, -2.9, 1.3)
+TUBE_RADIUS: float = 1.3
+TUBE_HEIGHT: float = 7.0
+TUBE_INSIDE: tuple[float, float, float] = (0.5, -2.7, 4.0)
+TUBE_OUTSIDE: tuple[float, float, float] = (3.0, 3.0, 3.0)
+# A second tube, apart from the first.
+APART_BASE: tuple[float, float, float] = (5.3, 1.1, -0.7)
+APART_RADIUS: float = 0.7
+APART_HEIGHT: float = 4.1
+SEW_TOL: float = 1e-6
+
+
+def cylinder_volume(radius: float, height: float) -> float:
+    return math.pi * radius**2 * height
+
+
+def loose_tube(
+    session: Session, base: tuple[float, float, float], radius: float, height: float
+) -> list[EntityId]:
+    """An open cylindrical face about +z and two planar caps, sharing no topology.
+
+    The wall is a circle extruded by ``height``. Each cap is a face made on a copy of one of
+    the wall's rims, so the three faces meet only geometrically, as after a surface import.
+    Returns [wall, cap at the base, cap at the top].
+    """
+    circle = created(
+        session, session.add_circle(base, (0.0, 0.0, 1.0), radius), EntityKind.EDGE
+    )
+    wall = created(
+        session, session.extrude(circle, (0.0, 0.0, height)), EntityKind.FACE
+    )
+    pairs = session.adjacency(EntityKind.FACE, EntityKind.EDGE)
+    types = session.entity_types(EntityKind.EDGE)
+    circles = {int(i) for i, t in zip(types.ids, types.types) if t == "Circle"}
+    edges = pairs.related[pairs.ids == int(wall[0])]
+    rims = sorted(
+        (EntityId(int(e)) for e in edges if int(e) in circles),
+        key=lambda e: float(session.mass_properties([e]).centroid[0][2]),
+    )
+    caps = []
+    for rim in rims:
+        copy = created(session, session.extract_edges([rim]), EntityKind.EDGE)
+        caps.extend(created(session, session.make_face(copy), EntityKind.FACE))
+    return [wall[0], *caps]
+
+
+def loose_box_faces(
+    session: Session,
+    size: tuple[float, float, float],
+    origin: tuple[float, float, float],
+) -> list[EntityId]:
+    """The six faces of a box as six unsewn planar faces, the box itself removed."""
+    box = created(session, session.add_box(*size, origin), EntityKind.SOLID)[0]
+    own = session.adjacency(EntityKind.SOLID, EntityKind.FACE)
+    pairs = session.adjacency(EntityKind.FACE, EntityKind.EDGE)
+    faces = []
+    for face in own.related[own.ids == int(box)]:
+        edges = [EntityId(int(e)) for e in pairs.related[pairs.ids == int(face)]]
+        copy = created(session, session.extract_edges(edges), EntityKind.EDGE)
+        faces.extend(created(session, session.make_face(copy), EntityKind.FACE))
+    session.remove([box])
+    return faces
+
+
+def solids_created(session: Session, delta: ps.HistoryDelta) -> list[EntityId]:
+    return created(session, delta, EntityKind.SOLID)
+
+
+def adaptive_volumes(session: Session, solids: list[EntityId]) -> list[float]:
+    return [float(v) for v in session.mass_properties(solids, precision=1e-12).measure]
+
+
+@pytest.mark.parametrize("caps_first", [False, True])
+def test_sewing_a_tube_and_its_caps_commits_the_solid_with_its_interior_inside(
+    caps_first: bool,
+) -> None:
+    """The 4.2.1 defect: this sew committed -37.165041091967, with every point test inverted.
+
+    BRepCheck_Analyzer accepts both orientations, so ``valid`` was True and the caller had no
+    signal. Naming the caps first changed nothing.
+    """
+    s = Session()
+    wall, bottom, top = loose_tube(s, TUBE_BASE, TUBE_RADIUS, TUBE_HEIGHT)
+    named = [bottom, top, wall] if caps_first else [wall, bottom, top]
+
+    delta = s.sew(named, tolerance=SEW_TOL, make_solid=True)
+
+    solid = solids_created(s, delta)
+    assert len(solid) == 1
+    assert delta.valid is True
+    assert adaptive_volumes(s, solid) == pytest.approx(
+        [cylinder_volume(TUBE_RADIUS, TUBE_HEIGHT)], rel=1e-12
+    )
+    assert model_volume(s) == pytest.approx(
+        cylinder_volume(TUBE_RADIUS, TUBE_HEIGHT), rel=1e-12
+    )
+    assert s.contains(solid, [TUBE_INSIDE, TUBE_OUTSIDE]).tolist() == [[True, False]]
+    assert all(s.is_alive(face) for face in (wall, bottom, top))
+    assert delta.deleted.size == 0
+
+
+def test_sewing_six_loose_box_faces_still_commits_the_box() -> None:
+    """The case 4.2.1 already got right keeps its answer."""
+    s = Session()
+    faces = loose_box_faces(s, (BOX_DX, BOX_DY, BOX_DZ), (0.0, 0.0, 0.0))
+
+    delta = s.sew(faces, tolerance=SEW_TOL, make_solid=True)
+
+    solid = solids_created(s, delta)
+    assert len(solid) == 1
+    assert adaptive_volumes(s, solid) == pytest.approx([BOX_VOLUME], rel=1e-12)
+    assert all(s.is_alive(face) for face in faces)
+
+
+def test_sewing_a_thin_sheet_still_commits_it() -> None:
+    """A sheet 0.001 thick encloses less than the first, coarse integral can settle.
+
+    Its volume, 0.021, is below that stage's error bound, 1e-3 x its diagonal x its area / 3
+    = 0.107, so the check integrates again at the precision derived from the tolerance. The
+    sheet is a real solid, and it is committed.
+    """
+    s = Session()
+    faces = loose_box_faces(s, (BOX_DX, BOX_DY, 0.001), (0.0, 0.0, 0.0))
+
+    delta = s.sew(faces, tolerance=SEW_TOL, make_solid=True)
+
+    assert adaptive_volumes(s, solids_created(s, delta)) == pytest.approx(
+        [BOX_DX * BOX_DY * 0.001], rel=1e-12
+    )
+
+
+def test_sewing_two_tubes_apart_makes_two_solids() -> None:
+    """4.2.1 put both shells into one solid, two outer shells, at -43.4765 = -(V1 + V2)."""
+    s = Session()
+    first = loose_tube(s, TUBE_BASE, TUBE_RADIUS, TUBE_HEIGHT)
+    second = loose_tube(s, APART_BASE, APART_RADIUS, APART_HEIGHT)
+
+    delta = s.sew([*first, *second], tolerance=SEW_TOL, make_solid=True)
+
+    solids = solids_created(s, delta)
+    assert adaptive_volumes(s, solids) == pytest.approx(
+        [
+            cylinder_volume(TUBE_RADIUS, TUBE_HEIGHT),
+            cylinder_volume(APART_RADIUS, APART_HEIGHT),
+        ],
+        rel=1e-12,
+    )
+    inside_second = (APART_BASE[0], APART_BASE[1], APART_BASE[2] + APART_HEIGHT / 2.0)
+    assert s.contains(solids, [TUBE_INSIDE, inside_second, TUBE_OUTSIDE]).tolist() == [
+        [True, False, False],
+        [False, True, False],
+    ]
+
+
+def test_sewing_a_tube_inside_a_tube_makes_a_hollow_solid() -> None:
+    """A closed shell inside another, their surfaces apart, is that solid's cavity."""
+    s = Session()
+    outer = loose_tube(s, (0.37, -2.9, 0.3), 2.5, 9.0)
+    inner = loose_tube(s, TUBE_BASE, TUBE_RADIUS, TUBE_HEIGHT)
+
+    delta = s.sew([*outer, *inner], tolerance=SEW_TOL, make_solid=True)
+
+    solid = solids_created(s, delta)
+    assert len(solid) == 1
+    hollow = cylinder_volume(2.5, 9.0) - cylinder_volume(TUBE_RADIUS, TUBE_HEIGHT)
+    assert adaptive_volumes(s, solid) == pytest.approx([hollow], rel=1e-12)
+    in_the_wall = (0.37 + 1.9, -2.9, 4.0)
+    assert s.contains(solid, [TUBE_INSIDE, in_the_wall]).tolist() == [[False, True]]
+
+
+def test_sewing_a_tube_inside_a_cavity_makes_it_a_solid_of_its_own() -> None:
+    """Depth two: a shell inside a cavity is an island, the outer shell of a second solid."""
+    s = Session()
+    outer = loose_tube(s, (0.37, -2.9, 0.3), 2.5, 9.0)
+    cavity = loose_tube(s, (0.37, -2.9, 1.3), 1.6, 7.0)
+    island = loose_tube(s, (0.37, -2.9, 2.3), 0.7, 5.0)
+
+    delta = s.sew([*outer, *cavity, *island], tolerance=SEW_TOL, make_solid=True)
+
+    solids = solids_created(s, delta)
+    hollow = cylinder_volume(2.5, 9.0) - cylinder_volume(1.6, 7.0)
+    assert adaptive_volumes(s, solids) == pytest.approx(
+        [hollow, cylinder_volume(0.7, 5.0)], rel=1e-12
+    )
+    points = [(0.37, -2.9, 4.0), (0.37 + 1.2, -2.9, 4.0), (0.37 + 2.1, -2.9, 4.0)]
+    assert s.contains(solids, points).tolist() == [
+        [False, False, True],
+        [True, False, False],
+    ]
+
+
+def test_sewing_two_crossing_tubes_makes_two_solids() -> None:
+    """Shells that cross are nested in neither direction: each bounds its own solid."""
+    s = Session()
+    first = loose_tube(s, TUBE_BASE, TUBE_RADIUS, TUBE_HEIGHT)
+    second = loose_tube(s, (1.37, -2.9, 3.3), 1.0, 7.0)
+
+    delta = s.sew([*first, *second], tolerance=SEW_TOL, make_solid=True)
+
+    assert adaptive_volumes(s, solids_created(s, delta)) == pytest.approx(
+        [cylinder_volume(TUBE_RADIUS, TUBE_HEIGHT), cylinder_volume(1.0, 7.0)],
+        rel=1e-12,
+    )
+
+
+def test_sewing_a_box_resting_on_a_box_makes_two_solids() -> None:
+    """Shells that touch from outside are not nested: every face of the top box is outside."""
+    s = Session()
+    lower = loose_box_faces(s, (BOX_DX, BOX_DY, BOX_DZ), (0.0, 0.0, 0.0))
+    upper = loose_box_faces(s, (1.0, 2.0, 1.5), (1.0, 2.0, BOX_DZ))
+
+    delta = s.sew([*lower, *upper], tolerance=SEW_TOL, make_solid=True)
+
+    assert adaptive_volumes(s, solids_created(s, delta)) == pytest.approx(
+        [BOX_VOLUME, 3.0], rel=1e-12
+    )
+
+
+def test_sewing_a_tube_standing_inside_a_tube_is_refused_and_changes_nothing() -> None:
+    """The inner tube's base lies on the outer tube's base: cavity or crossing is undecided."""
+    s = Session()
+    outer = loose_tube(s, (0.37, -2.9, 0.3), 2.5, 9.0)
+    inner = loose_tube(s, (0.37, -2.9, 0.3), TUBE_RADIUS, TUBE_HEIGHT)
+    before = unchanged_state(s)
+
+    with pytest.raises(ps.PysmeshError, match="undecided") as excinfo:
+        s.sew([*outer, *inner], tolerance=SEW_TOL, make_solid=True)
+
+    assert excinfo.value.face_ids == sorted(int(f) for f in inner)
+    named = ", ".join(str(int(f)) for f in sorted(outer))
+    assert f"faces [{named}]" in str(excinfo.value)
+    assert unchanged_state(s) == before
+
+
+def test_sewing_a_face_onto_its_own_copy_is_refused_and_changes_nothing() -> None:
+    """A pillow: two coincident faces sew into a closed shell that bounds no volume.
+
+    4.2.1 committed it as a solid of volume 0.0, and reported it valid.
+    """
+    s = Session()
+    face = created(
+        s, s.add_rectangle(TUBE_BASE, (0.0, 0.0, 1.0), 3.0, 7.0), EntityKind.FACE
+    )
+    twin = created(s, s.copy(face), EntityKind.FACE)
+    before = unchanged_state(s)
+
+    with pytest.raises(ps.PysmeshError, match="encloses a volume of 0") as excinfo:
+        s.sew([*face, *twin], tolerance=SEW_TOL, make_solid=True)
+
+    assert excinfo.value.face_ids == sorted(int(f) for f in (*face, *twin))
+    assert "the session is unchanged" in str(excinfo.value)
+    assert unchanged_state(s) == before
+
+
+def test_sewing_a_shell_that_folds_through_itself_is_refused_and_changes_nothing(
+    folded_loft: Callable[[Session], list[list[EntityId]]],
+) -> None:
+    """The classifier alone would orient it: the check on its volume refuses it.
+
+    A ruled loft through the folded sections, left open, and two caps copied from its end
+    sections sew into a closed shell that crosses itself. The point at infinity classifies
+    outside it, and the solid it bounds has volume -8.51.
+    """
+    s = Session()
+    sections = folded_loft(s)
+    caps = []
+    for section in (sections[0], sections[-1]):
+        copy = created(s, s.extract_edges(section), EntityKind.EDGE)
+        caps.extend(created(s, s.make_face(copy), EntityKind.FACE))
+    wall = created(s, s.thru_sections(sections, solid=False), EntityKind.FACE)
+    before = unchanged_state(s)
+
+    with pytest.raises(ps.PysmeshError, match="disagree") as excinfo:
+        s.sew([*wall, *caps], tolerance=SEW_TOL, make_solid=True)
+
+    assert excinfo.value.face_ids == sorted(int(f) for f in (*wall, *caps))
+    assert unchanged_state(s) == before
+
+
+def test_sewing_into_a_solid_keeps_a_face_that_sewed_to_nothing() -> None:
+    """4.2.1 replaced the whole sewing result by the solid and deleted the loose face."""
+    s = Session()
+    tube = loose_tube(s, TUBE_BASE, TUBE_RADIUS, TUBE_HEIGHT)
+    far = s.add_rectangle((20.0, 20.0, 20.0), (0.0, 0.0, 1.0), 3.0, 7.0)
+    loose = created(s, far, EntityKind.FACE)
+
+    delta = s.sew([*tube, *loose], tolerance=SEW_TOL, make_solid=True)
+
+    assert delta.deleted.size == 0
+    assert s.is_alive(loose[0])
+    assert adaptive_volumes(s, solids_created(s, delta)) == pytest.approx(
+        [cylinder_volume(TUBE_RADIUS, TUBE_HEIGHT)], rel=1e-12
+    )
+    assert model_counts(s)[:2] == (1, 4)
 
 
 # ============================================================== Internal-wire removal ==

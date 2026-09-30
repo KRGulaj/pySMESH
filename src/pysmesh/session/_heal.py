@@ -112,13 +112,35 @@ class _HealOps(_SessionBase):
         This is the repair for a model whose faces meet geometrically but share no topology —
         the usual state of a surface import — and the path from a set of faces to a solid.
 
+        **A solid is closed with its interior on the inside.** With ``make_solid``, every
+        closed shell of the result becomes part of a solid of positive volume, and
+        :meth:`contains` is true inside it. OCCT's validity check accepts a solid whose shell
+        bounds the space outside it, so ``valid`` cannot show this. The operation guarantees
+        it instead:
+
+        * Each closed shell is oriented by classifying the point at infinity against it. A
+          shell that bounds the space outside it is reversed. That changes a flag, not the
+          geometry, so every face id stays alive.
+        * A solid is committed only if it encloses more than ``Precision::Confusion()``
+          (1e-7 model units) times its area. The volume is integrated with GProp's adaptive
+          rule. A face sewn onto its own copy closes a shell that encloses nothing, and it is
+          refused.
+        * Closed shells are placed against each other. Shells apart from each other are
+          separate solids. A shell inside another, with their surfaces apart, is a cavity of
+          the shell it lies directly inside. A shell inside that cavity is a solid of its own.
+        * Shells that cross each other, or touch from outside, are separate solids. Those
+          solids overlap, as two bodies of the model may. A shell that touches another from
+          inside is refused: a cavity and a crossing cannot be told apart there.
+        * A face that sewed into no shell stays in the model beside the solids.
+
         Args:
             entities: Entities whose owning bodies are sewed. At least one.
             tolerance: Largest gap between two boundaries that still counts as shared (> 0).
                 Deliberately tight by default: sewing across a real gap invents topology
                 rather than repairing it.
-            make_solid: Close the result into a solid. Only a watertight shell bounds a
-                volume, so an open one is left as a shell and ``valid`` reports on that.
+            make_solid: Close the result into solids, as described above. Only a watertight
+                shell bounds a volume. If any shell of the result is open, every shell is
+                left a shell, and ``valid`` reports on them.
             non_manifold: Allow more than two faces to meet at one edge. Off by default,
                 because a non-manifold result is rarely what a CAD repair wants and is
                 accepted by very little downstream.
@@ -129,11 +151,17 @@ class _HealOps(_SessionBase):
                 exactly as it was.
 
         Returns:
-            The delta, carrying the validity verdict on ``valid``.
+            The delta, carrying the validity verdict on ``valid``. Every solid that
+            ``make_solid`` built is in ``created``, one id per solid.
 
         Raises:
             PysmeshError: On a non-positive tolerance, an empty selection, a dead id, or a
-                selection that shares sub-shapes with bodies left out of the scope.
+                selection that shares sub-shapes with bodies left out of the scope. Also,
+                with ``make_solid``, if a closed shell cannot be committed as a solid: it
+                encloses no volume, the classifier cannot place it, or it touches another
+                shell from inside. ``.face_ids`` then carries the ids of that shell's faces,
+                and the message names the reason, with the other shell's faces when there
+                is one. Nothing is committed, and the session is left exactly as it was.
         """
         return _delta(
             self._s.sew(

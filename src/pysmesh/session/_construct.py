@@ -730,7 +730,12 @@ class _ConstructOps(_SessionBase):
 
         Raises:
             PysmeshError: On fewer than two sections, a repeated body, a section that is
-                not a wire or edge, or a loft OCCT cannot build.
+                not a wire or edge, or a loft OCCT cannot build. Also, with ``solid``, if
+                the lofted solid encloses no more than ``Precision::Confusion()`` times its
+                area. A loft whose surface folds through itself comes back that way, and
+                OCCT's validity check accepts it: a ruled loft through sections tilted
+                towards each other is the measured case. Nothing is committed, and the
+                session is left exactly as it was.
         """
         return _delta(
             self._s.thru_sections(

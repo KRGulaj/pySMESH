@@ -22,8 +22,14 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from pysmesh import EntityId, Session
 
 # Prefer an installed ``pysmesh`` (the repaired wheel, exercised in CI) over the source tree.
 # Only fall back to ``src`` for a local dev build (CMake copies ``_core``/``_build_info`` into
@@ -178,3 +184,58 @@ def box_inch_iges_path(fixtures_dir: Path) -> str:
     """Path to the inch IGES fixture: native extent 2.0 declared in INCH. Its factor (0.0254)
     is the one a hard-coded millimetre-or-metre reader gets wrong."""
     return str(fixtures_dir / "box_inch.igs")
+
+
+# Three closed sections tilted towards each other, drawn by a seeded random sweep
+# (numpy default_rng(42)): 2 of 30 ruled lofts through such sections folded through
+# themselves, and OCCT oriented both inside-out. This is one of them: a circle, then two
+# ellipses, each as (centre, normal, rx, ry).
+_FOLDED_LOFT_SECTIONS: tuple[
+    tuple[tuple[float, float, float], tuple[float, float, float], float, float], ...
+] = (
+    (
+        (0.11486572091551484, -1.094523847564435, 0.0),
+        (0.08680774708713333, -0.1067094946713104, -0.899247622920093),
+        0.952877122126336,
+        0.952877122126336,
+    ),
+    (
+        (-0.14520903947180283, 0.6728760937208955, 3.0),
+        (0.14325880118003856, -0.3487286340419791, 0.7863693874363183),
+        1.4,
+        0.8,
+    ),
+    (
+        (-0.032918235508287035, -0.01068322085702728, 6.0),
+        (0.12241085306438004, 0.48506231954958223, 1.0393081348580258),
+        1.4,
+        0.8,
+    ),
+)
+
+
+@pytest.fixture(scope="session")
+def folded_loft() -> Callable[[Session], list[list[EntityId]]]:
+    """Adds the three sections of a ruled loft that folds through itself to a session.
+
+    The returned function builds each section as one edge body and returns their edge ids,
+    in loft order. A ruled loft through them folds its surface through itself; a smooth one
+    does not.
+    """
+    from pysmesh import EntityId, EntityKind
+
+    def add_sections(session: Session) -> list[list[EntityId]]:
+        sections = []
+        for centre, normal, rx, ry in _FOLDED_LOFT_SECTIONS:
+            made = (
+                session.add_circle(centre, normal, rx)
+                if rx == ry
+                else session.add_ellipse(centre, normal, rx, ry)
+            )
+            edges = [EntityId(int(i)) for i in made.created]
+            sections.append(
+                [e for e in edges if session.entity_kind(e) is EntityKind.EDGE]
+            )
+        return sections
+
+    return add_sections
