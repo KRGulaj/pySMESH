@@ -183,10 +183,6 @@ namespace {
 using EdgeFaces = NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
                                              TopTools_ShapeMapHasher>;
 
-// GProp's adaptive rule falls back to its fixed rule for any Eps above 1e-3. The cap keeps
-// it adaptive when the precision derived below would exceed that.
-constexpr double kAdaptiveEpsCap = 1e-3;
-
 double edge_length_of(const TopoDS_Shape& s) {
   double total = 0.0;
   ShapeSet edges;

@@ -127,7 +127,9 @@ class _QueryOps(_SessionBase):
             bbox=cast("NDArray[np.float64]", raw["bbox"]),
         )
 
-    def mass_properties(self, entities: Sequence[EntityId]) -> MassTable:
+    def mass_properties(
+        self, entities: Sequence[EntityId], *, precision: float | None = None
+    ) -> MassTable:
         """Measure and centre of mass of the named entities.
 
         Each entity is measured by its own kind — volume for a solid, area for a face, length
@@ -135,20 +137,49 @@ class _QueryOps(_SessionBase):
         properties of a *solid* visit every edge once per owning face, so a total edge length
         taken that way comes out doubled.
 
+        **The rule.** Without ``precision``, OCCT's fixed Gauss rule integrates, exactly as
+        before 4.2.2. It is exact on analytic geometry. It is not exact on a face trimmed by
+        an intersection curve, or on a free-form face or edge. It reads a fused pipe tee
+        1.39e-6 high and a parabolic edge 4.4e-4 long. On a production STEP assembly it read
+        one face 26 % off and one solid 8.5 % off.
+
+        With ``precision``, every measure is integrated adaptively to that relative
+        precision, and its centroid follows the same rule:
+
+        * a solid's volume and a face's area by GProp's adaptive rule, which refines each face
+          until two steps agree to ``precision``;
+        * an edge's length by an adaptive Gauss-Kronrod rule along its curve, because GProp
+          has no adaptive rule for a curve. It refines until the summed error estimate is
+          within ``precision`` times the length.
+
+        ``precision`` is the rule's target, not a guaranteed error. Read
+        :attr:`MassTable.error` for what the rule reports reaching.
+
+        **Cost.** Against the fixed rule, measured: 1.3 times on the tee at 1e-9. On the
+        largest solid of the production assembly, 436 faces, 5.0 times at 1e-6 and 8.5 times
+        at 1e-9. Edges cost less than with the fixed rule.
+
         Args:
             entities: Entity ids, of any kinds.
+            precision: The relative precision of the adaptive rule, in ``(0, 1e-3]``.
+                ``None`` keeps the fixed rule. Above 1e-3 GProp's rule is no longer
+                adaptive, so such a value is refused rather than answered by the fixed rule.
 
         Returns:
-            The measures and centroids, in the order the entities were named.
+            The measures, centroids and error estimates, in the order the entities were
+            named.
 
         Raises:
-            PysmeshError: If an id was never issued, or is dead.
+            PysmeshError: If an id was never issued, or is dead. Also on a ``precision``
+                that is not a finite number > 0, or that is above 1e-3. The message names
+                the value.
         """
-        raw = self._s.mass_properties(_ids(entities))
+        raw = self._s.mass_properties(_ids(entities), precision)
         return MassTable(
             ids=cast("NDArray[np.int64]", raw["ids"]),
             measure=cast("NDArray[np.float64]", raw["measure"]),
             centroid=cast("NDArray[np.float64]", raw["centroid"]),
+            error=cast("NDArray[np.float64]", raw["error"]),
         )
 
     def face_parameter_bounds(

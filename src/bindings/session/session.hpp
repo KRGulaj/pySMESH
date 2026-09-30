@@ -397,6 +397,13 @@ inline void append_unique(std::vector<TopoDS_Shape>& dst, const TopoDS_Shape& s)
   dst.push_back(s);
 }
 
+// GProp's adaptive rule falls back to its fixed rule for any Eps above 1e-3
+// (BRepGProp.hxx: "if Eps > 0.001 algorithm performs non-adaptive integration").
+constexpr double kAdaptiveEpsCap = 1e-3;
+
+// The measure of one shape by its own kind, with GProp's fixed Gauss rule. Exact on analytic
+// geometry; on a face trimmed by an intersection curve, or on a free-form edge, it is not.
+// Session.mass_properties integrates adaptively instead when the caller names a precision.
 inline double measure_of(const TopoDS_Shape& s) {
   GProp_GProps props;
   switch (s.ShapeType()) {
@@ -966,7 +973,12 @@ class Session {
   // volume for a solid, area for a face, length for an edge — never by walking a parent:
   // BRepGProp::LinearProperties on a SOLID visits every edge once per owning face and
   // silently doubles the answer.
-  py::dict mass_properties(const std::vector<EntityId>& entity_ids) const;
+  //
+  // With no precision, GProp's fixed Gauss rule, exactly as before 4.2.2. With one, every
+  // measure and centroid is integrated adaptively to that relative precision, and "error"
+  // carries the rule's own estimate of the relative error it reached.
+  py::dict mass_properties(const std::vector<EntityId>& entity_ids,
+                           const std::optional<double>& precision) const;
 
   // (N, 4) umin, umax, vmin, vmax for the named faces.
   py::array_t<double> face_parameter_bounds(const std::vector<EntityId>& face_ids) const;

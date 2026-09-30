@@ -42,6 +42,8 @@ import math
 
 import numpy as np
 import pytest
+from hypothesis import assume, given, settings
+from hypothesis import strategies as st
 
 import pysmesh as ps
 from pysmesh import EntityId, EntityKind, Session
@@ -337,6 +339,227 @@ def test_mass_properties_rejects_a_dead_id(box: Session) -> None:
 
     with pytest.raises(ps.PysmeshError, match="dead"):
         box.mass_properties([solid])
+
+
+# ------------------------------------------------ Mass properties at a precision --- #
+
+# A pipe tee: a branch of radius R2 rising from the axis of a main cylinder of radius R1.
+TEE_R1: float = 1.7
+TEE_L1: float = 11.0
+TEE_R2: float = 1.1
+TEE_H2: float = 5.3
+# The closed form the brief cites, and what GProp's fixed rule read on 4.2.1.
+TEE_VOLUME: float = 113.914779599726
+TEE_FIXED_RULE_VOLUME: float = 113.914937821150
+
+
+@pytest.fixture
+def tee() -> Session:
+    """The fused tee: the branch's wall is trimmed by an intersection curve."""
+    s = Session()
+    s.add_cylinder(TEE_R1, TEE_L1, (0.37, -2.9, 4.2), (1.0, 0.0, 0.0))
+    s.add_cylinder(TEE_R2, TEE_H2, (5.07, -2.9, 4.2), (0.0, 0.0, 1.0))
+    main, branch = ids_of(s, EntityKind.SOLID)
+    s.fuse([main], [branch])
+    return s
+
+
+def tee_closed_form() -> float:
+    """pi R1^2 L1 + pi R2^2 H2 - I, with I the part of the branch inside the main cylinder.
+
+    I = integral over t in (-pi/2, pi/2) of 2 R2^2 cos^2 t sqrt(R1^2 - R2^2 sin^2 t) dt.
+    The integrand is analytic on the closed interval (R1 > R2), so a 64-point Gauss-Legendre
+    rule is exact to rounding.
+    """
+    nodes, weights = np.polynomial.legendre.leggauss(64)
+    t = 0.5 * math.pi * nodes
+    height = np.sqrt(TEE_R1**2 - TEE_R2**2 * np.sin(t) ** 2)
+    integrand = 2.0 * TEE_R2**2 * np.cos(t) ** 2 * height
+    inside = 0.5 * math.pi * float(weights @ integrand)
+    return math.pi * TEE_R1**2 * TEE_L1 + math.pi * TEE_R2**2 * TEE_H2 - inside
+
+
+def parabola_length(poles: np.ndarray) -> float:
+    """Arc length of the quadratic Bezier over three poles, in closed form.
+
+    B'(t) = 2 (b + a t) with a = p0 - 2 p1 + p2 and b = p1 - p0, so |B'(t)|^2 = A t^2 + B t
+    + C, and the integral of the square root of a quadratic is elementary.
+    """
+    a = poles[0] - 2.0 * poles[1] + poles[2]
+    b = poles[1] - poles[0]
+    qa, qb, qc = 4.0 * a @ a, 8.0 * a @ b, 4.0 * b @ b
+
+    def primitive(t: float) -> float:
+        root = math.sqrt(qa * t * t + qb * t + qc)
+        algebraic = (2.0 * qa * t + qb) * root / (4.0 * qa)
+        scale = (4.0 * qa * qc - qb * qb) / (8.0 * qa**1.5)
+        return algebraic + scale * math.log(
+            2.0 * math.sqrt(qa) * root + 2.0 * qa * t + qb
+        )
+
+    return primitive(1.0) - primitive(0.0)
+
+
+def parabola_centroid(poles: np.ndarray) -> np.ndarray:
+    """Centroid of the quadratic Bezier's arc, integrated independently of OCCT.
+
+    The integrand B(t) |B'(t)| is analytic on [0, 1] for a non-degenerate arc, so a 200-point
+    Gauss-Legendre rule over the analytic parametrisation is exact to rounding.
+    """
+    nodes, weights = np.polynomial.legendre.leggauss(200)
+    t = 0.5 * (nodes + 1.0)
+    point = (
+        np.outer((1.0 - t) ** 2, poles[0])
+        + np.outer(2.0 * t * (1.0 - t), poles[1])
+        + np.outer(t**2, poles[2])
+    )
+    tangent = np.outer(1.0 - t, poles[1] - poles[0]) + np.outer(t, poles[2] - poles[1])
+    speed = np.linalg.norm(2.0 * tangent, axis=1)
+    w = 0.5 * weights * speed
+    return (point * w[:, None]).sum(axis=0) / w.sum()
+
+
+# A parabolic arc turning through a sharp bend, where GProp's fixed rule reads 4.4e-4 long.
+BENT_PARABOLA: np.ndarray = np.array(
+    [[0.37, -2.9, 1.3], [9.0, 4.0, 1.3], [9.3, -2.5, 1.3]], dtype=np.float64
+)
+
+
+def test_the_tee_closed_form_is_the_value_the_brief_cites() -> None:
+    """Fixture check: the in-test quadrature reproduces the cited 113.914779599726."""
+    assert tee_closed_form() == pytest.approx(TEE_VOLUME, rel=1e-14)
+
+
+def test_the_tee_at_a_precision_matches_its_closed_form(tee: Session) -> None:
+    """The 4.2.1 defect: the fixed Gauss rule reads the trimmed branch wall 1.39e-6 high."""
+    solid = ids_of(tee, EntityKind.SOLID)
+
+    table = tee.mass_properties(solid, precision=1e-9)
+
+    assert table.measure[0] == pytest.approx(tee_closed_form(), rel=1e-9)
+    assert table.error[0] <= 1e-9
+
+
+def test_the_tee_without_a_precision_reads_the_fixed_rule_as_before(
+    tee: Session,
+) -> None:
+    """``precision=None`` is 4.2.1's answer to the last digit, fixed-rule error and all."""
+    solid = ids_of(tee, EntityKind.SOLID)
+
+    default = tee.mass_properties(solid)
+    explicit = tee.mass_properties(solid, precision=None)
+
+    assert default.measure[0] == pytest.approx(
+        TEE_FIXED_RULE_VOLUME, rel=0.0, abs=5e-13
+    )
+    assert np.array_equal(default.measure, explicit.measure)
+    assert np.array_equal(default.centroid, explicit.centroid)
+    assert np.isnan(default.error).all()
+
+
+@pytest.mark.parametrize("precision", [None, 1e-3, 1e-6, 1e-12])
+def test_a_cylinder_matches_its_closed_form_at_every_setting(
+    precision: float | None,
+) -> None:
+    """Both rules are exact on a cylinder: the adaptive one changes nothing where none is due."""
+    s = Session()
+    s.add_cylinder(TEE_R1, TEE_L1, (0.37, -2.9, 4.2), (1.0, 0.0, 0.0))
+
+    table = s.mass_properties(ids_of(s, EntityKind.SOLID), precision=precision)
+
+    assert table.measure[0] == pytest.approx(math.pi * TEE_R1**2 * TEE_L1, rel=1e-12)
+    assert table.centroid[0] == pytest.approx(
+        (0.37 + TEE_L1 / 2.0, -2.9, 4.2), rel=1e-12, abs=1e-12
+    )
+
+
+def test_an_edge_at_a_precision_measures_the_length_the_fixed_rule_misses() -> None:
+    """BRepGProp has no adaptive rule for a curve; the edge rule is Gauss-Kronrod on its own.
+
+    On this parabolic arc the fixed rule reads 12.0355 against a closed form of 12.0302.
+    """
+    s = Session()
+    s.add_bspline(BENT_PARABOLA, degree=2)
+    edge = ids_of(s, EntityKind.EDGE)
+
+    fixed = s.mass_properties(edge)
+    table = s.mass_properties(edge, precision=1e-12)
+
+    expected = parabola_length(BENT_PARABOLA)
+    assert table.measure[0] == pytest.approx(expected, rel=1e-12)
+    assert table.centroid[0] == pytest.approx(
+        parabola_centroid(BENT_PARABOLA), rel=1e-12, abs=1e-12
+    )
+    assert fixed.measure[0] != pytest.approx(expected, rel=1e-4)
+
+
+@settings(max_examples=25, deadline=None, derandomize=True)
+@given(
+    poles=st.lists(
+        st.tuples(*[st.floats(-10.0, 10.0, allow_nan=False)] * 3),
+        min_size=3,
+        max_size=3,
+    )
+)
+def test_an_edge_at_a_precision_matches_any_parabolas_closed_form(
+    poles: list[tuple[float, float, float]],
+) -> None:
+    """The edge rule converges on every parabolic arc, however sharply it bends.
+
+    Collinear poles are excluded: the arc then folds back on itself, its speed vanishes, and
+    the closed form's logarithm has no value there.
+    """
+    p = np.array(poles, dtype=np.float64)
+    first, second = p[1] - p[0], p[2] - p[1]
+    legs = float(np.linalg.norm(first) * np.linalg.norm(second))
+    assume(np.linalg.norm(first) > 0.1 and np.linalg.norm(second) > 0.1)
+    assume(float(np.linalg.norm(np.cross(first, second))) > 1e-2 * legs)
+    s = Session()
+    s.add_bspline(p, degree=2)
+
+    table = s.mass_properties(ids_of(s, EntityKind.EDGE), precision=1e-10)
+
+    assert table.measure[0] == pytest.approx(parabola_length(p), rel=1e-10)
+
+
+def test_a_vertex_at_a_precision_is_exact(box: Session) -> None:
+    vertex = ids_of(box, EntityKind.VERTEX)[:1]
+
+    table = box.mass_properties(vertex, precision=1e-9)
+
+    assert table.measure[0] == 0.0
+    assert table.error[0] == 0.0
+    assert table.centroid[0] == pytest.approx(box.mass_properties(vertex).centroid[0])
+
+
+@pytest.mark.parametrize(
+    ("precision", "named"),
+    [
+        (0.0, "0"),
+        (-1e-9, "-1e-09"),
+        (math.nan, "nan"),
+        (math.inf, "inf"),
+        (-math.inf, "-inf"),
+    ],
+)
+def test_mass_properties_refuses_a_precision_that_is_not_a_relative_error(
+    box: Session, precision: float, named: str
+) -> None:
+    with pytest.raises(ps.PysmeshError, match="finite relative error > 0") as excinfo:
+        box.mass_properties(ids_of(box, EntityKind.SOLID), precision=precision)
+
+    assert f"(got {named})" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("precision", [2e-3, 0.5])
+def test_mass_properties_refuses_a_precision_above_the_adaptive_cap(
+    box: Session, precision: float
+) -> None:
+    """GProp integrates with its fixed rule above 1e-3, whatever it is asked."""
+    with pytest.raises(ps.PysmeshError, match="stops being adaptive") as excinfo:
+        box.mass_properties(ids_of(box, EntityKind.SOLID), precision=precision)
+
+    assert f"precision {precision!r} is above 0.001" in str(excinfo.value)
 
 
 # ========================================================== Parameter bounds ==
