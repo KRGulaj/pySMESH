@@ -769,6 +769,7 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
   ProgressDriver driver("thru_sections", hooks_of("thru_sections", progress, cancel));
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
+  std::optional<EnclosedVolume> hollow;
   {
     py::gil_scoped_release release;
     BRepOffsetAPI_ThruSections mk(solid, ruled);
@@ -790,6 +791,18 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
         args.Append(b);
       }
       hist = new BRepTools_History(args, mk);
+      // OCCT orients the lofted solid itself, and on a loft that folds through itself its
+      // answer is arbitrary. Measured over 30 seeded random ruled lofts through three tilted
+      // sections, two came back with volumes -7.85 and -8.51 and BRepCheck_Analyzer
+      // accepted both, so the solid's own volume is checked before it is committed. It is
+      // not re-oriented: reversing a surface that crosses itself does not give it an inside.
+      for (TopExp_Explorer ex(result, TopAbs_SOLID); ex.More() && solid; ex.Next()) {
+        const EnclosedVolume enclosed = enclosed_volume(ex.Current());
+        if (enclosed.volume <= enclosed.tolerance) {
+          hollow = enclosed;
+          break;
+        }
+      }
     }
   }
   driver.finish();
@@ -800,6 +813,19 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
     throw PysmeshError("Session.thru_sections: OCCT could not loft the sections.",
                        "Sections must all be closed or all be open, and must not "
                        "self-intersect when joined.",
+                       {});
+  }
+  if (hollow.has_value()) {
+    std::ostringstream s;
+    s << "Session.thru_sections: the lofted solid encloses a volume of " << hollow->volume
+      << ", at or below Precision::Confusion() x its area (" << hollow->tolerance
+      << "), so its interior is not on its inside. Nothing is committed; the session is "
+         "unchanged.";
+    throw PysmeshError(s.str(),
+                       "A loft whose surface folds through itself does this: a ruled loft "
+                       "through sections tilted towards each other is the measured case. "
+                       "Space or align the sections so that consecutive ones do not cross "
+                       "each other's path.",
                        {});
   }
   return commit(concat(survivors, result), hist, "thru_sections", result);
