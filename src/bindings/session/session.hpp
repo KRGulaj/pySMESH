@@ -466,9 +466,18 @@ struct EnclosedVolume {
 // to D x its area / 3, D the bounding-box diagonal, and the contributions cancel down to the
 // volume. A relative error e on them moves the volume by up to e x D x A / 3, while a sheet
 // of thickness t encloses t x A / 2, so the sign can go when t < 2 e D / 3. The fixed rule's
-// area error on one face of the production assembly was 26 %. The precision is the one the
-// defeature check derives: Eps x D x A / 3, the error bound, set to a tenth of eps x A, gives
-// Eps = 0.3 x eps / D.
+// area error on one face of the production assembly was 26 %.
+//
+// The integral is taken in two stages, because only the verdict against the tolerance
+// matters, and a tight precision costs: on the assembly's 436-face solid, 6.6 s at the
+// precision below against 1.2 s at kAdaptiveEpsCap.
+//
+//   * First at kAdaptiveEpsCap. With e the larger of that and the error GProp reports, the
+//     volume is settled when it clears the tolerance by more than e x D x A / 3. Over the
+//     assembly's 117 solids, the real error at this stage was at most 1/60 of that bound, and
+//     116 of them settle here.
+//   * Otherwise at the precision the defeature check derives: e x D x A / 3 set to a tenth of
+//     eps x A gives e = 0.3 x eps / D, so the verdict at the tolerance is the volume's own.
 inline EnclosedVolume enclosed_volume(const TopoDS_Shape& solid) {
   const double eps = Precision::Confusion();
   EnclosedVolume out;
@@ -479,9 +488,18 @@ inline EnclosedVolume enclosed_volume(const TopoDS_Shape& solid) {
   Bnd_Box box;
   BRepBndLib::Add(solid, box);
   const double diagonal = std::max(std::sqrt(box.SquareExtent()), eps);
-  GProp_GProps volume;
-  BRepGProp::VolumeProperties(solid, volume, std::min(0.3 * eps / diagonal, kAdaptiveEpsCap));
-  out.volume = volume.Mass();
+  // The most the faces' contributions can add up to, whatever cancels between them.
+  const double lever = diagonal * out.area / 3.0;
+  const double tight = std::min(0.3 * eps / diagonal, kAdaptiveEpsCap);
+  for (const double precision : {kAdaptiveEpsCap, tight}) {
+    GProp_GProps volume;
+    const double reached = BRepGProp::VolumeProperties(solid, volume, precision);
+    out.volume = volume.Mass();
+    if (std::abs(out.volume) > out.tolerance + std::max(precision, reached) * lever ||
+        precision <= tight) {
+      break;
+    }
+  }
   return out;
 }
 

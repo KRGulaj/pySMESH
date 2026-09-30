@@ -420,6 +420,23 @@ def test_sewing_six_loose_box_faces_still_commits_the_box() -> None:
     assert all(s.is_alive(face) for face in faces)
 
 
+def test_sewing_a_thin_sheet_still_commits_it() -> None:
+    """A sheet 0.001 thick encloses less than the first, coarse integral can settle.
+
+    Its volume, 0.021, is below that stage's error bound, 1e-3 x its diagonal x its area / 3
+    = 0.107, so the check integrates again at the precision derived from the tolerance. The
+    sheet is a real solid, and it is committed.
+    """
+    s = Session()
+    faces = loose_box_faces(s, (BOX_DX, BOX_DY, 0.001), (0.0, 0.0, 0.0))
+
+    delta = s.sew(faces, tolerance=SEW_TOL, make_solid=True)
+
+    assert adaptive_volumes(s, solids_created(s, delta)) == pytest.approx(
+        [BOX_DX * BOX_DY * 0.001], rel=1e-12
+    )
+
+
 def test_sewing_two_tubes_apart_makes_two_solids() -> None:
     """4.2.1 put both shells into one solid, two outer shells, at -43.4765 = -(V1 + V2)."""
     s = Session()

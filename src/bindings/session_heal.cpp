@@ -58,8 +58,6 @@ struct ClosedShell {
   double volume = 0.0;
   double area = 0.0;
   Bnd_Box box;
-  // Every vertex, and one point inside each face: where the shell is tested against another.
-  std::vector<gp_Pnt> samples;
 };
 
 // A closed shell that cannot become a solid, why, and the other shell it was placed against
@@ -137,25 +135,6 @@ std::optional<std::string> orient_and_measure(ClosedShell& c) {
          "itself does this";
 }
 
-// Every vertex of a shell, and a point inside each of its faces.
-std::vector<gp_Pnt> samples_of(const TopoDS_Shell& shell,
-                               const Handle(IntTools_Context) & context) {
-  std::vector<gp_Pnt> out;
-  ShapeSet vertices;
-  TopExp::MapShapes(shell, TopAbs_VERTEX, vertices);
-  for (int i = 1; i <= vertices.Extent(); ++i) {
-    out.push_back(BRep_Tool::Pnt(TopoDS::Vertex(vertices.FindKey(i))));
-  }
-  for (TopExp_Explorer ex(shell, TopAbs_FACE); ex.More(); ex.Next()) {
-    gp_Pnt p;
-    gp_Pnt2d uv;
-    if (BOPTools_AlgoTools3D::PointInFace(TopoDS::Face(ex.Current()), p, uv, context) == 0) {
-      out.push_back(p);
-    }
-  }
-  return out;
-}
-
 // Keep every shape of a sewing result that is not a shell: a face that sewed to nothing,
 // a free edge. Before 4.2.2 the solid replaced the whole result, and those were deleted.
 void keep_all_but_shells(const TopoDS_Shape& s, const BRep_Builder& b, TopoDS_Compound& into) {
@@ -176,27 +155,40 @@ enum class Placement { kOutside, kInside, kUndecided };
 
 // Where shell j lies against shell i, whose solid `where` classifies.
 //
-// If the two surfaces are apart, every point of j is on one side of i, so one point decides
-// exactly. If they meet, j is a cavity of i only if no point of j is outside i. A sample
-// outside settles it: j is not inside i, whether it touches i from outside or crosses it.
-// With none outside, j either touches i from inside or crosses it where no sample fell, and
-// the samples cannot tell which, so the placement is undecided.
+// j is a cavity of i only if no point of j is outside i, so any point of j outside i settles
+// that it is not: it touches i from outside, crosses it, or lies apart from it. The tests go
+// from cheap to dear, and each runs only when the one before settled nothing:
+//
+//   1. j's vertices. One outside settles it. Parts of an assembly that touch are settled here.
+//   2. The distance between the two surfaces. If they are apart, every point of j is on one
+//      side of i, and the vertices said which: inside.
+//   3. They meet. A point inside each face of j, as the defeature probe places one. One
+//      outside settles it. With none outside, j touches i from inside or crosses it where no
+//      point fell, and the points cannot tell which, so the placement is undecided.
 Placement place(const ClosedShell& j, const ClosedShell& i,
-                BRepClass3d_SolidClassifier& where) {
+                BRepClass3d_SolidClassifier& where,
+                const Handle(IntTools_Context) & context) {
   const double eps = Precision::Confusion();
-  BRepExtrema_DistShapeShape gap(i.shell, j.shell);
-  if (gap.IsDone() && gap.Value() > eps && !j.samples.empty()) {
-    where.Perform(j.samples.front(), eps);
-    switch (where.State()) {
-      case TopAbs_IN:
-        return Placement::kInside;
-      case TopAbs_OUT:
-        return Placement::kOutside;
-      default:
-        return Placement::kUndecided;
+  bool inside = false;
+  ShapeSet vertices;
+  TopExp::MapShapes(j.shell, TopAbs_VERTEX, vertices);
+  for (int k = 1; k <= vertices.Extent(); ++k) {
+    where.Perform(BRep_Tool::Pnt(TopoDS::Vertex(vertices.FindKey(k))), eps);
+    if (where.State() == TopAbs_OUT) {
+      return Placement::kOutside;
     }
+    inside = inside || where.State() == TopAbs_IN;
   }
-  for (const gp_Pnt& p : j.samples) {
+  BRepExtrema_DistShapeShape gap(i.shell, j.shell);
+  if (gap.IsDone() && gap.Value() > eps) {
+    return inside ? Placement::kInside : Placement::kUndecided;
+  }
+  for (TopExp_Explorer ex(j.shell, TopAbs_FACE); ex.More(); ex.Next()) {
+    gp_Pnt p;
+    gp_Pnt2d uv;
+    if (BOPTools_AlgoTools3D::PointInFace(TopoDS::Face(ex.Current()), p, uv, context) != 0) {
+      continue;
+    }
     where.Perform(p, eps);
     if (where.State() == TopAbs_OUT) {
       return Placement::kOutside;
@@ -233,7 +225,6 @@ Closure close_into_solids(const TopoDS_Shape& sewn, const std::vector<TopoDS_She
     if (std::optional<std::string> why = orient_and_measure(closed[i])) {
       return {TopoDS_Shape(), ShellRefusal{shells[i], *why, TopoDS_Shell()}};
     }
-    closed[i].samples = samples_of(closed[i].shell, context);
   }
 
   std::vector<std::vector<std::size_t>> containers(n);
@@ -246,7 +237,7 @@ Closure close_into_solids(const TopoDS_Shape& sewn, const std::vector<TopoDS_She
       if (!where.has_value()) {
         where.emplace(closed[i].solid);
       }
-      const Placement placement = place(closed[j], closed[i], *where);
+      const Placement placement = place(closed[j], closed[i], *where, context);
       if (placement == Placement::kInside) {
         containers[j].push_back(i);
       } else if (placement == Placement::kUndecided) {
