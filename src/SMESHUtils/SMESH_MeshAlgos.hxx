@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -168,6 +168,13 @@ namespace SMESH_MeshAlgos
                              const gp_XY& t0, const gp_XY& t1, const gp_XY& t2,
                              double &    bc0, double &    bc1);
 
+  /*!
+   * \brief Intersect volume by a ray
+   */
+  bool IntersectRayVolume( const gp_Ax1& ray, const double rayLen,
+                           const SMDS_MeshElement* vol,
+                           double & tMin, double & tMax,
+                           int & iFacetMin, int & iFacetMax);
   /*!
    * Return a face having linked nodes n1 and n2 and which is
    * - not in avoidSet,

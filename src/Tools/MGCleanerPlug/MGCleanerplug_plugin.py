@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2013-2022  EDF R&D
+# Copyright (C) 2013-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -29,7 +29,10 @@ def MGCleanerLct(context):
   import os
   import subprocess
   import tempfile
-  from qtsalome import QFileDialog, QMessageBox
+  if 'SALOME_USE_PYSIDE' in os.environ:
+    from PySide2.QtWidgets import QFileDialog, QMessageBox
+  else:
+    from PyQt5.Qt import QFileDialog, QMessageBox
   
   import MGCleanerMonPlugDialog
   window = MGCleanerMonPlugDialog.getDialog()

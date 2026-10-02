@@ -44,6 +44,14 @@
         <translation>Group elements by type</translation>
     </message>
     <message>
+        <source>INP_FILES_FILTER</source>
+        <translation>ABAQUS INP files</translation>
+    </message>
+    <message>
+        <source>STRUCTUREDCGNS</source>
+        <translation>Structured version (only for Hexahedron(i,j,k) and Quadrangle: Mapping meshes)</translation>
+    </message>
+    <message>
         <source>GMF_ASCII_FILES_FILTER</source>
         <translation>GMF ASCII files</translation>
     </message>
@@ -96,6 +104,10 @@
         <translation>Volumes with bare border</translation>
     </message>
     <message>
+        <source>SCALED_JACOBIAN</source>
+        <translation>Scaled Jacobian</translation>
+    </message>
+    <message>
         <source>OVER_CONSTRAINED_VOLUME</source>
         <translation>Over-constrained volumes</translation>
     </message>
@@ -110,6 +122,10 @@
     <message>
         <source>ASPECTRATIO_3D_ELEMENTS</source>
         <translation>Aspect Ratio 3D</translation>
+    </message>
+    <message>
+        <source>WARPING_3D_ELEMENTS</source>
+        <translation>Warping 3D</translation>
     </message>
     <message>
         <source>ASPECTRATIO_ELEMENTS</source>
@@ -261,6 +277,10 @@
         <translation>Mesh Information</translation>
     </message>
     <message>
+        <source>MEN_RELOAD_FROM_FILE</source>
+        <translation>Reload from file</translation>
+    </message>
+    <message>
         <source>MEN_ALL</source>
         <translation>All</translation>
     </message>
@@ -291,6 +311,10 @@
     <message>
         <source>MEN_COPY_MESH</source>
         <translation>Copy Mesh</translation>
+    </message>
+    <message>
+    <source>MEN_CREATE_DUAL_MESH</source>
+        <translation>Create Dual Mesh</translation>
     </message>
     <message>
         <source>MEN_CLIP</source>
@@ -467,6 +491,10 @@
     <message>
         <source>MEN_2D_FROM_3D</source>
         <translation>Create boundary elements</translation>
+    </message>
+    <message>
+        <source>MEN_2D_FROM_3D_ELEMENTS</source>
+        <translation>Create 2D mesh from 3D elements</translation>
     </message>
     <message>
         <source>MEN_MESH_ORDER</source>
@@ -857,6 +885,46 @@
         <translation>MED file</translation>
     </message>
     <message>
+        <source>MEN_IMPORT_MAIL</source>
+        <translation>MAIL file</translation>
+    </message>
+    <message>
+        <source>MEN_IMPORT_INP</source>
+        <translation>INP file</translation>
+    </message>
+    <message>
+        <source>MEN_IMPORT_CDB</source>
+        <translation>CDB file</translation>
+    </message>
+    <message>
+        <source>MEN_IMPORT_ASC</source>
+        <translation>ASC file</translation>
+    </message>
+    <message>
+        <source>MEN_IMPORT_GEOF</source>
+        <translation>GEOF file</translation>
+    </message>
+    <message>
+        <source>MEN_MAIL</source>
+        <translation>MAIL file</translation>
+    </message>
+    <message>
+        <source>MEN_INP</source>
+        <translation>INP file</translation>
+    </message>
+    <message>
+        <source>MEN_CDB</source>
+        <translation>CDB file</translation>
+    </message>
+    <message>
+        <source>MEN_ASC</source>
+        <translation>ASC file</translation>
+    </message>
+    <message>
+        <source>MEN_GEOF</source>
+        <translation>GEOF file</translation>
+    </message>
+    <message>
         <source>MEN_IMPORT_CGNS</source>
         <translation>CGNS file</translation>
     </message>
@@ -871,6 +939,14 @@
     <message>
         <source>MEN_GMF</source>
         <translation>GMF file</translation>
+    </message>
+    <message>
+        <source>MEN_IMPORT_MESHIO</source>
+        <translation>other formats</translation>
+    </message>
+    <message>
+        <source>MEN_EXPORT_MESHIO</source>
+        <translation>other formats</translation>
     </message>
     <message>
         <source>MEN_MERGE</source>
@@ -1313,8 +1389,16 @@
         <translation>Volume</translation>
     </message>
     <message>
+        <source>MEN_SCALED_JACOBIAN</source>
+        <translation>Scaled Jacobian</translation>
+    </message>
+    <message>
         <source>MEN_WARP</source>
         <translation>Warping Angle</translation>
+    </message>
+    <message>
+        <source>MEN_WARP_3D</source>
+        <translation>Warping 3D</translation>
     </message>
     <message>
         <source>MEN_WHAT_IS</source>
@@ -1393,6 +1477,11 @@ Please, select a mesh and try again</translation>
         <source>GROUP_NAME_IS_EMPTY</source>
         <translation>Name of group is not specified.
 Please enter a name of new group to be created or choose an existing one.</translation>
+    </message>
+    <message>
+        <source>SEVERAL_GROUPS_IN_SELECTION</source>
+        <translation>You are probably trying to select objects belonging to different groups. 
+Please select only objects from the same group.</translation>
     </message>
     <message>
         <source>MESH_GEOM_GRP_CHOSEN</source>
@@ -1948,6 +2037,10 @@ Probably, there is not enough space on disk, or the version of MED file used is 
 </translation>
     </message>
     <message>
+        <source>SMESH_EXPORT_FAILED_SHORT</source>
+        <translation>Mesh export failed.</translation>
+    </message>
+    <message>
         <source>SMESH_EXPORT_MED_DUPLICATED_GRP</source>
         <translation>There are duplicated group names in mesh &quot;%1&quot;.
 You can cancel exporting and rename them,
@@ -1978,6 +2071,34 @@ Overwrite the file?</translation>
 meshes with the following names: %1
 The result file may be incorrect.
 Overwrite the file?</translation>
+    </message>
+    <message>
+        <source>SMESH_EXPORT_MESHIO_ONLY_MESH</source>
+        <translation>Current implementation uses export through intermediate MED file.
+However, meshio does not support reading MED files with more than one mesh.
+Selected meshes will be saved into separated files.
+
+Do you want to continue?</translation>
+    </message>
+    <message>
+        <source>SMESH_MESHIO_NOT_INSTALLED</source>
+        <translation>Meshio is not installed!
+Operation will be canceled.
+
+Try to install meshio with a command:
+pip install meshio[all]</translation>
+    </message>
+    <message>
+        <source>SMESH_CONVERT_LIB_NOT_INSTALLED</source>
+        <translation>Converter is not installed!
+Operation will be canceled.
+        </translation>
+    </message>
+    <message>
+        <source>SMESH_EXPORT_UNKNOWN_LIB</source>
+        <translation>Unknown export library!
+Operation will be canceled.
+        </translation>
     </message>
     <message>
         <source>EXPORT_NOT_SUPPORTED</source>
@@ -2219,6 +2340,14 @@ Check algorithm documentation for supported geometry</translation>
     <message>
         <source>SMESH_LOGARITHMIC_SCALARBAR</source>
         <translation>Logarithmic</translation>
+    </message>
+    <message>
+        <source>SMESH_TRESHOLD_SCALARBAR</source>
+        <translation>Threshold</translation>
+    </message>
+    <message>
+        <source>SMESH_WIREFRAME_OFF_SCALARBAR</source>
+        <translation>Wireframe Off</translation>
     </message>
     <message>
         <source>SMESH_MAKE_GROUPS</source>
@@ -3269,6 +3398,10 @@ Use Display Entity menu command to show them.
         <translation>Show base information about the mesh object</translation>
     </message>
     <message>
+        <source>STB_RELOAD_FROM_FILE</source>
+        <translation>Reload original mesh from file</translation>
+    </message>
+    <message>
         <source>STB_ALL</source>
         <translation>All</translation>
     </message>
@@ -3299,6 +3432,10 @@ Use Display Entity menu command to show them.
     <message>
         <source>STB_COPY_MESH</source>
         <translation>Copy Mesh</translation>
+    </message>
+    <message>
+        <source>STB_CREATE_DUAL_MESH</source>
+        <translation>Create Dual Mesh</translation>
     </message>
     <message>
         <source>STB_CLIP</source>
@@ -3355,6 +3492,10 @@ Use Display Entity menu command to show them.
     <message>
         <source>STB_2D_FROM_3D</source>
         <translation>Create boundary elements</translation>
+    </message>
+    <message>
+        <source>STB_2D_FROM_3D_ELEMENTS</source>
+        <translation>Create 2D mesh from 3D elements</translation>
     </message>
     <message>
         <source>STB_MESH_ORDER</source>
@@ -3493,6 +3634,10 @@ Use Display Entity menu command to show them.
         <translation>Export to UNV file</translation>
     </message>
     <message>
+        <source>STB_EXPORT_MESHIO</source>
+        <translation>Export to other formats via GMSH or MESHIO</translation>
+    </message>
+    <message>
         <source>STB_EXTRUSION</source>
         <translation>Extrusion</translation>
     </message>
@@ -3611,6 +3756,10 @@ Use Display Entity menu command to show them.
     <message>
         <source>STB_IMPORT_GMF</source>
         <translation>Import GMF file</translation>
+    </message>
+    <message>
+        <source>STB_IMPORT_MESHIO</source>
+        <translation>Import file via GMSH or MESHIO</translation>
     </message>
     <message>
         <source>STB_GMF</source>
@@ -3897,7 +4046,15 @@ Use Display Entity menu command to show them.
         <translation>Volume</translation>
     </message>
     <message>
+        <source>STB_SCALED_JACOBIAN</source>
+        <translation>Scaled Jacobian</translation>
+    </message>
+    <message>
         <source>STB_WARP</source>
+        <translation>Warping angle</translation>
+    </message>
+    <message>
+        <source>STB_WARP_3D</source>
         <translation>Warping angle</translation>
     </message>
     <message>
@@ -3993,6 +4150,10 @@ Use Display Entity menu command to show them.
         <translation>Mesh Information</translation>
     </message>
     <message>
+        <source>TOP_RELOAD_FROM_FILE</source>
+        <translation>Reload from file</translation>
+    </message>
+    <message>
         <source>TOP_ALL</source>
         <translation>All</translation>
     </message>
@@ -4079,6 +4240,10 @@ Use Display Entity menu command to show them.
     <message>
         <source>TOP_2D_FROM_3D</source>
         <translation>Create boundary elements</translation>
+    </message>
+    <message>
+        <source>TOP_2D_FROM_3D_ELEMENTS</source>
+        <translation>Create 2D mesh from 3D elements</translation>
     </message>
     <message>
         <source>TOP_MESH_ORDER</source>
@@ -4609,8 +4774,16 @@ Use Display Entity menu command to show them.
         <translation>Volume</translation>
     </message>
     <message>
+        <source>TOP_SCALED_JACOBIAN</source>
+        <translation>Scaled Jacobian</translation>
+    </message>
+    <message>
         <source>TOP_WARP</source>
         <translation>Warping angle</translation>
+    </message>
+    <message>
+        <source>TOP_WARP_3D</source>
+        <translation>Warping 3D</translation>
     </message>
     <message>
         <source>TOP_WHAT_IS</source>
@@ -4635,6 +4808,10 @@ Use Display Entity menu command to show them.
     <message>
         <source>WARP_ELEMENTS</source>
         <translation>Warping</translation>
+    </message>
+    <message>
+        <source>WARP_3D_ELEMENTS</source>
+        <translation>Warping 3D</translation>
     </message>
     <message>
         <source>MEN_FILE_INFO</source>
@@ -5680,6 +5857,29 @@ Please specify it and try again</translation>
     </message>
 </context>
 <context>
+    <name>SMESHGUI_CreateDualMeshDlg</name>
+    <message>
+        <source>CAPTION</source>
+        <translation>Create Dual Mesh</translation>
+    </message>
+    <message>
+        <source>MESH</source>
+        <translation>Mesh or Sub-mesh</translation>
+    </message>
+    <message>
+        <source>NON_TETRA_MESH_WARNING</source>
+        <translation>Warning: mesh must have only Tetrahedron 3D elements</translation>
+    </message>
+    <message>
+        <source>DUAL_MESH_NAME</source>
+        <translation>Name of the dual mesh</translation>
+    </message>
+    <message>
+        <source>PROJ_SHAPE</source>
+        <translation>Project boundary elements on shape</translation>
+    </message>
+</context>
+<context>
     <name>SMESHGUI_ConvToQuadOp</name>
     <message>
         <source>MESH_IS_NOT_SELECTED</source>
@@ -6231,6 +6431,10 @@ Please check input data and try again</translation>
         <translation>Aspect ratio 3D</translation>
     </message>
     <message>
+        <source>WARPING_3D</source>
+        <translation>Warping 3D</translation>
+    </message>
+    <message>
         <source>BAD_ORIENTED_VOLUME</source>
         <translation>Bad oriented volume</translation>
     </message>
@@ -6456,6 +6660,10 @@ Please enter correct value and try again</translation>
     <message>
         <source>VOLUME_3D</source>
         <translation>Volume</translation>
+    </message>
+    <message>
+        <source>SCALED_JACOBIAN</source>
+        <translation>Scaled Jacobian</translation>
     </message>
     <message>
         <source>WARPING</source>
@@ -7367,6 +7575,14 @@ It is impossible to read point coordinates from file</translation>
         <source>ALL_DOMAINS</source>
         <translation>All domains</translation>
     </message>
+    <message>
+        <source>ADVANCED_OPTIONS</source>
+        <translation>Advanced options</translation>
+    </message>
+    <message>
+        <source>AVOID_GENERATING_OVER_CONSTRAINED_VOLUMES</source>
+        <translation>Avoid generating over-constrained volumes </translation>
+    </message>
 </context>
 <context>
     <name>SMESHGUI_PrecisionDlg</name>
@@ -7846,6 +8062,17 @@ It is impossible to read point coordinates from file</translation>
     </message>
 </context>
 <context>
+    <name>SMESHGUI_MakeFull2DFrom3DDlg</name>
+    <message>
+        <source>CAPTION</source>
+        <translation>Create 2D mesh from 3D elements</translation>
+    </message>
+    <message>
+        <source>2D_FROM_3D_ELEMENTS</source>
+        <translation>2D from 3D</translation>
+    </message>
+</context>    
+<context>
     <name>SMESHGUI_Make2DFrom3DDlg</name>
     <message>
         <source>CAPTION</source>
@@ -7894,6 +8121,43 @@ It is impossible to read point coordinates from file</translation>
     <message>
         <source>CREATE_GROUP</source>
         <translation>Create group</translation>
+    </message>
+</context>
+<context>
+    <name>SMESHGUI_MakeFull2DFrom3DOp</name>
+    <message>
+        <source>NB_ADDED</source>
+        <translation>%1 boundary elements have been added</translation>
+    </message>
+    <message>
+        <source>WRONG_GROUPS</source>
+        <translation>The following groups have not been processed
+as they are of improper type:
+%1</translation>
+    </message>
+    <message>
+        <source>SMESH_ERR_NO_INPUT_MESH</source>
+        <translation>Source mesh is not specified</translation>
+    </message>
+    <message>
+        <source>SMESH_TOO_MANY_MESHES</source>
+        <translation>Only one mesh can be processed at once</translation>
+    </message>
+    <message>
+        <source>SMESH_NOT_ONLY_GROUPS</source>
+        <translation>Can&apos;t process meshes and groups at once</translation>
+    </message>
+    <message>
+        <source>SMESH_ERR_NO_3D_ELEMENTS</source>
+        <translation>The source objects do not contain 3D elements</translation>
+    </message>
+    <message>
+        <source>SMESH_ERR_MESH_NAME_NOT_SPECIFIED</source>
+        <translation>New mesh name is not specified</translation>
+    </message>
+    <message>
+        <source>SMESH_ERR_GRP_NAME_NOT_SPECIFIED</source>
+        <translation>Group name is not specified</translation>
     </message>
 </context>
 <context>
@@ -8981,6 +9245,14 @@ red in the Object Browser.</translation>
     <message>
         <source>AverageLengthForHypoSet</source>
         <translation>Mean Size</translation>
+    </message>
+</context>
+<context>
+    <name>SMESHGUI_SpinBoxForbiddendRange</name>
+    <message>
+        <source>VALID_RANGE_NOVAR_MSG</source>
+        <translation>Specify a floating-point value in range [%1; %2) U (%3; %4]
+with %5-digit precision</translation>
     </message>
 </context>
 </TS>

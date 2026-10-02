@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -232,6 +232,50 @@ CORBA::Double StdMeshers_NumberOfSegments_i::GetScaleFactor()
                                   SALOME::BAD_PARAM );
   }
   return scale;
+}
+
+//=============================================================================
+/*!
+ *  StdMeshers_NumberOfSegments_i::SetBeta
+ *
+ *  Set beta coefficient for Beta Law distribution
+ */
+//=============================================================================
+
+void StdMeshers_NumberOfSegments_i::SetBeta(CORBA::Double beta)
+{
+  ASSERT(myBaseImpl);
+  try {
+    this->GetImpl()->SetBeta(beta);
+    // Update Python script
+    SMESH::TPythonDump() << _this() << ".SetBeta( " << SMESH::TVar(beta) << " )";
+  }
+  catch (SALOME_Exception& S_ex) {
+    THROW_SALOME_CORBA_EXCEPTION(S_ex.what(), SALOME::BAD_PARAM);
+  }
+}
+
+//=============================================================================
+/*!
+ *  StdMeshers_NumberOfSegments_i::GetBeta
+ *
+ *  Get beta coefficient for Beta Law distribution
+ */
+//=============================================================================
+
+CORBA::Double StdMeshers_NumberOfSegments_i::GetBeta()
+{
+  ASSERT(myBaseImpl);
+
+  double beta = 1.0;
+  try {
+    beta = this->GetImpl()->GetBeta();
+  }
+  catch (SALOME_Exception& S_ex) {
+    THROW_SALOME_CORBA_EXCEPTION(S_ex.what(), SALOME::BAD_PARAM);
+  }
+
+  return beta;
 }
 
 //=============================================================================

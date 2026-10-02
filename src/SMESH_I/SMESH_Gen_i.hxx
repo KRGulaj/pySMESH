@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -231,27 +231,87 @@ public:
   // Create empty mesh on a shape
   SMESH::SMESH_Mesh_ptr CreateMesh( GEOM::GEOM_Object_ptr theShapeObject );
 
+  // Create empty parallel mesh on a shape
+  SMESH::SMESH_ParallelMesh_ptr CreateParallelMesh( GEOM::GEOM_Object_ptr theShapeObject );
+
   // Create empty mesh
   SMESH::SMESH_Mesh_ptr CreateEmptyMesh();
 
+  SMESH::SMESH_Mesh_ptr ReloadMeshFromFile(SMESH::SMESH_Mesh_ptr theMesh);
+
   //  Create a mesh and import data from an UNV file
   SMESH::SMESH_Mesh_ptr CreateMeshesFromUNV( const char* theFileName );
+
+  SMESH::SMESH_Mesh_ptr ReloadMeshesFromUNV(const char*           theFileName,
+                                            SMESH::SMESH_Mesh_ptr sourceMesh);
 
   //  Create mesh(es) and import data from MED file
   SMESH::mesh_array* CreateMeshesFromMED( const char* theFileName,
                                           SMESH::DriverMED_ReadStatus& theStatus );
 
+  SMESH::mesh_array* ReloadMeshesFromMED(const char*                  theFileName,
+                                         SMESH::SMESH_Mesh_ptr        sourceMesh,
+                                         SMESH::DriverMED_ReadStatus& theStatus);
+
+  //  Create mesh(es) and import data from MAIL file
+  SMESH::mesh_array* CreateMeshesFromMAIL( const char* theFileName,
+                                          SMESH::DriverMED_ReadStatus& theStatus );
+
+  //  Create mesh(es) and import data from INP (abaqus) file
+  SMESH::mesh_array* CreateMeshesFromINP( const char* theFileName,
+                                          SMESH::DriverMED_ReadStatus& theStatus ) override;
+                                          
+  //  Create mesh(es) and import data from CDB (ansys) file
+  SMESH::mesh_array* CreateMeshesFromCDB( const char* theFileName,
+                                          SMESH::DriverMED_ReadStatus& theStatus ) override;
+
+  //  Create mesh(es) and import data from ASC (systus) file
+  SMESH::mesh_array* CreateMeshesFromASC( const char* theFileName,
+                                          SMESH::DriverMED_ReadStatus& theStatus ) override;
+                                          
+  //  Create mesh(es) and import data from GEOF (zset) file
+  SMESH::mesh_array* CreateMeshesFromGEOF( const char* theFileName,
+                                          SMESH::DriverMED_ReadStatus& theStatus ) override;
+
   //  Create a mesh and import data from a STL file
   SMESH::SMESH_Mesh_ptr CreateMeshesFromSTL( const char* theFileName );
+
+  SMESH::SMESH_Mesh_ptr ReloadMeshesFromSTL(const char*           theFileName,
+                                            SMESH::SMESH_Mesh_ptr sourceMesh);
 
   //  Create mesh(es) and import data from CGNS file
   SMESH::mesh_array* CreateMeshesFromCGNS( const char* theFileName,
                                            SMESH::DriverMED_ReadStatus& theStatus );
 
+  SMESH::mesh_array* ReloadMeshesFromCGNS(const char*                  theFileName,
+                                          SMESH::SMESH_Mesh_ptr        sourceMesh, 
+                                          SMESH::DriverMED_ReadStatus& theStatus);
+
   //  Create a mesh and import data from a GMF file
   SMESH::SMESH_Mesh_ptr CreateMeshesFromGMF( const char*             theFileName,
                                              CORBA::Boolean          theMakeRequiredGroups,
                                              SMESH::ComputeError_out theError);
+
+  SMESH::SMESH_Mesh_ptr ReloadMeshesFromGMF(const char* theFileName,
+                                            SMESH::SMESH_Mesh_ptr        sourceMesh,
+                                            CORBA::Boolean          theMakeRequiredGroups,
+                                            SMESH::ComputeError_out theError);
+
+  //  Create a mesh and import data from any file supported by meshio library
+  SMESH::mesh_array* CreateMeshesFromMESHIO(const char*             theFileName,
+                                            SMESH::DriverMED_ReadStatus& theStatus,
+                                            const char* selectedFilter = nullptr,
+                                            const char* converter = nullptr);
+
+  SMESH::mesh_array* ReloadMeshesFromMESHIO(const char* theFileName,
+                                          SMESH::SMESH_Mesh_ptr        sourceMesh,
+                                          SMESH::DriverMED_ReadStatus& theStatus,
+                                          const char* converter = nullptr);
+
+  // Create dual mesh of a tetrahedron mesh
+  SMESH::SMESH_Mesh_ptr CreateDualMesh(SMESH::SMESH_IDSource_ptr meshPart,
+                                       const char*               meshName,
+                                       CORBA::Boolean            adapt_to_shape);
 
   // Copy a part of mesh
   SMESH::SMESH_Mesh_ptr CopyMesh(SMESH::SMESH_IDSource_ptr meshPart,
@@ -456,7 +516,15 @@ public:
                                        CORBA::Boolean isMultiFile,
                                        CORBA::Boolean& isValidScript);
 
+  // Internal method used by C++ TPythonDump class destructor
   void AddToPythonScript (const TCollection_AsciiString& theString);
+
+  // CORBA interface method (idl interfaced) for Python plugins
+  virtual void AddToPythonScript (const char* theCommand);
+
+  void PausePythonDumpRecording();
+
+  void ResumePythonDumpRecording();
 
   void RemoveLastFromPythonScript();
 
@@ -512,7 +580,8 @@ public:
   // publishing methods
   SALOMEDS::SComponent_ptr PublishComponent();
   SALOMEDS::SObject_ptr PublishMesh (SMESH::SMESH_Mesh_ptr theMesh,
-                                     const char*           theName = 0);
+                                     const char*           theName = 0,
+                                     const char*           thePixMap = 0);
   SALOMEDS::SObject_ptr PublishHypothesis (SMESH::SMESH_Hypothesis_ptr theHyp,
                                            const char*                 theName = 0);
   SALOMEDS::SObject_ptr PublishSubMesh (SMESH::SMESH_Mesh_ptr    theMesh,
@@ -524,6 +593,7 @@ public:
                                       GEOM::GEOM_Object_ptr  theShapeObject,
                                       const char*            theName = 0);
   void UpdateIcons(SMESH::SMESH_Mesh_ptr theMesh);
+  void UpdateGroupIcon(SMESH::SMESH_GroupBase_ptr theGroup);
   void HighLightInvalid(CORBA::Object_ptr theObject, bool isInvalid);
   bool IsInvalid(SALOMEDS::SObject_ptr theObject);
   bool AddHypothesisToShape(SMESH::SMESH_Mesh_ptr       theMesh,
@@ -618,6 +688,10 @@ public:
                                 CORBA::Double             theTolerance );
 
 private:
+
+  SMESH::mesh_array* CreateMeshesFromMEDConverterInMedcoupling( const char* theFileName,
+                                          SMESH::DriverMED_ReadStatus& theStatus, const std::string& converterPyFuncName);
+
   // Get hypothesis creator
   GenericHypothesisCreator_i* getHypothesisCreator( const char*  theHypName,
                                                     const char*  theLibName,
@@ -627,6 +701,7 @@ private:
                                                 const char* theLibName);
   // Create empty mesh on shape
   SMESH::SMESH_Mesh_ptr createMesh();
+  SMESH::SMESH_ParallelMesh_ptr createParallelMesh();
 
   // Check mesh icon
   bool isGeomModifIcon( SMESH::SMESH_Mesh_ptr mesh );

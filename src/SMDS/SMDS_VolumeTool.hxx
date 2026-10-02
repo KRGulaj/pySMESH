@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -103,6 +103,9 @@ class SMDS_EXPORT SMDS_VolumeTool
   double GetSize() const;
   // Return element volume
 
+  double GetScaledJacobian() const;
+  // Return the scaled jacobian 
+
   bool GetBaryCenter (double & X, double & Y, double & Z) const;
 
   bool IsOut(double X, double Y, double Z, double tol) const;
@@ -185,6 +188,12 @@ class SMDS_EXPORT SMDS_VolumeTool
   bool IsFreeFace(  int faceIndex, const SMDS_MeshElement** otherVol=0 ) const;
   // Fast check that only one volume is built on nodes of a given face
   // otherVol returns another volume sharing the given facet
+  // Function works for conforming mesh.
+
+  bool IsFreeFaceCheckAllNodes(  int faceIndex, const SMDS_MeshElement** otherVol=0 ) const;
+  // Check that only one volume is built on nodes of a given face
+  // otherVol returns another volume sharing the given facet
+  // Function to be used on mesh with non conforming elements. The face shared between 
 
   bool IsFreeFaceAdv(  int faceIndex, const SMDS_MeshElement** otherVol=0 ) const;
   // Thorough check that all volumes built on the face nodes lays on one side
@@ -195,6 +204,10 @@ class SMDS_EXPORT SMDS_VolumeTool
 
   bool GetFaceBaryCenter (int faceIndex, double & X, double & Y, double & Z) const;
   // Return barycenter of a face
+
+  bool AllFacesSameOriented() const;
+  // Check that all the faces of a polyhedron have the same orientation
+  // no differentiation between inward and outward orientation is made.
 
   double GetFaceArea( int faceIndex ) const;
   // Return face area

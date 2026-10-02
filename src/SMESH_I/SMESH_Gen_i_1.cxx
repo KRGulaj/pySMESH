@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -45,12 +45,6 @@
 #include <TopoDS_Solid.hxx>
 
 #include <cctype>
-
-#ifdef _DEBUG_
-static int MYDEBUG = 0;
-#else
-static int MYDEBUG = 0;
-#endif
 
 using namespace std;
 
@@ -162,7 +156,7 @@ long SMESH_Gen_i::GetBallElementsGroupsTag()
 
 bool SMESH_Gen_i::CanPublishInStudy(CORBA::Object_ptr theIOR)
 {
-  if(MYDEBUG) MESSAGE("CanPublishInStudy - "<<!CORBA::is_nil(getStudyServant()));
+  MESSAGE("CanPublishInStudy - "<<!CORBA::is_nil(getStudyServant()));
   
   if ( !myIsEnablePublish )
     return false;
@@ -183,7 +177,7 @@ bool SMESH_Gen_i::CanPublishInStudy(CORBA::Object_ptr theIOR)
   if( !aGroup->_is_nil() )
     return true;
 
-  if(MYDEBUG) MESSAGE("CanPublishInStudy--CANT");
+  MESSAGE("CanPublishInStudy--CANT");
   return false;
 }
 
@@ -501,7 +495,7 @@ SALOMEDS::SObject_ptr SMESH_Gen_i::PublishInStudy(SALOMEDS::SObject_ptr /*theSOb
     return aSO._retn();
   if ( CORBA::is_nil( theIOR ))
     return aSO._retn();
-  if(MYDEBUG) MESSAGE("PublishInStudy");
+  MESSAGE("PublishInStudy");
 
   // Publishing a mesh
   SMESH::SMESH_Mesh_var aMesh = SMESH::SMESH_Mesh::_narrow( theIOR );
@@ -528,7 +522,7 @@ SALOMEDS::SObject_ptr SMESH_Gen_i::PublishInStudy(SALOMEDS::SObject_ptr /*theSOb
     aMesh = aGroup->GetMesh();
     aSO = PublishGroup( aMesh, aGroup, aShapeObject, theName );
   }
-  if(MYDEBUG) MESSAGE("PublishInStudy_END");
+  MESSAGE("PublishInStudy_END");
 
   return aSO._retn();
 }
@@ -540,7 +534,7 @@ SALOMEDS::SObject_ptr SMESH_Gen_i::PublishInStudy(SALOMEDS::SObject_ptr /*theSOb
 
 SALOMEDS::SComponent_ptr SMESH_Gen_i::PublishComponent()
 {
-  if(MYDEBUG) MESSAGE("PublishComponent");
+  MESSAGE("PublishComponent");
   if ( !myIsEnablePublish )
     return SALOMEDS::SComponent::_nil();
 
@@ -602,7 +596,7 @@ SALOMEDS::SComponent_ptr SMESH_Gen_i::PublishComponent()
   // (to support tree representation customization and drag-n-drop)
   useCaseBuilder->SetRootCurrent();
   useCaseBuilder->Append( father ); // component object is added as the top level item
-  if(MYDEBUG) MESSAGE("PublishComponent--END");
+  MESSAGE("PublishComponent--END");
 
   return father._retn();
 }
@@ -613,13 +607,14 @@ SALOMEDS::SComponent_ptr SMESH_Gen_i::PublishComponent()
 //=======================================================================
 
 SALOMEDS::SObject_ptr SMESH_Gen_i::PublishMesh (SMESH::SMESH_Mesh_ptr theMesh,
-                                                const char*           theName)
+                                                const char*           theName,
+                                                const char*           thePixMap)
 {
   if ( !myIsEnablePublish )
     return SALOMEDS::SObject::_nil();
   if ( CORBA::is_nil( theMesh ))
     return SALOMEDS::SObject::_nil();
-  if(MYDEBUG) MESSAGE("PublishMesh--IN");
+  MESSAGE("PublishMesh--IN");
 
   // find or publish a mesh
 
@@ -637,7 +632,8 @@ SALOMEDS::SObject_ptr SMESH_Gen_i::PublishMesh (SMESH::SMESH_Mesh_ptr theMesh,
     else
       aTag++;
 
-    aMeshSO = publish( theMesh, father, aTag, "ICON_SMESH_TREE_MESH_WARN" );
+    aMeshSO = publish( theMesh, father, aTag,
+                       thePixMap ? thePixMap : "ICON_SMESH_TREE_MESH_WARN" );
     if ( aMeshSO->_is_nil() )
       return aMeshSO._retn();
   }
@@ -690,7 +686,7 @@ SALOMEDS::SObject_ptr SMESH_Gen_i::PublishMesh (SMESH::SMESH_Mesh_ptr theMesh,
     }
   }
 
-  if(MYDEBUG) MESSAGE("PublishMesh_END");
+  MESSAGE("PublishMesh_END");
   return aMeshSO._retn();
 }
 
@@ -900,7 +896,7 @@ SALOMEDS::SObject_ptr
 SMESH_Gen_i::PublishHypothesis (SMESH::SMESH_Hypothesis_ptr theHyp,
                                 const char*                 theName)
 {
-  if(MYDEBUG) MESSAGE("PublishHypothesis");
+  MESSAGE("PublishHypothesis");
   if ( !myIsEnablePublish )
     return SALOMEDS::SObject::_nil();
   if (theHyp->_is_nil())
@@ -935,7 +931,7 @@ SMESH_Gen_i::PublishHypothesis (SMESH::SMESH_Hypothesis_ptr theHyp,
 
   SetName( aHypSO, theName, hypType.in() );
 
-  if(MYDEBUG) MESSAGE("PublishHypothesis--END")
+  MESSAGE("PublishHypothesis--END");
   return aHypSO._retn();
 }
 
@@ -983,18 +979,13 @@ void SMESH_Gen_i::UpdateIcons( SMESH::SMESH_Mesh_ptr theMesh )
       if ( idSrc->_is_nil() )
         continue;
 
-      SMESH::SMESH_GroupBase_var     grp = SMESH::SMESH_GroupBase::_narrow( obj );
-      SMESH::SMESH_GroupOnFilter_var gof = SMESH::SMESH_GroupOnFilter::_narrow( obj );
-      const bool         isGroup = !grp->_is_nil();
-      const bool isGroupOnFilter = !gof->_is_nil();
-
       bool isEmpty = ( mesh_i->NbNodes() == 0 );
       if ( !isEmpty )
       {
-        if ( isGroupOnFilter ) // GetTypes() can be very long on GroupOnFilter!
-        {
-          SMESH::smIdType_array_var nbByType = mesh_i->GetNbElementsByType();
-          isEmpty = ( nbByType[ grp->GetType() ] == 0 );
+        SMESH::SMESH_GroupBase_var grp = SMESH::SMESH_GroupBase::_narrow( obj );
+        if ( !grp->_is_nil() ) {
+          UpdateGroupIcon(grp);
+          continue;
         }
         else
         {
@@ -1019,15 +1010,44 @@ void SMESH_Gen_i::UpdateIcons( SMESH::SMESH_Mesh_ptr theMesh )
 
       if ( isEmpty )
         SetPixMap( so, "ICON_SMESH_TREE_MESH_WARN");
-      else if ( !isGroup )
-        SetPixMap( so, "ICON_SMESH_TREE_MESH" );
-      else if ( isGroupOnFilter )
-        SetPixMap( so, "ICON_SMESH_TREE_GROUP_ON_FILTER" );
       else
-        SetPixMap( so, "ICON_SMESH_TREE_GROUP" );
+        SetPixMap( so, "ICON_SMESH_TREE_MESH" );
 
     } // loop on sub-meshes or groups
   } // loop on roots
+}
+
+//=======================================================================
+//function : UpdateGroupIcon
+//purpose  : update icon of a group
+//=======================================================================
+
+void SMESH_Gen_i::UpdateGroupIcon( SMESH::SMESH_GroupBase_ptr theGroup )
+{
+  SALOMEDS::SObject_wrap so = ObjectToSObject( theGroup );
+  if ( so->_is_nil() )
+    return;
+
+  SMESH::SMESH_GroupOnFilter_var gof = SMESH::SMESH_GroupOnFilter::_narrow( theGroup );
+  const bool isGroupOnFilter = !gof->_is_nil();
+
+  bool isEmpty = false;
+  if ( isGroupOnFilter ) // GetTypes() can be very long on GroupOnFilter!
+  {
+    SMESH::smIdType_array_var nbByType = theGroup->GetMesh()->GetNbElementsByType();
+    isEmpty = ( nbByType[ theGroup->GetType() ] == 0 );
+  }
+  else
+  {
+    isEmpty = ( theGroup->Size() == 0 );
+  }
+
+  if ( isEmpty )
+    SetPixMap( so, "ICON_SMESH_TREE_MESH_WARN");
+  else if ( isGroupOnFilter )
+    SetPixMap( so, "ICON_SMESH_TREE_GROUP_ON_FILTER" );
+  else
+    SetPixMap( so, "ICON_SMESH_TREE_GROUP" );
 }
 
 //=======================================================================
@@ -1097,7 +1117,7 @@ SALOMEDS::SObject_ptr
 SMESH_Gen_i::GetMeshOrSubmeshByShape (SMESH::SMESH_Mesh_ptr theMesh,
                                       GEOM::GEOM_Object_ptr theShape)
 {
-  if(MYDEBUG) MESSAGE("GetMeshOrSubmeshByShape")
+  MESSAGE("GetMeshOrSubmeshByShape");
   SALOMEDS::SObject_wrap aMeshOrSubMesh;
   if (theMesh->_is_nil() || ( theShape->_is_nil() && theMesh->HasShapeToMesh()))
     return aMeshOrSubMesh._retn();
@@ -1121,7 +1141,7 @@ SMESH_Gen_i::GetMeshOrSubmeshByShape (SMESH::SMESH_Mesh_ptr theMesh,
         aMeshOrSubMesh = ObjectToSObject( aSubMesh );
     }
   }
-  if(MYDEBUG) MESSAGE("GetMeshOrSubmeshByShape--END")
+  MESSAGE("GetMeshOrSubmeshByShape--END");
   return aMeshOrSubMesh._retn();
 }
 
@@ -1134,7 +1154,7 @@ bool SMESH_Gen_i::AddHypothesisToShape(SMESH::SMESH_Mesh_ptr       theMesh,
                                        GEOM::GEOM_Object_ptr       theShape,
                                        SMESH::SMESH_Hypothesis_ptr theHyp)
 {
-  if(MYDEBUG) MESSAGE("AddHypothesisToShape")
+  MESSAGE("AddHypothesisToShape");
   if (theMesh->_is_nil() ||
       theHyp->_is_nil() || (theShape->_is_nil()
                             && theMesh->HasShapeToMesh()) )
@@ -1175,7 +1195,7 @@ bool SMESH_Gen_i::AddHypothesisToShape(SMESH::SMESH_Mesh_ptr       theMesh,
 
   addReference( AHR, theHyp );
 
-  if(MYDEBUG) MESSAGE("AddHypothesisToShape--END")
+  MESSAGE("AddHypothesisToShape--END");
   return true;
 }
 

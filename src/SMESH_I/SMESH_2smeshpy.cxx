@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -166,6 +166,65 @@ namespace {
 
   void CheckObjectPresence( const Handle(_pyCommand)& cmd, set<_pyID> & presentObjects)
   {
+    // Handle import statements - register imported names in presentObjects
+    const TCollection_AsciiString& cmdStr = cmd->GetString();
+
+    // Pattern "... import name [as xxx]" -> add name or xxx to presentObjects
+    if ( cmdStr.Search("import ") > 0)
+    {
+      int importPos = cmdStr.Search("import ");
+      TCollection_AsciiString afterImport = cmdStr.SubString(importPos + 7, cmdStr.Length());
+      afterImport.LeftAdjust();  // Strip whitespaces
+      afterImport.RightAdjust();
+      // Handle " as "
+      int asPos = afterImport.Search(" as ");
+      if (asPos > 0)
+      {
+        TCollection_AsciiString alias = afterImport.SubString(asPos + 4, afterImport.Length());
+        alias.RightAdjust();
+        alias.LeftAdjust();
+        if (!alias.IsEmpty())
+          presentObjects.insert(alias);
+      }
+      else
+      {
+        // Pattern "... import name1, name2, name3" -> add name1 name2 and name3 to presentObjects
+        int commaPos = afterImport.Search(",");
+        if (commaPos > 0)
+        {
+          // Extract each import
+          TCollection_AsciiString remaining = afterImport;
+          while (!remaining.IsEmpty())
+          {
+            commaPos = remaining.Search(",");
+            TCollection_AsciiString name;
+            if (commaPos > 0)
+            {
+              name = remaining.SubString(1, commaPos - 1);
+              remaining = remaining.SubString(commaPos + 1, remaining.Length());
+              remaining.LeftAdjust();
+            }
+            else
+            {
+              name = remaining;
+              remaining.Clear(); // leave the while
+            }
+            name.RightAdjust();
+            name.LeftAdjust();
+            if (!name.IsEmpty())
+              presentObjects.insert(name); // add comma separated import
+          }
+        } // Take the first one after import if no comma
+        else
+        {
+          afterImport.LeftAdjust();
+          if (!afterImport.IsEmpty())
+            presentObjects.insert(afterImport);
+        }
+      }
+      return;
+    }
+
     // either comment or erase a command including NotPublishedObjectName()
     if ( cmd->GetString().Location( TPythonDump::NotPublishedObjectName(), 1, cmd->Length() ))
     {
@@ -301,6 +360,10 @@ namespace {
     //   - FT_Deflection2D          = 22
     // v 9.3.0: FT_Undefined == 50, new items:
     //   - FT_Length3D              = 22
+    // v 9.12.0: FT_Undefined == 51, new items:
+    //   - FT_ScaledJacobian        = 8
+    // v 9.12.0: FT_Undefined == 52, new items:
+    //   - FT_Warping3D             = 4
     //
     // It's necessary to continue recording this history and to fill
     // undef2newItems (see below) accordingly.
@@ -325,6 +388,8 @@ namespace {
       undef2newItems[ 48 ].push_back( 22 );
       undef2newItems[ 49 ].push_back( 22 );
       undef2newItems[ 50 ].push_back( 22 );
+      undef2newItems[ 51 ].push_back( 8 );
+      undef2newItems[ 52 ].push_back( 4 );
 
       ASSERT( undef2newItems.rbegin()->first == SMESH::FT_Undefined );
     }
@@ -458,7 +523,7 @@ namespace {
       initialized = true;
       filteredArgs.push_back( "SMESH.MED_V2_1" );
       filteredArgs.push_back( "SMESH.MED_V2_2" );
-    }  
+    }
     return std::find( filteredArgs.begin(), filteredArgs.end(), theArg ) != filteredArgs.end();
   }
 }
@@ -694,6 +759,7 @@ Handle(_pyCommand) _pyGen::AddCommand( const TCollection_AsciiString& theCommand
   if ( objID == this->GetID() || objID == SMESH_2smeshpy::GenName())
   {
     this->Process( aCommand );
+
     //addFilterUser( aCommand, theGen ); // protect filters from clearing
     return aCommand;
   }
@@ -762,7 +828,7 @@ Handle(_pyCommand) _pyGen::AddCommand( const TCollection_AsciiString& theCommand
       meshID = aCommand->GetResultValue();
     else if ( method == "MakeBoundaryMesh")
       meshID = aCommand->GetResultValue(1);
-    else if ( method == "MakeBoundaryElements")
+    else if ( method == "MakeBoundaryElements" || method == "MakeBoundaryOfEachElement" )
       meshID = aCommand->GetResultValue(2);
 
     if ( method.Search("MakeGroups") != -1      ||
@@ -779,7 +845,7 @@ Handle(_pyCommand) _pyGen::AddCommand( const TCollection_AsciiString& theCommand
       groups = aCommand->GetResultValue();
     else if ( method == "MakeBoundaryMesh" )
       groups = aCommand->GetResultValue(2);
-    else if ( method == "MakeBoundaryElements")
+    else if ( method == "MakeBoundaryElements" || method == "MakeBoundaryOfEachElement" )
       groups = aCommand->GetResultValue(3);
     else if ( method == "Create0DElementsOnAllNodes" &&
               aCommand->GetArg(2).Length() > 2 ) // group name != ''
@@ -932,11 +998,13 @@ Handle(_pyCommand) _pyGen::AddCommand( const TCollection_AsciiString& theCommand
           "Geom_POLYHEDRA", "Geom_BALL" };
         if ( -1 < iGeom && iGeom < nbTypes )
           Threshold = SMESH + types[ iGeom ];
-#ifdef _DEBUG_
-        // is types complete? (compilation failure means that enum GeometryType changed)
-        static_assert( sizeof(types) / sizeof(const char*) == nbTypes,
-                       "Update names of GeometryType's!!!" );
-#endif
+
+        if (SALOME::VerbosityActivated())
+        {
+          // is types complete? (compilation failure means that enum GeometryType changed)
+          static_assert( sizeof(types) / sizeof(const char*) == nbTypes,
+                        "Update names of GeometryType's!!!" );
+        }
       }
       if (Type == "SMESH.FT_EntityType")
       {
@@ -953,11 +1021,13 @@ Handle(_pyCommand) _pyGen::AddCommand( const TCollection_AsciiString& theCommand
           "Entity_Polyhedra", "Entity_Quad_Polyhedra", "Entity_Ball" };
         if ( -1 < iGeom && iGeom < nbTypes )
           Threshold = SMESH + types[ iGeom ];
-#ifdef _DEBUG_
-        // is 'types' complete? (compilation failure means that enum EntityType changed)
-        static_assert( sizeof(types) / sizeof(const char*) == nbTypes,
-                       "Update names of EntityType's!!!" );
-#endif
+
+        if (SALOME::VerbosityActivated())
+        {
+          // is 'types' complete? (compilation failure means that enum EntityType changed)
+          static_assert( sizeof(types) / sizeof(const char*) == nbTypes,
+                        "Update names of EntityType's!!!" );
+        }
       }
     }
     if ( ThresholdID.Length() != 2 ) // neither '' nor ""
@@ -1002,9 +1072,11 @@ void _pyGen::Process( const Handle(_pyCommand)& theCommand )
 {
   // there are methods to convert:
   // CreateMesh( shape )
+  // ReloadMesh( shape )
   // Concatenate( [mesh1, ...], ... )
   // CreateHypothesis( theHypType, theLibName )
   // Compute( mesh, geom )
+  // CheckCompute( mesh )
   // Evaluate( mesh, geom )
   // mesh creation
   TCollection_AsciiString method = theCommand->GetMethod();
@@ -1022,6 +1094,7 @@ void _pyGen::Process( const Handle(_pyCommand)& theCommand )
   }
   if ( method == "CreateMeshesFromUNV" ||
        method == "CreateMeshesFromSTL" ||
+       method == "CreateDualMesh" ||
        method == "CopyMesh" ) // command result is a mesh
   {
     Handle(_pyMesh) mesh = new _pyMesh( theCommand, theCommand->GetResultValue() );
@@ -1053,6 +1126,13 @@ void _pyGen::Process( const Handle(_pyCommand)& theCommand )
     std::list< _pyID > entries = theCommand->GetStudyEntries( theCommand->GetResultValue() );
     Handle(_pyMesh) mesh = new _pyMesh( theCommand, entries.front() );
     AddObject( mesh );
+  }
+  if (method == "ReloadMeshFromFile")
+  {
+    std::cout << "WhatIS" << std::endl;
+    Handle(_pyMesh) mesh = new _pyMesh(theCommand, theCommand->GetResultValue());
+    AddObject(mesh);
+    return;
   }
 
   // CreateHypothesis()
@@ -1087,6 +1167,21 @@ void _pyGen::Process( const Handle(_pyCommand)& theCommand )
       return;
     }
   }
+
+  // smeshgen.CheckCompute( mesh ) --> mesh.CheckCompute()
+  if ( method == "CheckCompute" )
+  {
+    const _pyID& meshID = theCommand->GetArg( 1 );
+    map< _pyID, Handle(_pyMesh) >::iterator id_mesh = myMeshes.find( meshID );
+    if ( id_mesh != myMeshes.end() ) {
+      theCommand->SetObject( meshID );
+      theCommand->RemoveArgs();
+      id_mesh->second->Process( theCommand );
+      id_mesh->second->AddProcessedCmd( theCommand );
+      return;
+    }
+  }
+
 
   // smeshgen.Evaluate( mesh, geom ) --> mesh.Evaluate(geom)
   if ( method == "Evaluate" )
@@ -1820,14 +1915,15 @@ _pyMesh::_pyMesh(const Handle(_pyCommand) theCreationCmd, const _pyID& meshId):
   }
   else if ( theCreationCmd->GetMethod().Search("MakeMesh") != -1 ||
             theCreationCmd->GetMethod() == "MakeBoundaryMesh" ||
-            theCreationCmd->GetMethod() == "MakeBoundaryElements" )
+            theCreationCmd->GetMethod() == "MakeBoundaryElements" ||
+            theCreationCmd->GetMethod() == "MakeBoundaryOfEachElement" )
   {
     // this mesh depends on a source mesh
     // (theCreationCmd is already Process()ed by _pyMeshEditor)
     const _pyID& meshID = theCreationCmd->GetObject();
     addFatherMesh( meshID );
   }
-    
+
   // convert my creation command
   Handle(_pyCommand) creationCmd = GetCreationCmd();
   creationCmd->SetObject( SMESH_2smeshpy::SmeshpyName() );
@@ -1895,6 +1991,31 @@ void _pyMesh::Process( const Handle(_pyCommand)& theCommand )
         (*hyp)->MeshComputed( myLastComputeCmd );
     }
     Flush();
+  }
+  // in snapshot mode, clear the previous CheckCompute()
+  else if ( method == "CheckCompute" )
+  {
+    if ( !theGen->IsToKeepAllCommands() ) // !historical
+    {
+      if ( !myLastCheckCmd.IsNull() )
+      {
+        // check if the previously computed mesh has been edited,
+        // if so then we do not clear the previous Compute()
+        bool toClear = true;
+        list< Handle(_pyMeshEditor)>::iterator e = myEditors.begin();
+        for ( ; e != myEditors.end() && toClear; ++e )
+        {
+          list< Handle(_pyCommand)>& cmds = (*e)->GetProcessedCmds();
+          list< Handle(_pyCommand) >::reverse_iterator cmd = cmds.rbegin();
+          if ( cmd != cmds.rend() &&
+               (*cmd)->GetOrderNb() > myLastCheckCmd->GetOrderNb() )
+            toClear = false;
+        }
+        if ( toClear )
+          myLastCheckCmd->Clear();
+      }
+      myLastCheckCmd = theCommand;
+    }
   }
   // ----------------------------------------------------------------------
   else if ( method == "Clear" ) // in snapshot mode, clear all previous commands
@@ -2187,7 +2308,7 @@ void _pyMesh::Process( const Handle(_pyCommand)& theCommand )
 
 //================================================================================
 /*!
- * \brief Return True if addition of accesor method is needed
+ * \brief Return True if addition of accessor method is needed
  */
 //================================================================================
 
@@ -2211,7 +2332,8 @@ bool _pyMesh::NeedMeshAccess( const Handle(_pyCommand)& theCommand )
         "GetElemNode","IsMediumNode","IsMediumNodeOfAnyElem","ElemNbEdges","ElemNbFaces",
         "GetElemFaceNodes", "GetFaceNormal", "FindElementByNodes",
         "IsPoly","IsQuadratic","BaryCenter","GetHypothesisList", "SetAutoColor", "GetAutoColor",
-        "Clear", "ConvertToStandalone", "GetMeshOrder", "SetMeshOrder"
+        "Clear", "ConvertToStandalone", "GetMeshOrder", "SetMeshOrder",
+        "SetNbThreads", "CheckCompute"
         ,"" }; // <- mark of end
     sameMethods.Insert( names );
   }
@@ -2419,7 +2541,7 @@ void _pyMesh::ClearCommands()
   list< Handle(_pySubMesh) >::iterator sm = mySubmeshes.begin();
   for ( ; sm != mySubmeshes.end(); ++sm )
     (*sm)->ClearCommands();
-  
+
   list< Handle(_pyGroup) >::iterator gr = myGroups.begin();
   for ( ; gr != myGroups.end(); ++gr )
     (*gr)->ClearCommands();
@@ -2452,6 +2574,26 @@ void _pyMesh::addFatherMesh( const Handle(_pyMesh)& mesh )
   if ( !mesh.IsNull() && mesh->GetID() != GetID() )
   {
     //myFatherMeshes.push_back( mesh );
+
+    // Do not add again, if this mesh is already a child of the mesh
+    list< Handle(_pyMesh) >::iterator meshIt = mesh->myChildMeshes.begin();
+    for ( ; meshIt != mesh->myChildMeshes.end(); ++meshIt )
+      if ( (*meshIt)->GetID() == GetID() )
+      {
+        MESSAGE("Warning: this mesh " << GetID() << " is already a child of mesh " << mesh->GetID());
+        return;
+      }
+
+    // Do not make the other mesh our father, if it is already a child of us
+    meshIt = myChildMeshes.begin();
+    for ( ; meshIt != myChildMeshes.end(); ++meshIt )
+      if ( (*meshIt)->GetID() == mesh->GetID() )
+      {
+        MESSAGE("Warning: this mesh " << GetID() << " is already a father of mesh " << mesh->GetID());
+        return;
+      }
+
+    // add this mesh to the list of child meshes
     mesh->myChildMeshes.push_back( this );
 
     // protect last Compute() from clearing by the next Compute()
@@ -2512,7 +2654,7 @@ void _pyMeshEditor::Process( const Handle(_pyCommand)& theCommand)
       "GetLastCreatedElems", "FaceGroupsSeparatedByEdges",
       "MirrorMakeMesh","MirrorObjectMakeMesh","TranslateMakeMesh","TranslateObjectMakeMesh",
       "Scale","ScaleMakeMesh","RotateMakeMesh","RotateObjectMakeMesh","MakeBoundaryMesh",
-      "MakeBoundaryElements", "SplitVolumesIntoTetra","SplitHexahedraIntoPrisms",
+      "MakeBoundaryElements", "MakeBoundaryOfEachElement", "SplitVolumesIntoTetra","SplitHexahedraIntoPrisms",
       "DoubleElements","DoubleNodes","DoubleNode","DoubleNodeGroup","DoubleNodeGroups",
       "DoubleNodeElem","DoubleNodeElemInRegion","DoubleNodeElemGroup","AffectedElemGroupsInRegion",
       "DoubleNodeElemGroupInRegion","DoubleNodeElemGroups","DoubleNodeElemGroupsInRegion",
@@ -2579,7 +2721,7 @@ void _pyMeshEditor::Process( const Handle(_pyCommand)& theCommand)
       // 1. Remove "MakeGroups" from the Command
       TCollection_AsciiString aMethod = theCommand->GetMethod();
       int nbArgsToAdd = diffLastTwoArgsMethods.Contains(aMethod) ? 2 : 1;
-      
+
       if(is0DmethObj)
         pos = pos-2;  //Remove "0D" from the Command too
       aMethod.Trunc(pos-1);
@@ -3121,7 +3263,7 @@ void _pyHypothesis::rememberCmdOfParameter( const Handle(_pyCommand) & theComman
 
 //================================================================================
 /*!
- * \brief Return true if a setting parameter command ha been used to compute mesh
+ * \brief Return true if a setting parameter command has been used to compute mesh
  */
 //================================================================================
 
@@ -3410,7 +3552,7 @@ void _pyLayerDistributionHypo::Flush()
   list< Handle(_pyCommand) >::iterator cmd = myArgCommands.begin();
   _pyID prevNewName;
   for ( cmd = myArgCommands.begin(); cmd != myArgCommands.end(); ++cmd )
-  {    
+  {
     const _pyID& hyp1dID = (*cmd)->GetArg( 1 );
     if ( hyp1dID.IsEmpty() ) continue;
 
@@ -3434,7 +3576,7 @@ void _pyLayerDistributionHypo::Flush()
       }
       newName += "_Distribution";
       prevNewName = newName;
-    
+
       hyp1d->GetCreationCmd()->SetResultValue( newName );
     }
     list< Handle(_pyCommand) >& cmds = theGen->GetCommands();
@@ -4631,7 +4773,7 @@ _pyGroup::_pyGroup(const Handle(_pyCommand)& theCreationCmd, const _pyID & id)
 
 //================================================================================
 /*!
- * \brief Check if "[ group1, group2 ] = mesh.GetGroups()" creation command 
+ * \brief Check if "[ group1, group2 ] = mesh.GetGroups()" creation command
  *        can be cleared
  */
 //================================================================================
@@ -4802,7 +4944,7 @@ void _pyFilter::Process( const Handle(_pyCommand)& theCommand)
 
   if ( !myNewID.IsEmpty() )
     theCommand->SetObject( myNewID );
-    
+
   // Convert the following set of commands into smesh.GetFilterFromCriteria(criteria)
   // aFilter0x2aaab0487080 = aFilterManager.CreateFilter()
   // aFilter0x2aaab0487080.SetCriteria(aCriteria)
@@ -4845,7 +4987,7 @@ void _pyFilter::Process( const Handle(_pyCommand)& theCommand)
 void _pyFilter::Flush()
 {
   if ( myNewID.IsEmpty() ) return;
-  
+
   list< Handle(_pyCommand) >::iterator cmd = myArgCmds.begin();
   for ( ; cmd != myArgCmds.end(); ++cmd )
     if ( !(*cmd)->IsEmpty() )
@@ -4982,7 +5124,7 @@ _pyHypothesisReader::_pyHypothesisReader()
     //          ...
     //          dim="2">
     //   <python-wrap>
-    //     <accumulative-methods> 
+    //     <accumulative-methods>
     //       SetEnforcedVertex,
     //       SetEnforcedVertexNamed
     //     </accumulative-methods>

@@ -1,5 +1,5 @@
 # -*- coding: iso-8859-1 -*-
-# Copyright (C) 2011-2022  EDF R&D
+# Copyright (C) 2011-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -20,7 +20,13 @@
 # Author : Guillaume Boulant (EDF)
 #
 
-from qtsalome import QDialog, QIcon, Qt
+import os
+if 'SALOME_USE_PYSIDE' in os.environ:
+  from PySide2.QtWidgets import QDialog, QApplication
+  from PySide2.QtGui import QIcon
+  from PySide2.QtCore import Qt
+else:
+  from PyQt5.Qt import QDialog, QIcon, Qt, QApplication
 
 from salome.smesh.spadder.gui.plugindialog_ui import Ui_PluginDialog
 from salome.smesh.spadder.gui.inputdialog import InputDialog, INPUTDATA_KEY_FILES, INPUTDATA_KEY_PARAM
@@ -238,7 +244,7 @@ class PluginDialog(QDialog):
         This function is the slot connected to the Input button
         (signal clicked()). It opens the dialog window to input
         data. The dialog is opened in a window modal mode so that the
-        SALOME study objects can be selected. In conterpart, this
+        SALOME study objects can be selected. In counterpart, this
         class must listen to signals emitted by the child dialog
         windows to process the validation event (see the slot
         onProcessInput which is connected to this event).
@@ -407,8 +413,6 @@ def getDialog():
 # ==============================================================================
 #
 def TEST_PluginDialog():
-    import sys
-    from qtsalome import QApplication
     app = QApplication(sys.argv)
     app.lastWindowClosed.connect( app.quit )
 

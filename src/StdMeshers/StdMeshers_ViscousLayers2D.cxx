@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -240,9 +240,7 @@ namespace VISCOUS_2D
 
     bool SetNewLength( const double length );
 
-#ifdef _DEBUG_
-    int           _ID;
-#endif
+    int           _ID; // debug
   };
   //--------------------------------------------------------------------------------
   /*!
@@ -674,9 +672,10 @@ bool _ViscousBuilder2D::error(const string& text )
       _error->myAlgo = smError->myAlgo;
     smError = _error;
   }
-#ifdef _DEBUG_
-  cout << "_ViscousBuilder2D::error " << text << endl;
-#endif
+
+  if (SALOME::VerbosityActivated())
+    cout << "_ViscousBuilder2D::error " << text << endl;
+
   return false;
 }
 
@@ -1019,7 +1018,7 @@ bool _ViscousBuilder2D::makePolyLines()
     faceBndBox2D.Add( *_polyLineVec[ iPoLine]._segTree->getBox() );
   const double boxTol = 1e-3 * sqrt( faceBndBox2D.SquareExtent() );
 
-  if ( _maxThickness * maxLen2dTo3dRatio > sqrt( faceBndBox2D.SquareExtent() ) / 10 )
+  if ( _maxThickness * maxLen2dTo3dRatio > sqrt( faceBndBox2D.SquareExtent() ) / 2 )
   {
     vector< const _Segment* > foundSegs;
     double maxPossibleThick = 0;
@@ -1042,6 +1041,8 @@ bool _ViscousBuilder2D::makePolyLines()
           foundSegs.clear();
           L2._segTree->GetSegmentsNear( L1._lEdges[iLE]._ray, foundSegs );
           for ( size_t i = 0; i < foundSegs.size(); ++i )
+            // In this block periodically finding strange intersection with parameter close to 0
+            // to investigate
             if ( intersection.Compute( *foundSegs[i], L1._lEdges[iLE]._ray ))
             {
               double  distToL2 = intersection._param2 / L1._lEdges[iLE]._len2dTo3dRatio;
@@ -1339,9 +1340,9 @@ void _ViscousBuilder2D::setLayerEdgeData( _LayerEdge&                 lEdge,
   lEdge._ray.SetDirection( lEdge._normal2D );
   lEdge._isBlocked = false;
   lEdge._length2D  = 0;
-#ifdef _DEBUG_
-  lEdge._ID        = _nbLE++;
-#endif
+
+  if (SALOME::VerbosityActivated())
+    lEdge._ID        = _nbLE++;
 }
 
 //================================================================================
@@ -1866,26 +1867,30 @@ bool _ViscousBuilder2D::shrink()
         Geom2dAdaptor_Curve edgeCurve( pcurve, Min( uf, ul ), Max( uf, ul ));
         Geom2dAdaptor_Curve seg2Curve( seg2Line );
         Geom2dInt_GInter     curveInt( edgeCurve, seg2Curve, 1e-7, 1e-7 );
+
+        // In the older version length2D was set to this value only inside the !convex if block
+        // But it seems that length2D can be set here anyway, because if not set valid value of length2D here,
+        // it will be calculated later using length1D, and it can be not valid in cases if length1D is too large or too small.
+        length2D = L2->_lEdges[iFSeg2]._length2D;
+
+        /*  convex VERTEX
+         *                     L  seg2
+         *                    |  o---o---
+         *                    | /    |
+         *                    |/     |  L2
+         *                    x------x---      */
+        /* concave VERTEX
+         *                     o-----o---
+         *                      \    |
+         *                       \   |  L2
+         *                        x--x---
+         *                       /
+         *                    L /               */
         isConvex = ( curveInt.IsDone() && !curveInt.IsEmpty() );
-        if ( isConvex ) {
-          /*                   convex VERTEX */
+        if ( isConvex )
+        {
           length1D = Abs( u - curveInt.Point( 1 ).ParamOnFirst() );
-          double maxDist2d = 2 * L2->_lEdges[ iLSeg2 ]._length2D;
-          isConvex = ( length1D < maxDist2d * len1dTo2dRatio );
-          /*                                          |L  seg2
-           *                                          |  o---o---
-           *                                          | /    |
-           *                                          |/     |  L2
-           *                                          x------x---      */
-        }
-        if ( !isConvex ) { /* concave VERTEX */   /*  o-----o---
-                                                   *   \    |
-                                                   *    \   |  L2
-                                                   *     x--x---
-                                                   *    /
-                                                   * L /               */
-          length2D = L2->_lEdges[ iFSeg2 ]._length2D;
-          //if ( L2->_advancable ) continue;
+          length2D = Max(length2D, length1D / len1dTo2dRatio);
         }
       }
       else // L2 is advancable but in the face adjacent by L
@@ -2726,7 +2731,7 @@ _SegmentTree::box_type* _SegmentTree::buildRootBox()
 
 //================================================================================
 /*!
- * \brief Redistrubute _segments among children
+ * \brief Redistribute _segments among children
  */
 //================================================================================
 

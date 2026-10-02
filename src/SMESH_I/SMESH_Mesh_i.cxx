@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -57,6 +57,7 @@
 #include "SMESH_PreMeshInfo.hxx"
 #include "SMESH_PythonDump.hxx"
 #include "SMESH_subMesh_i.hxx"
+#include "SMESH_Meshio.h"
 
 #include <SALOMEDS_Attributes_wrap.hxx>
 #include <SALOMEDS_wrap.hxx>
@@ -95,12 +96,6 @@
     throw SALOME::SALOME_Exception( se );  }
 
 #include "SMESH_TryCatch.hxx" // include after OCCT headers!
-
-#ifdef _DEBUG_
-static int MYDEBUG = 0;
-#else
-static int MYDEBUG = 0;
-#endif
 
 using namespace std;
 using SMESH::TPythonDump;
@@ -664,7 +659,7 @@ SMESH_Mesh_i::AddHypothesis(GEOM::GEOM_Object_ptr       aSubShape,
     if ( prevNbMeshEnt > 0 /*newNbMeshEnt != prevNbMeshEnt*/ )
       _gen_i->UpdateIcons( mesh );
   }
-  if(MYDEBUG) MESSAGE( " AddHypothesis(): status = " << status );
+  MESSAGE( " AddHypothesis(): status = " << status );
 
   // Update Python script
   TPythonDump() << "status = " << mesh << ".AddHypothesis( "
@@ -684,7 +679,7 @@ SMESH_Mesh_i::addHypothesis(GEOM::GEOM_Object_ptr       aSubShape,
                             SMESH::SMESH_Hypothesis_ptr anHyp,
                             std::string*                anErrorText)
 {
-  if(MYDEBUG) MESSAGE("addHypothesis");
+  MESSAGE("addHypothesis");
 
   if (CORBA::is_nil( aSubShape ) && HasShapeToMesh())
     THROW_SALOME_CORBA_EXCEPTION("bad Sub-shape reference",SALOME::BAD_PARAM);
@@ -770,7 +765,7 @@ SMESH_Hypothesis::Hypothesis_Status
 SMESH_Mesh_i::removeHypothesis(GEOM::GEOM_Object_ptr       aSubShape,
                                SMESH::SMESH_Hypothesis_ptr anHyp)
 {
-  if(MYDEBUG) MESSAGE("removeHypothesis()");
+  MESSAGE("removeHypothesis()");
 
   if (CORBA::is_nil( aSubShape ) && HasShapeToMesh())
     THROW_SALOME_CORBA_EXCEPTION("bad Sub-shape reference", SALOME::BAD_PARAM);
@@ -816,7 +811,7 @@ SMESH::ListOfHypothesis *
 SMESH_Mesh_i::GetHypothesisList(GEOM::GEOM_Object_ptr aSubShape)
 {
   Unexpect aCatch(SALOME_SalomeException);
-  if (MYDEBUG) MESSAGE("GetHypothesisList");
+  MESSAGE("GetHypothesisList");
   if (_impl->HasShapeToMesh() && CORBA::is_nil(aSubShape))
     THROW_SALOME_CORBA_EXCEPTION("bad Sub-shape reference", SALOME::BAD_PARAM);
 
@@ -856,7 +851,7 @@ SMESH_Mesh_i::GetHypothesisList(GEOM::GEOM_Object_ptr aSubShape)
 SMESH::submesh_array* SMESH_Mesh_i::GetSubMeshes()
 {
   Unexpect aCatch(SALOME_SalomeException);
-  if (MYDEBUG) MESSAGE("GetSubMeshes");
+  MESSAGE("GetSubMeshes");
 
   SMESH::submesh_array_var aList = new SMESH::submesh_array();
 
@@ -1220,7 +1215,7 @@ void SMESH_Mesh_i::RemoveGroupWithContents( SMESH::SMESH_GroupBase_ptr theGroup 
 SMESH::ListOfGroups * SMESH_Mesh_i::GetGroups()
 {
   Unexpect aCatch(SALOME_SalomeException);
-  if (MYDEBUG) MESSAGE("GetGroups");
+  MESSAGE("GetGroups");
 
   SMESH::ListOfGroups_var aList = new SMESH::ListOfGroups();
 
@@ -1419,6 +1414,9 @@ SMESH::SMESH_Group_ptr SMESH_Mesh_i::IntersectGroups( SMESH::SMESH_GroupBase_ptr
         resGroupDS->SMDSGroup().Add( e );
     }
   }
+
+  GetGen()->UpdateGroupIcon(aResGrp);
+
   // Update Python script
   pyDump << aResGrp << " = " << SMESH::SMESH_Mesh_var(_this()) << ".IntersectGroups( "
          << theGroup1 << ", " << theGroup2 << ", '" << theName << "')";
@@ -1505,6 +1503,8 @@ SMESH_Mesh_i::IntersectListOfGroups(const SMESH::ListOfGroups& theGroups,
       resGroupDS->SMDSGroup().Add( e );
   }
 
+  GetGen()->UpdateGroupIcon(aResGrp);
+
   // Update Python script
   pyDump << aResGrp << " = " << SMESH::SMESH_Mesh_var( _this() )
          << ".IntersectListOfGroups( " << theGroups << ", '" << theName << "' )";
@@ -1566,6 +1566,9 @@ SMESH::SMESH_Group_ptr SMESH_Mesh_i::CutGroups( SMESH::SMESH_GroupBase_ptr theGr
         resGroupDS->SMDSGroup().Add( e );
     }
   }
+
+  GetGen()->UpdateGroupIcon(aResGrp);
+
   // Update Python script
   pyDump << aResGrp << " = " << SMESH::SMESH_Mesh_var(_this()) << ".CutGroups( "
          << theGroup1 << ", " << theGroup2 << ", '" << theName << "')";
@@ -1665,6 +1668,8 @@ SMESH_Mesh_i::CutListOfGroups(const SMESH::ListOfGroups& theMainGroups,
     if ( !isIn )
       resGroupDS->SMDSGroup().Add( e );
   }
+
+  GetGen()->UpdateGroupIcon(aResGrp);
 
   // Update Python script
   pyDump << aResGrp << " = " << SMESH::SMESH_Mesh_var( _this() )
@@ -1874,6 +1879,8 @@ SMESH_Mesh_i::CreateDimGroup(const SMESH::ListOfIDSources& theGroups,
       }
     }
   }
+
+  GetGen()->UpdateGroupIcon(aResGrp);
 
   // Update Python script
   pyDump << aResGrp << " = " << SMESH::SMESH_Mesh_var( _this())
@@ -2341,6 +2348,38 @@ namespace
 
     return true;
   }
+
+  //-----------------------------------------------------------------------------
+  /*!
+   * \brief Solves issues like the ProjectionSource2D source face cannot be found in a mesh index
+            after geometry was modified. In this case the shape is being searched by its name
+            and set to hypothesis again. It works only if the shapes entry name wasn't changed.
+   */
+  void updateHypObjectsDependOn(
+    const SMESHDS_Hypothesis* hypToUpdate, const std::map<int, SMESH::SMESH_Hypothesis_ptr>& mapHypo)
+  {
+    MESSAGE("Check if we need to update objects those hypothesis depends on");
+    if (!hypToUpdate)
+      return;
+
+    const std::string hypName = hypToUpdate->GetName();
+    SCRUTE(hypName);
+
+    auto id_hypptr = mapHypo.find(hypToUpdate->GetID());
+    if (id_hypptr == mapHypo.end())
+      return;
+
+    SMESH::SMESH_Hypothesis_var hyp = SMESH::SMESH_Hypothesis::_narrow(id_hypptr->second);
+    SMESH_Hypothesis_i* hyp_i = SMESH::DownCast<SMESH_Hypothesis_i*>(hyp);
+
+    std::vector<std::string> entryArray;
+    std::vector<int>         subIDArray;
+    if (!hyp_i->getObjectsDependOn(entryArray, subIDArray))
+      return;
+
+    hyp_i->setObjectsDependOn(entryArray, subIDArray);
+    MESSAGE("Updated objects depends on for hypothesis " << hypName);
+  }
 }
 
 //=============================================================================
@@ -2506,7 +2545,7 @@ void SMESH_Mesh_i::CheckGeomModif( bool theIsBreakLink )
         }
         old2newShapeMap.Bind( group->GetShape(), groupsData.back()._shape );
       }
-      
+
     }
   }
   // store assigned hypotheses
@@ -2622,7 +2661,10 @@ void SMESH_Mesh_i::CheckGeomModif( bool theIsBreakLink )
     const THypList& hyps = ids2Hyps[i].second;
     THypList::const_iterator h = hyps.begin();
     for ( ; h != hyps.end(); ++h )
+    {
+      updateHypObjectsDependOn(*h, _mapHypo);
       _impl->AddHypothesis( s, (*h)->GetID() );
+    }
   }
 
   {
@@ -2646,32 +2688,34 @@ void SMESH_Mesh_i::CheckGeomModif( bool theIsBreakLink )
         g->GetGroupDS()->SetColor( data._color );
     }
 
-    if ( !sameTopology )
+    std::map< int, int >::iterator o2n = old2newIDs.begin();
+    for ( ; o2n != old2newIDs.end(); ++o2n )
     {
-      std::map< int, int >::iterator o2n = old2newIDs.begin();
-      for ( ; o2n != old2newIDs.end(); ++o2n )
+      int newID = o2n->second, oldID = o2n->first;
+      if ( newID == oldID || !_mapSubMesh.count( oldID ))
+        continue;
+      if ( newID > 0 )
       {
-        int newID = o2n->second, oldID = o2n->first;
-        if ( newID == oldID || !_mapSubMesh.count( oldID ))
-          continue;
-        if ( newID > 0 )
-        {
-          _mapSubMesh   [ newID ] = _impl->GetSubMeshContaining( newID );
-          _mapSubMesh_i [ newID ] = _mapSubMesh_i [ oldID ];
-          _mapSubMeshIor[ newID ] = _mapSubMeshIor[ oldID ];
-        }
-        _mapSubMesh.   erase(oldID);
-        _mapSubMesh_i. erase(oldID);
-        _mapSubMeshIor.erase(oldID);
-        if ( newID > 0 )
-          _mapSubMesh_i [ newID ]->changeLocalId( newID );
+        _mapSubMesh   [ newID ] = _impl->GetSubMeshContaining( newID );
+        _mapSubMesh_i [ newID ] = _mapSubMesh_i [ oldID ];
+        _mapSubMeshIor[ newID ] = _mapSubMeshIor[ oldID ];
       }
+      _mapSubMesh.   erase(oldID);
+      _mapSubMesh_i. erase(oldID);
+      _mapSubMeshIor.erase(oldID);
+      if ( newID > 0 )
+        _mapSubMesh_i [ newID ]->changeLocalId( newID );
     }
 
     // update _mapSubMesh
     std::map<int, ::SMESH_subMesh*>::iterator i_sm = _mapSubMesh.begin();
     for ( ; i_sm != _mapSubMesh.end(); ++i_sm )
-      i_sm->second = _impl->GetSubMesh( meshDS->IndexToShape( i_sm->first ));
+    {
+      if(_impl->GetSubMesh( meshDS->IndexToShape( i_sm->first )))
+      {
+        i_sm->second = _impl->GetSubMesh( meshDS->IndexToShape( i_sm->first ));
+      }
+    }
   }
 
   if ( !sameTopology )
@@ -3122,7 +3166,7 @@ SMESH::SMESH_Group_ptr SMESH_Mesh_i::ConvertToStandalone( SMESH::SMESH_GroupBase
 
 SMESH::SMESH_subMesh_ptr SMESH_Mesh_i::createSubMesh( GEOM::GEOM_Object_ptr theSubShapeObject )
 {
-  if(MYDEBUG) MESSAGE( "createSubMesh" );
+  MESSAGE( "createSubMesh" );
   TopoDS_Shape  myLocSubShape = _gen_i->GeomObjectToShape(theSubShapeObject);
   ::SMESH_subMesh * mySubMesh = _impl->GetSubMesh(myLocSubShape);
   int               subMeshId = 0;
@@ -3154,8 +3198,7 @@ SMESH::SMESH_subMesh_ptr SMESH_Mesh_i::createSubMesh( GEOM::GEOM_Object_ptr theS
 
   // register CORBA object for persistence
   int nextId = _gen_i->RegisterObject( subMesh );
-  if(MYDEBUG) { MESSAGE( "Add submesh to map with id = "<< nextId); }
-  else        { (void)nextId; } // avoid "unused variable" warning
+  MESSAGE( "Add submesh to map with id = "<< nextId);
 
   // to track changes of GEOM groups
   if ( subMeshId > 0 )
@@ -3291,8 +3334,7 @@ SMESH::SMESH_GroupBase_ptr SMESH_Mesh_i::createGroup (SMESH::ElementType        
 
     // register CORBA object for persistence
     int nextId = _gen_i->RegisterObject( aGroup );
-    if(MYDEBUG) { MESSAGE( "Add group to map with id = "<< nextId); }
-    else        { nextId = ( nextId > 0 ); } // avoid "unused variable" warning in release mode
+    MESSAGE( "Add group to map with id = "<< nextId);
 
     // to track changes of GEOM groups
     if ( !theShape.IsNull() ) {
@@ -3313,7 +3355,7 @@ SMESH::SMESH_GroupBase_ptr SMESH_Mesh_i::createGroup (SMESH::ElementType        
 
 void SMESH_Mesh_i::removeGroup( const int theId )
 {
-  if(MYDEBUG) MESSAGE("SMESH_Mesh_i::removeGroup()" );
+  MESSAGE("SMESH_Mesh_i::removeGroup()");
   if ( _mapGroups.find( theId ) != _mapGroups.end() ) {
     SMESH::SMESH_GroupBase_var group = _mapGroups[theId];
     _mapGroups.erase( theId );
@@ -3480,7 +3522,6 @@ void SMESH_Mesh_i::onHypothesisModified(int theHypID, bool theUpdateIcons)
 
 void SMESH_Mesh_i::SetImpl(::SMESH_Mesh * impl)
 {
-  if(MYDEBUG) MESSAGE("SMESH_Mesh_i::SetImpl");
   _impl = impl;
   if ( _impl )
     _impl->SetCallUp( new TCallUp_i(this));
@@ -3494,7 +3535,6 @@ void SMESH_Mesh_i::SetImpl(::SMESH_Mesh * impl)
 
 ::SMESH_Mesh & SMESH_Mesh_i::GetImpl()
 {
-  if(MYDEBUG) MESSAGE("SMESH_Mesh_i::GetImpl()");
   return *_impl;
 }
 
@@ -3840,7 +3880,7 @@ void SMESH_Mesh_i::ExportUNV (const char *file, CORBA::Boolean renumber)
   checkGroupNames();
   // Update Python script
   TPythonDump() << SMESH::SMESH_Mesh_var(_this())
-                << ".ExportUNV( r'" << file << "' " << renumber << "' )";
+                << ".ExportUNV( r'" << file << "', " << renumber << " )";
 
   // Perform Export
   PrepareForWriting( file );
@@ -4058,6 +4098,76 @@ void SMESH_Mesh_i::ExportPartToMED(SMESH::SMESH_IDSource_ptr meshPart,
                 << saveNumbers
                 << " )";
   SMESH_CATCH( SMESH::throwCorbaException );
+}
+
+//================================================================================
+/*!
+ * \brief Export a part of mesh to a file with meshio library
+ */
+//================================================================================
+
+void SMESH_Mesh_i::ExportPartToMESHIO(SMESH::SMESH_IDSource_ptr meshPart,
+                                      const char*               file,
+                                      const char*               selectedFilter,
+                                      const char*               converter)
+{
+  // Get default MED version
+  SMESH::long_array_var medVersions = GetMEDVersionsCompatibleForAppend();
+  const CORBA::Long version = medVersions[0];
+  MESSAGE("Export part with meshio through MED version: " << version);
+
+  // Special case for Gmsh 2.2 format: to keep groups in the file, MED file should be written with auto_groups = true and then converted to Gmsh 2.2
+  // see gmsh user manual page 11 CAUTION: without -save_all option for Gmsh 2.2
+  const bool auto_groups = SMESHIOConverter::GetFilterLabel(selectedFilter).find("Gmsh 2.2") != std::string::npos;
+  const bool overwrite = true;
+  const bool autoDimension = true;
+  const GEOM::ListOfFields fields;
+  const char* geomAssocFields = "";
+  const double ZTolerance = -1.0;
+  const bool saveNumbers = true;
+
+  // Create an object that holds a temp file name and
+  // removes the file when goes out of scope.
+  SMESH_Meshio meshio(selectedFilter);
+  const QString tempFileName = meshio.CreateTempFileName(file);
+
+  // Export a given mesh into the temp file
+  MEDFileSpeCls spe(tempFileName.toUtf8().data(), overwrite, version);
+  this->ExportPartToMEDCommon(spe, meshPart, auto_groups, autoDimension, fields,
+                               geomAssocFields, ZTolerance, saveNumbers);
+
+  // Convert temp file into a target one with meshio command
+  meshio.Convert(tempFileName, file, false, converter);
+
+  // Prepare python dump
+  SMESH_TRY;
+
+  SMESHIOConverter::ExternalConverter externalConverter = SMESHIOConverter::ExternalConverter::Unknown;
+  externalConverter = meshio.GetConverterForExtension(selectedFilter, file, converter);
+  switch (externalConverter)
+  {
+    case SMESHIOConverter::ExternalConverter::Gmsh:
+      TPythonDump() << _this() << ".ExportPartToGMSHIO("
+                << meshPart << ", r'"
+                << file << "', '"
+                << SMESHIOConverter::GetFilterLabel(selectedFilter) << "'"
+                << ")";
+      break;
+
+    case SMESHIOConverter::ExternalConverter::MeshIo:
+      TPythonDump() << _this() << ".ExportPartToMESHIO("
+                << meshPart << ", r'"
+                << file << "', '"
+                << SMESHIOConverter::GetFilterLabel(selectedFilter) << "'"
+                << ")";
+      break;
+
+    case SMESHIOConverter::ExternalConverter::Unknown:
+    default:
+      break;
+  }
+
+  SMESH_CATCH(SMESH::throwCorbaException);
 }
 
 //================================================================================
@@ -4469,7 +4579,7 @@ void SMESH_Mesh_i::ExportPartToSTL(::SMESH::SMESH_IDSource_ptr meshPart,
 
 //================================================================================
 /*!
- * \brief Export a part of mesh to an STL file
+ * \brief Export a part of mesh to an CGNS file
  */
 //================================================================================
 
@@ -4501,6 +4611,50 @@ void SMESH_Mesh_i::ExportCGNS(::SMESH::SMESH_IDSource_ptr meshPart,
 
   TPythonDump() << SMESH::SMESH_Mesh_var(_this()) << ".ExportCGNS( "
                 << meshPart<< ", r'" << file << "', " << overwrite << ")";
+
+  SMESH_CATCH( SMESH::throwCorbaException );
+
+#else
+  THROW_SALOME_CORBA_EXCEPTION("CGNS library is unavailable", SALOME::INTERNAL_ERROR);
+#endif
+}
+
+//================================================================================
+/*!
+ * \brief Export a part of mesh to an StructuredCGNS file
+ */
+//================================================================================
+
+void SMESH_Mesh_i::ExportStructuredCGNS( SMESH::SMESH_IDSource_ptr meshPart,
+                                          const char*               file,
+                                          CORBA::Boolean            overwrite )
+{
+#ifdef WITH_CGNS
+  SMESH_TRY;
+  if ( _preMeshInfo )
+    _preMeshInfo->FullLoadFromFile();
+
+  PrepareForWriting(file,overwrite);
+
+  std::string meshName("");
+  SALOMEDS::SObject_wrap so = _gen_i->ObjectToSObject( meshPart );
+  if ( !so->_is_nil() )
+  {
+    CORBA::String_var name = so->GetName();
+    meshName = name.in();
+  }
+  SMESH_TRY;
+
+  SMESH::SMESH_Mesh_var mesh = meshPart->GetMesh();
+  SMESH_Mesh_i*       mesh_i = SMESH::DownCast<SMESH_Mesh_i*>( mesh );
+  mesh_i->Load();
+  auto myMesh                = mesh_i->GetImpl().GetMeshDS();
+  _impl->ExportStructuredCGNS(file, myMesh, meshName.c_str());
+
+  SMESH_CATCH( SMESH::throwCorbaException );
+
+  TPythonDump() << SMESH::SMESH_Mesh_var(_this()) << ".ExportStructuredCGNS( "
+                "r'" << file << "', " << overwrite << ", " << meshPart << ")";
 
   SMESH_CATCH( SMESH::throwCorbaException );
 
@@ -5189,7 +5343,7 @@ CORBA::LongLong SMESH_Mesh_i::GetMeshPtr()
     _preMeshInfo->FullLoadFromFile();
 
   CORBA::LongLong pointeur = CORBA::LongLong(_impl);
-  if ( MYDEBUG ) MESSAGE("CORBA::LongLong SMESH_Mesh_i::GetMeshPtr() "<<pointeur);
+  MESSAGE("CORBA::LongLong SMESH_Mesh_i::GetMeshPtr() "<<pointeur);
   return pointeur;
 }
 
@@ -5931,8 +6085,7 @@ void SMESH_Mesh_i::CreateGroupServants()
 
     // register CORBA object for persistence
     int nextId = _gen_i->RegisterObject( groupVar );
-    if(MYDEBUG) { MESSAGE( "Add group to map with id = "<< nextId); }
-    else        { (void)nextId; } // avoid "unused variable" warning in release mode
+    MESSAGE( "Add group to map with id = "<< nextId);
 
     // publishing the groups in the study
     GEOM::GEOM_Object_var shapeVar = _gen_i->ShapeToGeomObject( shape );
@@ -5963,14 +6116,14 @@ void SMESH_Mesh_i::CreateGroupServants()
  */
 //=============================================================================
 
-bool SMESH_Mesh_i::IsComputedOK()
+CORBA::Boolean SMESH_Mesh_i::IsComputedOK()
 {
   return _impl->IsComputedOK();
 }
 
 //=============================================================================
 /*!
- * \brief Return groups cantained in _mapGroups by their IDs
+ * \brief Return groups contained in _mapGroups by their IDs
  */
 //=============================================================================
 
@@ -6170,8 +6323,8 @@ SMESH::SMESH_Mesh_ptr SMESH_Mesh_i::GetMesh()
 /*!
  * \brief Return false if GetMeshInfo() return incorrect information that may
  *        happen if mesh data is not yet fully loaded from the file of study.
- * 
- * 
+ *
+ *
  */
 //================================================================================
 
@@ -6654,7 +6807,7 @@ class SMESH_DimHyp
 
     // check hypothesises for concurrence (skip first as algorithm)
     size_t nbSame = 0;
-    // pointers should be same, because it is referened from mesh hypothesis partition
+    // pointers should be same, because it is referenced from mesh hypothesis partition
     list <const SMESHDS_Hypothesis*>::const_iterator hypIt = _hypotheses.begin();
     list <const SMESHDS_Hypothesis*>::const_iterator otheEndIt = theOther->_hypotheses.end();
     for ( hypIt++ /*skip first as algo*/; hypIt != _hypotheses.end(); hypIt++ )
@@ -7037,6 +7190,7 @@ TListOfListOfInt SMESH_Mesh_i::findConcurrentSubMeshes()
   return res;
 }
 
+
 //=============================================================================
 /*!
  * \brief Convert submesh ids into submesh interfaces
@@ -7090,7 +7244,7 @@ void SMESH_Mesh_i::convertMeshOrder (const TListOfListOfInt&     theIdsOrder,
   theResOrder.length( listIndx );
 
   if ( theIsDump ) {
-    // finilise python dump
+    // finalise python dump
     aPythonDump << " ]";
     aPythonDump << " = " << SMESH::SMESH_Mesh_var(_this()) << ".GetMeshOrder()";
   }
@@ -7229,7 +7383,7 @@ smIdType SMESH_MeshPartDS::MinNodeID() const
 {
   if ( _meshDS ) return _meshDS->MinNodeID();
   return NbNodes() == 0 ? 0 : (*_elements[ SMDSAbs_Node ].begin())->GetID();
-}  
+}
 // -------------------------------------------------------------------------------------
 smIdType SMESH_MeshPartDS::MaxElementID() const
 {

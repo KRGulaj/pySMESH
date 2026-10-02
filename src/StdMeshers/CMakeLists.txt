@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -27,6 +27,7 @@ ENDIF(SALOME_SMESH_USE_TBB)
 INCLUDE_DIRECTORIES(
   ${OpenCASCADE_INCLUDE_DIR}
   ${Boost_INCLUDE_DIRS}
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${KERNEL_INCLUDE_DIRS}
   ${GEOM_INCLUDE_DIRS}
   ${MEDCOUPLING_INCLUDE_DIRS}
@@ -37,12 +38,6 @@ INCLUDE_DIRECTORIES(
   ${PROJECT_SOURCE_DIR}/src/Controls
   ${TBB_INCLUDES}
 )
-
-IF(SALOME_SMESH_ENABLE_MEFISTO)
-  INCLUDE_DIRECTORIES(
-    ${PROJECT_SOURCE_DIR}/src/MEFISTO2
-  )
-ENDIF(SALOME_SMESH_ENABLE_MEFISTO)
 
 # additional preprocessor / compiler flags
 ADD_DEFINITIONS(
@@ -56,10 +51,11 @@ ENDIF(SALOME_SMESH_USE_TBB)
 
 # libraries to link to
 SET(_link_LIBRARIES
-  ${KERNEL_SALOMELocalTrace}
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
   ${KERNEL_OpUtil}
   ${OpenCASCADE_ModelingAlgorithms_LIBRARIES} 
   ${OpenCASCADE_ModelingData_LIBRARIES}
+  ${OpenCASCADE_DETools_LIBRARIES}
   ${GEOM_GEOMUtils}
   SMESHimpl
   SMESHDS
@@ -67,10 +63,6 @@ SET(_link_LIBRARIES
   ${TBB_LIBS}
   ${Boost_LIBRARIES}
 )
-
-IF(SALOME_SMESH_ENABLE_MEFISTO)
-  SET(_link_LIBRARIES ${_link_LIBRARIES} MEFISTO2D)
-ENDIF(SALOME_SMESH_ENABLE_MEFISTO)
 
 # --- headers ---
 
@@ -129,16 +121,17 @@ SET(StdMeshers_HEADERS
   StdMeshers_ViscousLayers2D.hxx
   StdMeshers_Projection_1D2D.hxx
   StdMeshers_CartesianParameters3D.hxx
+  StdMeshers_Cartesian_3D_Grid.hxx
+  StdMeshers_Cartesian_3D_Hexahedron.hxx
   StdMeshers_Cartesian_3D.hxx
+  StdMeshers_Cartesian_VL.hxx
   StdMeshers_QuadFromMedialAxis_1D2D.hxx
   StdMeshers_PolygonPerFace_2D.hxx
   StdMeshers_PolyhedronPerSolid_3D.hxx
   StdMeshers_BlockRenumber.hxx
+  StdMeshers_ViscousLayerBuilder.hxx
 )
 
-IF(SALOME_SMESH_ENABLE_MEFISTO)
-  SET(StdMeshers_HEADERS ${StdMeshers_HEADERS} StdMeshers_MEFISTO_2D.hxx)
-ENDIF(SALOME_SMESH_ENABLE_MEFISTO)
 # --- sources ---
 
 # sources / static
@@ -195,17 +188,17 @@ SET(StdMeshers_SOURCES
   StdMeshers_ViscousLayers2D.cxx
   StdMeshers_Projection_1D2D.cxx
   StdMeshers_CartesianParameters3D.cxx
+  StdMeshers_Cartesian_3D_Grid.cxx
+  StdMeshers_Cartesian_3D_Hexahedron.cxx
   StdMeshers_Cartesian_3D.cxx
+  StdMeshers_Cartesian_VL.cxx
   StdMeshers_Adaptive1D.cxx
   StdMeshers_QuadFromMedialAxis_1D2D.cxx
   StdMeshers_PolygonPerFace_2D.cxx
   StdMeshers_PolyhedronPerSolid_3D.cxx
   StdMeshers_BlockRenumber.cxx
+  StdMeshers_ViscousLayerBuilder.cxx
 )
-
-IF(SALOME_SMESH_ENABLE_MEFISTO)
-  SET(StdMeshers_SOURCES ${StdMeshers_SOURCES} StdMeshers_MEFISTO_2D.cxx)
-ENDIF(SALOME_SMESH_ENABLE_MEFISTO)
 
 # --- rules ---
 

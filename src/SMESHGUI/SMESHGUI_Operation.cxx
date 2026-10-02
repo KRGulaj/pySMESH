@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -149,11 +149,14 @@ void SMESHGUI_Operation::setDialogActive( const bool active )
 void SMESHGUI_Operation::onOk()
 {
   setIsApplyAndClose( true );
-  if( onApply() )
+  if( onApply() ) {
     commit();
+  }
+  else {
+    // Ensure the operation gets aborted when Apply fails
+    abort();
+  }
   setIsApplyAndClose( false );
-  //else
-  //  abort();
 }
 
 //=======================================================================

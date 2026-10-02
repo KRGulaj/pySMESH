@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -509,11 +509,11 @@ void SMESHGUI_CreatePolyhedralVolumeDlg::ClickOnApply()
             SMESH::SMESH_MeshEditor_var aMeshEditor = myMesh->GetMeshEditor();
             anElemId = aMeshEditor->AddPolyhedralVolume(anIdsOfNodes, aQuantities);
           }catch(SALOME::SALOME_Exception& exc){
-            INFOS("Follow exception was cought:\n\t"<<exc.details.text);
+            INFOS("Follow exception was caught:\n\t"<<exc.details.text);
           }catch(std::exception& exc){
-            INFOS("Follow exception was cought:\n\t"<<exc.what());
+            INFOS("Follow exception was caught:\n\t"<<exc.what());
           }catch(...){
-            INFOS("Unknown exception was cought !!!");
+            INFOS("Unknown exception was caught !!!");
           }
         }
       else if (GetConstructorId() == 1)
@@ -530,11 +530,11 @@ void SMESHGUI_CreatePolyhedralVolumeDlg::ClickOnApply()
             SMESH::SMESH_MeshEditor_var aMeshEditor = myMesh->GetMeshEditor();
             anElemId = aMeshEditor->AddPolyhedralVolumeByFaces(anIdsOfFaces);
           }catch(SALOME::SALOME_Exception& exc){
-            INFOS("Follow exception was cought:\n\t"<<exc.details.text);
+            INFOS("Follow exception was caught:\n\t"<<exc.details.text);
           }catch(std::exception& exc){
-            INFOS("Follow exception was cought:\n\t"<<exc.what());
+            INFOS("Follow exception was caught:\n\t"<<exc.what());
           }catch(...){
-            INFOS("Unknown exception was cought !!!");
+            INFOS("Unknown exception was caught !!!");
           }
         }
 

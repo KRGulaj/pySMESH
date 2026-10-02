@@ -1,4 +1,4 @@
-# Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -46,6 +46,8 @@ import SALOME
 import SALOMEDS
 import os
 import inspect
+
+from pathlib import Path
 
 # In case the omniORBpy EnumItem class does not fully support Python 3
 # (for instance in version 4.2.1-2), the comparison ordering methods must be
@@ -133,6 +135,15 @@ class MeshMeta(type):
         """Implement issubclass(sub, cls)."""
         return type.__subclasscheck__(cls, sub) or (cls.__name__ == sub.__name__ and cls.__module__ == sub.__module__)
 
+def changeExtensionToMed(inputPath):
+    """
+    Takes a file path as input and returns the absolute path
+    of the same file with its extension changed to '.med'
+    """
+    inp2 = Path(inputPath)
+    outp = inp2.parent.absolute() / inp2.with_suffix(".med").name
+    return str(outp)
+
 def DegreesToRadians(AngleInDegrees):
     """Convert an angle from degrees to radians
     """
@@ -216,7 +227,7 @@ NO_NAME = "NoName"
 def GetName(obj):
     """
     Return a name of an object
-    
+
     Returns:
         object name
     """
@@ -429,26 +440,26 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
     def init_smesh(self,geompyD = None):
         """
         Set Geometry component
-        """    
+        """
         #print("init_smesh")
         self.UpdateStudy(geompyD)
         notebook.myStudy = salome.myStudy
 
     def Mesh(self, obj=0, name=0):
         """
-        Create a mesh. This mesh can be either 
+        Create a mesh. This mesh can be either
 
         * an empty mesh not bound to geometry, if *obj* == 0
         * an empty mesh bound to geometry, if *obj* is GEOM.GEOM_Object
         * a mesh wrapping a :class:`CORBA mesh <SMESH.SMESH_Mesh>` given as *obj* parameter.
 
         Parameters:
-            obj: either 
+            obj: either
 
                    1. a :class:`CORBA mesh <SMESH.SMESH_Mesh>` got by calling e.g.
                       ::
 
-                        salome.myStudy.FindObjectID("0:1:2:3").GetObject() 
+                        salome.myStudy.FindObjectID("0:1:2:3").GetObject()
 
                    2. a geometrical object for meshing
                    3. none.
@@ -461,6 +472,22 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
         if isinstance(obj,str):
             obj,name = name,obj
         return Mesh(self, self.geompyD, obj, name)
+
+    def ParallelMesh(self, obj, name=0, split_geom=True):
+        """
+        Create a parallel mesh.
+
+        Parameters:
+            obj: geometrical object for meshing
+            name: the name for the new mesh.
+            split_geom: If True split the geometry and create the associated
+            sub meshes
+
+        Returns:
+            an instance of class :class:`ParallelMesh`.
+        """
+        return ParallelMesh(self, self.geompyD, obj,
+                            split_geom=split_geom, name=name)
 
     def RemoveMesh( self, mesh ):
         """
@@ -648,7 +675,7 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
         if sc:
             sb.LoadWith(sc, self)
         pass
-    
+
     def SetEnablePublish( self, theIsEnablePublish ):
         """
         Set enable publishing in the study. Calling SetEnablePublish( False ) allows to
@@ -659,6 +686,14 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
         global notebook
         notebook = salome_notebook.NoteBook( theIsEnablePublish )
 
+    def ReloadMeshFromFile(self, theMesh):
+        """
+        Desc for method,
+        """
+
+        aSmeshMesh = SMESH._objref_SMESH_Gen.ReloadMeshFromFile(self, theMesh)
+        aMesh = Mesh(self, self.geompyD, aSmeshMesh)
+        return aMesh
 
     def CreateMeshesFromUNV( self,theFileName ):
         """
@@ -677,7 +712,7 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
         Create a Mesh object(s) importing data from the given MED file
 
         Returns:
-                a tuple ( list of class :class:`Mesh` instances, 
+                a tuple ( list of class :class:`Mesh` instances,
                 :class:`SMESH.DriverMED_ReadStatus` )
         """
 
@@ -725,6 +760,32 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
         if error.comment: print("*** CreateMeshesFromGMF() errors:\n", error.comment)
         return Mesh(self, self.geompyD, aSmeshMesh), error
 
+    def CreateMeshesFromMESHIO(self, theFileName, selectedFilter = ''):
+        """
+        Create a Mesh object(s) importing data from from any file supported by meshio library.
+
+        Returns:
+                a tuple ( list of class :class:`Mesh` instances,
+                :class:`SMESH.DriverMED_ReadStatus` )
+        """
+
+        aSmeshMeshes, aStatus = SMESH._objref_SMESH_Gen.CreateMeshesFromMESHIO(self, theFileName, selectedFilter, "meshio")
+        aMeshes = [ Mesh(self, self.geompyD, m) for m in aSmeshMeshes ]
+        return aMeshes, aStatus
+    
+    def CreateMeshesFromGMSHIO(self, theFileName, selectedFilter = ''):
+        """
+        Create a Mesh object(s) importing data from from any file supported by gmsh library.
+
+        Returns:
+                a tuple ( list of class :class:`Mesh` instances,
+                :class:`SMESH.DriverMED_ReadStatus` )
+        """
+
+        aSmeshMeshes, aStatus = SMESH._objref_SMESH_Gen.CreateMeshesFromMESHIO(self, theFileName, selectedFilter, "gmsh")
+        aMeshes = [ Mesh(self, self.geompyD, m) for m in aSmeshMeshes ]
+        return aMeshes, aStatus
+
     def Concatenate( self, meshes, uniteIdenticalGroups,
                      mergeNodesAndElements = False, mergeTolerance = 1e-5, allGroups = False,
                      name = "", meshToAppendTo = None):
@@ -744,7 +805,7 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
         Returns:
                 an instance of class :class:`Mesh`
 
-        See also: 
+        See also:
                 :meth:`Mesh.Append`
         """
 
@@ -773,12 +834,32 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
         aMesh = Mesh( self, self.geompyD, aSmeshMesh, name=name )
         return aMesh
 
+    def CreateDualMesh( self, mesh, meshName, adaptToShape):
+        """
+        Create a dual of a mesh.
+
+        Parameters:
+                mesh: Tetrahedron mesh
+                        :class:`mesh, <SMESH.SMESH_IDSource>`.
+
+                meshName: a name of the new mesh
+                adpatToShape: if true project boundary points on shape
+
+        Returns:
+                an instance of class :class:`Mesh`
+        """
+        if isinstance( mesh, Mesh ):
+            mesh = mesh.GetMesh()
+        dualMesh = SMESH._objref_SMESH_Gen.CreateDualMesh(self, mesh, meshName, adaptToShape)
+        return Mesh(self, self.geompyD, dualMesh)
+
+
     def CopyMesh( self, meshPart, meshName, toCopyGroups=False, toKeepIDs=False):
         """
         Create a mesh by copying a part of another mesh.
 
         Parameters:
-                meshPart: a part of mesh to copy, either 
+                meshPart: a part of mesh to copy, either
                         :class:`mesh, sub-mesh, group or filter <SMESH.SMESH_IDSource>`.
                         To copy nodes or elements not forming any mesh object,
                         pass result of :meth:`Mesh.GetIDSource` as *meshPart*
@@ -810,7 +891,7 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
                 meshName: an optional name of the new mesh. If omitted, the mesh name is kept.
                 toCopyGroups: to create groups in the new mesh.
                 toReuseHypotheses: to reuse hypotheses of the *sourceMesh*.
-                toCopyElements: to copy mesh elements present on non-modified sub-shapes of 
+                toCopyElements: to copy mesh elements present on non-modified sub-shapes of
                                 *sourceMesh*.
         Returns:
                 tuple ( ok, newMesh, newGroups, newSubMeshes, newHypotheses, invalidEntries )
@@ -1167,6 +1248,8 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
             functor = aFilterMgr.CreateAspectRatio3D()
         elif theCriterion == FT_Warping:
             functor = aFilterMgr.CreateWarping()
+        elif theCriterion == FT_Warping3D:
+            functor = aFilterMgr.CreateWarping3D()
         elif theCriterion == FT_MinimumAngle:
             functor = aFilterMgr.CreateMinimumAngle()
         elif theCriterion == FT_Taper:
@@ -1197,6 +1280,8 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
             functor = aFilterMgr.CreateNodeConnectivityNumber()
         elif theCriterion == FT_BallDiameter:
             functor = aFilterMgr.CreateBallDiameter()
+        elif theCriterion == FT_ScaledJacobian:
+            functor = aFilterMgr.CreateScaledJacobian()
         else:
             print("Error: given parameter is not numerical functor type.")
         aFilterMgr.UnRegister()
@@ -1285,7 +1370,7 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
         Returns:
                 minimum distance value
 
-        See also: 
+        See also:
                 :meth:`GetMinDistance`
         """
 
@@ -1313,7 +1398,7 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
 
         Returns:
                 :class:`SMESH.Measure` structure or None if input data is invalid
-        See also: 
+        See also:
                 :meth:`MinDistance`
         """
 
@@ -1360,7 +1445,7 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
         Returns:
                 tuple of six values (minX, minY, minZ, maxX, maxY, maxZ)
 
-        See also: 
+        See also:
                :meth:`GetBoundingBox`
         """
 
@@ -1381,7 +1466,7 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
         Returns:
                 :class:`SMESH.Measure` structure
 
-        See also: 
+        See also:
                 :meth:`BoundingBox`
         """
 
@@ -1460,14 +1545,14 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
     def GetGravityCenter(self, obj):
         """
         Get gravity center of all nodes of a mesh object.
-        
-        Parameters:            
+
+        Parameters:
                 obj: :class:`mesh, sub-mesh, group or filter <SMESH.SMESH_IDSource>`
 
-        Returns:        
+        Returns:
                 Three components of the gravity center (x,y,z)
 
-        See also: 
+        See also:
                 :meth:`Mesh.BaryCenter`
         """
         if isinstance(obj, Mesh): obj = obj.mesh
@@ -1481,11 +1566,11 @@ class smeshBuilder( SMESH._objref_SMESH_Gen, object ):
         """
         Computes a radian measure of an angle defined by 3 points: <(p1,p2,p3)
 
-        Parameters:            
-                p1,p2,p3: coordinates of 3 points defined by either SMESH.PointStruct 
+        Parameters:
+                p1,p2,p3: coordinates of 3 points defined by either SMESH.PointStruct
                           or list [x,y,z]
 
-        Returns:        
+        Returns:
             Angle in radians
         """
         if isinstance( p1, list ): p1 = PointStruct(*p1)
@@ -1551,13 +1636,13 @@ class Mesh(metaclass = MeshMeta):
     It also has methods to define groups of mesh elements, to modify a mesh (by addition of
     new nodes and elements and by changing the existing entities), to get information
     about a mesh and to export a mesh in different formats.
-    """    
+    """
 
     geom = 0
     mesh = 0
     editor = 0
 
-    def __init__(self, smeshpyD, geompyD, obj=0, name=0):
+    def __init__(self, smeshpyD, geompyD, obj=0, name=0, parallel=False):
 
         """
         Constructor
@@ -1590,7 +1675,12 @@ class Mesh(metaclass = MeshMeta):
                     else:
                         geo_name = "%s_%s to mesh"%(self.geom.GetShapeType(), id(self.geom)%100)
                     geompyD.addToStudy( self.geom, geo_name )
-                self.SetMesh( self.smeshpyD.CreateMesh(self.geom) )
+                if parallel and isinstance(self, ParallelMesh):
+                    mymesh = self.smeshpyD.CreateParallelMesh(self.geom)
+                    mymesh2 = mymesh._narrow(SMESH._objref_SMESH_Mesh)
+                    self.SetMesh( mymesh )
+                else:
+                    self.SetMesh( self.smeshpyD.CreateMesh(self.geom) )
 
             elif isinstance(obj, SMESH._objref_SMESH_Mesh):
                 self.SetMesh(obj)
@@ -1842,7 +1932,6 @@ class Mesh(metaclass = MeshMeta):
                 geom = self.geom
         return self.smeshpyD.Evaluate(self.mesh, geom)
 
-
     def Compute(self, geom=0, discardModifs=False, refresh=False):
         """
         Compute the mesh and return the status of the computation
@@ -1956,6 +2045,13 @@ class Mesh(metaclass = MeshMeta):
                     if refresh: salome.sg.updateObjBrowser()
 
         return ok
+
+    def CheckCompute(self):
+        """
+        Check if the mesh was properly compute
+        """
+        if not self.mesh.IsComputedOK():
+            raise Exception("Could not compute {}".format(self.GetName()))
 
     def GetComputeErrors(self, shape=0 ):
         """
@@ -2081,12 +2177,12 @@ class Mesh(metaclass = MeshMeta):
     def SetMeshOrder(self, submeshes):
         """
         Set priority of sub-meshes. It works in two ways:
-        
+
         * For sub-meshes with assigned algorithms of same dimension generating mesh of
           *several dimensions*, it sets the order in which the sub-meshes are computed.
         * For the rest sub-meshes, it sets the order in which the sub-meshes are checked
-          when looking for meshing parameters to apply to a sub-shape. To impose the 
-          order in which sub-meshes with uni-dimensional algorithms are computed, 
+          when looking for meshing parameters to apply to a sub-shape. To impose the
+          order in which sub-meshes with uni-dimensional algorithms are computed,
           call **submesh.Compute()** in a desired order.
 
         Parameters:
@@ -2125,7 +2221,7 @@ class Mesh(metaclass = MeshMeta):
 
     def AutomaticTetrahedralization(self, fineness=0):
         """
-        Compute a tetrahedral mesh using AutomaticLength + MEFISTO + Tetrahedron
+        Compute a tetrahedral mesh using AutomaticLength + Triangle + Tetrahedron
 
         Parameters:
                 fineness: [0.0,1.0] defines mesh fineness
@@ -2300,23 +2396,23 @@ class Mesh(metaclass = MeshMeta):
             meshPart: a part of mesh (:class:`sub-mesh, group or filter <SMESH.SMESH_IDSource>`)
                     to export instead of the mesh
             autoDimension: if *True* (default), a space dimension of a MED mesh can be either
-    
+
                     - 1D if all mesh nodes lie on OX coordinate axis, or
                     - 2D if all mesh nodes lie on XOY coordinate plane, or
                     - 3D in the rest cases.
-    
+
                     If *autoDimension* is *False*, the space dimension is always 3.
             fields: list of GEOM fields defined on the shape to mesh.
-            geomAssocFields: each character of this string means a need to export a 
-                    corresponding field; correspondence between fields and characters 
+            geomAssocFields: each character of this string means a need to export a
+                    corresponding field; correspondence between fields and characters
                     is following:
-    
+
                     - 'v' stands for "_vertices_" field;
                     - 'e' stands for "_edges_" field;
                     - 'f' stands for "_faces_" field;
                     - 's' stands for "_solids_" field.
-    
-            zTolerance (float): tolerance in Z direction. If Z coordinate of a node is 
+
+            zTolerance (float): tolerance in Z direction. If Z coordinate of a node is
                             close to zero within a given tolerance, the coordinate is set to zero.
                             If *ZTolerance* is negative (default), the node coordinates are kept as is.
             saveNumbers(boolean) : enable saving numbers of nodes and cells.
@@ -2371,8 +2467,8 @@ class Mesh(metaclass = MeshMeta):
                         the typical use is auto_groups=False.
                 version (int): define the version (xy, where version is x.y.z) of MED file format.
                         For instance med 3.2.1 is coded 3*10+2 = 32, med 4.0.0 is coded 4*10+0 = 40.
-                        The rules of compatibility to write a mesh in an older version than 
-                        the current version depend on the current version. For instance, 
+                        The rules of compatibility to write a mesh in an older version than
+                        the current version depend on the current version. For instance,
                         with med 4.0 it is possible to write/append med files in 4.0.0 (default)
                         or 3.2.1 or 3.3.1 formats.
                         If the version is equal to -1, the version is not changed (default).
@@ -2387,8 +2483,8 @@ class Mesh(metaclass = MeshMeta):
 
                         If *autoDimension* is *False*, the space dimension is always 3.
                 fields: list of GEOM fields defined on the shape to mesh.
-                geomAssocFields: each character of this string means a need to export a 
-                        corresponding field; correspondence between fields and characters 
+                geomAssocFields: each character of this string means a need to export a
+                        corresponding field; correspondence between fields and characters
                         is following:
 
                         - 'v' stands for "_vertices_" field;
@@ -2396,7 +2492,7 @@ class Mesh(metaclass = MeshMeta):
                         - 'f' stands for "_faces_" field;
                         - 's' stands for "_solids_" field.
 
-                zTolerance (float): tolerance in Z direction. If Z coordinate of a node is 
+                zTolerance (float): tolerance in Z direction. If Z coordinate of a node is
                              close to zero within a given tolerance, the coordinate is set to zero.
                              If *ZTolerance* is negative (default), the node coordinates are kept as is.
                 saveNumbers (boolean) : enable saving numbers of nodes and cells.
@@ -2524,6 +2620,26 @@ class Mesh(metaclass = MeshMeta):
             meshPart = self.mesh
         self.mesh.ExportCGNS(meshPart, f, overwrite, groupElemsByType)
 
+    def ExportStructuredCGNS(self, f, overwrite=1, meshPart=None ):
+        """
+        Export the mesh in a file in Structured CGNS format
+
+        Parameters:
+                f: is the file name
+                overwrite: boolean parameter for overwriting/not overwriting the file
+                meshPart: a part of mesh (:class:`sub-mesh, group or filter <SMESH.SMESH_IDSource>`) to export instead of the mesh               
+        """          
+
+        unRegister = genObjUnRegister()
+        if isinstance( meshPart, list ):
+            meshPart = self.GetIDSource( meshPart, SMESH.ALL )
+            unRegister.set( meshPart )
+        if isinstance( meshPart, Mesh ):
+            meshPart = meshPart.mesh
+        elif not meshPart:
+            meshPart = self.mesh
+        self.mesh.ExportStructuredCGNS(meshPart, f, overwrite)        
+
     def ExportGMF(self, f, meshPart=None):
         """
         Export the mesh in a file in GMF format.
@@ -2545,6 +2661,89 @@ class Mesh(metaclass = MeshMeta):
             meshPart = self.mesh
         self.mesh.ExportGMF(meshPart, f, True)
 
+    def ExportMESHIO(
+        self,
+        fileName,
+        selectedFilter,
+        meshPart
+    ):
+        """
+        Exports a part of mesh to a file with meshio library
+        through an intermediate MED file.
+
+        Parameters described below are the same as for ExportMED() method.
+        However, we know that _pyMesh::Process(const Handle(_pyCommand)& theCommand) method
+        change a position of meshPart argument when dump to a Python script for whatever reason
+        this way:
+        - to 5th place for ExportMED command
+        - to last place for the rest commands
+
+        So, for this method meshPart moved to the end of the args.
+        Look at src/SMESH_I/SMESH_2smeshpy.cxx for related source code.
+
+        The same note is for the name of the method that was dumped as ExportPartToMESHIO(),
+        but then processing just removes PartTo from the middle of the name as it was done
+        for all export methods.
+
+        Parameters:
+                fileName: is the file name
+                selectedFilter: filter string selected by user in a file dialog
+                meshPart: a part of mesh (:class:`sub-mesh, group or filter <SMESH.SMESH_IDSource>`)
+                        to export instead of the mesh
+        """
+
+        if isinstance(meshPart, Mesh):
+            meshPart = meshPart.GetMesh()
+
+        self.mesh.ExportPartToMESHIO(
+            meshPart,
+            fileName,
+            selectedFilter,
+            "meshio"
+        )
+
+    def ExportGMSHIO(
+        self,
+        fileName,
+        selectedFilter,
+        meshPart
+    ):
+        """
+        Exports a part of mesh to a file with gmsh library
+        through an intermediate MED file.
+
+        Parameters described below are the same as for ExportMED() method.
+        However, we know that _pyMesh::Process(const Handle(_pyCommand)& theCommand) method
+        change a position of meshPart argument when dump to a Python script for whatever reason
+        this way:
+        - to 5th place for ExportMED command
+        - to last place for the rest commands
+
+        So, for this method meshPart moved to the end of the args.
+        Look at src/SMESH_I/SMESH_2smeshpy.cxx for related source code.
+
+        The same note is for the name of the method that was dumped as ExportPartToMESHIO(),
+        but then processing just removes PartTo from the middle of the name as it was done
+        for all export methods.
+
+        Parameters:
+                fileName: is the file name
+                selectedFilter: filter string selected by user in a file dialog
+                meshPart: a part of mesh (:class:`sub-mesh, group or filter <SMESH.SMESH_IDSource>`)
+                        to export instead of the mesh
+        """
+
+        if isinstance(meshPart, Mesh):
+            meshPart = meshPart.GetMesh()
+
+        self.mesh.ExportPartToMESHIO(
+            meshPart,
+            fileName,
+            selectedFilter,
+            "gmsh"
+        )
+
+
     def ExportToMED(self, *args, **kwargs):
         """
         Deprecated, used only for compatibility! Please, use :meth:`ExportMED` method instead.
@@ -2564,7 +2763,7 @@ class Mesh(metaclass = MeshMeta):
 
                         If **autoDimension** is *False*, the space dimension is always 3.
         """
-    
+
         print("WARNING: ExportToMED() is deprecated, use ExportMED() instead")
         # process positional arguments
         #args = [i for i in args if i not in [SMESH.MED_V2_1, SMESH.MED_V2_2]] # backward compatibility
@@ -2641,7 +2840,7 @@ class Mesh(metaclass = MeshMeta):
         Create an empty standalone mesh group
 
         Parameters:
-                elementType: the :class:`type <SMESH.ElementType>` of elements in the group; 
+                elementType: the :class:`type <SMESH.ElementType>` of elements in the group;
                         either of (SMESH.NODE, SMESH.EDGE, SMESH.FACE, SMESH.VOLUME)
                 name: the name of the mesh group
 
@@ -2696,7 +2895,7 @@ class Mesh(metaclass = MeshMeta):
 
     def _groupTypeFromShape( self, shape ):
         """
-        Pivate method to get a type of group on geometry
+        Private method to get a type of group on geometry
         """
         tgeo = str(shape.GetShapeType())
         if tgeo == "VERTEX":
@@ -2881,7 +3080,7 @@ class Mesh(metaclass = MeshMeta):
 
     def GetGroups(self, elemType = SMESH.ALL):
         """
-        Get the list of groups existing in the mesh in the order of creation 
+        Get the list of groups existing in the mesh in the order of creation
         (starting from the oldest one)
 
         Parameters:
@@ -3592,7 +3791,7 @@ class Mesh(metaclass = MeshMeta):
         Return the type of mesh element or node
 
         Returns:
-            the value from :class:`SMESH.ElementType` enumeration. 
+            the value from :class:`SMESH.ElementType` enumeration.
             Return SMESH.ALL if element or node with the given ID does not exist
         """
 
@@ -3886,7 +4085,7 @@ class Mesh(metaclass = MeshMeta):
         Returns:
             a list of three double values
 
-        See also: 
+        See also:
                 :meth:`smeshBuilder.GetGravityCenter`
         """
 
@@ -4004,7 +4203,7 @@ class Mesh(metaclass = MeshMeta):
         Returns:
             tuple of six values (minX, minY, minZ, maxX, maxY, maxZ)
 
-        See Also: 
+        See Also:
             :meth:`GetBoundingBox()`
         """
 
@@ -4027,7 +4226,7 @@ class Mesh(metaclass = MeshMeta):
         Returns:
             :class:`SMESH.Measure` structure
 
-        See Also: 
+        See Also:
             :meth:`BoundingBox()`
         """
 
@@ -4163,7 +4362,7 @@ class Mesh(metaclass = MeshMeta):
         Returns:
             an object (a new group or a temporary :class:`SMESH.SMESH_IDSource`) holding
             IDs of new and/or found 0D elements. IDs of 0D elements
-            can be retrieved from the returned object by 
+            can be retrieved from the returned object by
             calling :meth:`GetIDs() <SMESH.SMESH_IDSource.GetIDs>`
         """
 
@@ -4537,7 +4736,7 @@ class Mesh(metaclass = MeshMeta):
             edges = self.GetIDSource( edges, SMESH.EDGE )
             unRegister.set( edges )
         return self.editor.Get1DBranches( edges, startNode )
-    
+
     def FindSharpEdges( self, angle, addExisting=False ):
         """
         Return sharp edges of faces and non-manifold ones.
@@ -4604,7 +4803,7 @@ class Mesh(metaclass = MeshMeta):
     def AddNodeOnSegment(self, Node1, Node2, position = 0.5):
         """
         Replace each triangle bound by Node1-Node2 segment with
-        two triangles by connecting a node made on the link with a node 
+        two triangles by connecting a node made on the link with a node
         opposite to the link.
 
         Parameters:
@@ -4820,7 +5019,7 @@ class Mesh(metaclass = MeshMeta):
         Split quadrangles into triangles.
 
         Parameters:
-                IDsOfElements: the faces to be splitted.
+                IDsOfElements: the faces to be split.
                 theCriterion: is a numerical functor, in terms of enum :class:`SMESH.FunctorType`, used to
                         choose a diagonal for splitting. If *theCriterion* is None, which is a default
                         value, then quadrangles will be split by the smallest diagonal.
@@ -4874,7 +5073,7 @@ class Mesh(metaclass = MeshMeta):
         a quadrangle.
 
         Parameters:
-                theElements: the faces to be splitted. This can be either 
+                theElements: the faces to be split. This can be either
                         :class:`mesh, sub-mesh, group, filter <SMESH.SMESH_IDSource>`
                         or a list of face IDs. By default all quadrangles are split
 
@@ -4897,7 +5096,7 @@ class Mesh(metaclass = MeshMeta):
         Split quadrangles into triangles.
 
         Parameters:
-                IDsOfElements: the faces to be splitted
+                IDsOfElements: the faces to be split
                 Diag13 (boolean):        is used to choose a diagonal for splitting.
 
         Returns:
@@ -4936,15 +5135,15 @@ class Mesh(metaclass = MeshMeta):
         Find a better splitting of the given quadrangle.
 
         Parameters:
-                IDOfQuad:   the ID of the quadrangle to be splitted.
+                IDOfQuad:   the ID of the quadrangle to be split.
                 theCriterion:  is a numerical functor, in terms of enum :class:`SMESH.FunctorType`, used to
                         choose a diagonal for splitting.
                         Note that not all items of :class:`SMESH.FunctorType` corresponds
                         to numerical functors.
 
         Returns:
-            * 1 if 1-3 diagonal is better, 
-            * 2 if 2-4 diagonal is better, 
+            * 1 if 1-3 diagonal is better,
+            * 2 if 2-4 diagonal is better,
             * 0 if error occurs.
 
         Note:
@@ -4953,7 +5152,7 @@ class Mesh(metaclass = MeshMeta):
         """
         return self.editor.BestSplit(IDOfQuad, self.smeshpyD.GetFunctor(theCriterion))
 
-    def SplitVolumesIntoTetra(self, elems, method=smeshBuilder.Hex_5Tet ):
+    def SplitVolumesIntoTetra(self, elems, method=smeshBuilder.Hex_5Tet, avoidOverConstrainedVolumes=False ):
         """
         Split volumic elements into tetrahedrons
 
@@ -4962,6 +5161,7 @@ class Mesh(metaclass = MeshMeta):
                 method:  flags passing splitting method:
                         smesh.Hex_5Tet, smesh.Hex_6Tet, smesh.Hex_24Tet.
                         smesh.Hex_5Tet - to split the hexahedron into 5 tetrahedrons, etc.
+                avoidOverConstrainedVolume: if True, choose variants that comply with no over-constrained volumes
 
         Note:
                 This operation can create gaps in numeration of elements.
@@ -4973,7 +5173,10 @@ class Mesh(metaclass = MeshMeta):
         if ( isinstance( elems, list )):
             elems = self.editor.MakeIDSource(elems, SMESH.VOLUME)
             unRegister.set( elems )
-        self.editor.SplitVolumesIntoTetra(elems, method)
+        if avoidOverConstrainedVolumes:
+            self.editor.SplitVolumesIntoTetraAvoidOverConstrainedVolumes(elems, method)
+        else:
+            self.editor.SplitVolumesIntoTetra(elems, method)
         return
 
     def SplitBiQuadraticIntoLinear(self, elems=None):
@@ -5096,7 +5299,7 @@ class Mesh(metaclass = MeshMeta):
         This operation uses :doc:`pattern_mapping` functionality for splitting.
 
         Parameters:
-                theObject: the object from which the list of hexahedrons is taken; 
+                theObject: the object from which the list of hexahedrons is taken;
                         this is :class:`mesh, sub-mesh, group or filter <SMESH.SMESH_IDSource>`
                 theNode000,theNode001: within the range [0,7]; gives the orientation of the
                         pattern relatively each hexahedron: the (0,0,0) key-point of the pattern
@@ -5425,6 +5628,32 @@ class Mesh(metaclass = MeshMeta):
         if mesh: mesh = self.smeshpyD.Mesh(mesh)
         return mesh, group
 
+    def MakeBoundaryOfEachElement(self, groupName="", meshName="", toCopyAll=False, groups=[] ):
+        """
+        Create boundary elements around the whole mesh or groups of elements
+
+        Parameters:
+                groupName: a name of group to store all boundary elements in,
+                        "" means not to create the group
+                meshName: a name of a new mesh, which is a copy of the initial
+                        mesh + created boundary elements; "" means not to create the new mesh
+                toCopyAll: if True, the whole initial mesh will be copied into
+                        the new mesh else only boundary elements will be copied into the new mesh
+                groups: list of :class:`sub-meshes, groups or filters <SMESH.SMESH_IDSource>` of elements to make boundary around
+
+        Returns:
+                tuple( long, mesh, group )
+                       - long - number of added boundary elements
+                       - mesh - the :class:`Mesh` where elements were added to
+                       - group - the :class:`group <SMESH.SMESH_Group>` of boundary elements or None
+        """
+        dimension=SMESH.BND_2DFROM3D
+        toCreateAllElements = True # create all boundary elements in the mesh
+        nb, mesh, group = self.editor.MakeBoundaryElements( dimension,groupName,meshName,
+                                                           toCopyAll,toCreateAllElements,groups)
+        if mesh: mesh = self.smeshpyD.Mesh(mesh)
+        return nb, mesh, group
+
     def MakeBoundaryElements(self, dimension=SMESH.BND_2DFROM3D, groupName="", meshName="",
                              toCopyAll=False, groups=[]):
         """
@@ -5448,9 +5677,9 @@ class Mesh(metaclass = MeshMeta):
                        - mesh - the :class:`Mesh` where elements were added to
                        - group - the :class:`group <SMESH.SMESH_Group>` of boundary elements or None
         """
-
+        toCreateAllElements = False # create only elements in the boundary of the solid
         nb, mesh, group = self.editor.MakeBoundaryElements(dimension,groupName,meshName,
-                                                           toCopyAll,groups)
+                                                           toCopyAll,toCreateAllElements,groups)
         if mesh: mesh = self.smeshpyD.Mesh(mesh)
         return nb, mesh, group
 
@@ -5588,7 +5817,7 @@ class Mesh(metaclass = MeshMeta):
                 of all steps, else - size of each step
 
         Returns:
-            the list of created :class:`groups <SMESH.SMESH_GroupBase>` if *MakeGroups* == True, 
+            the list of created :class:`groups <SMESH.SMESH_GroupBase>` if *MakeGroups* == True,
             empty list otherwise
         """
 
@@ -5644,7 +5873,7 @@ class Mesh(metaclass = MeshMeta):
                         - a list of tree components of the point or
                         - a node ID or
                         - a GEOM point
-            angles: list of angles in radians. Nodes at each extrusion step are rotated 
+            angles: list of angles in radians. Nodes at each extrusion step are rotated
                 around *basePoint*, additionally to previous steps.
             anglesVariation: forces the computation of rotation angles as linear
                 variation of the given *angles* along path steps
@@ -5862,13 +6091,13 @@ class Mesh(metaclass = MeshMeta):
             PathShape: optional shape (edge or wire) which defines the sub-mesh of the mesh defined by *PathObject* if the mesh contains not only path segments, else it can be None
             NodeStart: the first or the last node on the path. Defines the direction of extrusion
             HasAngles: not used obsolete
-            Angles: list of angles in radians. Nodes at each extrusion step are rotated 
+            Angles: list of angles in radians. Nodes at each extrusion step are rotated
                 around *basePoint*, additionally to previous steps.
             LinearVariation: forces the computation of rotation angles as linear
                 variation of the given Angles along path steps
             HasRefPoint: allows using the reference point
             RefPoint: optional scaling and rotation center (mass center of the extruded
-                elements by default). The User can specify any point as the Reference Point. 
+                elements by default). The User can specify any point as the Reference Point.
                 *RefPoint* can be either GEOM Vertex, [x,y,z] or :class:`SMESH.PointStruct`
             MakeGroups: forces the generation of new groups from existing ones
             ScaleFactors: optional scale factors to apply during extrusion
@@ -5876,7 +6105,7 @@ class Mesh(metaclass = MeshMeta):
                 else *scaleFactors* [i] is applied to nodes at the i-th extrusion step
 
         Returns:
-            list of created :class:`groups <SMESH.SMESH_GroupBase>` and 
+            list of created :class:`groups <SMESH.SMESH_GroupBase>` and
             :class:`error code <SMESH.SMESH_MeshEditor.Extrusion_Error>`
         Example: :ref:`tui_extrusion_along_path`
         """
@@ -5896,7 +6125,7 @@ class Mesh(metaclass = MeshMeta):
         Angles,AnglesParameters,hasVars = ParseAngles(Angles)
         ScaleFactors,ScalesParameters,hasVars = ParseParameters(ScaleFactors)
         Parameters = AnglesParameters + var_separator + \
-                     RefPoint.parameters + var_separator + ScalesParameters 
+                     RefPoint.parameters + var_separator + ScalesParameters
         self.mesh.SetParameters(Parameters)
         return self.editor.ExtrusionAlongPathObjects(Nodes, Edges, Faces,
                                                      PathObject, PathShape, NodeStart,
@@ -5917,7 +6146,7 @@ class Mesh(metaclass = MeshMeta):
             Path: 1D mesh or 1D sub-mesh, along which proceeds the extrusion
             NodeStart: the start node from Path. Defines the direction of extrusion
             HasAngles: not used obsolete
-            Angles: list of angles in radians. Nodes at each extrusion step are rotated 
+            Angles: list of angles in radians. Nodes at each extrusion step are rotated
                 around *basePoint*, additionally to previous steps.
             LinearVariation: forces the computation of rotation angles as linear
                 variation of the given Angles along path steps
@@ -5960,7 +6189,7 @@ class Mesh(metaclass = MeshMeta):
             PathShape: shape (edge) defines the sub-mesh for the path
             NodeStart: the first or the last node on the edge. Defines the direction of extrusion
             HasAngles: not used obsolete
-            Angles: list of angles in radians. Nodes at each extrusion step are rotated 
+            Angles: list of angles in radians. Nodes at each extrusion step are rotated
                 around *basePoint*, additionally to previous steps.
             HasRefPoint: allows using the reference point
             RefPoint: the reference point around which the shape is rotated (the mass center of the shape by default).
@@ -6001,7 +6230,7 @@ class Mesh(metaclass = MeshMeta):
             PathShape: shape (edge) defines the sub-mesh for the path
             NodeStart: the first or the last node on the edge. Defines the direction of extrusion
             HasAngles: not used obsolete
-            Angles: list of angles in radians. Nodes at each extrusion step are rotated 
+            Angles: list of angles in radians. Nodes at each extrusion step are rotated
                 around *basePoint*, additionally to previous steps.
             HasRefPoint: allows using the reference point
             RefPoint: the reference point around which the shape is rotated (the mass center of the shape by default).
@@ -6012,7 +6241,7 @@ class Mesh(metaclass = MeshMeta):
                 variation of the given Angles along path steps
 
         Returns:
-            list of created :class:`groups <SMESH.SMESH_GroupBase>` and 
+            list of created :class:`groups <SMESH.SMESH_GroupBase>` and
             :class:`error code <SMESH.SMESH_MeshEditor.Extrusion_Error>` if *MakeGroups* == True,
             only :class:`error code <SMESH.SMESH_MeshEditor.Extrusion_Error>` otherwise
         Example: :ref:`tui_extrusion_along_path`
@@ -6039,7 +6268,7 @@ class Mesh(metaclass = MeshMeta):
             PathShape: shape (edge) defines the sub-mesh for the path
             NodeStart: the first or the last node on the edge. Defines the direction of extrusion
             HasAngles: not used obsolete
-            Angles: list of angles in radians. Nodes at each extrusion step are rotated 
+            Angles: list of angles in radians. Nodes at each extrusion step are rotated
                 around *basePoint*, additionally to previous steps.
             HasRefPoint: allows using the reference point
             RefPoint:  the reference point around which the shape is rotated (the mass center of the shape by default).
@@ -6050,7 +6279,7 @@ class Mesh(metaclass = MeshMeta):
                 variation of the given Angles along path steps
 
         Returns:
-            list of created :class:`groups <SMESH.SMESH_GroupBase>` and 
+            list of created :class:`groups <SMESH.SMESH_GroupBase>` and
             :class:`error code <SMESH.SMESH_MeshEditor.Extrusion_Error>` if *MakeGroups* == True,
             only :class:`error code <SMESH.SMESH_MeshEditor.Extrusion_Error>` otherwise
         Example: :ref:`tui_extrusion_along_path`
@@ -6077,7 +6306,7 @@ class Mesh(metaclass = MeshMeta):
             PathShape: shape (edge) defines the sub-mesh for the path
             NodeStart: the first or the last node on the edge. Defines the direction of extrusion
             HasAngles: not used obsolete
-            Angles: list of angles in radians. Nodes at each extrusion step are rotated 
+            Angles: list of angles in radians. Nodes at each extrusion step are rotated
                 around *basePoint*, additionally to previous steps.
             HasRefPoint: allows using the reference point
             RefPoint: the reference point around which the shape is rotated (the mass center of the shape by default).
@@ -6088,7 +6317,7 @@ class Mesh(metaclass = MeshMeta):
                 variation of the given Angles along path steps
 
         Returns:
-            list of created :class:`groups <SMESH.SMESH_GroupBase>` and 
+            list of created :class:`groups <SMESH.SMESH_GroupBase>` and
             :class:`error code <SMESH.SMESH_MeshEditor.Extrusion_Error>` if *MakeGroups* == True,
             only :class:`error code <SMESH.SMESH_MeshEditor.Extrusion_Error>` otherwise
         Example: :ref:`tui_extrusion_along_path`
@@ -6320,7 +6549,7 @@ class Mesh(metaclass = MeshMeta):
         Parameters:
             theObject: the object to translate (:class:`mesh, sub-mesh, group or filter <SMESH.SMESH_IDSource>`)
             thePoint: base point for scale (:class:`SMESH.PointStruct` or list of 3 coordinates)
-            theScaleFact: list of 1-3 scale factors for axises
+            theScaleFact: list of 1-3 scale factors for axes
             Copy: allows copying the translated elements
             MakeGroups: forces the generation of new groups from existing
                 ones (if Copy)
@@ -6356,7 +6585,7 @@ class Mesh(metaclass = MeshMeta):
         Parameters:
             theObject: the object to translate (:class:`mesh, sub-mesh, group or filter <SMESH.SMESH_IDSource>`)
             thePoint: base point for scale (:class:`SMESH.PointStruct` or list of 3 coordinates)
-            theScaleFact: list of 1-3 scale factors for axises
+            theScaleFact: list of 1-3 scale factors for axes
             MakeGroups: forces the generation of new groups from existing ones
             NewMeshName: the name of the newly created mesh
 
@@ -6498,7 +6727,7 @@ class Mesh(metaclass = MeshMeta):
             theObject (SMESH.SMESH_IDSource): the source object (mesh, sub-mesh, group or filter)
             theValue (float): signed offset size
             MakeGroups (boolean): forces the generation of new groups from existing ones
-            CopyElements (boolean): if *NewMeshName* is empty, True means to keep original elements, 
+            CopyElements (boolean): if *NewMeshName* is empty, True means to keep original elements,
                           False means to remove original elements.
             NewMeshName (string): the name of a mesh to create. If empty, offset elements are added to this mesh
 
@@ -6879,7 +7108,7 @@ class Mesh(metaclass = MeshMeta):
 
         Parameters:
             theElements: container of elements to duplicate. It can be a
-                :class:`mesh, sub-mesh, group, filter <SMESH.SMESH_IDSource>` 
+                :class:`mesh, sub-mesh, group, filter <SMESH.SMESH_IDSource>`
                 or a list of element IDs. If *theElements* is
                 a :class:`Mesh`, elements of highest dimension are duplicated
             theGroupName: a name of group to contain the generated elements.
@@ -6889,7 +7118,7 @@ class Mesh(metaclass = MeshMeta):
                 in any group.
 
         Returns:
-                a :class:`group <SMESH.SMESH_Group>` where the new elements are added. 
+                a :class:`group <SMESH.SMESH_Group>` where the new elements are added.
                 None if *theGroupName* == "".
         """
 
@@ -7158,7 +7387,7 @@ class Mesh(metaclass = MeshMeta):
         return self.editor.CreateHoleSkin( radius, theShape, groupName, theNodesCoords )
 
     def MakePolyLine(self, segments, groupName='', isPreview=False ):
-        """    
+        """
         Create a polyline consisting of 1D mesh elements each lying on a 2D element of
         the initial triangle mesh. Positions of new nodes are found by cutting the mesh by the
         plane passing through pairs of points specified by each :class:`SMESH.PolySegment` structure.
@@ -7176,7 +7405,7 @@ class Mesh(metaclass = MeshMeta):
             segments: list of :class:`SMESH.PolySegment` defining positions of cutting planes.
             groupName: optional name of a group where created mesh segments will be added.
 
-        """    
+        """
         editor = self.editor
         if isPreview:
             editor = self.mesh.GetMeshEditPreviewer()
@@ -7331,10 +7560,10 @@ class Mesh(metaclass = MeshMeta):
         """
         Computes a radian measure of an angle defined by 3 nodes: <(node1,node2,node3)
 
-        Parameters:            
+        Parameters:
                 node1,node2,node3: IDs of the three nodes
 
-        Returns:        
+        Returns:
             Angle in radians [0,PI]. -1 if failure case.
         """
         p1 = self.GetNodeXYZ( node1 )
@@ -7392,6 +7621,19 @@ class Mesh(metaclass = MeshMeta):
 
         return self.FunctorValue(SMESH.FT_Warping, elemId)
 
+    def GetWarping3D(self, elemId):
+        """
+        Get warping angle of faces element of 3D elements.
+
+        Parameters:
+            elemId: mesh element ID
+
+        Returns:
+            element's warping angle value
+        """
+
+        return self.FunctorValue(SMESH.FT_Warping3D, elemId)
+
     def GetMinimumAngle(self, elemId):
         """
         Get minimum angle of 2D element.
@@ -7431,6 +7673,19 @@ class Mesh(metaclass = MeshMeta):
 
         return self.FunctorValue(SMESH.FT_Skew, elemId)
 
+    def GetScaledJacobian(self, elemId):
+        """
+        Get the scaled jacobian of 3D element id
+
+        Parameters:
+            elemId: mesh element ID
+
+        Returns:
+            the scaled jacobian
+        """
+
+        return self.FunctorValue(SMESH.FT_ScaledJacobian, elemId)
+
     def GetMinMax(self, funType, meshPart=None):
         """
         Return minimal and maximal value of a given functor.
@@ -7465,6 +7720,447 @@ class Mesh(metaclass = MeshMeta):
 
     pass # end of Mesh class
 
+def _copy_gmsh_param(dim, local_param, global_param):
+    if dim==3:
+        local_param.SetMaxSize(global_param.GetMaxSize())
+        local_param.SetMinSize(global_param.GetMinSize())
+        local_param.Set3DAlgo(global_param.Get3DAlgo())
+        local_param.SetRecombineAll(global_param.GetRecombineAll())
+        local_param.SetSubdivAlgo(global_param.GetSubdivAlgo())
+        local_param.SetRemeshAlgo(global_param.GetRemeshAlgo())
+        local_param.SetRemeshPara(global_param.GetRemeshPara())
+        local_param.SetSmouthSteps(global_param.GetSmouthSteps())
+        local_param.SetSizeFactor(global_param.GetSizeFactor())
+        local_param.SetUseIncomplElem(global_param.GetUseIncomplElem())
+        local_param.SetMeshCurvatureSize(global_param.GetMeshCurvatureSize())
+        local_param.SetSecondOrder(global_param.GetSecondOrder())
+        local_param.SetIs2d(global_param.GetIs2d())
+    elif dim==2:
+        local_param.SetMaxSize(global_param.GetMaxSize())
+        local_param.SetMinSize(global_param.GetMinSize())
+        local_param.Set2DAlgo(global_param.Get2DAlgo())
+        local_param.SetRecomb2DAlgo(global_param.GetRecomb2DAlgo())
+        local_param.SetRecombineAll(global_param.GetRecombineAll())
+        local_param.SetSubdivAlgo(global_param.GetSubdivAlgo())
+        local_param.SetRemeshAlgo(global_param.GetRemeshAlgo())
+        local_param.SetRemeshPara(global_param.GetRemeshPara())
+        local_param.SetSmouthSteps(global_param.GetSmouthSteps())
+        local_param.SetSizeFactor(global_param.GetSizeFactor())
+        local_param.SetUseIncomplElem(global_param.GetUseIncomplElem())
+        local_param.SetMeshCurvatureSize(global_param.GetMeshCurvatureSize())
+        local_param.SetSecondOrder(global_param.GetSecondOrder())
+        local_param.SetIs2d(global_param.GetIs2d())
+
+def _copy_netgen_param(dim, local_param, global_param):
+    """
+    Create 1D/2D/3D netgen parameters from a NETGEN 1D2D3D parameter
+    """
+    if dim==1:
+        #TODO: More global conversion ? or let user define it
+        local_param.NumberOfSegments(int(global_param.GetMaxSize()))
+    elif dim==2:
+        local_param.SetMaxSize(global_param.GetMaxSize())
+        local_param.SetMinSize(global_param.GetMinSize())
+        local_param.SetOptimize(global_param.GetOptimize())
+        local_param.SetFineness(global_param.GetFineness())
+        local_param.SetNbSegPerEdge(global_param.GetNbSegPerEdge())
+        local_param.SetNbSegPerRadius(global_param.GetNbSegPerRadius())
+        #TODO: Why the 0.9 to have same results
+        local_param.SetGrowthRate(global_param.GetGrowthRate()*0.9)
+        local_param.SetChordalError(global_param.GetChordalError())
+        local_param.SetChordalErrorEnabled(global_param.GetChordalErrorEnabled())
+        local_param.SetUseSurfaceCurvature(global_param.GetUseSurfaceCurvature())
+        local_param.SetUseDelauney(global_param.GetUseDelauney())
+        local_param.SetQuadAllowed(global_param.GetQuadAllowed())
+        local_param.SetWorstElemMeasure(global_param.GetWorstElemMeasure())
+        local_param.SetCheckChartBoundary(global_param.GetCheckChartBoundary())
+        local_param.SetNbThreads(global_param.GetNbThreads())
+    else:
+        local_param.SetMaxSize(global_param.GetMaxSize())
+        local_param.SetMinSize(global_param.GetMinSize())
+        local_param.SetOptimize(global_param.GetOptimize())
+        local_param.SetCheckOverlapping(global_param.GetCheckOverlapping())
+        local_param.SetCheckChartBoundary(global_param.GetCheckChartBoundary())
+        local_param.SetFineness(global_param.GetFineness())
+        local_param.SetNbSegPerEdge(global_param.GetNbSegPerEdge())
+        local_param.SetNbSegPerRadius(global_param.GetNbSegPerRadius())
+        local_param.SetGrowthRate(global_param.GetGrowthRate())
+        local_param.SetNbThreads(global_param.GetNbThreads())
+
+
+def _shaperstudy2geom(geompyD, shaper_obj):
+    """
+    Conversion of shaper object to geom object
+
+    Parameters:
+        geompyD: geomBuilder instance
+        shaper_obj: Shaper study object
+
+    Returns:
+        geom object
+
+    """
+    import tempfile
+    #Writing shaperstudy object into a brep file
+    fid, tmp_file = tempfile.mkstemp(suffix='.brep')
+    with open(fid, 'wb') as f:
+        f.write(shaper_obj.GetShapeStream())
+    # Reimporting brep file into geom
+    real_geom = geompyD.ImportBREP(tmp_file)
+    os.remove(tmp_file)
+
+    return real_geom
+
+
+def _split_geom(geompyD, geom):
+    """
+    Splitting geometry into n solids and a 2D/1D compound
+
+    Parameters:
+        geompyD: geomBuilder instance
+        geom: geometrical object for meshing
+
+    Returns:
+        compound containing all the 1D,2D elements
+        list of solids
+    """
+
+    # Splitting geometry into 3D elements and all the 2D/1D into one compound
+    object_solids = geompyD.ExtractShapes(geom, geompyD.ShapeType["SOLID"],
+                                          True)
+
+    solids = []
+    isolid = 0
+    for solid in object_solids:
+        isolid += 1
+        geompyD.addToStudyInFather( geom, solid, 'Solid_{}'.format(isolid) )
+        solids.append(solid)
+    # If geom is a solid ExtractShapes will return nothing in that case geom is the solids
+    if isolid == 0:
+       solids = [geom]
+
+    faces = []
+    iface = 0
+    solid_faces = geompyD.ExtractShapes(geom, geompyD.ShapeType["FACE"],
+                                        True)
+    for face in solid_faces:
+        faces.append(face)
+        iface += 1
+        geompyD.addToStudyInFather(geom, face,
+                                   'Face_{}'.format(iface))
+
+    return faces, solids
+
+
+MULTITHREAD, MULTINODE = range(2)
+class ParallelismSettings:
+    """
+    Defines the parameters for the parallelism of ParallelMesh
+    """
+    def __init__(self, mesh):
+        """
+        Construsctor
+
+        Parameters:
+        mesh: Instance of ParallelMesh
+        """
+        if not(isinstance(mesh, ParallelMesh)):
+            raise ValueError("mesh should be a ParallelMesh")
+
+        self._mesh = mesh
+
+
+class MTParallelismSettings(ParallelismSettings):
+    """
+    Defines the parameters for the parallelism of ParallelMesh using MultiThreading
+    """
+    def __init__(self, mesh):
+        ParallelismSettings.__init__(self, mesh)
+
+    # Multithreading methods
+    def SetNbThreads(self, nbThreads):
+        """ Set the number of threads for multithread """
+        if nbThreads < 1:
+            raise ValueError("Number of threads must be strictly greater than 1")
+
+        self._mesh.mesh.SetNbThreads(nbThreads)
+
+    def GetNbThreads(self):
+        """ Get Number of threads """
+        return self._mesh.mesh.GetNbThreads()
+
+    def __str__(self):
+        """ str conversion """
+        string = "\nParameter for MultiThreading parallelism:\n"
+        string += "NbThreads: {}\n".format(self.GetNbThreads())
+
+        return string
+
+
+class MNParallelismSettings(ParallelismSettings):
+    """
+    Defines the parameters for the parallelism of ParallelMesh using MultiNodal
+    """
+    def __init__(self, mesh):
+        ParallelismSettings.__init__(self, mesh)
+
+    def GetResource(self):
+        """ Get the resource on which to run """
+        return self._mesh.mesh.GetResource()
+
+    def SetResource(self, resource):
+        """ Set the resource on which to run """
+        self._mesh.mesh.SetResource(resource)
+
+    def SetNbProc(self, nbProc):
+        """ Set the number of Processor for multinode """
+        if nbProc < 1:
+            raise ValueError("Number of Proc must be strictly greater than 1")
+        self._mesh.mesh.SetNbProc(nbProc)
+
+    def GetNbProc(self):
+        """ Get Number of Processor """
+        return self._mesh.mesh.GetNbProc()
+
+    def SetNbProcPerNode(self, nbProcPerNode):
+        """ Set the number of Processor Per Node for multinode """
+        if nbProcPerNode < 1:
+            raise ValueError("Number of Processor Per Node must be strictly greater than 1")
+
+        self._mesh.mesh.SetNbProcPerNode(nbProcPerNode)
+
+    def GetNbProcPerNode(self):
+        """ Get Number of Processor Per Node """
+        return self._mesh.mesh.GetNbProcPerNode()
+
+    def SetNbNode(self, nbNode):
+        """ Set the number of Node for multinode """
+        if nbNode < 1:
+            raise ValueError("Number of Node must be strictly greater than 1")
+        self._mesh.mesh.SetNbNode(nbNode)
+
+    def GetNbNode(self):
+        """ Get Number of Node """
+        return self._mesh.mesh.GetNbNode()
+
+    def SetWcKey(self, wcKey):
+        """ Set the number of Node for multinode """
+        self._mesh.mesh.SetWcKey(wcKey)
+
+    def GetWcKey(self):
+        """ Get Number of Node """
+        return self._mesh.mesh.GetWcKey()
+
+    def SetWalltime(self, walltime):
+        """ Set the number of Node for multinode """
+        self._mesh.mesh.SetWalltime(walltime)
+
+    def GetWalltime(self):
+        """ Get Number of Node """
+        return self._mesh.mesh.GetWalltime()
+
+    def __str__(self):
+        """ str conversion """
+        string = "\nParameter for MultiNode parallelism:\n"
+        string += "Reource: {}\n".format(self.GetResource())
+        string += "NbProc: {}\n".format(self.GetNbProc())
+        string += "NbProcPerNode: {}\n".format(self.GetNbProcPerNode())
+        string += "NbNode: {}\n".format(self.GetNbNode())
+        string += "WcKey: {}\n".format(self.GetWcKey())
+        string += "Walltime: {}\n".format(self.GetWalltime())
+
+        return string
+
+
+class ParallelMesh(Mesh):
+    """
+    Surcharge on Mesh for parallel computation of a mesh
+    """
+    def __init__(self, smeshpyD, geompyD, geom, split_geom=True, name=0):
+        """
+        Create a parallel mesh.
+
+        Parameters:
+            smeshpyD: instance of smeshBuilder
+            geompyD: instance of geomBuilder
+            geom: geometrical object for meshing
+            split_geom: If true will divide geometry on solids and 1D/2D
+            compound and create the associated submeshes
+            name: the name for the new mesh.
+
+        Returns:
+            an instance of class :class:`ParallelMesh`.
+        """
+
+        if not isinstance(geom, geomBuilder.GEOM._objref_GEOM_Object):
+            raise ValueError("geom argument must be a geometry")
+
+        try:
+            import SHAPERSTUDY
+            shaper_object = SHAPERSTUDY.SHAPERSTUDY_ORB._objref_SHAPER_Object
+            has_shaper = True
+        except ImportError:
+            shaper_object = int
+            has_shaper = False
+
+        # If we have a shaper object converting it into geom (temporary solution)
+        if isinstance(geom, shaper_object):
+            self._geom_obj = _shaperstudy2geom(geompyD, geom)
+        elif isinstance(geom, geomBuilder.GEOM._objref_GEOM_Object):
+            self._geom_obj = geom
+        else:
+            msg= ""
+            if not has_shaper:
+                msg = "\nShaper was not compiled"
+            raise Exception("Could not handle geom format {}.{} ".format(type(geom), msg))
+
+        # Splitting geometry into one geom containing 1D and 2D elements and a
+        # list of 3D elements
+        super(ParallelMesh, self).__init__(smeshpyD, geompyD, self._geom_obj, name, parallel=True)
+
+        if split_geom:
+            self._faces, self._solids = _split_geom(geompyD, self._geom_obj)
+
+        self._param = None
+
+    def _build_submeshes(self, mesher2D, mesher3D):
+        """
+        Construct the submeshes for a parallel use of smesh
+
+        Parameters:
+            mesher2D: name of 2D mesher for 2D parallel compute (NETGEN)
+            mesher3D: name of 3D mesher for 3D parallel compute (NETGEN or
+            GMSH)
+        """
+
+        # Building global 2D mesher
+        if mesher3D:
+            if mesher3D == "NETGEN":
+                algo2D = "NETGEN_2D"
+            elif mesher3D == "GMSH":
+                algo2D = "GMSH_2D"
+            else:
+                raise ValueError("mesher3D should be either NETGEN or GMSH")
+
+            self._algo2d = self.Triangle(geom=self._geom_obj, algo=algo2D)
+
+        # Parallel 2D
+        if mesher2D:
+            #Means that we want to mesh face of solids in parallel and not
+            #the volume
+            self._algo2d = []
+            #For the moment use AutomaticLength based on finesse
+            # TODO: replace by input hypothesis
+            self._algo1d = self.Segment(geom=self._geom_obj)
+
+            for face_id, face in enumerate(self._faces):
+                name = "face_{}".format(face_id)
+                algo2d = self.Triangle(geom=face, algo="NETGEN_2D_Remote")
+                self._algo2d.append(algo2d)
+
+        if mesher3D:
+            self._algo3d = []
+            for solid_id, solid in enumerate(self._solids):
+                name = "Solid_{}".format(solid_id)
+                if ( mesher3D == "NETGEN" ):
+                    algo3d = self.Tetrahedron(geom=solid, algo="NETGEN_3D_Remote")
+                    self._algo3d.append(algo3d)
+                elif ( mesher3D == "GMSH" ):
+                    algo3d = self.Tetrahedron(geom=solid, algo="GMSH_3D_Remote")
+                    self._algo3d.append(algo3d)
+
+    def GetNbSolids(self):
+        """
+        Return the number of 3D solids
+        """
+        return len(self._solids)
+
+    def GetNbFaces(self):
+        """
+        Return the number of 2D faces
+        """
+        return len(self._faces)
+
+    def GetParallelismMethod(self):
+        """ Get the parallelims method """
+        return self.mesh.GetParallelismMethod()
+
+    def SetParallelismMethod(self, method):
+        """ Set the parallelims method """
+        if method not in [MULTITHREAD , MULTINODE]:
+            raise ValueError("Parallelism method can only be 0:MultiThread or 1:MultiNode")
+
+        self.mesh.SetParallelismMethod(method)
+
+        if method == MULTITHREAD:
+            self._param = MTParallelismSettings(self)
+        else:
+            self._param = MNParallelismSettings(self)
+
+    def GetParallelismSettings(self):
+        """
+        Return class to set parameters for the parallelism
+        """
+        if self._param is None:
+            raise Exception("You need to set Parallelism method first (SetParallelismMethod)")
+        return self._param
+
+    def AddGlobalHypothesis(self, hyp):
+        """
+        Split hypothesis to apply it to all the submeshes:
+        - the 1D+2D
+        - each of the 3D solids
+
+        Parameters:
+                hyp: a hypothesis to assign
+
+        """
+        if isinstance(hyp, NETGENPlugin._objref_NETGENPlugin_Hypothesis):
+            copy_param = _copy_netgen_param
+            mesher3D = "NETGEN"
+        elif isinstance(hyp, GMSHPlugin._objref_GMSHPlugin_Hypothesis):
+            copy_param = _copy_gmsh_param
+            mesher3D = "GMSH"
+        else:
+            raise ValueError("param must come from NETGENPlugin or GMSHPlugin")
+
+        self.mesh.SetParallelismDimension(3)
+        self._build_submeshes(None, mesher3D)
+
+        param2d = self._algo2d.Parameters()
+        copy_param(2, param2d, hyp)
+
+        for algo3d in self._algo3d:
+            param3d = algo3d.Parameters()
+            copy_param(3, param3d, hyp)
+
+    def Add2DGlobalHypothesis(self, hyp):
+        """
+        Split hypothesis to apply it to all the submeshes:
+        - the 1D
+        - each of the 2D faces
+
+        Parameters:
+                hyp: a hypothesis to assign
+
+        """
+        if isinstance(hyp, NETGENPlugin._objref_NETGENPlugin_Hypothesis):
+            copy_param = _copy_netgen_param
+            mesher2D = "NETGEN"
+        else:
+            raise ValueError("param must come from NETGENPlugin")
+
+        self.mesh.SetParallelismDimension(2)
+        self._build_submeshes(mesher2D, None)
+
+        param1d = self._algo1d
+        copy_param(1, param1d, hyp)
+
+        for algo2d in self._algo2d:
+            param2d = algo2d.Parameters()
+            copy_param(2, param2d, hyp)
+
+    pass # End of ParallelMesh
 
 class meshProxy(SMESH._objref_SMESH_Mesh):
     """
@@ -7508,8 +8204,18 @@ class meshProxy(SMESH._objref_SMESH_Mesh):
         if len( args ) == 1:
             args += True,
         return SMESH._objref_SMESH_Mesh.ExportDAT(self, *args)
-    pass
+
 omniORB.registerObjref(SMESH._objref_SMESH_Mesh._NP_RepositoryId, meshProxy)
+
+
+class parallelMeshProxy(SMESH._objref_SMESH_ParallelMesh):
+    def __init__(self,*args):
+        SMESH._objref_SMESH_ParallelMesh.__init__(self,*args)
+    def __deepcopy__(self, memo=None):
+        new = self.__class__(self)
+        return new
+omniORB.registerObjref(SMESH._objref_SMESH_ParallelMesh._NP_RepositoryId, parallelMeshProxy)
+
 
 
 class submeshProxy(SMESH._objref_SMESH_subMesh):

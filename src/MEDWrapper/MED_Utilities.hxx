@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -24,6 +24,7 @@
 #define MED_Utilities_HeaderFile
 
 #include "MED_WrapperDef.hxx"
+#include "utilities.h"
 
 #include <iostream>
 #include <sstream>
@@ -45,19 +46,11 @@ namespace MED
   };
 }
 
-#ifdef _DEBUG_
-  #define MSG(deb,msg) if(deb) std::cout<<MED::PrefixPrinter::GetPrefix()<<msg<<" ("<<__FILE__<<" ["<<__LINE__<<"])\n"
-  #define BEGMSG(deb,msg) if(deb) std::cout<<MED::PrefixPrinter::GetPrefix()<<msg
-  #define INITMSGA(deb,lev,msg) MED::PrefixPrinter aPrefixPrinter_##lev(deb); BEGMSG(deb,msg)
-  #define INITMSG(deb,msg) INITMSGA(deb,,msg)
-  #define ADDMSG(deb,msg) if(deb) std::cout<<msg
-#else // _DEBUG_
-  #define MSG(deb,msg)
-  #define BEGMSG(deb,msg)
-  #define INITMSGA(deb,lev,msg)
-  #define INITMSG(deb,msg)
-  #define ADDMSG(deb,msg)
-#endif // _DEBUG_
+#define MSG(msg) if(SALOME::VerbosityActivated()) std::cout<<MED::PrefixPrinter::GetPrefix()<<msg<<" ("<<__FILE__<<" ["<<__LINE__<<"])\n"; else (void)0
+#define BEGMSG(msg) if(SALOME::VerbosityActivated()) std::cout<<MED::PrefixPrinter::GetPrefix()<<msg; else (void)0
+#define INITMSGA(lev,msg) if(SALOME::VerbosityActivated()) { MED::PrefixPrinter aPrefixPrinter_##lev(true); BEGMSG(msg); } else (void)0
+#define INITMSG(msg) INITMSGA(,msg)
+#define ADDMSG(msg) if(SALOME::VerbosityActivated()) std::cout<<msg; else (void)0
 
 #ifndef EXCEPTION
 

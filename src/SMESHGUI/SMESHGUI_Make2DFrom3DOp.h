@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -33,6 +33,7 @@
 #include CORBA_SERVER_HEADER(SMESH_Mesh)
 
 class QCheckBox;
+class QGroupBox;
 class QLineEdit;
 class QRadioButton;
 class SMESHGUI_Make2DFrom3DOp;
@@ -64,6 +65,9 @@ public:
   void                 setGroupName( const QString& );
 
   bool                 copySource() const;
+
+protected:
+  QGroupBox*    myModeGrp;
 
 private slots:
   void                 onTargetChanged();

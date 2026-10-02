@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -62,7 +62,7 @@ class SMDS_EXPORT SMDS_VolumeOfNodes: public SMDS_CellOfNodes
                    const int            nbNodes);
   ~SMDS_VolumeOfNodes();
 
-  void Print(std::ostream & OS) const;
+  virtual void Print(std::ostream & OS) const override;
   int NbFaces() const;
   int NbNodes() const;
   int NbEdges() const;

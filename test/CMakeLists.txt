@@ -1,4 +1,4 @@
-# Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 #
 # Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 # CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -20,23 +20,56 @@
 # See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
 #
 
+INCLUDE(tests.set)
+
+SET(TEST_INSTALL_DIRECTORY ${SMESH_TEST_DIR}/other)
+
+# Install 'salome test' staff
+# ---------------------------
+
+SALOME_CONFIGURE_FILE(CTestTestfileInstall.cmake
+                      ${CMAKE_CURRENT_BINARY_DIR}${CMAKE_FILES_DIRECTORY}/CTestTestfile.cmake
+                      INSTALL ${TEST_INSTALL_DIRECTORY})
+INSTALL(FILES tests.set DESTINATION ${TEST_INSTALL_DIRECTORY})
+INSTALL(FILES ${GOOD_TESTS} ${BAD_TESTS} ${SESSION_FREE_TESTS} ${UNSTABLE_TESTS} ${OTHER_FILES} ${SMESH_WITH_MG} ${SMESH_WITH_SHAPER} DESTINATION ${TEST_INSTALL_DIRECTORY})
+INSTALL(DIRECTORY data DESTINATION ${TEST_INSTALL_DIRECTORY})
+
+# Add tests for 'make test'
+# -------------------------
+
 SALOME_GENERATE_TESTS_ENVIRONMENT(_test_env)
-SET(_test_helper ${CMAKE_SOURCE_DIR}/doc/salome/examples/testme.py)
 
-# Tests from RESTRICTED repository -----------------------------------
+FOREACH(_test ${GOOD_TESTS})
+  GET_FILENAME_COMPONENT(testname ${_test} NAME_WE)
+  SET(testname "TESTS_${testname}")
+  ADD_TEST(NAME ${testname}
+           COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_SOURCE_DIR}/test/test_helper.py ${CMAKE_CURRENT_SOURCE_DIR}/${_test})
+  SET_TESTS_PROPERTIES(${testname} PROPERTIES ENVIRONMENT "${tests_env}" LABELS "tests")
+ENDFOREACH()
 
-SET(RESTRICTED_ROOT_DIR $ENV{RESTRICTED_ROOT_DIR} CACHE PATH "Path to the restricted repository")
+INCLUDE_DIRECTORIES( 
+  ${PROJECT_SOURCE_DIR}/src/SMESHUtils
+  ${PROJECT_SOURCE_DIR}/src/SMDS
+  )
 
-IF(WITH_SHAPER_STUDY AND EXISTS ${RESTRICTED_ROOT_DIR})
-  FILE(GLOB _restricted_tests "${RESTRICTED_ROOT_DIR}/SMESH/*.py")
-  FOREACH(_test ${_restricted_tests})
-    GET_FILENAME_COMPONENT(_test_name ${_test} NAME_WE)
-    ADD_TEST(NAME ${_test_name}
-             COMMAND ${PYTHON_EXECUTABLE} -B ${_test_helper} ${_test})
-    SET_TESTS_PROPERTIES(${_test_name} PROPERTIES ENVIRONMENT "${_test_env}")
+FOREACH(_test ${CPP_TESTS})
+  GET_FILENAME_COMPONENT(testname ${_test} NAME_WE)
+  SET(testname "TESTS_${testname}")
+  
+  add_executable(${_test} ${_test}.cxx)
+  target_link_libraries(${_test} SMESHUtils SMDS )
+
+  ADD_TEST(NAME ${testname}
+           COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/${_test} )
+  SET_TESTS_PROPERTIES(${testname} PROPERTIES ENVIRONMENT "${tests_env}" LABELS "tests")
+ENDFOREACH()
+
+IF(WIN32)
+  FOREACH(_test ${CPP_TESTS})
+    INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/${CMAKE_BUILD_TYPE}/${_test}${CMAKE_EXECUTABLE_SUFFIX} PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ DESTINATION ${TEST_INSTALL_DIRECTORY})
   ENDFOREACH()
 ELSE()
-  MESSAGE(WARNING "Tests from RESTRICTED repository aren't available")
-ENDIF()
-
-# --------------------------------------------------------------------
+  FOREACH(_test ${CPP_TESTS})
+    INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/${_test} PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ DESTINATION ${TEST_INSTALL_DIRECTORY})
+  ENDFOREACH()
+ENDIF(WIN32)

@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -124,14 +124,19 @@ namespace {
   bool storeShapeForDebug(const TopoDS_Shape& shape)
   {
     bool toShow;
-#ifdef _DEBUG_
-    const char* type[] ={"COMPOUND","COMPSOLID","SOLID","SHELL","FACE","WIRE","EDGE","VERTEX"};
-    BRepTools::Write( shape, SMESH_Comment("/tmp/") << type[shape.ShapeType()] << "_"
-                      << shape.TShape().operator->() << ".brep");
-    toShow = !theMeshDS[0]; // no show
-#else
-    toShow = theMeshDS[0]; // no show
-#endif
+
+    if (SALOME::VerbosityActivated())
+    {
+      const char* type[] ={"COMPOUND","COMPSOLID","SOLID","SHELL","FACE","WIRE","EDGE","VERTEX"};
+      BRepTools::Write( shape, SMESH_Comment("/tmp/") << type[shape.ShapeType()] << "_"
+                        << shape.TShape().operator->() << ".brep");
+      toShow = !theMeshDS[0]; // no show
+    }
+    else
+    {
+      toShow = theMeshDS[0]; // no show
+    }
+
     if ( toShow ) {
       show_shape( shape, "avoid warning: show_shape() defined but not used");
       show_list( "avoid warning: show_list() defined but not used", list< TopoDS_Edge >() );
@@ -165,7 +170,7 @@ namespace {
         if ( (++eIt) != eBackIt )
           --eBackIt;
     }
-    SHOW_LIST("ATFER REVERSE", edges)
+    SHOW_LIST("AFTER REVERSE", edges)
   }
 
   //================================================================================
@@ -542,10 +547,11 @@ bool StdMeshers_ProjectionUtils::FindSubShapeAssociation(const TopoDS_Shape& the
   //       b) find association of a couple of vertices and recall self.
   //
 
-#ifdef _DEBUG_
-  theMeshDS[0] = theMesh1->GetMeshDS(); // debug
-  theMeshDS[1] = theMesh2->GetMeshDS();
-#endif
+  if (SALOME::VerbosityActivated())
+  {
+    theMeshDS[0] = theMesh1->GetMeshDS(); // debug
+    theMeshDS[1] = theMesh2->GetMeshDS();
+  }
 
   // =================================================================================
   // 1) Is it the case of associating a group member -> another group? (PAL16202, 16203)
@@ -2803,10 +2809,10 @@ namespace StdMeshers_ProjectionUtils
       const double D = M.Determinant();
       if ( D < 1e-3 * ( newSrcOrig - _srcOrig ).Modulus() )
       {
-#ifdef _DEBUG_
-        cerr << "TrsfFinder3D::Invert()"
+        if (SALOME::VerbosityActivated())
+          cerr << "TrsfFinder3D::Invert()"
              << "D " << M.Determinant() << " IsSingular " << M.IsSingular() << endl;
-#endif
+
         return false;
       }
       gp_Mat Minv = M.Inverted();

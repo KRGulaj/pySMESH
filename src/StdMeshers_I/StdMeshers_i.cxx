@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -77,9 +77,7 @@
 #include "StdMeshers_UseExisting_1D2D_i.hxx"
 #include "StdMeshers_ViscousLayers2D_i.hxx"
 #include "StdMeshers_ViscousLayers_i.hxx"
-#ifdef ENABLE_MEFISTO
- #include "StdMeshers_MEFISTO_2D_i.hxx"
-#endif
+#include "StdMeshers_ViscousLayerBuilder_i.hxx"
 
 namespace SMESH {
   class ApplicableToAny
@@ -209,15 +207,11 @@ STDMESHERS_I_EXPORT
     else if (strcmp(aHypName, "CartesianParameters3D") == 0)
       aCreator = new StdHypothesisCreator_i<StdMeshers_CartesianParameters3D_i>;
     else if (strcmp(aHypName, "BlockRenumber") == 0)
-      aCreator = new StdHypothesisCreator_i<StdMeshers_BlockRenumber_i>;
+      aCreator = new StdHypothesisCreator_i<StdMeshers_BlockRenumber_i>;    
 
     // Algorithms
     else if (strcmp(aHypName, "Regular_1D") == 0)
       aCreator = new StdHypothesisCreator_i<StdMeshers_Regular_1D_i>;
-#ifdef ENABLE_MEFISTO
-    else if (strcmp(aHypName, "MEFISTO_2D") == 0)
-      aCreator = new StdHypothesisCreator_i<StdMeshers_MEFISTO_2D_i>;
-#endif
     else if (strcmp(aHypName, "Quadrangle_2D") == 0)
       aCreator = new StdHypothesisCreator_i<StdMeshers_Quadrangle_2D_i, StdMeshers_Quadrangle_2D_i>;
     else if (strcmp(aHypName, "QuadFromMedialAxis_1D2D") == 0)
@@ -255,7 +249,9 @@ STDMESHERS_I_EXPORT
     else if (strcmp(aHypName, "PolygonPerFace_2D") == 0)
       aCreator = new StdHypothesisCreator_i<StdMeshers_PolygonPerFace_2D_i>;
     else if (strcmp(aHypName, "PolyhedronPerSolid_3D") == 0)
-      aCreator = new StdHypothesisCreator_i<StdMeshers_PolyhedronPerSolid_3D_i>;
+      aCreator = new StdHypothesisCreator_i<StdMeshers_PolyhedronPerSolid_3D_i>;    
+    else if (strcmp(aHypName, "ViscousLayerBuilder") == 0)
+      aCreator = new StdHypothesisCreator_i<StdMeshers_ViscousLayerBuilder_i>;
 
     return aCreator;
   }

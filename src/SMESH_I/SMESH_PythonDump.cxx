@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -46,12 +46,6 @@
 
 #include <cstring>
 
-#ifdef _DEBUG_
-static int MYDEBUG = 0;
-#else
-static int MYDEBUG = 0;
-#endif
-
 #include "SMESH_TryCatch.hxx"
 
 namespace SMESH
@@ -79,6 +73,22 @@ namespace SMESH
   {
     ++myCounter;
   }
+
+  void TPythonDump::IncrementMyCounter()
+  {
+    ++myCounter;
+  }
+
+  void TPythonDump::DecrementMyCounter()
+  {
+    if (myCounter > 0) {
+      --myCounter;
+    }
+    else {
+      MESSAGE("Warning: TPythonDump::DecrementMyCounter() called when counter is 0");
+    }
+  }
+
   TPythonDump::
   ~TPythonDump()
   {
@@ -92,7 +102,7 @@ namespace SMESH
         if ( !objEntry.empty() )
           aCollection += (TVar::ObjPrefix() + objEntry ).c_str();
         aSMESHGen->AddToPythonScript(aCollection);
-        if(MYDEBUG) MESSAGE(aString);
+        MESSAGE(aString);
         // prevent misuse of already treated variables
         aSMESHGen->UpdateParameters(CORBA::Object_var().in(),"");
       }
@@ -415,11 +425,13 @@ namespace SMESH
       case FT_AspectRatio:           myStream<< "aAspectRatio";           break;
       case FT_AspectRatio3D:         myStream<< "aAspectRatio3D";         break;
       case FT_Warping:               myStream<< "aWarping";               break;
+      case FT_Warping3D:             myStream<< "aWarping3D";             break;
       case FT_MinimumAngle:          myStream<< "aMinimumAngle";          break;
       case FT_Taper:                 myStream<< "aTaper";                 break;
       case FT_Skew:                  myStream<< "aSkew";                  break;
       case FT_Area:                  myStream<< "aArea";                  break;
       case FT_Volume3D:              myStream<< "aVolume3D";              break;
+      case FT_ScaledJacobian:        myStream<< "aScaledJacobian";        break;
       case FT_MaxElementLength2D:    myStream<< "aMaxElementLength2D";    break;
       case FT_MaxElementLength3D:    myStream<< "aMaxElementLength3D";    break;
       case FT_FreeBorders:           myStream<< "aFreeBorders";           break;
@@ -693,11 +705,8 @@ namespace SMESH
 
   void printException( const char* text )
   {
-#ifdef _DEBUG_
-    std::cout << "Exception in SMESH_Gen_i::DumpPython(): " << text << std::endl;
-#else
-    (void)text; // unused in release mode
-#endif
+    if (SALOME::VerbosityActivated())
+      std::cout << "Exception in SMESH_Gen_i::DumpPython(): " << text << std::endl;
   }
 
 //=======================================================================
@@ -787,7 +796,7 @@ Engines::TMPFile* SMESH_Gen_i::DumpPython( CORBA::Boolean  isPublished,
 
 //=============================================================================
 /*!
- *  AddToPythonScript
+ *  AddToPythonScript - C++ Internal version
  */
 //=============================================================================
 void SMESH_Gen_i::AddToPythonScript (const TCollection_AsciiString& theString)
@@ -796,6 +805,58 @@ void SMESH_Gen_i::AddToPythonScript (const TCollection_AsciiString& theString)
     myPythonScript = new TColStd_HSequenceOfAsciiString;
   }
   myPythonScript->Append(theString);
+}
+
+//=============================================================================
+/*!
+ *  AddToPythonScript - CORBA Interface version (for Python plugins)
+ */
+//=============================================================================
+void SMESH_Gen_i::AddToPythonScript (const char* theCommand)
+{
+  // avoid empty commands
+  if (!theCommand || theCommand[0] == '\0') {
+    return;
+  }
+
+  TCollection_AsciiString aCommand(theCommand);
+
+  // automatic object entry tracking (like TPythonDump does)
+  // const std::string & objEntry = GetLastObjEntry();
+  // if (!objEntry.empty()) {
+  //   aCommand += (SMESH::TVar::ObjPrefix() + objEntry).c_str();
+  // }
+
+  // call internal method
+  AddToPythonScript(aCommand);
+
+  MESSAGE("AddToPythonScript(CORBA): " << theCommand);
+}
+
+//=============================================================================
+/*!
+ *  SMESH_Gen_i::PausePythonDumpRecording
+ *
+ *  CORBA wrapper to increment TPythonDump suppression counter (myCounter).
+ *  Called from Python plugins to pause the record of intermediate operations.
+ */
+//=============================================================================
+void SMESH_Gen_i::PausePythonDumpRecording()
+{
+  SMESH::TPythonDump::IncrementMyCounter();
+}
+
+//=============================================================================
+/*!
+ *  SMESH_Gen_i::ResumePythonDumpRecording
+ *
+ *  CORBA wrapper to decrement TPythonDump suppression counter (myCounter).
+ *  Called from Python plugins to resume normal dump recording.
+ */
+//=============================================================================
+void SMESH_Gen_i::ResumePythonDumpRecording()
+{
+  SMESH::TPythonDump::DecrementMyCounter();
 }
 
 //=============================================================================
@@ -1212,12 +1273,20 @@ TCollection_AsciiString SMESH_Gen_i::DumpPython_impl
   initPart += "from salome.smesh import smeshBuilder\n";
   if ( importGeom && isMultiFile )
   {
-    initPart += ("\n## import GEOM dump file ## \n"
+    initPart += ("\n## import GEOM or SHAPERSTUDY dump file ## \n"
                  "import string, os, sys, re, inspect\n"
-                 "thisFile   = inspect.getfile( inspect.currentframe() )\n"
-                 "thisModule = os.path.splitext( os.path.basename( thisFile ))[0]\n"
-                 "sys.path.insert( 0, os.path.dirname( thisFile ))\n"
-                 "exec(\"from \"+re.sub(\"SMESH$\",\"GEOM\",thisModule)+\" import *\")\n\n");
+                 "this_file   = inspect.getfile( inspect.currentframe() )\n"
+                 "this_module = os.path.splitext( os.path.basename( this_file ))[0]\n"
+                 "module_geom = re.sub(\"SMESH$\", \"GEOM\", this_module)\n"
+                 "module_shaperstudy = re.sub(\"SMESH$\", \"SHAPERSTUDY\", this_module)\n"
+                 "geom_path = os.path.join(os.path.dirname(this_file), module_geom + \".py\")\n"
+                 "shaperstudy_path = os.path.join(os.path.dirname(this_file), module_shaperstudy + \".py\")\n"
+                 "if os.path.exists(geom_path):\n"
+                 "  exec(f\"from {module_geom} import *\")\n"
+                 "if os.path.exists(shaperstudy_path):\n"
+                 "  exec(f\"from {module_shaperstudy} import *\")\n"
+                 "\n"
+                 );
   }
   // import python files corresponding to plugins if they are used in anUpdatedScript
   {
@@ -1315,10 +1384,16 @@ TCollection_AsciiString SMESH_Gen_i::DumpPython_impl
       "\n\tpass"
       "\n"
       "\nif __name__ == '__main__':"
+      "\n\tgeom_file = re.sub('SMESH$', 'GEOM', thisModule) + '.py'"
+      "\n\tshaperstudy_file = re.sub('SMESH$', 'SHAPERSTUDY', thisModule) + '.py'"
+      "\n\tif os.path.exists(geom_file):"
+      "\n\t\tselected_file = geom_file"
+      "\n\telif os.path.exists(shaperstudy_file):"
+      "\n\t\tselected_file = shaperstudy_file"
+      "\n\texec(f'import {selected_file[:-3]} as module_dump')"
+      "\n\tmodule_dump.RebuildData()"
+      "\n\texec(f'from {selected_file[:-3]} import *')"
       "\n\tSMESH_RebuildData = RebuildData"
-      "\n\texec('import '+re.sub('SMESH$','GEOM',thisModule)+' as GEOM_dump')"
-      "\n\tGEOM_dump.RebuildData()"
-      "\n\texec('from '+re.sub('SMESH$','GEOM',thisModule)+' import * ')"
       "\n\tSMESH_RebuildData()";
   }
   anUpdatedScript += "\n";

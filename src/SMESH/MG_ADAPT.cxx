@@ -1,4 +1,4 @@
-// Copyright (C) 2020-2022  CEA/DEN, EDF R&D
+// Copyright (C) 2020-2026  CEA, EDF
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -43,6 +43,7 @@
 #include <fcntl.h>
 #include <array>
 #include <memory>   // unique_ptr
+#include <chrono>
 
 typedef SMESH_Comment ToComment;
 
@@ -52,7 +53,7 @@ static std::string removeFile(std::string fileName, int& notOk)
   std::string errStr;
   notOk = std::remove(fileName.c_str());
   if (notOk) errStr = ToComment("\n error while removing file : ") << fileName;
-  else       errStr = ToComment("\n file : ") << fileName << " succesfully deleted! \n ";
+  else       errStr = ToComment("\n file : ") << fileName << " successfully deleted! \n ";
 
   return errStr;
 }
@@ -956,6 +957,7 @@ std::string MgAdapt::getCommandToRun()
   cmd+= " --in "+ meshIn;
   meshFormatOutputMesh = getFileName()+".mesh";
   tmpFilesToBeDeleted.push_back(meshFormatOutputMesh);
+
   cmd+= " --out "+ meshFormatOutputMesh;
   if (useLocalMap || useConstantValue) cmd+= " --sizemap "+ solFileIn;
   else //  (useBackgroundMap)
@@ -968,7 +970,7 @@ std::string MgAdapt::getCommandToRun()
   //~{
   //~// constant value TODO
   //~}
-  // Check coherence between mesh dimension and option fo adaptation
+  // Check coherence between mesh dimension and option for adaptation
   checkDimensionOptionAdaptation();
 
   //   sizemap file is written only if level is higher than 3
@@ -1036,14 +1038,19 @@ std::string MgAdapt::getCommandToRun()
     if ( key.empty() )
       return ToComment( "Problem with library SalomeMeshGemsKeyGenerator: " + errorTxt );
 
-    cmd += " --key " + key;
+    if ( key!="0" )
+      cmd += " --key " + key;
   }
 
 #ifdef WIN32
   cmd += " < NUL";
 #endif
-  //   std::cout << "--- cmd :"<< std::endl;
-  //   std::cout << cmd << std::endl;
+
+  if (SALOME::VerbosityActivated())
+    {
+      std::cout << "--- cmd :"<< std::endl;
+      std::cout << cmd << std::endl;
+    }
 
   return cmd;
 }
@@ -1130,7 +1137,7 @@ std::string MgAdapt::getFileName() const
 aGenericName << _getpid();
 #endif
   aGenericName << "_";
-  aGenericName << std::abs((int)(long) aGenericName.data());
+  aGenericName << std::chrono::system_clock::now().time_since_epoch().count();
 
   return aGenericName;
 }
@@ -1575,9 +1582,9 @@ MgAdapt::Status MgAdapt::addMessage(const std::string& msg,
   _errorMessages.push_back( msg );
 
   //~MESSAGE(msg);
-#ifdef _DEBUG_
-  std::cout << msg << std::endl;
-#endif
+  if (SALOME::VerbosityActivated())
+    std::cout << msg << std::endl;
+
   return ( _status = isFatal ? MgAdapt::DRS_FAIL : MgAdapt::DRS_WARN_SKIP_ELEM );
 }
 

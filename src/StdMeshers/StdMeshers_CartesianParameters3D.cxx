@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -67,7 +67,9 @@ StdMeshers_CartesianParameters3D::StdMeshers_CartesianParameters3D(int         h
     _toAddEdges( false ),
     _toConsiderInternalFaces( false ),
     _toUseThresholdForInternalFaces( false ),
-    _toCreateFaces( false )
+    _toCreateFaces( false ),
+    _toUseQuanta(false),
+    _quanta(0.01)
 {
   _name = "CartesianParameters3D"; // used by "Cartesian_3D"
   _param_algo_dim = 3; // 3D
@@ -155,7 +157,7 @@ namespace
 
     if ( internalPoints.size() != spaceFunctions.size() + 1 )
       throw SALOME_Exception
-        (SMESH_Comment("Numbre of internal points mismatch number of functions for ") << axis);
+        (SMESH_Comment("Number of internal points mismatch number of functions for ") << axis);
 
     for ( size_t i = 0; i < spaceFunctions.size(); ++i )
       spaceFunctions[i] =
@@ -359,9 +361,13 @@ void StdMeshers_CartesianParameters3D::ComputeCoordinates(const double    x0,
         ++iCell;
       }
     }
-    const double lastCellLen = coords.back() - coords[ coords.size() - 2 ];
-    if ( fabs( coords.back() - p1 ) > 0.5 * lastCellLen )
+    if (coords.size() < 2)
       coords.push_back ( p1 );
+    else {
+      const double lastCellLen = coords.back() - coords[ coords.size() - 2 ];
+      if ( fabs( coords.back() - p1 ) > 0.5 * lastCellLen )
+        coords.push_back ( p1 );
+    }
   }
 
   // correct coords if a forced point is too close to a neighbor node
@@ -775,6 +781,37 @@ void StdMeshers_CartesianParameters3D::SetToCreateFaces(bool toCreate)
 }
 
 //=======================================================================
+//function : SetToUseQuanta
+//purpose  : Enables use of quanta
+//=======================================================================
+
+void StdMeshers_CartesianParameters3D::SetToUseQuanta(bool toUseQuanta)
+{
+  if ( _toUseQuanta != toUseQuanta )
+  {
+    _toUseQuanta = toUseQuanta;
+    NotifySubMeshesHypothesisModification();
+  }
+}
+
+//=======================================================================
+//function : SetQuanta
+//purpose  : Set size quanta value
+//=======================================================================
+
+void StdMeshers_CartesianParameters3D::SetQuanta(const double quanta)
+{
+  if ( quanta < 1e-6 || quanta > 1.0 )
+    throw SALOME_Exception(LOCALIZED("Quanta must be in the range [0.01,1] "));
+
+  bool changed = (_quanta != quanta); 
+  _quanta = quanta;
+  
+  if ( changed )
+    NotifySubMeshesHypothesisModification();
+}
+
+//=======================================================================
 //function : IsDefined
 //purpose  : Return true if parameters are well defined
 //=======================================================================
@@ -823,7 +860,9 @@ std::ostream & StdMeshers_CartesianParameters3D::SaveTo(std::ostream & save)
 
   save << " " << _toConsiderInternalFaces
        << " " << _toUseThresholdForInternalFaces
-       << " " << _toCreateFaces;
+       << " " << _toCreateFaces
+       << " " << _toUseQuanta
+       << " " << _quanta;
 
   return save;
 }
@@ -888,6 +927,9 @@ std::istream & StdMeshers_CartesianParameters3D::LoadFrom(std::istream & load)
     load >> _toUseThresholdForInternalFaces;
     load >> _toCreateFaces;
   }
+
+  if ( load >> _toUseQuanta )
+    load >> _quanta;
 
   return load;
 }

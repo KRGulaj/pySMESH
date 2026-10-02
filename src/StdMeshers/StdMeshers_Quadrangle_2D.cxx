@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -49,7 +49,7 @@
 #include <Bnd_Box.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <Geom_Surface.hxx>
-#include <NCollection_DefineArray2.hxx>
+#include <NCollection_Array2.hxx>
 #include <Precision.hxx>
 #include <ShapeAnalysis.hxx>
 #include <TColStd_SequenceOfInteger.hxx>
@@ -431,6 +431,16 @@ bool StdMeshers_Quadrangle_2D::computeQuadDominant(SMESH_Mesh&         aMesh,
   SMESHDS_Mesh *  meshDS = aMesh.GetMeshDS();
   Handle(Geom_Surface) S = BRep_Tool::Surface(aFace);
   int i,j,    geomFaceID = meshDS->ShapeToIndex(aFace);
+
+  meshDS->SetStructuredGrid( aFace, nbhoriz, nbvertic );
+  for (j = 0; j < nbvertic; j++)
+    for (i = 0; i < nbhoriz; i++)
+    {
+      UVPtStruct& uvPnt = quad->UVPt( i, j );
+      auto P  = std::make_shared<gp_Pnt>( S->Value( uvPnt.u, uvPnt.v ).Coord() );
+      meshDS->SetNodeOnStructuredGrid( aFace, P, i, j );
+    }
+    
   for (i = 1; i < nbhoriz - 1; i++)
     for (j = 1; j < nbvertic - 1; j++)
     {
@@ -1194,10 +1204,8 @@ namespace
 
       theVariants.insert( *this );
 
-#ifndef _DEBUG_
-      if ( theVariants.size() > 1 ) // erase a worse variant
+      if (SALOME::VerbosityActivated() && theVariants.size() > 1 ) // erase a worse variant
         theVariants.erase( ++theVariants.begin() );
-#endif
     };
 
     // first criterion - equality of nbSeg of opposite sides
@@ -5039,7 +5047,7 @@ bool StdMeshers_Quadrangle_2D::getEnforcedUV()
     {
       if ( isStrictCheck && iP < nbPoints )
         return error
-          (TComm("Classification of an enforced point ralative to the face boundary failed - ")
+          (TComm("Classification of an enforced point relative to the face boundary failed - ")
            << points[ iP ].X() << ", "<< points[ iP ].Y() << ", "<< points[ iP ].Z() << " )");
     }
     }

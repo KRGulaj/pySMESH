@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -20,6 +20,7 @@
 # --- options ---
 # additional include directories
 INCLUDE_DIRECTORIES(
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${KERNEL_INCLUDE_DIRS}
   ${MEDFILE_INCLUDE_DIRS}
   ${GEOM_INCLUDE_DIRS}
@@ -53,7 +54,7 @@ SET(_link_LIBRARIES
   ${KERNEL_SalomeLifeCycleCORBA}
   ${KERNEL_SalomeNS}
   ${KERNEL_OpUtil}
-  ${KERNEL_SALOMEBasics}
+  ${SALOMEBOOTSTRAP_SALOMEBasics}
   ${KERNEL_SalomeContainer}
   ${KERNEL_SalomeHDFPersist}
   ${KERNEL_SalomeGenericObj}
@@ -62,7 +63,7 @@ SET(_link_LIBRARIES
   ${KERNEL_SalomeResourcesManager}
   ${KERNEL_SalomeNotification}
   ${KERNEL_SalomeIDLKERNEL}
-  ${KERNEL_SALOMELocalTrace}
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
   ${GEOM_NMTDS}
   ${GEOM_SalomeIDLGEOM}  
   ${OpenCASCADE_KERNEL}

@@ -96,6 +96,10 @@
             <translation>mesh_conv_to_quad.png</translation>
         </message>
         <message>
+            <source>ICON_CREATE_DUAL_MESH</source>
+            <translation>mesh_create_dual_mesh.png</translation>
+        </message>
+        <message>
             <source>ICON_CUT</source>
             <translation>mesh_cutGroups.png</translation>
         </message>
@@ -413,7 +417,7 @@
         </message>
         <message>
             <source>ICON_PATTERN_2d</source>
-            <translation>mesh_algo_mefisto.png</translation>
+            <translation>mesh_algo_tri.png</translation>
         </message>
         <message>
             <source>ICON_PATTERN_3d</source>
@@ -608,6 +612,10 @@
             <translation>mesh_volume_3d.png</translation>
         </message>
         <message>
+            <source>ICON_SCALED_JACOBIAN</source>
+            <translation>mesh_scaled_jacobian.png</translation>
+        </message>
+        <message>
             <source>ICON_BARE_BORDER_VOLUME</source>
             <translation>bare_border_volume.png</translation>
         </message>
@@ -666,6 +674,10 @@
         <message>
             <source>ICON_2D_FROM_3D</source>
             <translation>mesh_2d_from_3d.png</translation>
+        </message>
+        <message>
+            <source>ICON_2D_FROM_3D_ELEMENTS</source>
+            <translation>mesh_2d_from_3d_elements.png</translation>
         </message>
         <message>
             <source>ICON_SPLIT_TO_TETRA</source>

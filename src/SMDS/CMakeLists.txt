@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -20,6 +20,7 @@
 # --- options ---
 # additional include directories
 INCLUDE_DIRECTORIES(
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${KERNEL_INCLUDE_DIRS}
   ${Boost_INCLUDE_DIRS}
 )
@@ -31,8 +32,9 @@ ADD_DEFINITIONS(
 
 # libraries to link to
 SET(_link_LIBRARIES
-  ${KERNEL_SALOMELocalTrace}
   ${KERNEL_OpUtil}
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
+  ${SALOMEBOOTSTRAP_SALOMEException}
   VTK::CommonCore
   VTK::CommonDataModel
 )

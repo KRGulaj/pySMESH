@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -71,6 +71,11 @@ public:
   void SetScaleFactor( CORBA::Double theScaleFactor );
   // Get scalar factor
   CORBA::Double GetScaleFactor();
+
+  // Set beta coefficient for Beta Law distribution
+  void SetBeta(CORBA::Double beta);
+  // Get beta coefficient for Beta Law distribution
+  CORBA::Double GetBeta();
 
   // Set table function for distribution DT_TabFunc
   void SetTableFunction(const SMESH::double_array& table);

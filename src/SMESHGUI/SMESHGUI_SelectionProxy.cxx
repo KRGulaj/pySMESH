@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -908,6 +908,9 @@ bool SMESH::SelectionProxy::elementControl( int id, int control, double precisio
       case SMESH::FT_Warping:
         functor.reset( new SMESH::Controls::Warping() );
         break;
+      case SMESH::FT_Warping3D:
+        functor.reset(new SMESH::Controls::Warping3D());
+        break;
       case SMESH::FT_MinimumAngle:
         functor.reset( new SMESH::Controls::MinimumAngle() );
         break;
@@ -940,6 +943,9 @@ bool SMESH::SelectionProxy::elementControl( int id, int control, double precisio
         break;
       case SMESH::FT_BallDiameter:
         functor.reset( new SMESH::Controls::BallDiameter() );
+        break;
+      case SMESH::FT_ScaledJacobian:
+        functor.reset( new SMESH::Controls::ScaledJacobian() );
         break;
       default:
         break;
@@ -976,6 +982,9 @@ bool SMESH::SelectionProxy::elementControl( int id, int control, double precisio
       case SMESH::FT_Warping:
         functor = manager->CreateWarping();
         break;
+      case SMESH::FT_Warping3D:
+        functor = manager->CreateWarping3D();
+        break;
       case SMESH::FT_MinimumAngle:
         functor = manager->CreateMinimumAngle();
         break;
@@ -1008,6 +1017,9 @@ bool SMESH::SelectionProxy::elementControl( int id, int control, double precisio
         break;
       case SMESH::FT_BallDiameter:
         functor = manager->CreateBallDiameter();
+        break;
+      case SMESH::FT_ScaledJacobian:
+        functor = manager->CreateScaledJacobian();
         break;
       default:
         break;

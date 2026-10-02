@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -41,7 +41,7 @@ class SMESH_Gen;
 /*!
  * This hypothesis specifies a meshed edge to take a mesh pattern from
  * and optionally association of vertices between the source edge and a
- * target one (where a hipothesis is assigned to)
+ * target one (where a hypothesis is assigned to)
  */
 // =========================================================
 

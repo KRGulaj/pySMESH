@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -25,17 +25,19 @@
 //  Author : Paul RASCLE, EDF
 //  Module : SMESH
 //
-
 //#define CHRONODEF
-
+//
 #include "SMESH_Gen.hxx"
 
+#include "SMESH_DriverMesh.hxx"
 #include "SMDS_Mesh.hxx"
 #include "SMDS_MeshElement.hxx"
 #include "SMDS_MeshNode.hxx"
 #include "SMESHDS_Document.hxx"
 #include "SMESH_HypoFilter.hxx"
 #include "SMESH_Mesh.hxx"
+#include "SMESH_SequentialMesh.hxx"
+#include "SMESH_ParallelMesh.hxx"
 #include "SMESH_MesherHelper.hxx"
 #include "SMESH_subMesh.hxx"
 
@@ -47,6 +49,10 @@
 #include <TopoDS_Iterator.hxx>
 
 #include "memoire.h"
+#include <functional>
+
+#include <QString>
+#include <QProcess>
 
 #ifdef WIN32
   #include <windows.h>
@@ -54,7 +60,15 @@
 
 #include <Basics_Utils.hxx>
 
+#ifndef WIN32
+#include <boost/asio.hpp>
+#endif
+
 using namespace std;
+#ifndef WIN32
+#include <boost/filesystem.hpp>
+namespace fs = boost::filesystem;
+#endif
 
 // Environment variable separator
 #ifdef WIN32
@@ -146,7 +160,8 @@ SMESH_Mesh* SMESH_Gen::CreateMesh(bool theIsEmbeddedMode)
   Unexpect aCatch(SalomeException);
 
   // create a new SMESH_mesh object
-  SMESH_Mesh *aMesh = new SMESH_Mesh(_localId++,
+  SMESH_Mesh *aMesh = new SMESH_SequentialMesh(
+                                     _localId++,
                                      this,
                                      theIsEmbeddedMode,
                                      _studyContext->myDocument);
@@ -154,6 +169,286 @@ SMESH_Mesh* SMESH_Gen::CreateMesh(bool theIsEmbeddedMode)
 
   return aMesh;
 }
+
+//=============================================================================
+/*!
+ * Creates a parallel mesh in a study.
+ * if (theIsEmbeddedMode) { mesh modification commands are not logged }
+ */
+//=============================================================================
+
+SMESH_ParallelMesh* SMESH_Gen::CreateParallelMesh(bool theIsEmbeddedMode)
+{
+  Unexpect aCatch(SalomeException);
+
+  // create a new SMESH_mesh object
+  SMESH_ParallelMesh *aMesh = new SMESH_ParallelMesh(
+                                     _localId++,
+                                     this,
+                                     theIsEmbeddedMode,
+                                     _studyContext->myDocument);
+  _studyContext->mapMesh[_localId-1] = aMesh;
+
+  return aMesh;
+}
+
+//=============================================================================
+/*!
+ * Algo to run the computation of all the submeshes of a mesh in sequentila
+ */
+//=============================================================================
+
+bool SMESH_Gen::sequentialComputeSubMeshes(
+          SMESH_Mesh & aMesh,
+          const TopoDS_Shape & aShape,
+          const ::MeshDimension       aDim,
+          TSetOfInt*                  aShapesId /*=0*/,
+          TopTools_IndexedMapOfShape* allowedSubShapes,
+          SMESH_subMesh::compute_event &computeEvent,
+          const bool includeSelf,
+          const bool complexShapeFirst,
+          const bool   aShapeOnly)
+{
+  MESSAGE("Sequential Compute of submeshes");
+
+  bool ret = true;
+
+  SMESH_subMeshIteratorPtr smIt;
+  SMESH_subMesh *shapeSM = aMesh.GetSubMesh(aShape);
+
+  smIt = shapeSM->getDependsOnIterator(includeSelf, !complexShapeFirst);
+  while ( smIt->more() )
+  {
+    SMESH_subMesh* smToCompute = smIt->next();
+
+    // do not mesh vertices of a pseudo shape
+    const TopoDS_Shape&        shape = smToCompute->GetSubShape();
+    const TopAbs_ShapeEnum shapeType = shape.ShapeType();
+    if ( !aMesh.HasShapeToMesh() && shapeType == TopAbs_VERTEX )
+      continue;
+
+    // check for preview dimension limitations
+    if ( aShapesId && SMESH_Gen::GetShapeDim( shapeType ) > (int)aDim )
+    {
+      // clear compute state not to show previous compute errors
+      //  if preview invoked less dimension less than previous
+      smToCompute->ComputeStateEngine( SMESH_subMesh::CHECK_COMPUTE_STATE );
+      continue;
+    }
+
+    if (smToCompute->GetComputeState() == SMESH_subMesh::READY_TO_COMPUTE)
+    {
+      if (_compute_canceled)
+        return false;
+      smToCompute->SetAllowedSubShapes( fillAllowed( shapeSM, aShapeOnly, allowedSubShapes ));
+      setCurrentSubMesh( smToCompute );
+      smToCompute->ComputeStateEngine( computeEvent );
+      setCurrentSubMesh( nullptr );
+      smToCompute->SetAllowedSubShapes( nullptr );
+    }
+
+    // we check all the sub-meshes here and detect if any of them failed to compute
+    if (smToCompute->GetComputeState() == SMESH_subMesh::FAILED_TO_COMPUTE &&
+        ( shapeType != TopAbs_EDGE || !SMESH_Algo::isDegenerated( TopoDS::Edge( shape ))))
+      ret = false;
+    else if ( aShapesId )
+      aShapesId->insert( smToCompute->GetId() );
+  }
+  //aMesh.GetMeshDS()->Modified();
+  return ret;
+
+};
+
+//=============================================================================
+/*
+ * compute of a submesh
+ * This function is passed to the thread pool
+ */
+//=============================================================================
+const std::function<void(SMESH_subMesh*,
+                         SMESH_subMesh::compute_event,
+                         SMESH_subMesh*,
+                         bool,
+                         TopTools_IndexedMapOfShape *,
+                         TSetOfInt*)>
+     compute_function([] (SMESH_subMesh* sm,
+                          SMESH_subMesh::compute_event event,
+                          SMESH_subMesh *shapeSM,
+                          bool aShapeOnly,
+                          TopTools_IndexedMapOfShape *allowedSubShapes,
+                          TSetOfInt*                  aShapesId) -> void
+{
+  if (sm->GetComputeState() == SMESH_subMesh::READY_TO_COMPUTE)
+  {
+    sm->SetAllowedSubShapes( fillAllowed( shapeSM, aShapeOnly, allowedSubShapes ));
+    //setCurrentSubMesh( sm );
+    sm->ComputeStateEngine(event);
+    //setCurrentSubMesh( nullptr );
+    sm->SetAllowedSubShapes( nullptr );
+  }
+
+  if ( aShapesId )
+    aShapesId->insert( sm->GetId() );
+
+});
+
+
+//=============================================================================
+/*
+ * Copy a file on remote resource
+ */
+//=============================================================================
+
+void SMESH_Gen::send_mesh(SMESH_Mesh& aMesh, std::string file_name)
+{
+#ifndef WIN32
+  SMESH_ParallelMesh& aParMesh = dynamic_cast<SMESH_ParallelMesh&>(aMesh);
+  // Calling run_mesher
+  // Path to mesher script
+  fs::path send_files = fs::path(std::getenv("SMESH_ROOT_DIR"))/
+  fs::path("bin")/
+  fs::path("salome")/
+  fs::path("send_files.py");
+
+  std::string s_program="python3";
+  std::list<std::string> params;
+  params.push_back(send_files.string());
+  params.push_back(file_name);
+  params.push_back("--resource="+aParMesh.GetResource());
+
+  // log file
+  fs::path log_file=aParMesh.GetTmpFolder() / fs::path("copy.log");
+  QString out_file = log_file.string().c_str();
+
+  // Building arguments for QProcess
+  QString program = QString::fromStdString(s_program);
+  QStringList arguments;
+  for(auto arg : params){
+    arguments << arg.c_str();
+  }
+
+  std::string cmd = "";
+  cmd += s_program;
+  for(auto arg: params){
+    cmd += " " + arg;
+  }
+  MESSAGE("Send files command: ");
+  MESSAGE(cmd);
+
+  QProcess myProcess;
+  myProcess.setProcessChannelMode(QProcess::MergedChannels);
+  myProcess.setStandardOutputFile(out_file);
+
+  myProcess.start(program, arguments);
+  // Waiting for process to finish (argument -1 make it wait until the end of
+  // the process otherwise it just waits 30 seconds)
+  bool finished = myProcess.waitForFinished(-1);
+  int ret = myProcess.exitCode();
+
+  if(ret != 0 || !finished){
+  // Run crashed
+    std::string msg = "Issue with send_files: \n";
+    msg += "See log for more details: " + log_file.string() + "\n";
+    msg += cmd + "\n";
+    throw SALOME_Exception(msg);
+  }
+#endif
+}
+
+//=============================================================================
+/*!
+ * Algo to run the computation of all the submeshes of a mesh in parallel
+ */
+//=============================================================================
+
+bool SMESH_Gen::parallelComputeSubMeshes(
+          SMESH_Mesh & aMesh,
+          const TopoDS_Shape & aShape,
+          const ::MeshDimension       aDim,
+          TSetOfInt*                  aShapesId /*=0*/,
+          TopTools_IndexedMapOfShape* allowedSubShapes,
+          SMESH_subMesh::compute_event &computeEvent,
+          const bool includeSelf,
+          const bool complexShapeFirst,
+          const bool   aShapeOnly)
+{
+#ifdef WIN32
+  throw SALOME_Exception("ParallelMesh is not working on Windows");
+#else
+
+  bool ret = true;
+
+  SMESH_subMeshIteratorPtr smIt;
+  SMESH_subMesh *shapeSM = aMesh.GetSubMesh(aShape);
+  SMESH_ParallelMesh &aParMesh = dynamic_cast<SMESH_ParallelMesh&>(aMesh);
+
+  TopAbs_ShapeEnum previousShapeType = TopAbs_VERTEX;
+  MESSAGE("Parallel Compute of submeshes");
+
+
+  smIt = shapeSM->getDependsOnIterator(includeSelf, !complexShapeFirst);
+  while ( smIt->more() )
+  {
+    SMESH_subMesh* smToCompute = smIt->next();
+
+    // do not mesh vertices of a pseudo shape
+    const TopoDS_Shape&        shape = smToCompute->GetSubShape();
+    const TopAbs_ShapeEnum shapeType = shape.ShapeType();
+    // Not doing in parallel 1D meshes
+    if ( !aMesh.HasShapeToMesh() && shapeType == TopAbs_VERTEX )
+      continue;
+
+    if (shapeType != previousShapeType) {
+      // Waiting for all threads for the previous type to end
+      aMesh.wait();
+
+      std::string file_name="";
+      if (previousShapeType == aParMesh.GetDumpElement())
+        file_name = "Mesh"+std::to_string(aParMesh.GetParallelismDimension()-1)+"D.med";
+
+      if(file_name != "")
+      {
+        fs::path mesh_file = fs::path(aParMesh.GetTmpFolder()) / fs::path(file_name);
+	      SMESH_DriverMesh::exportMesh(mesh_file.string(), aMesh, "MESH");
+        if (aParMesh.GetParallelismMethod() == ParallelismMethod::MultiNode) {
+          this->send_mesh(aMesh, mesh_file.string());
+        }
+      }
+      //Resetting threaded pool info
+      previousShapeType = shapeType;
+    }
+
+    // check for preview dimension limitations
+    if ( aShapesId && SMESH_Gen::GetShapeDim( shapeType ) > (int)aDim )
+    {
+      // clear compute state not to show previous compute errors
+      //  if preview invoked less dimension less than previous
+      smToCompute->ComputeStateEngine( SMESH_subMesh::CHECK_COMPUTE_STATE );
+      continue;
+    }
+    // Parallelism is only for 3D parts
+    if(shapeType!=aMesh.GetParallelElement()){
+      compute_function(smToCompute, computeEvent,
+                      shapeSM, aShapeOnly, allowedSubShapes,
+                      aShapesId);
+    }else{
+      boost::asio::post(*(aParMesh.GetPool()), std::bind(compute_function, smToCompute, computeEvent,
+                        shapeSM, aShapeOnly, allowedSubShapes,
+                        aShapesId));
+    }
+  }
+
+  // Waiting for the thread for Solids to finish
+  aMesh.wait();
+
+  aMesh.GetMeshDS()->Modified();
+
+  // Cleanup done here as in Python the destructor is not called
+  aParMesh.cleanup();
+
+  return ret;
+#endif
+};
 
 //=============================================================================
 /*
@@ -201,57 +496,25 @@ bool SMESH_Gen::Compute(SMESH_Mesh &                aMesh,
     // ===============================================
     // Mesh all the sub-shapes starting from vertices
     // ===============================================
+    ret = aMesh.ComputeSubMeshes(
+            this,
+            aMesh, aShape, aDim,
+            aShapesId, allowedSubShapes,
+            computeEvent,
+            includeSelf,
+            complexShapeFirst,
+            aShapeOnly);
 
-    smIt = shapeSM->getDependsOnIterator(includeSelf, !complexShapeFirst);
-    while ( smIt->more() )
-    {
-      SMESH_subMesh* smToCompute = smIt->next();
-
-      // do not mesh vertices of a pseudo shape
-      const TopoDS_Shape&        shape = smToCompute->GetSubShape();
-      const TopAbs_ShapeEnum shapeType = shape.ShapeType();
-      if ( !aMesh.HasShapeToMesh() && shapeType == TopAbs_VERTEX )
-        continue;
-
-      // check for preview dimension limitations
-      if ( aShapesId && GetShapeDim( shapeType ) > (int)aDim )
-      {
-        // clear compute state not to show previous compute errors
-        //  if preview invoked less dimension less than previous
-        smToCompute->ComputeStateEngine( SMESH_subMesh::CHECK_COMPUTE_STATE );
-        continue;
-      }
-
-      if (smToCompute->GetComputeState() == SMESH_subMesh::READY_TO_COMPUTE)
-      {
-        if (_compute_canceled)
-          return false;
-        smToCompute->SetAllowedSubShapes( fillAllowed( shapeSM, aShapeOnly, allowedSubShapes ));
-        setCurrentSubMesh( smToCompute );
-        smToCompute->ComputeStateEngine( computeEvent );
-        setCurrentSubMesh( nullptr );
-        smToCompute->SetAllowedSubShapes( nullptr );
-      }
-
-      // we check all the sub-meshes here and detect if any of them failed to compute
-      if (smToCompute->GetComputeState() == SMESH_subMesh::FAILED_TO_COMPUTE &&
-          ( shapeType != TopAbs_EDGE || !SMESH_Algo::isDegenerated( TopoDS::Edge( shape ))))
-        ret = false;
-      else if ( aShapesId )
-        aShapesId->insert( smToCompute->GetId() );
-    }
-    //aMesh.GetMeshDS()->Modified();
     return ret;
   }
   else
   {
     // ================================================================
-    // Apply algos that do NOT require discreteized boundaries
+    // Apply algos that do NOT require discretized boundaries
     // ("all-dimensional") and do NOT support sub-meshes, starting from
     // the most complex shapes and collect sub-meshes with algos that
     // DO support sub-meshes
     // ================================================================
-
     list< SMESH_subMesh* > smWithAlgoSupportingSubmeshes[4]; // for each dim
 
     // map to sort sm with same dim algos according to dim of
@@ -333,7 +596,7 @@ bool SMESH_Gen::Compute(SMESH_Mesh &                aMesh,
         smWithAlgoSupportingSubmeshes[0].push_front( shDim2smIt->second );
 
     // ======================================================
-    // Apply all-dimensional algorithms supporing sub-meshes
+    // Apply all-dimensional algorithms supporting sub-meshes
     // ======================================================
 
     std::vector< SMESH_subMesh* > smVec;
@@ -446,8 +709,10 @@ bool SMESH_Gen::Compute(SMESH_Mesh &                aMesh,
           if ( aShapesId && GetShapeDim( shapeType ) > (int)aDim )
             continue;
           sm->SetAllowedSubShapes( fillAllowed( shapeSM, aShapeOnly, allowedSubShapes ));
+
           setCurrentSubMesh( sm );
           sm->ComputeStateEngine( computeEvent );
+
           setCurrentSubMesh( NULL );
           sm->SetAllowedSubShapes( nullptr );
           if ( aShapesId )
@@ -460,6 +725,7 @@ bool SMESH_Gen::Compute(SMESH_Mesh &                aMesh,
     // mesh the rest sub-shapes starting from vertices
     // -----------------------------------------------
     ret = Compute( aMesh, aShape, aFlags | UPWARD, aDim, aShapesId, allowedSubShapes );
+
   }
 
   MEMOSTAT;
@@ -603,7 +869,7 @@ bool SMESH_Gen::Evaluate(SMESH_Mesh &          aMesh,
       const TopoDS_Shape& aSubShape = smToCompute->GetSubShape();
       const int aShapeDim = GetShapeDim( aSubShape );
       if ( aShapeDim < 1 ) break;
-      
+
       SMESH_Algo* algo = GetAlgo( smToCompute );
       if ( algo && !algo->NeedDiscreteBoundary() ) {
         if ( algo->SupportSubmeshes() ) {
@@ -776,7 +1042,7 @@ static bool checkConformIgnoredAlgos(SMESH_Mesh&               aMesh,
 //=======================================================================
 //function : checkMissing
 //purpose  : notify on missing hypothesis
-//           Return false if algo or hipothesis is missing
+//           Return false if algo or hypothesis is missing
 //=======================================================================
 
 static bool checkMissing(SMESH_Gen*                aGen,

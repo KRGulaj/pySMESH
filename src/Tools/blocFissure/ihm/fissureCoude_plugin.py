@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Copyright (C) 2006-2022  EDF R&D
+# Copyright (C) 2006-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -37,7 +37,11 @@ def fissureCoudeDlg(context):
 
   #import subprocess
   #import tempfile
-  from qtsalome import QFileDialog, QMessageBox, QPalette, QColor, QDialog
+  if 'SALOME_USE_PYSIDE' in os.environ:
+    from PySide2.QtWidgets import QFileDialog, QMessageBox, QDialog
+    from PySide2.QtGui import  QPalette, QColor
+  else:
+    from PyQt5.Qt import QFileDialog, QMessageBox, QPalette, QColor, QDialog
   from blocFissure.ihm.fissureCoude_ui import Ui_Dialog
 
   class fissureCoudeDialog(QDialog):

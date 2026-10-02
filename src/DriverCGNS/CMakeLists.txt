@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -50,6 +50,7 @@ SET(_link_LIBRARIES
 SET(MeshDriverCGNS_HEADERS
   DriverCGNS_Read.hxx
   DriverCGNS_Write.hxx
+  DriverStructuredCGNS_Write.hxx
   SMESH_DriverCGNS.hxx
 )
 
@@ -59,6 +60,7 @@ SET(MeshDriverCGNS_HEADERS
 SET(MeshDriverCGNS_SOURCES
   DriverCGNS_Read.cxx
   DriverCGNS_Write.cxx
+  DriverStructuredCGNS_Write.cxx
 )
 
 # --- rules ---

@@ -20,7 +20,7 @@
      input - geometry of elements accepted by algorithm input. Used to define compatible algos of
              different dimensions. Compatible algos have equal geometries in "input" and "output".
      need-hyp - (optional) Boolean. Does the algo require a hypothesis or not. Default is "false".
-     need-geom - (optional) [true, fasle, never]. Can the algo work w/o geometry or not.
+     need-geom - (optional) [true, false, never]. Can the algo work w/o geometry or not.
              Default is "true". "never" means that the algo can't work with geometry.
      support-submeshes - (optional) Boolean. Does an multi-dimensional algo support sub-meshes.
                          Default is "false".
@@ -308,24 +308,6 @@
       </python-wrap>
     </algorithm>
 
-    <algorithm type      ="@MEFISTO2D_NAME@"
-	       label-id  ="Triangle: Mefisto"
-	       icon-id   ="mesh_algo_mefisto.png"
-               group-id ="1"
-               priority ="40"
-               hypos     ="LengthFromEdges,MaxElementArea"
-               opt-hypos ="ViscousLayers2D"
-               input     ="EDGE"
-               output    ="TRIA"
-               dim       ="2">
-      <python-wrap>
-        <algo>MEFISTO_2D=Triangle(algo=smeshBuilder.MEFISTO)</algo>
-        <hypo>LengthFromEdges=LengthFromEdges()</hypo>
-        <hypo>MaxElementArea=MaxElementArea(SetMaxElementArea())</hypo>
-        <hypo>ViscousLayers2D=ViscousLayers2D(SetTotalThickness(),SetNumberLayers(),SetStretchFactor(),SetEdges(1),SetEdges(2),SetGroupName())</hypo>
-      </python-wrap>
-    </algorithm>
-
     <algorithm type     ="Quadrangle_2D"
                label-id ="Quadrangle: Mapping"
                icon-id  ="mesh_algo_quad.png"
@@ -573,12 +555,14 @@
                group-id         ="0"
                priority         ="20"
                hypos            ="CartesianParameters3D"
+               opt-hypos        ="ViscousLayers"
                support-submeshes="false"
                output           ="HEXA"
                need-hyp         ="true"
                dim              ="3">
       <python-wrap>
         <algo>Cartesian_3D=BodyFitted()</algo>
+        <hypo>ViscousLayers=ViscousLayers(SetTotalThickness(),SetNumberLayers(),SetStretchFactor(),SetFaces(1),SetFaces(2),SetMethod(),SetGroupName())</hypo>
       </python-wrap>
     </algorithm>
 

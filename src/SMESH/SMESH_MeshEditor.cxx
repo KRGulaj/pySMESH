@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -62,6 +62,8 @@
 #include <Geom_Curve.hxx>
 #include <Geom_Surface.hxx>
 #include <Precision.hxx>
+#include <ShapeAnalysis.hxx>
+#include <ShapeAnalysis_Curve.hxx>
 #include <TColStd_ListOfInteger.hxx>
 #include <TopAbs_State.hxx>
 #include <TopExp.hxx>
@@ -101,6 +103,7 @@
 #include "SMESH_TryCatch.hxx" // include after OCCT headers!
 
 #include <smIdType.hxx>
+#include <Basics_OCCTVersion.hxx>
 
 #define cast2Node(elem) static_cast<const SMDS_MeshNode*>( elem )
 
@@ -1505,7 +1508,7 @@ int SMESH_MeshEditor::Reorient2D( TIDSortedElemSet &  theFaces,
   vector< const SMDS_MeshElement* > facesNearLink;
   vector< std::pair< int, int > >   nodeIndsOfFace;
   TIDSortedElemSet                  avoidSet, emptySet;
-  NCollection_Map< SMESH_TLink, SMESH_TLink > checkedLinks;
+  NCollection_Map< SMESH_TLink, SMESH_TLinkHasher > checkedLinks;
 
   while ( !theRefFaces.empty() )
   {
@@ -2150,6 +2153,8 @@ namespace
       const_cast<TSplitMethod&>(splitMethod)._connectivity = nullptr;
       const_cast<TSplitMethod&>(splitMethod)._ownConn = false;
     }
+    // Assignment operator (to remove compilation warning)
+    TSplitMethod& operator=(const TSplitMethod& other) = default;
     bool hasFacet( const TTriangleFacet& facet ) const
     {
       if ( _nbCorners == 4 )
@@ -2183,21 +2188,50 @@ namespace
 
   //=======================================================================
   /*!
+   * \brief Return true if one of the tetras included in the variant will be
+   * an overconstrained tetra
+   */
+  //=======================================================================
+  bool isVariantOverConstrained(SMDS_VolumeTool& vol, const int* connVariants)
+  {
+    std::vector<const SMDS_MeshNode*> tetraNodes;
+    const SMDS_MeshNode** volNodes = vol.GetNodes();
+    int i = 0;
+    while (connVariants[i] != -1) {
+      tetraNodes.push_back(volNodes[connVariants[i]]);
+      i += 1;
+      if (tetraNodes.size() == 4) {
+        bool isCurrentTetraOverConstrained = true; 
+        for (const SMDS_MeshNode* node : tetraNodes) {
+          if (node->NbInverseElements(SMDSAbs_Face) == 0) {
+              isCurrentTetraOverConstrained = false; 
+          }
+        }
+        if (isCurrentTetraOverConstrained) {
+          return true; 
+        }
+        tetraNodes.clear(); 
+        }
+    }
+    return false; 
+  }
+
+  //=======================================================================
+  /*!
    * \brief return TSplitMethod for the given element to split into tetrahedra
    */
   //=======================================================================
-
-  TSplitMethod getTetraSplitMethod( SMDS_VolumeTool& vol, const int theMethodFlags)
+  TSplitMethod getTetraSplitMethod( SMDS_VolumeTool& vol,
+                                    const int theMethodFlags,
+                                    const bool avoidOverConstrainedVolumes )
   {
     const int iQ = vol.Element()->IsQuadratic() ? 2 : 1;
-
     // at HEXA_TO_24 method, each face of volume is split into triangles each based on
     // an edge and a face barycenter; tertaherdons are based on triangles and
     // a volume barycenter
     const bool is24TetMode = ( theMethodFlags == SMESH_MeshEditor::HEXA_TO_24 );
 
     // Find out how adjacent volumes are split
-
     vector < list< TTriangleFacet > > triaSplitsByFace( vol.NbFaces() ); // splits of each side
     int hasAdjacentSplits = 0, maxTetConnSize = 0;
     for ( int iF = 0; iF < vol.NbFaces(); ++iF )
@@ -2239,7 +2273,6 @@ namespace
     }
 
     // Among variants of split method select one compliant with adjacent volumes
-
     TSplitMethod method;
     if ( !vol.Element()->IsPoly() && !is24TetMode )
     {
@@ -2267,25 +2300,31 @@ namespace
       default:
         nbVariants = 0;
       }
-      for ( int variant = 0; variant < nbVariants && method._nbSplits == 0; ++variant )
+      for (int variant = 0; variant < nbVariants && method._nbSplits == 0; ++variant)
       {
         // check method compliance with adjacent tetras,
         // all found splits must be among facets of tetras described by this method
-        method = TSplitMethod( nbTet, connVariants[variant] );
-        if ( hasAdjacentSplits && method._nbSplits > 0 )
+        method = TSplitMethod(nbTet, connVariants[variant]);
+        bool facetCreated = true;
+        bool is_overConstrained=false;
+        if (hasAdjacentSplits && method._nbSplits > 0)
         {
-          bool facetCreated = true;
-          for ( size_t iF = 0; facetCreated && iF < triaSplitsByFace.size(); ++iF )
+          for (size_t iF = 0; facetCreated && iF < triaSplitsByFace.size(); ++iF)
           {
             list< TTriangleFacet >::const_iterator facet = triaSplitsByFace[iF].begin();
             for ( ; facetCreated && facet != triaSplitsByFace[iF].end(); ++facet )
               facetCreated = method.hasFacet( *facet );
           }
-          if ( !facetCreated )
-            method = TSplitMethod(0); // incompatible method
         }
+        // check the variant will not produce over constrained tetras
+        if (avoidOverConstrainedVolumes)
+          is_overConstrained = isVariantOverConstrained( vol, connVariants[variant]);
+
+        if (!facetCreated || is_overConstrained)
+          method = TSplitMethod(0); // incompatible method
       }
     }
+
     if ( method._nbSplits < 1 )
     {
       // No standard method is applicable, use a generic solution:
@@ -2390,6 +2429,7 @@ namespace
 
     return method;
   }
+
   //=======================================================================
   /*!
    * \brief return TSplitMethod to split haxhedron into prisms
@@ -2574,10 +2614,12 @@ namespace
 //           If facet ID < 0, element is split into tetrahedra,
 //           else a hexahedron is split into prisms so that the given facet is
 //           split into triangles
+//           Avoid over-constrained volumes if true (only for tetras)
 //=======================================================================
 
 void SMESH_MeshEditor::SplitVolumes (const TFacetOfElem & theElems,
-                                     const int            theMethodFlags)
+                                     const int            theMethodFlags,
+                                     const bool avoidOverConstrainedVolumes )
 {
   SMDS_VolumeTool    volTool;
   SMESH_MesherHelper helper( *GetMesh()), fHelper(*GetMesh());
@@ -2588,7 +2630,7 @@ void SMESH_MeshEditor::SplitVolumes (const TFacetOfElem & theElems,
 
   SMESH_SequenceOfElemPtr newNodes, newElems;
 
-  // map face of volume to it's baricenrtic node
+  // map face of volume to its baricenrtic node
   map< TVolumeFaceKey, const SMDS_MeshNode* > volFace2BaryNode;
   double bc[3];
   vector<const SMDS_MeshElement* > splitVols;
@@ -2607,7 +2649,7 @@ void SMESH_MeshEditor::SplitVolumes (const TFacetOfElem & theElems,
     if ( !volTool.Set( elem, /*ignoreCentralNodes=*/false )) continue; // strange...
 
     TSplitMethod splitMethod = ( facetToSplit < 0  ?
-                                 getTetraSplitMethod( volTool, theMethodFlags ) :
+                                 getTetraSplitMethod( volTool, theMethodFlags, avoidOverConstrainedVolumes) :
                                  getPrismSplitMethod( volTool, theMethodFlags, facetToSplit ));
     if ( splitMethod._nbSplits < 1 ) continue;
 
@@ -3585,7 +3627,7 @@ bool SMESH_MeshEditor::TriToQuad (TIDSortedElemSet &                   theElems,
     }
 
     // search elements to fuse starting from startElem or links of elements
-    // fused earlyer - startLinks
+    // fused earlier - startLinks
     list< SMESH_TLink > startLinks;
     while ( startElem || !startLinks.empty() ) {
       while ( !startElem && !startLinks.empty() ) {
@@ -3850,6 +3892,68 @@ void SMESH_MeshEditor::GetLinkedNodes( const SMDS_MeshNode* theNode,
 }
 
 //=======================================================================
+//function : averageBySurface
+//purpose  : Auxiliary function to treat properly nodes in periodic faces in the laplacian smoother
+//=======================================================================
+void averageBySurface( const Handle(Geom_Surface)& theSurface, const SMDS_MeshNode* refNode, 
+                        TIDSortedElemSet& nodeSet, map< const SMDS_MeshNode*, gp_XY* >& theUVMap, double * coord )
+{
+  if ( theSurface.IsNull() ) 
+  {
+    TIDSortedElemSet::iterator nodeSetIt = nodeSet.begin();
+    for ( ; nodeSetIt != nodeSet.end(); nodeSetIt++ ) 
+    {
+      const SMDS_MeshNode* node = cast2Node(*nodeSetIt);
+      coord[0] += node->X();
+      coord[1] += node->Y();
+      coord[2] += node->Z();
+    }
+  }
+  else
+  {
+    Standard_Real Umin,Umax,Vmin,Vmax;
+    theSurface->Bounds( Umin, Umax, Vmin, Vmax );
+    ASSERT( theUVMap.find( refNode ) != theUVMap.end() );
+    gp_XY* nodeUV = theUVMap[ refNode ];
+    Standard_Real uref = nodeUV->X();
+    Standard_Real vref = nodeUV->Y();
+
+    TIDSortedElemSet::iterator nodeSetIt = nodeSet.begin();
+    for ( ; nodeSetIt != nodeSet.end(); nodeSetIt++ ) 
+    {
+      const SMDS_MeshNode* node = cast2Node(*nodeSetIt);
+      ASSERT( theUVMap.find( node ) != theUVMap.end() );
+      gp_XY* uv = theUVMap[ node ];    
+
+      if ( theSurface->IsUPeriodic() || theSurface->IsVPeriodic() )  
+      {          
+        Standard_Real u          = uv->X();
+        Standard_Real v          = uv->Y();                      
+        Standard_Real uCorrected = u;
+        Standard_Real vCorrected = v;
+        bool isUTobeCorrected = (std::fabs( uref - u ) >= 0.7 * std::fabs( Umax - Umin ));
+        bool isVTobeCorrected = (std::fabs( vref - v ) >= 0.7 * std::fabs( Vmax - Vmin ));
+
+        if( isUTobeCorrected  )
+          uCorrected = uref > u ? Umax + std::fabs(Umin - u) : Umin - std::fabs(Umax - u);
+
+        if( isVTobeCorrected )
+          vCorrected = vref > v ? Vmax + std::fabs(Vmin - v) : Vmin - std::fabs(Vmax - v);
+        
+        coord[0] += uCorrected;
+        coord[1] += vCorrected;
+
+      }
+      else
+      {
+        coord[0] += uv->X();
+        coord[1] += uv->Y();
+      }
+    }   
+  }
+}
+
+//=======================================================================
 //function : laplacianSmooth
 //purpose  : pulls theNode toward the center of surrounding nodes directly
 //           connected to that node along an element edge
@@ -3865,26 +3969,14 @@ void laplacianSmooth(const SMDS_MeshNode*                 theNode,
   SMESH_MeshEditor::GetLinkedNodes( theNode, nodeSet, SMDSAbs_Face );
 
   // compute new coodrs
+  double coord[] = { 0., 0., 0. };  
 
-  double coord[] = { 0., 0., 0. };
-  TIDSortedElemSet::iterator nodeSetIt = nodeSet.begin();
-  for ( ; nodeSetIt != nodeSet.end(); nodeSetIt++ ) {
-    const SMDS_MeshNode* node = cast2Node(*nodeSetIt);
-    if ( theSurface.IsNull() ) { // smooth in 3D
-      coord[0] += node->X();
-      coord[1] += node->Y();
-      coord[2] += node->Z();
-    }
-    else { // smooth in 2D
-      ASSERT( theUVMap.find( node ) != theUVMap.end() );
-      gp_XY* uv = theUVMap[ node ];
-      coord[0] += uv->X();
-      coord[1] += uv->Y();
-    }
-  }
+  averageBySurface( theSurface, theNode, nodeSet, theUVMap, coord );
+
   int nbNodes = nodeSet.size();
   if ( !nbNodes )
     return;
+
   coord[0] /= nbNodes;
   coord[1] /= nbNodes;
 
@@ -3894,7 +3986,7 @@ void laplacianSmooth(const SMDS_MeshNode*                 theNode,
     gp_Pnt p3d = theSurface->Value( coord[0], coord[1] );
     coord[0] = p3d.X();
     coord[1] = p3d.Y();
-    coord[2] = p3d.Z();
+    coord[2] = p3d.Z();    
   }
   else
     coord[2] /= nbNodes;
@@ -3902,6 +3994,72 @@ void laplacianSmooth(const SMDS_MeshNode*                 theNode,
   // move node
 
   const_cast< SMDS_MeshNode* >( theNode )->setXYZ(coord[0],coord[1],coord[2]);
+}
+
+//=======================================================================
+//function : correctTheValue
+//purpose  : Given a boundaries of parametric space determine if the node coordinate (u,v) need correction 
+//            based on the reference coordinate (uref,vref)
+//=======================================================================
+void correctTheValue( Standard_Real Umax, Standard_Real Umin, Standard_Real Vmax, Standard_Real Vmin, 
+                        Standard_Real uref, Standard_Real vref, Standard_Real &u, Standard_Real &v  )
+{
+  bool isUTobeCorrected = (std::fabs( uref - u ) >= 0.7 * std::fabs( Umax - Umin ));
+  bool isVTobeCorrected = (std::fabs( vref - v ) >= 0.7 * std::fabs( Vmax - Vmin ));
+  if ( isUTobeCorrected )
+    u = std::fabs(u-Umin) < 1e-7 ? Umax : Umin;            
+  if ( isVTobeCorrected )
+    v = std::fabs(v-Vmin) < 1e-7 ? Vmax : Vmin;
+}
+
+//=======================================================================
+//function : averageByElement
+//purpose  : Auxiliary function to treat properly nodes in periodic faces in the centroidal smoother
+//=======================================================================
+void averageByElement( const Handle(Geom_Surface)& theSurface, const SMDS_MeshNode* refNode, const SMDS_MeshElement* elem,
+                        map< const SMDS_MeshNode*, gp_XY* >& theUVMap, SMESH::Controls::TSequenceOfXYZ& aNodePoints, 
+                        gp_XYZ& elemCenter )
+{
+  int nn = elem->NbNodes();
+  if(elem->IsQuadratic()) nn = nn/2;
+  int i=0;
+  SMDS_ElemIteratorPtr itN = elem->nodesIterator();
+  Standard_Real Umin,Umax,Vmin,Vmax;
+  while ( i<nn ) 
+  {
+    const SMDS_MeshNode* aNode = static_cast<const SMDS_MeshNode*>( itN->next() );
+    i++;
+    gp_XYZ aP( aNode->X(), aNode->Y(), aNode->Z() );
+    aNodePoints.push_back( aP );
+    if ( !theSurface.IsNull() ) // smooth in 2D
+    { 
+      ASSERT( theUVMap.find( aNode ) != theUVMap.end() );
+      gp_XY* uv = theUVMap[ aNode ];
+
+      if ( theSurface->IsUPeriodic() || theSurface->IsVPeriodic() )  
+      {  
+        theSurface->Bounds( Umin, Umax, Vmin, Vmax );
+        Standard_Real u          = uv->X();
+        Standard_Real v          = uv->Y();   
+        bool isSingularPoint     = std::fabs(u - Umin) < 1e-7 || std::fabs(v - Vmin) < 1e-7 || std::fabs(u - Umax) < 1e-7 || std::fabs( v - Vmax ) < 1e-7;
+        if ( !isSingularPoint )
+        {
+          aP.SetCoord( uv->X(), uv->Y(), 0. );
+        }
+        else
+        {
+          gp_XY* refPoint = theUVMap[ refNode ];
+          Standard_Real uref = refPoint->X();
+          Standard_Real vref = refPoint->Y();
+          correctTheValue( Umax, Umin, Vmax, Vmin, uref, vref, u, v ); 
+          aP.SetCoord( u, v, 0. );
+        }        
+      }
+      else
+        aP.SetCoord( uv->X(), uv->Y(), 0. );
+    }    
+    elemCenter += aP;   
+  }
 }
 
 //=======================================================================
@@ -3918,48 +4076,46 @@ void centroidalSmooth(const SMDS_MeshNode*                 theNode,
   SMESH::Controls::Area anAreaFunc;
   double totalArea = 0.;
   int nbElems = 0;
-
   // compute new XYZ
-
+  bool notToMoveNode = false;
+  // Do not correct singular nodes
+  if ( !theSurface.IsNull() && (theSurface->IsUPeriodic() || theSurface->IsVPeriodic()) )
+  { 
+    Standard_Real Umin,Umax,Vmin,Vmax;
+    theSurface->Bounds( Umin, Umax, Vmin, Vmax );
+    gp_XY* uv = theUVMap[ theNode ];
+    Standard_Real u = uv->X();
+    Standard_Real v = uv->Y();   
+    notToMoveNode = std::fabs(u - Umin) < 1e-7 || std::fabs(v - Vmin) < 1e-7 || std::fabs(u - Umax) < 1e-7 || std::fabs( v - Vmax ) < 1e-7;
+  }
+  
   SMDS_ElemIteratorPtr elemIt = theNode->GetInverseElementIterator(SMDSAbs_Face);
-  while ( elemIt->more() )
+  while ( elemIt->more() && !notToMoveNode )
   {
     const SMDS_MeshElement* elem = elemIt->next();
     nbElems++;
 
     gp_XYZ elemCenter(0.,0.,0.);
     SMESH::Controls::TSequenceOfXYZ aNodePoints;
-    SMDS_ElemIteratorPtr itN = elem->nodesIterator();
     int nn = elem->NbNodes();
     if(elem->IsQuadratic()) nn = nn/2;
-    int i=0;
-    //while ( itN->more() ) {
-    while ( i<nn ) {
-      const SMDS_MeshNode* aNode = static_cast<const SMDS_MeshNode*>( itN->next() );
-      i++;
-      gp_XYZ aP( aNode->X(), aNode->Y(), aNode->Z() );
-      aNodePoints.push_back( aP );
-      if ( !theSurface.IsNull() ) { // smooth in 2D
-        ASSERT( theUVMap.find( aNode ) != theUVMap.end() );
-        gp_XY* uv = theUVMap[ aNode ];
-        aP.SetCoord( uv->X(), uv->Y(), 0. );
-      }
-      elemCenter += aP;
-    }
+    averageByElement( theSurface, theNode, elem, theUVMap, aNodePoints, elemCenter );
+
     double elemArea = anAreaFunc.GetValue( aNodePoints );
     totalArea += elemArea;
     elemCenter /= nn;
     aNewXYZ += elemCenter * elemArea;
   }
   aNewXYZ /= totalArea;
-  if ( !theSurface.IsNull() ) {
+  
+  if ( !theSurface.IsNull() && !notToMoveNode ) {
     theUVMap[ theNode ]->SetCoord( aNewXYZ.X(), aNewXYZ.Y() );
     aNewXYZ = theSurface->Value( aNewXYZ.X(), aNewXYZ.Y() ).XYZ();
   }
 
   // move node
-
-  const_cast< SMDS_MeshNode* >( theNode )->setXYZ(aNewXYZ.X(),aNewXYZ.Y(),aNewXYZ.Z());
+  if ( !notToMoveNode )
+    const_cast< SMDS_MeshNode* >( theNode )->setXYZ(aNewXYZ.X(),aNewXYZ.Y(),aNewXYZ.Z());
 }
 
 //=======================================================================
@@ -4262,7 +4418,8 @@ void SMESH_MeshEditor::Smooth (TIDSortedElemSet &          theElems,
         if ( !BRep_Tool::IsClosed( edge, face ))
           continue;
         SMESHDS_SubMesh* sm = aMesh->MeshElements( edge );
-        if ( !sm ) continue;
+        if ( !sm )
+          continue;
         // find out which parameter varies for a node on seam
         double f,l;
         gp_Pnt2d uv1, uv2;
@@ -4419,7 +4576,7 @@ void SMESH_MeshEditor::Smooth (TIDSortedElemSet &          theElems,
     } // smoothing iterations
 
     // MESSAGE(" Face id: " << *fId <<
-    //         " Nb iterstions: " << it <<
+    //         " Nb iterations: " << it <<
     //         " Displacement: " << maxDisplacement <<
     //         " Aspect Ratio " << maxRatio);
 
@@ -4636,7 +4793,7 @@ void SMESH_MeshEditor::sweepElement(const SMDS_MeshElement*               elem,
         std::swap( itNN[0],    itNN[1] );
         std::swap( prevNod[0], prevNod[1] );
         std::swap( nextNod[0], nextNod[1] );
-        std::swap( isSingleNode[0], isSingleNode[1] );
+	std::vector<bool>::swap(isSingleNode[0], isSingleNode[1]);
         if ( nbSame > 0 )
           sames[0] = 1 - sames[0];
         iNotSameNode = 1 - iNotSameNode;
@@ -5219,13 +5376,12 @@ void SMESH_MeshEditor::makeWalls (TNodeOfNodeListMap &     mapNewNodes,
               srcEdges.push_back(aMesh->FindEdge (commonNodes[0],commonNodes[1],commonNodes[2]));
             else
               srcEdges.push_back(aMesh->FindEdge (commonNodes[0],commonNodes[1]));
-#ifdef _DEBUG_
-            if ( !srcEdges.back() )
+
+            if (SALOME::VerbosityActivated() && !srcEdges.back())
             {
               cout << "SMESH_MeshEditor::makeWalls(), no source edge found for a free face #"
-                   << iF << " of volume #" << vTool.ID() << endl;
+                  << iF << " of volume #" << vTool.ID() << endl;
             }
-#endif
           }
         }
         if ( freeInd.empty() )
@@ -6816,9 +6972,8 @@ SMESH_MeshEditor::PGroupIDs SMESH_MeshEditor::Offset( TIDSortedElemSet & theElem
   for ( size_t i = 0; i < new2OldNodes.size(); ++i )
     if ( const SMDS_MeshNode* n = new2OldNodes[ i ].first )
     {
-#ifndef _DEBUG_
-      if ( n->NbInverseElements() > 0 )
-#endif
+
+      if (!SALOME::VerbosityActivated() || n->NbInverseElements() > 0 )
       {
         const SMDS_MeshNode* n2 =
           tgtMeshDS->AddNodeWithID( n->X(), n->Y(), n->Z(), idShift + n->GetID() );
@@ -7281,6 +7436,7 @@ void SMESH_MeshEditor::MergeNodes (TListOfListOfNodes & theGroupsOfNodes,
   {
     const SMDS_MeshElement* elem = *eIt;
     SMESHDS_SubMesh*          sm = mesh->MeshElements( elem->getshapeId() );
+    bool                 marked = elem->isMarked();
 
     bool keepElem = applyMerge( elem, newElemDefs, nodeNodeMap, /*noHoles=*/false );
     if ( !keepElem )
@@ -7317,6 +7473,8 @@ void SMESH_MeshEditor::MergeNodes (TListOfListOfNodes & theGroupsOfNodes,
           sm->AddElement( newElem );
         if ( elem != newElem )
           ReplaceElemInGroups( elem, newElem, mesh );
+        if ( marked && newElem )
+          newElem->setIsMarked( true );
       }
     }
   }
@@ -7788,6 +7946,8 @@ bool SMESH_MeshEditor::applyMerge( const SMDS_MeshElement* elem,
 // purpose : allow comparing elements basing on their nodes
 // ========================================================
 
+struct ComparableElementHasher;
+
 class ComparableElement : public boost::container::flat_set< smIdType >
 {
   typedef boost::container::flat_set< smIdType >  int_set;
@@ -7795,6 +7955,8 @@ class ComparableElement : public boost::container::flat_set< smIdType >
   const SMDS_MeshElement* myElem;
   smIdType                mySumID;
   mutable int             myGroupID;
+
+  friend ComparableElementHasher;
 
 public:
 
@@ -7824,7 +7986,11 @@ public:
     mySumID   = src.mySumID;
     myGroupID = src.myGroupID;
   }
+};
 
+struct ComparableElementHasher
+{
+#if OCC_VERSION_LARGE < 0x07080000
   static int HashCode(const ComparableElement& se, int limit )
   {
     return ::HashCode( FromSmIdType<int>(se.mySumID), limit );
@@ -7833,7 +7999,17 @@ public:
   {
     return ( se1 == se2 );
   }
+#else
+  size_t operator()(const ComparableElement& se) const
+  {
+    return static_cast<size_t>(FromSmIdType<int>(se.mySumID));
+  }
 
+  bool operator()(const ComparableElement& se1, const ComparableElement& se2) const
+  {
+    return ( se1 == se2 );
+  }
+#endif
 };
 
 //=======================================================================
@@ -7851,8 +8027,8 @@ void SMESH_MeshEditor::FindEqualElements( TIDSortedElemSet &        theElements,
   if ( theElements.empty() ) elemIt = GetMeshDS()->elementsIterator();
   else                       elemIt = SMESHUtils::elemSetIterator( theElements );
 
-  typedef NCollection_Map< ComparableElement, ComparableElement > TMapOfElements;
-  typedef std::list<smIdType>                                     TGroupOfElems;
+  typedef NCollection_Map< ComparableElement, ComparableElementHasher > TMapOfElements;
+  typedef std::list<smIdType>                                           TGroupOfElems;
   TMapOfElements               mapOfElements;
   std::vector< TGroupOfElems > arrayOfGroups;
   TGroupOfElems                groupOfElems;
@@ -9346,7 +9522,8 @@ void SMESH_MeshEditor::ConvertToQuadratic(const bool theForce3d, const bool theT
       case SMDSEntity_TriQuad_Hexa:
         NewVolume = aHelper.AddVolume(nodes[0], nodes[1], nodes[2], nodes[3],
                                       nodes[4], nodes[5], nodes[6], nodes[7], id, theForce3d);
-        for ( size_t i = 20; i < nodes.size(); ++i ) // rm central nodes
+        for (size_t i = 8; i < nodes.size(); ++i) // rm central nodes from each edge
+        //for (size_t i = 20; i < nodes.size(); ++i) // rm central nodes from each edge
           if ( nodes[i]->NbInverseElements() == 0 )
             GetMeshDS()->RemoveFreeNode( nodes[i], /*sm=*/0, /*fromGroups=*/true );
         break;
@@ -9359,7 +9536,9 @@ void SMESH_MeshEditor::ConvertToQuadratic(const bool theForce3d, const bool theT
       case SMDSEntity_BiQuad_Penta:
         NewVolume = aHelper.AddVolume(nodes[0], nodes[1], nodes[2],
                                       nodes[3], nodes[4], nodes[5], id, theForce3d);
-        for ( size_t i = 15; i < nodes.size(); ++i ) // rm central nodes
+
+        for (size_t i = 6; i < nodes.size(); ++i) // rm central nodes
+        //for ( size_t i = 15; i < nodes.size(); ++i ) // rm central nodes
           if ( nodes[i]->NbInverseElements() == 0 )
             GetMeshDS()->RemoveFreeNode( nodes[i], /*sm=*/0, /*fromGroups=*/true );
         break;
@@ -11581,7 +11760,7 @@ bool SMESH_MeshEditor::DoubleNodesOnGroupBoundaries( const std::vector<TIDSorted
       {
         int oldId = *itn;
         //MESSAGE("     node " << oldId);
-        vtkCellLinks::Link l = (static_cast <vtkCellLinks *>(grid->GetCellLinks()))->GetLink(oldId);
+        vtkCellLinks::Link l = (static_cast <vtkCellLinks *>(grid->GetLinks()))->GetLink(oldId);
         for (int i=0; i<l.ncells; i++)
         {
           int vtkId = l.cells[i];
@@ -11939,7 +12118,7 @@ bool SMESH_MeshEditor::DoubleNodesOnGroupBoundaries( const std::vector<TIDSorted
     {
       int oldId = itnod->first;
       //MESSAGE("     node " << oldId);
-      vtkCellLinks::Link l = (static_cast< vtkCellLinks *>(grid->GetCellLinks()))->GetLink(oldId);
+      vtkCellLinks::Link l = (static_cast< vtkCellLinks *>(grid->GetLinks()))->GetLink(oldId);
       for (int i = 0; i < l.ncells; i++)
       {
         int vtkId = l.cells[i];
@@ -12808,7 +12987,8 @@ int SMESH_MeshEditor::MakeBoundaryMesh(const TIDSortedElemSet& elements,
                                        bool                    toCopyElements/*=false*/,
                                        bool                    toCopyExistingBoundary/*=false*/,
                                        bool                    toAddExistingBondary/*= false*/,
-                                       bool                    aroundElements/*= false*/)
+                                       bool                    aroundElements/*= false*/,
+                                       bool                    toCreateAllElements/*= false*/)
 {
   SMDSAbs_ElementType missType = (dimension == BND_2DFROM3D) ? SMDSAbs_Face : SMDSAbs_Edge;
   SMDSAbs_ElementType elemType = (dimension == BND_1DFROM2D) ? SMDSAbs_Face : SMDSAbs_Volume;
@@ -12827,7 +13007,6 @@ int SMESH_MeshEditor::MakeBoundaryMesh(const TIDSortedElemSet& elements,
   SMESH_MeshEditor* presentEditor;
   SMESH_MeshEditor tgtEditor2( tgtEditor.GetMesh() );
   presentEditor = toAddExistingBondary ? &tgtEditor : &tgtEditor2;
-
   SMESH_MesherHelper helper( *myMesh );
   const TopAbs_ShapeEnum missShapeType = ( missType==SMDSAbs_Face ? TopAbs_FACE : TopAbs_EDGE );
   SMDS_VolumeTool vTool;
@@ -12865,8 +13044,9 @@ int SMESH_MeshEditor::MakeBoundaryMesh(const TIDSortedElemSet& elements,
       const SMDS_MeshElement* otherVol = 0;
       for ( int iface = 0, n = vTool.NbFaces(); iface < n; iface++ )
       {
-        if ( !vTool.IsFreeFace(iface, &otherVol) &&
-             ( !aroundElements || elements.count( otherVol )))
+        if ( !toCreateAllElements && 
+              !vTool.IsFreeFace(iface, &otherVol) &&
+                ( !aroundElements || elements.count( otherVol )))
           continue;
         freeFacets.push_back( iface );
       }
@@ -12899,15 +13079,58 @@ int SMESH_MeshEditor::MakeBoundaryMesh(const TIDSortedElemSet& elements,
           if (iQuad)
             for ( inode = 1; inode < nbFaceNodes; inode += 2)
               nodes.push_back( nn[inode] ); // add medium nodes
-          int iCenter = vTool.GetCenterNodeIndex(iface); // for HEX27
-          if ( iCenter > 0 )
-            nodes.push_back( vTool.GetNodes()[ iCenter ] );
 
-          if (const SMDS_MeshElement * f = aMesh->FindElement( nodes,
-                                                               SMDSAbs_Face, /*noMedium=*/false ))
-            presentBndElems.push_back( f );
+          // for triangle face for Penta18 (BiQuadratic pentahedron) return -2
+          // because we haven't center node on triangle side, but it's need for create biquadratic face
+          int iCenter = vTool.GetCenterNodeIndex(iface); // for HEX27
+
+          // for triangle faces for Penta18 (BiQuadratic pentahedron) firstly check, exist face or not
+          // if not - create node in middle face
+          if (iCenter == -2)
+          {
+            SMDS_ElemIteratorPtr itF = nodes[0]->GetInverseElementIterator(SMDSAbs_Face);
+            bool isFound = false;
+            while (itF->more())
+            {
+              const SMDS_MeshElement* e = itF->next();
+              int nbNodesToCheck = e->NbNodes();
+              if (nbNodesToCheck == (int)nodes.size() + 1)
+              {
+                for (size_t i = 1; e && i < nodes.size() - 1; ++i)
+                {
+                  int nodeIndex = e->GetNodeIndex(nodes[i]);
+                  if (nodeIndex < 0 || nodeIndex >= nbNodesToCheck)
+                    e = 0;
+                }
+                if (e)
+                {
+                  presentBndElems.push_back(e);
+                  isFound = true;
+                }
+              }
+            }
+
+            if (!isFound)
+            {
+              SMESH_MesherHelper aHelper(*myMesh);
+              double bc[3];
+              vTool.GetFaceBaryCenter(iface, bc[0], bc[1], bc[2]);
+              auto aNodeC = aHelper.AddNode(bc[0], bc[1], bc[2]);
+              nodes.push_back(aNodeC);
+              missingBndElems.push_back(nodes);
+            }
+          }
           else
-            missingBndElems.push_back( nodes );
+          {
+            if (iCenter > 0)
+              nodes.push_back(vTool.GetNodes()[iCenter]);
+
+            if (const SMDS_MeshElement* f = aMesh->FindElement(nodes,
+              SMDSAbs_Face, /*noMedium=*/false))
+              presentBndElems.push_back(f);
+            else
+              missingBndElems.push_back(nodes);
+          }
 
           if ( targetMesh != myMesh )
           {

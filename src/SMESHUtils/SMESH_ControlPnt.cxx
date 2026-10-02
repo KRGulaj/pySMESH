@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -163,23 +163,15 @@ void SMESHUtils::createPointsSampleFromFace( const TopoDS_Face&       theFace,
   // Get the transformation associated to the face location
   gp_Trsf aTrsf = aLocation.Transformation();
 
-  // Get triangles
-  int nbTriangles = aTri->NbTriangles();
-  const Poly_Array1OfTriangle& triangles = aTri->Triangles();
-
-  // GetNodes
-  int nbNodes = aTri->NbNodes();
-  TColgp_Array1OfPnt nodes(1,nbNodes);
-  nodes = aTri->Nodes();
-
   // Iterate on triangles and subdivide them
+  int nbTriangles = aTri->NbTriangles();
   thePoints.reserve( thePoints.size() + nbTriangles );
   for ( int i = 1; i <= nbTriangles; i++ )
   {
-    const Poly_Triangle& aTriangle = triangles.Value(i);
-    gp_Pnt p1 = nodes.Value(aTriangle.Value(1));
-    gp_Pnt p2 = nodes.Value(aTriangle.Value(2));
-    gp_Pnt p3 = nodes.Value(aTriangle.Value(3));
+    const Poly_Triangle& aTriangle = aTri->Triangle(i);
+    gp_Pnt p1 = aTri->Node(aTriangle.Value(1));
+    gp_Pnt p2 = aTri->Node(aTriangle.Value(2));
+    gp_Pnt p3 = aTri->Node(aTriangle.Value(3));
 
     p1.Transform(aTrsf);
     p2.Transform(aTrsf);
@@ -286,7 +278,7 @@ void SMESHUtils::subdivideTriangle( const gp_Pnt& p1,
   // So D < 1/3 * sqrt(3/4) * a and if a < sqrt(3) * S then D < S/2
   // and the distance between two mass centers of two neighbouring triangles
   // sharing an edge is < 2 * 1/2 * S = S
-  // If the traingles share a Vertex and no Edge the distance of the mass centers
+  // If the triangles share a Vertex and no Edge the distance of the mass centers
   // to the Vertices is 2*D < S so the mass centers are distant of less than 2*S
 
   double threshold = sqrt( 3. ) * theSize;

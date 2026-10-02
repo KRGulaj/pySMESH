@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (C) 2013-2022  EDF R&D
+# Copyright (C) 2013-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -18,7 +18,11 @@
 # See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
 #
 
-from qtsalome import *
+import os
+if 'SALOME_USE_PYSIDE' in os.environ:
+  from PySide2.QtWidgets import QWidget, QApplication
+else:
+  from PyQt5.Qt import QWidget, QApplication
 from .Gui.myMain_ui import Ui_Gestion
 import sys
 

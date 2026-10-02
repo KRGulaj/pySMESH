@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -192,7 +192,7 @@ void SMESHGUI_ShapeByMeshOp::startOperation()
   SMESHGUI_SelectionOp::startOperation();
 
   //activateSelection(); // set filters
-  onSelectionDone(); // desable/enable [ OK ]
+  onSelectionDone(); // disable/enable [ OK ]
 
   myDlg->show();
 }
@@ -406,7 +406,7 @@ bool SMESHGUI_ShapeByMeshOp::onApply()
 
 //=======================================================================
 // function : onSelectionDone()
-// purpose  : SLOT called when selection changed. Enable/desable [ OK ]
+// purpose  : SLOT called when selection changed. Enable/disable [ OK ]
 //=======================================================================
 void SMESHGUI_ShapeByMeshOp::onSelectionDone()
 {

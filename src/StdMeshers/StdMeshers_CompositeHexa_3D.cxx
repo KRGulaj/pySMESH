@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -1242,12 +1242,13 @@ bool _QuadFaceGrid::Init(const TopoDS_Face& f, SMESH_ProxyMesh& mesh)
   if (mySides.size() != 4)
     return false;
 
-#ifdef _DEBUG_
+if (SALOME::VerbosityActivated())
+{
   mySides.GetSide( Q_BOTTOM )->SetID( Q_BOTTOM );
   mySides.GetSide( Q_RIGHT  )->SetID( Q_RIGHT );
   mySides.GetSide( Q_TOP    )->SetID( Q_TOP );
   mySides.GetSide( Q_LEFT   )->SetID( Q_LEFT );
-#endif
+}
 
   return true;
 }
