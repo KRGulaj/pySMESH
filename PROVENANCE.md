@@ -50,6 +50,26 @@ doesn't ship a Windows-buildable equivalent:
 
 Both are licensed LGPL-2.1, same as SMESH itself.
 
+## MEFISTO carried forward from SMESH V9_9_0
+
+SALOME removed the MEFISTO 2-D triangulator from SMESH in commit `9d7121c88` ("bos #29628
+Remove MEFISTO 2D algorithm", committed 2022-06-08). pySMESH keeps `Mefisto2D` as public
+API. The five files below are verbatim copies from SMESH tag `V9_9_0` (commit
+`4df9beadff0df879bcabb7c5472188f18cd30b42`). Each blob hash equals the upstream blob.
+
+| File | Local path | Upstream path at `V9_9_0` |
+|---|---|---|
+| `aptrte.cxx` | `extern/mefisto2/aptrte.cxx` | `src/MEFISTO2/aptrte.cxx` |
+| `aptrte.h` | `extern/mefisto2/aptrte.h` | `src/MEFISTO2/aptrte.h` |
+| `Rn.h` | `extern/mefisto2/Rn.h` | `src/MEFISTO2/Rn.h` |
+| `StdMeshers_MEFISTO_2D.cxx` | `extern/mefisto2/StdMeshers_MEFISTO_2D.cxx` | `src/StdMeshers/StdMeshers_MEFISTO_2D.cxx` |
+| `StdMeshers_MEFISTO_2D.hxx` | `extern/mefisto2/StdMeshers_MEFISTO_2D.hxx` | `src/StdMeshers/StdMeshers_MEFISTO_2D.hxx` |
+
+The Fortran sources `trte.f` and `areteideale.f` are not carried. `trte.c` (above) replaces
+`trte.f`. `aptrte.cxx` already defines the `areteideale_` that `trte.c` calls, and
+`patches/smesh/mefisto.patch` gives it the f2c signature. These files are licensed LGPL-2.1,
+same as SMESH itself.
+
 ## Patches
 
 `patches/{kernel,geom,smesh,occt8}/*.patch`, applied by `prepare.py` in that order. Most come
