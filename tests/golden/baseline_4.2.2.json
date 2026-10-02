@@ -1,0 +1,1290 @@
+{
+ "meta": {
+  "git_head": "885d3c2be",
+  "core_git_sha": "4e5a4e1b7",
+  "occt": "8.0.0",
+  "vtk": "9.6.2",
+  "boost": "1.90.0",
+  "with_netgen": false,
+  "python": "3.13.14",
+  "numpy": "2.5.0",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "captured_utc": "2026-10-02T17:04:14Z"
+ },
+ "probes": {
+  "primitive/box": {
+   "group": "geometry",
+   "seconds": 1.506,
+   "values": {
+    "solids": 1,
+    "faces": 6,
+    "edges": 12,
+    "vertices": 8,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 6,
+    "volume": 231.0,
+    "area": 262.0
+   }
+  },
+  "primitive/cylinder": {
+   "group": "geometry",
+   "seconds": 1.095,
+   "values": {
+    "solids": 1,
+    "faces": 3,
+    "edges": 3,
+    "vertices": 2,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 3,
+    "volume": 28.274333882308134,
+    "area": 51.836278784231595
+   }
+  },
+  "primitive/cone": {
+   "group": "geometry",
+   "seconds": 0.46,
+   "values": {
+    "solids": 1,
+    "faces": 3,
+    "edges": 3,
+    "vertices": 2,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 3,
+    "volume": 16.493361431346408,
+    "area": 39.69482401915933
+   }
+  },
+  "primitive/sphere": {
+   "group": "geometry",
+   "seconds": 0.552,
+   "values": {
+    "solids": 1,
+    "faces": 1,
+    "edges": 3,
+    "vertices": 2,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 1,
+    "volume": 20.57952627611555,
+    "area": 36.31681107549801
+   }
+  },
+  "primitive/torus": {
+   "group": "geometry",
+   "seconds": 0.688,
+   "values": {
+    "solids": 1,
+    "faces": 1,
+    "edges": 2,
+    "vertices": 1,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 1,
+    "volume": 37.899280900183214,
+    "area": 94.74820225045785
+   }
+  },
+  "primitive/wedge": {
+   "group": "geometry",
+   "seconds": 0.558,
+   "values": {
+    "solids": 1,
+    "faces": 6,
+    "edges": 12,
+    "vertices": 8,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 6,
+    "volume": 16.0,
+    "area": 43.31370849898476
+   }
+  },
+  "boolean/fuse/overlap": {
+   "group": "geometry",
+   "seconds": 0.794,
+   "values": {
+    "solids": 1,
+    "faces": 12,
+    "edges": 30,
+    "vertices": 20,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 12,
+    "volume": 15.0,
+    "area": 42.0
+   }
+  },
+  "boolean/fuse/coplanar": {
+   "group": "geometry",
+   "seconds": 0.923,
+   "values": {
+    "solids": 1,
+    "faces": 14,
+    "edges": 28,
+    "vertices": 16,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 10,
+    "volume": 12.0,
+    "area": 32.0
+   }
+  },
+  "boolean/cut/overlap": {
+   "group": "geometry",
+   "seconds": 0.832,
+   "values": {
+    "solids": 1,
+    "faces": 9,
+    "edges": 21,
+    "vertices": 14,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 9,
+    "volume": 7.0,
+    "area": 24.0
+   }
+  },
+  "boolean/cut/coplanar": {
+   "group": "geometry",
+   "seconds": 0.539,
+   "values": {
+    "solids": 1,
+    "faces": 6,
+    "edges": 12,
+    "vertices": 8,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 6,
+    "volume": 4.000000000000001,
+    "area": 16.0
+   }
+  },
+  "boolean/common/overlap": {
+   "group": "geometry",
+   "seconds": 0.434,
+   "values": {
+    "solids": 1,
+    "faces": 6,
+    "edges": 12,
+    "vertices": 8,
+    "free_edges": 0,
+    "solid_ids": 2,
+    "face_ids": 6,
+    "volume": 1.0000000000000002,
+    "area": 6.0
+   }
+  },
+  "boolean/common/coplanar": {
+   "group": "geometry",
+   "seconds": 0.681,
+   "values": {
+    "solids": 1,
+    "faces": 6,
+    "edges": 12,
+    "vertices": 8,
+    "free_edges": 0,
+    "solid_ids": 2,
+    "face_ids": 10,
+    "volume": 4.000000000000001,
+    "area": 16.0
+   }
+  },
+  "boolean/fragment/overlap": {
+   "group": "geometry",
+   "seconds": 0.781,
+   "values": {
+    "solids": 3,
+    "faces": 18,
+    "edges": 36,
+    "vertices": 22,
+    "free_edges": 0,
+    "solid_ids": 2,
+    "face_ids": 12,
+    "volume": 15.0,
+    "area": 48.0
+   }
+  },
+  "boolean/fragment/coplanar": {
+   "group": "geometry",
+   "seconds": 0.819,
+   "values": {
+    "solids": 3,
+    "faces": 16,
+    "edges": 28,
+    "vertices": 16,
+    "free_edges": 0,
+    "solid_ids": 2,
+    "face_ids": 12,
+    "volume": 12.000000000000004,
+    "area": 40.0
+   }
+  },
+  "boolean/split/overlap": {
+   "group": "geometry",
+   "seconds": 0.688,
+   "values": {
+    "solids": 3,
+    "faces": 18,
+    "edges": 36,
+    "vertices": 22,
+    "free_edges": 0,
+    "solid_ids": 2,
+    "face_ids": 15,
+    "volume": 16.000000000000004,
+    "area": 51.0
+   }
+  },
+  "boolean/split/coplanar": {
+   "group": "geometry",
+   "seconds": 0.51,
+   "values": {
+    "solids": 3,
+    "faces": 17,
+    "edges": 32,
+    "vertices": 20,
+    "free_edges": 0,
+    "solid_ids": 2,
+    "face_ids": 13,
+    "volume": 16.000000000000004,
+    "area": 52.0
+   }
+  },
+  "boolean/box_cut_cylinder": {
+   "group": "geometry",
+   "seconds": 0.836,
+   "values": {
+    "solids": 1,
+    "faces": 7,
+    "edges": 15,
+    "vertices": 10,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 7,
+    "volume": 25.716814692820417,
+    "area": 70.28318530717958
+   }
+  },
+  "boolean/sphere_common_box": {
+   "group": "geometry",
+   "seconds": 0.611,
+   "values": {
+    "solids": 1,
+    "faces": 3,
+    "edges": 3,
+    "vertices": 2,
+    "free_edges": 0,
+    "solid_ids": 2,
+    "face_ids": 3,
+    "volume": 0.39748260689045267,
+    "area": 3.673597363258621
+   }
+  },
+  "boolean/section_edges": {
+   "group": "geometry",
+   "seconds": 0.732,
+   "values": {
+    "solids": 2,
+    "faces": 12,
+    "edges": 30,
+    "vertices": 22,
+    "free_edges": 0,
+    "solid_ids": 2,
+    "face_ids": 12,
+    "volume": 16.000000000000004,
+    "area": 48.0
+   }
+  },
+  "fillet/box_edge": {
+   "group": "geometry",
+   "seconds": 0.706,
+   "values": {
+    "solids": 1,
+    "faces": 7,
+    "edges": 15,
+    "vertices": 10,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 7,
+    "volume": 230.40984494934273,
+    "area": 259.53207887907064
+   }
+  },
+  "chamfer/box_edge": {
+   "group": "geometry",
+   "seconds": 0.552,
+   "values": {
+    "solids": 1,
+    "faces": 7,
+    "edges": 15,
+    "vertices": 10,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 7,
+    "volume": 230.12,
+    "area": 259.2625396744416
+   }
+  },
+  "loft/wing_1edge_smooth": {
+   "group": "geometry",
+   "seconds": 0.483,
+   "values": {
+    "solids": 1,
+    "faces": 3,
+    "edges": 3,
+    "vertices": 2,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 3,
+    "volume": 0.1329085621865669,
+    "area": 3.805325730954811
+   }
+  },
+  "loft/wing_1edge_ruled": {
+   "group": "geometry",
+   "seconds": 0.772,
+   "values": {
+    "solids": 1,
+    "faces": 4,
+    "edges": 5,
+    "vertices": 3,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 4,
+    "volume": 0.13290856218656646,
+    "area": 3.805325730954809
+   }
+  },
+  "loft/wing_2edge_smooth": {
+   "group": "geometry",
+   "seconds": 0.798,
+   "values": {
+    "solids": 1,
+    "faces": 4,
+    "edges": 6,
+    "vertices": 4,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 4,
+    "volume": 0.1329082497140846,
+    "area": 3.8053113537235923
+   }
+  },
+  "loft/wing_2edge_ruled": {
+   "group": "geometry",
+   "seconds": 0.896,
+   "values": {
+    "solids": 1,
+    "faces": 6,
+    "edges": 10,
+    "vertices": 6,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 6,
+    "volume": 0.13290824971408444,
+    "area": 3.8053113537235905
+   }
+  },
+  "loft/circles_ruled_3": {
+   "group": "geometry",
+   "seconds": 0.565,
+   "values": {
+    "solids": 1,
+    "faces": 4,
+    "edges": 5,
+    "vertices": 3,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 4,
+    "volume": 9.13156264643433,
+    "area": 24.677394809263312
+   }
+  },
+  "sweep/pipe_shell_spline": {
+   "group": "geometry",
+   "seconds": 0.712,
+   "values": {
+    "solids": 1,
+    "faces": 3,
+    "edges": 3,
+    "vertices": 2,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 3,
+    "volume": 7.453683106458047,
+    "area": 34.10752240199253
+   }
+  },
+  "sweep/revolve_rectangle": {
+   "group": "geometry",
+   "seconds": 0.627,
+   "values": {
+    "solids": 1,
+    "faces": 6,
+    "edges": 12,
+    "vertices": 8,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 6,
+    "volume": 4.712388980384689,
+    "area": 20.849555921538748
+   }
+  },
+  "offset/thick_solid_box": {
+   "group": "geometry",
+   "seconds": 0.676,
+   "values": {
+    "solids": 1,
+    "faces": 11,
+    "edges": 24,
+    "vertices": 16,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 11,
+    "volume": 51.28799999999998,
+    "area": 352.7199999999999
+   }
+  },
+  "offset/sphere": {
+   "group": "geometry",
+   "seconds": 0.471,
+   "values": {
+    "solids": 1,
+    "faces": 1,
+    "edges": 3,
+    "vertices": 2,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 1,
+    "volume": 31.05935576971551,
+    "area": 47.78362426110074
+   }
+  },
+  "sew/six_box_faces": {
+   "group": "geometry",
+   "seconds": 0.562,
+   "values": {
+    "solids": 1,
+    "faces": 6,
+    "edges": 12,
+    "vertices": 8,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 6,
+    "volume": 231.0,
+    "area": 262.0
+   }
+  },
+  "unify/split_box_fixture": {
+   "group": "geometry",
+   "seconds": 0.549,
+   "values": {
+    "solids": 1,
+    "faces": 6,
+    "edges": 12,
+    "vertices": 8,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 10,
+    "volume": 16.000000000000004,
+    "area": 40.0
+   }
+  },
+  "heal/split_box_fixture": {
+   "group": "geometry",
+   "seconds": 0.433,
+   "values": {
+    "solids": 1,
+    "faces": 10,
+    "edges": 20,
+    "vertices": 12,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 10,
+    "volume": 16.000000000000004,
+    "area": 40.0
+   }
+  },
+  "defeature/box_hole": {
+   "group": "geometry",
+   "seconds": 0.629,
+   "values": {
+    "solids": 1,
+    "faces": 6,
+    "edges": 12,
+    "vertices": 8,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 6,
+    "volume": 32.00000000000001,
+    "area": 64.0
+   }
+  },
+  "tessellate/session": {
+   "group": "geometry",
+   "seconds": 1.322,
+   "values": {
+    "sphere_tris": 17042,
+    "sphere_nodes": 8588,
+    "torus_tris": 34532,
+    "torus_nodes": 17550,
+    "wing_tris": 3022,
+    "wing_nodes": 1596
+   }
+  },
+  "tessellate/stateless": {
+   "group": "geometry",
+   "seconds": 0.872,
+   "values": {
+    "tris": 17042,
+    "nodes": 8588
+   }
+  },
+  "query/bbox_and_distance": {
+   "group": "geometry",
+   "seconds": 0.716,
+   "values": {
+    "bbox0_xmin": -1e-07,
+    "bbox0_xmax": 3.0000001,
+    "bbox1_xmin": 4.9999999,
+    "distance": 2.0000000005366174,
+    "contains_in": true,
+    "contains_out": false
+   }
+  },
+  "exchange/step_round_trip": {
+   "group": "geometry",
+   "seconds": 0.722,
+   "values": {
+    "solids": 1,
+    "faces": 6,
+    "edges": 12,
+    "vertices": 8,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 6,
+    "volume": 231.0,
+    "area": 262.0,
+    "face_labels": 0,
+    "unit": "M"
+   }
+  },
+  "exchange/iges_round_trip": {
+   "group": "geometry",
+   "seconds": 0.561,
+   "values": {
+    "solids": 1,
+    "faces": 6,
+    "edges": 12,
+    "vertices": 8,
+    "free_edges": 0,
+    "solid_ids": 1,
+    "face_ids": 6,
+    "volume": 231.0,
+    "area": 262.0
+   }
+  },
+  "exchange/production_step": {
+   "group": "geometry",
+   "seconds": 33.092,
+   "values": {
+    "solids": 117,
+    "faces": 5606,
+    "edges": 13996,
+    "volume_fixed_rule": 3.3671561379855857,
+    "face_labels": 0,
+    "solid_labels": 117,
+    "tris_defl_1mm": 425206
+   }
+  },
+  "1d/regular_5": {
+   "group": "mesh",
+   "seconds": 0.665,
+   "values": {
+    "segments": 5,
+    "first": 2.2,
+    "last": 2.1999999999999993,
+    "min": 2.1999999999999993,
+    "max": 2.2,
+    "sum": 11.0
+   }
+  },
+  "1d/scale_5_x3": {
+   "group": "mesh",
+   "seconds": 0.517,
+   "values": {
+    "segments": 5,
+    "first": 1.1792918228861708,
+    "last": 3.5378754686585125,
+    "min": 1.1792918228861708,
+    "max": 3.5378754686585125,
+    "sum": 11.0
+   }
+  },
+  "1d/table_5": {
+   "group": "mesh",
+   "seconds": 1.121,
+   "values": {
+    "segments": 5,
+    "first": 3.368682861328125,
+    "last": 1.5384236437555696,
+    "min": 1.5384236437555696,
+    "max": 3.368682861328125,
+    "sum": 11.0
+   }
+  },
+  "1d/expression_5": {
+   "group": "mesh",
+   "seconds": 0.625,
+   "values": {
+    "segments": 5,
+    "first": 2.868499755859375,
+    "last": 1.5736641058543839,
+    "min": 1.5736641058543839,
+    "max": 2.868499755859375,
+    "sum": 11.0
+   }
+  },
+  "1d/arithmetic": {
+   "group": "mesh",
+   "seconds": 0.367,
+   "values": {
+    "segments": 9,
+    "first": 0.5,
+    "last": 2.0,
+    "min": 0.5,
+    "max": 2.0,
+    "sum": 11.0
+   }
+  },
+  "1d/start_end": {
+   "group": "mesh",
+   "seconds": 0.455,
+   "values": {
+    "segments": 10,
+    "first": 0.5,
+    "last": 2.0,
+    "min": 0.5,
+    "max": 2.0,
+    "sum": 11.0
+   }
+  },
+  "1d/geometric": {
+   "group": "mesh",
+   "seconds": 0.661,
+   "values": {
+    "segments": 10,
+    "first": 0.5,
+    "last": 0.6005491200000002,
+    "min": 0.5,
+    "max": 2.1499084800000006,
+    "sum": 11.0
+   }
+  },
+  "1d/fixed_points": {
+   "group": "mesh",
+   "seconds": 0.473,
+   "values": {
+    "segments": 7,
+    "first": 1.375,
+    "last": 1.375,
+    "min": 1.375,
+    "max": 1.833333333333334,
+    "sum": 11.0
+   }
+  },
+  "1d/local_length": {
+   "group": "mesh",
+   "seconds": 0.645,
+   "values": {
+    "segments": 8,
+    "first": 1.375,
+    "last": 1.375,
+    "min": 1.375,
+    "max": 1.375,
+    "sum": 11.0
+   }
+  },
+  "1d/max_length": {
+   "group": "mesh",
+   "seconds": 0.681,
+   "values": {
+    "segments": 6,
+    "first": 1.8333333333333333,
+    "last": 1.833333333333334,
+    "min": 1.833333333333333,
+    "max": 1.833333333333334,
+    "sum": 11.0
+   }
+  },
+  "1d/automatic": {
+   "group": "mesh",
+   "seconds": 0.468,
+   "values": {
+    "segments": 22,
+    "first": 0.5,
+    "last": 0.5,
+    "min": 0.5,
+    "max": 0.5,
+    "sum": 11.0
+   }
+  },
+  "1d/deflection_circle": {
+   "group": "mesh",
+   "seconds": 1.197,
+   "values": {
+    "segments": 28,
+    "first": 0.3358934283099209,
+    "last": 0.33589342830992414,
+    "min": 0.3358934283099209,
+    "max": 0.33589342830992414,
+    "sum": 9.40501599267786
+   }
+  },
+  "1d/adaptive_circle": {
+   "group": "mesh",
+   "seconds": 0.488,
+   "values": {
+    "error": "crash: exit code 0xC0000005, no result reported"
+   }
+  },
+  "1d/composite_segment": {
+   "group": "mesh",
+   "seconds": 0.712,
+   "values": {
+    "nodes": 44,
+    "edges": 48,
+    "faces": 0,
+    "volumes": 0,
+    "n_EDGE": 48
+   }
+  },
+  "3d/hexa_structured_box": {
+   "group": "mesh",
+   "seconds": 0.402,
+   "values": {
+    "nodes": 125,
+    "edges": 48,
+    "faces": 96,
+    "volumes": 64,
+    "n_EDGE": 48,
+    "n_QUADRANGLE": 96,
+    "n_HEXAHEDRON": 64,
+    "min_angle_min": 90.0,
+    "min_angle_max": 90.0,
+    "min_angle_sum": 8640.0,
+    "aspect2d_min": 1.1038961038961042,
+    "aspect2d_max": 1.9696969696969693,
+    "aspect2d_sum": 142.54545454545453,
+    "aspect3d_min": 2.4862718027978516,
+    "aspect3d_max": 2.4862718027978516,
+    "aspect3d_sum": 159.1213953790625,
+    "cell_volume_min": 3.609375,
+    "cell_volume_max": 3.609375,
+    "cell_volume_sum": 231.0
+   }
+  },
+  "3d/hexa_quadratic_box": {
+   "group": "mesh",
+   "seconds": 0.787,
+   "values": {
+    "nodes": 81,
+    "edges": 24,
+    "faces": 24,
+    "volumes": 8,
+    "n_QUAD_EDGE": 24,
+    "n_QUAD_QUADRANGLE": 24,
+    "n_QUAD_HEXAHEDRON": 8,
+    "min_angle_min": 90.0,
+    "min_angle_max": 90.0,
+    "min_angle_sum": 2160.0,
+    "aspect2d_min": 1.1038961038961042,
+    "aspect2d_max": 1.9696969696969693,
+    "aspect2d_sum": 35.63636363636364,
+    "aspect3d_min": 2.4862718027978516,
+    "aspect3d_max": 2.4862718027978516,
+    "aspect3d_sum": 19.890174422382813,
+    "cell_volume_min": 28.875,
+    "cell_volume_max": 28.875,
+    "cell_volume_sum": 231.0
+   }
+  },
+  "3d/hexa_propagation": {
+   "group": "mesh",
+   "seconds": 0.697,
+   "values": {
+    "nodes": 128,
+    "edges": 52,
+    "faces": 102,
+    "volumes": 63,
+    "n_EDGE": 52,
+    "n_QUADRANGLE": 102,
+    "n_HEXAHEDRON": 63,
+    "min_angle_min": 89.9999999999999,
+    "min_angle_max": 90.0,
+    "min_angle_sum": 9179.999999999996,
+    "aspect2d_min": 1.0791589363017933,
+    "aspect2d_max": 1.3809523809523814,
+    "aspect2d_sum": 116.5454545454546,
+    "aspect3d_min": 1.799497257054654,
+    "aspect3d_max": 1.7994972570546592,
+    "aspect3d_sum": 113.36832719444332,
+    "cell_volume_min": 3.666666666666658,
+    "cell_volume_max": 3.666666666666674,
+    "cell_volume_sum": 230.99999999999994
+   }
+  },
+  "3d/composite_hexa_box": {
+   "group": "mesh",
+   "seconds": 0.52,
+   "values": {
+    "nodes": 64,
+    "edges": 36,
+    "faces": 54,
+    "volumes": 27,
+    "n_EDGE": 36,
+    "n_QUADRANGLE": 54,
+    "n_HEXAHEDRON": 27,
+    "min_angle_min": 89.99999999999994,
+    "min_angle_max": 90.0,
+    "min_angle_sum": 4860.0,
+    "aspect2d_min": 1.1038961038961037,
+    "aspect2d_max": 1.969696969696971,
+    "aspect2d_sum": 80.18181818181819,
+    "aspect3d_min": 2.486271802797851,
+    "aspect3d_max": 2.486271802797855,
+    "aspect3d_sum": 67.12933867554202,
+    "cell_volume_min": 8.55555555555555,
+    "cell_volume_max": 8.555555555555562,
+    "cell_volume_sum": 231.0
+   }
+  },
+  "3d/hexa_from_skin_refuses_geometry": {
+   "group": "mesh",
+   "seconds": 0.625,
+   "values": {
+    "error": "PysmeshError: Mesher.compute: meshing failed on 1 sub-shape(s).",
+    "details": "SOLID 1: Algorithm can't work with geometrical shapes (algorithm HexaFromSkin_3D)"
+   }
+  },
+  "2d/mefisto_box": {
+   "group": "mesh",
+   "seconds": 0.737,
+   "values": {
+    "nodes": 222,
+    "edges": 84,
+    "faces": 440,
+    "volumes": 0,
+    "n_EDGE": 84,
+    "n_TRIANGLE": 440,
+    "min_angle_min": 0.1872037469141953,
+    "min_angle_max": 60.00000000000001,
+    "min_angle_sum": 19328.83334821419,
+    "aspect2d_min": 1.0,
+    "aspect2d_max": 314.13534661327833,
+    "aspect2d_sum": 1871.1105614899598
+   }
+  },
+  "2d/mefisto_sphere": {
+   "group": "mesh",
+   "seconds": 0.481,
+   "values": {
+    "nodes": 204,
+    "edges": 20,
+    "faces": 392,
+    "volumes": 0,
+    "n_EDGE": 20,
+    "n_TRIANGLE": 392,
+    "min_angle_min": 4.874106007754545,
+    "min_angle_max": 59.94789437728525,
+    "min_angle_sum": 15958.432625442218,
+    "aspect2d_min": 1.0002630426176287,
+    "aspect2d_max": 7.559635045968434,
+    "aspect2d_sum": 579.1742313360132
+   }
+  },
+  "2d/polygon_per_face_and_polyhedron": {
+   "group": "mesh",
+   "seconds": 0.588,
+   "values": {
+    "nodes": 32,
+    "edges": 36,
+    "faces": 6,
+    "volumes": 1,
+    "n_EDGE": 36,
+    "n_POLYGON": 6,
+    "n_POLYHEDRON": 1,
+    "min_angle_min": 90.0,
+    "min_angle_max": 90.0,
+    "min_angle_sum": 540.0,
+    "cell_volume_min": 231.0,
+    "cell_volume_max": 231.0,
+    "cell_volume_sum": 231.0
+   }
+  },
+  "2d/radial_quadrangle_disk": {
+   "group": "mesh",
+   "seconds": 0.78,
+   "values": {
+    "nodes": 25,
+    "edges": 8,
+    "faces": 24,
+    "volumes": 0,
+    "n_EDGE": 8,
+    "n_TRIANGLE": 8,
+    "n_QUADRANGLE": 16,
+    "min_angle_min": 44.99999999999992,
+    "min_angle_max": 67.50000000000006,
+    "min_angle_sum": 1439.9999999999986,
+    "aspect2d_min": 1.1289562950315082,
+    "aspect2d_max": 1.7799615284936003,
+    "aspect2d_sum": 36.864991994400825
+   }
+  },
+  "2d/quad_from_medial_axis_strip": {
+   "group": "mesh",
+   "seconds": 0.515,
+   "values": {
+    "nodes": 81,
+    "edges": 32,
+    "faces": 64,
+    "volumes": 0,
+    "n_EDGE": 32,
+    "n_QUADRANGLE": 64,
+    "min_angle_min": 89.99999999999919,
+    "min_angle_max": 90.0,
+    "min_angle_sum": 5759.999999999992,
+    "aspect2d_min": 3.0833333333333255,
+    "aspect2d_max": 3.0833333333333464,
+    "aspect2d_sum": 197.33333333333343
+   }
+  },
+  "2d/projection_opposite_faces": {
+   "group": "mesh",
+   "seconds": 0.539,
+   "values": {
+    "nodes": 68,
+    "edges": 36,
+    "faces": 132,
+    "volumes": 0,
+    "n_EDGE": 36,
+    "n_TRIANGLE": 132,
+    "min_angle_min": 3.6379794196406667,
+    "min_angle_max": 60.00000000000001,
+    "min_angle_sum": 4051.7015319020893,
+    "aspect2d_min": 1.0,
+    "aspect2d_max": 9.545353833069287,
+    "aspect2d_sum": 364.7130408346807
+   }
+  },
+  "2d/projection_1d2d_opposite_faces": {
+   "group": "mesh",
+   "seconds": 0.973,
+   "values": {
+    "nodes": 68,
+    "edges": 36,
+    "faces": 132,
+    "volumes": 0,
+    "n_EDGE": 36,
+    "n_TRIANGLE": 132,
+    "min_angle_min": 3.6379794196406667,
+    "min_angle_max": 60.00000000000001,
+    "min_angle_sum": 4051.7015319020893,
+    "aspect2d_min": 1.0,
+    "aspect2d_max": 9.545353833069287,
+    "aspect2d_sum": 364.7130408346807
+   }
+  },
+  "3d/prism_extruded_triangle": {
+   "group": "mesh",
+   "seconds": 0.492,
+   "values": {
+    "nodes": 44,
+    "edges": 27,
+    "faces": 49,
+    "volumes": 33,
+    "n_EDGE": 27,
+    "n_TRIANGLE": 22,
+    "n_QUADRANGLE": 27,
+    "n_PENTAHEDRON": 33,
+    "min_angle_min": 14.361365876810662,
+    "min_angle_max": 90.0,
+    "min_angle_sum": 3238.599738744857,
+    "aspect2d_min": 1.0100687194706242,
+    "aspect2d_max": 2.665553241393419,
+    "aspect2d_sum": 65.35300803834616,
+    "aspect3d_min": 3.2198829047104884,
+    "aspect3d_max": 11.672699594342014,
+    "aspect3d_sum": 170.2634565648354,
+    "cell_volume_min": 1.068487167358398,
+    "cell_volume_max": 6.4415399947848755,
+    "cell_volume_sum": 135.0
+   }
+  },
+  "3d/radial_prism_layers": {
+   "group": "mesh",
+   "seconds": 0.72,
+   "values": {
+    "nodes": 211,
+    "edges": 20,
+    "faces": 156,
+    "volumes": 312,
+    "n_EDGE": 20,
+    "n_TRIANGLE": 156,
+    "n_PENTAHEDRON": 312,
+    "min_angle_min": 3.6057541151751513,
+    "min_angle_max": 59.93150643660651,
+    "min_angle_sum": 6536.326714540493,
+    "aspect2d_min": 1.00138180384865,
+    "aspect2d_max": 10.082466634546975,
+    "aspect2d_sum": 278.4163538931801,
+    "aspect3d_min": 4.688072528313858,
+    "aspect3d_max": 28.269429655390162,
+    "aspect3d_sum": 2389.668465489212,
+    "cell_volume_min": 0.009249306269018789,
+    "cell_volume_max": 0.4368999375941275,
+    "cell_volume_sum": 66.61240091382645
+   }
+  },
+  "3d/radial_prism_distribution": {
+   "group": "mesh",
+   "seconds": 0.543,
+   "values": {
+    "nodes": 252,
+    "edges": 20,
+    "faces": 156,
+    "volumes": 390,
+    "n_EDGE": 20,
+    "n_TRIANGLE": 156,
+    "n_PENTAHEDRON": 390,
+    "min_angle_min": 3.6057541151751513,
+    "min_angle_max": 59.93150643660651,
+    "min_angle_sum": 6536.326714540493,
+    "aspect2d_min": 1.00138180384865,
+    "aspect2d_max": 10.082466634546975,
+    "aspect2d_sum": 278.4163538931801,
+    "aspect3d_min": 4.812193184629825,
+    "aspect3d_max": 30.456154433770745,
+    "aspect3d_sum": 3615.2009838157483,
+    "cell_volume_min": 0.0037009341402395608,
+    "cell_volume_max": 0.548396758745225,
+    "cell_volume_sum": 66.61240091382645
+   }
+  },
+  "3d/cartesian_sphere": {
+   "group": "mesh",
+   "seconds": 0.63,
+   "values": {
+    "nodes": 521,
+    "edges": 0,
+    "faces": 0,
+    "volumes": 304,
+    "n_HEXAHEDRON": 208,
+    "n_POLYHEDRON": 96,
+    "aspect3d_min": 1.000000000000314,
+    "aspect3d_max": 1.7728648603143764,
+    "aspect3d_sum": 247.69636798644575,
+    "cell_volume_min": 0.024227705097174257,
+    "cell_volume_max": 0.07676562500000075,
+    "cell_volume_sum": 19.462154454804033
+   }
+  },
+  "3d/viscous_layers_hexa_box": {
+   "group": "mesh",
+   "seconds": 1.194,
+   "values": {
+    "nodes": 96,
+    "edges": 44,
+    "faces": 78,
+    "volumes": 45,
+    "n_EDGE": 44,
+    "n_QUADRANGLE": 78,
+    "n_HEXAHEDRON": 45,
+    "min_angle_min": 89.99999999999972,
+    "min_angle_max": 90.0,
+    "min_angle_sum": 7019.999999999998,
+    "aspect2d_min": 1.103896103896104,
+    "aspect2d_max": 10.108126721763089,
+    "aspect2d_sum": 269.98951048951056,
+    "aspect3d_min": 2.7704794688693775,
+    "aspect3d_max": 11.037716808876734,
+    "aspect3d_sum": 257.7076414456022,
+    "cell_volume_min": 1.5555555555555558,
+    "cell_volume_max": 7.414814814814823,
+    "cell_volume_sum": 230.99999999999994,
+    "group_elements": 18
+   }
+  },
+  "viscous/compute_viscous_layers_box_fixture": {
+   "group": "mesh",
+   "seconds": 1.104,
+   "values": {
+    "prisms": 576,
+    "nodes": 392,
+    "inner_tris": 192,
+    "failed_faces": 0,
+    "warnings": 0,
+    "layer_height_min": 0.013736263736263687,
+    "layer_height_max": 0.03426034564421958
+   }
+  },
+  "edit/smooth_merge_quad_to_tri": {
+   "group": "mesh",
+   "seconds": 0.743,
+   "values": {
+    "min_angle_before": 0.1872037469141953,
+    "min_angle_after_smooth": 18.434948822922017,
+    "merge_nodes_report": "EditReport(nodes_before=222, nodes_after=222, edges_before=84, edges_after=84, faces_before=440, faces_after=440, volumes_before=0, volumes_after=0, groups_merged=0)"
+   }
+  },
+  "medial/rectangle_axis": {
+   "group": "mesh",
+   "seconds": 0.883,
+   "values": {
+    "branches": 5,
+    "branch_points": 2,
+    "boundary_edges": 4
+   }
+  },
+  "S1/table_15m_first_cell_3e-06": {
+   "group": "defect",
+   "seconds": 0.736,
+   "values": {
+    "error": "PysmeshError: Mesher.compute: meshing failed on 1 sub-shape(s).",
+    "details": "EDGE 1: no message (algorithm Regular_1D)"
+   }
+  },
+  "S1/table_15m_first_cell_0.0003": {
+   "group": "defect",
+   "seconds": 1.014,
+   "values": {
+    "nodes": 101,
+    "first_cell": 0.000457763671875,
+    "last_cell": 3.184563202810848
+   }
+  },
+  "S2/expression_15m_1_over_0.0003_plus_t": {
+   "group": "defect",
+   "seconds": 0.942,
+   "values": {
+    "nodes": 101,
+    "first_cell": 0.000457763671875,
+    "last_cell": 11.34481768732146
+   }
+  },
+  "O1/ruled_loft_4_circles": {
+   "group": "defect",
+   "seconds": 0.982,
+   "values": {
+    "error": "RuntimeError: NCollection_IndexedDataMap::FindFromKey",
+    "A3_session_brep_changed": true
+   }
+  },
+  "B1/prism_unequal_edge_counts": {
+   "group": "defect",
+   "seconds": 0.752,
+   "values": {
+    "error": "PysmeshError: Mesher.compute: meshing failed on 1 sub-shape(s).",
+    "details": "SOLID 1: Standard_NotImplemented: Adaptor3d_Surface::EvalD0 (algorithm Prism_3D)"
+   }
+  },
+  "A1/reduced_quad_warning": {
+   "group": "defect",
+   "seconds": 1.036,
+   "values": {
+    "error": "PysmeshError: Mesher.compute: meshing failed on 1 sub-shape(s).",
+    "details": "FACE 1: To use 'Reduced' transition, two opposite sides should have same number of segments, but actual number of segments is different on all sides. 'Standard' transion has been used. (algorithm Quadrangle_2D)",
+    "kept_faces": 422
+   }
+  },
+  "A6/missing_hypothesis_message": {
+   "group": "defect",
+   "seconds": 0.758,
+   "values": {
+    "error": "PysmeshError: Mesher.compute: meshing failed on 0 sub-shape(s).",
+    "details": "SMESH reported no per-sub-shape error text. The most common cause is an algorithm assigned to a sub-shape it cannot mesh at all."
+   }
+  },
+  "V1/sphere_near_coincident_grid": {
+   "group": "defect",
+   "seconds": 2.57,
+   "values": {
+    "empty": 40,
+    "invalid": 0,
+    "cells": 135
+   }
+  },
+  "V2/wing_cut_free_edges": {
+   "group": "defect",
+   "seconds": 1.125,
+   "values": {
+    "solids": 1,
+    "faces": 4,
+    "edges": 7,
+    "vertices": 5,
+    "free_edges": 2,
+    "solid_ids": 1,
+    "face_ids": 3,
+    "volume": 0.13290856218656721,
+    "area": 3.805325730954811
+   }
+  },
+  "V3/inside_out_box_import": {
+   "group": "defect",
+   "seconds": 0.588,
+   "values": {
+    "valid": true,
+    "volume": -0.9999999999999998
+   }
+  },
+  "D1_D2/bbox_padding_and_spline": {
+   "group": "defect",
+   "seconds": 0.445,
+   "values": {
+    "line_xmin": -1e-07,
+    "spline_xmin": 4.99718766183329
+   }
+  },
+  "D3/fixed_rule_wing_volume": {
+   "group": "defect",
+   "seconds": 0.554,
+   "values": {
+    "fixed": 0.10610073921072888,
+    "adaptive": 0.13290856218656688
+   }
+  },
+  "O4/bowed_end_section": {
+   "group": "defect",
+   "seconds": 0.569,
+   "values": {
+    "error": "PysmeshError: Session.thru_sections: the operation produced an invalid shape (BRepCheck_Analyzer reported errors); the session is unchanged.",
+    "details": ""
+   }
+  },
+  "C5/common_alias_ids": {
+   "group": "defect",
+   "seconds": 0.654,
+   "values": {
+    "solids": 1,
+    "faces": 5,
+    "edges": 9,
+    "vertices": 6,
+    "free_edges": 0,
+    "solid_ids": 2,
+    "face_ids": 7,
+    "volume": 0.7853981633974597,
+    "area": 5.1415926535898
+   }
+  },
+  "C2/export_handoff_after_common": {
+   "group": "defect",
+   "seconds": 0.775,
+   "values": {
+    "error": "PysmeshError: Session.export_handoff: the entity id to sub-shape map is not a bijection, so the handoff would silently mis-name entities.",
+    "details": "2 id(s) share a sub-shape with another id, which a same-domain merge produces: the merged entity is denoted by all of them and the handoff cannot choose one. Resolve the ambiguity before handing off \u2014 a merge is settled by exporting after the ids the caller no longer needs have been dropped, a split by treating the pieces as the new entities they are."
+   }
+  }
+ }
+}
