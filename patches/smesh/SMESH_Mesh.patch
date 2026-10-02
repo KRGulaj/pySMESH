@@ -1,33 +1,91 @@
-diff --git a/src/SMESH/SMESH_Mesh.hxx b/src/SMESH/SMESH_Mesh.hxx
---- a/src/SMESH/SMESH_Mesh.hxx
-+++ b/src/SMESH/SMESH_Mesh.hxx
-@@ -41,7 +41,9 @@
- #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
- #include <TopTools_ListOfShape.hxx>
+looooo/SMESH patch/SMESH_Mesh.patch: build SMESH without MED (WITH_MED guards).
+Re-ported to SALOME SMESH V9_16_0 by pySMESH. The '#undef _Precision_HeaderFile'
+hunk is dropped: V9_16_0 comments it out itself (SMESH_Mesh.cxx:61). The guards are
+extended to SMESH_DriverMesh.cxx, new in V9_16_0, which reads and writes MED files
+through MEDCoupling; without MED each of its entry points throws SALOME_Exception.
+
+diff --git a/src/SMESH/SMESH_DriverMesh.cxx b/src/SMESH/SMESH_DriverMesh.cxx
+index bd95953..b459822 100644
+--- a/src/SMESH/SMESH_DriverMesh.cxx
++++ b/src/SMESH/SMESH_DriverMesh.cxx
+@@ -32,10 +32,16 @@
+ #include "SMESH_Mesh.hxx"
+ #include "SMESH_Gen.hxx"
  
 +#ifdef WITH_MED
- #include "MEDCouplingMemArray.hxx"
+ #include <MEDFileMesh.hxx>
+ #include <MEDCouplingUMesh.hxx>
+ 
+ using namespace MEDCoupling;
++#else
++// Built without MED: every entry point below needs a MED file, so each one throws
++// instead of returning a result that was never computed.
++#include <Utils_SALOME_Exception.hxx>
 +#endif
  
- #include <map>
- #include <list>
-@@ -265,6 +267,7 @@ class SMESH_EXPORT SMESH_Mesh
-     TooLargeForExport(const char* format):runtime_error(format) {}
-   };
+ /**
+  * @brief Compares the mesh from two mesh files (MED)
+@@ -47,19 +53,25 @@ using namespace MEDCoupling;
+  * @return true if the mesh within the files are identical
+  */
+ bool SMESH_DriverMesh::diffMEDFile(const std::string mesh_file1, const std::string mesh_file2, const std::string mesh_name){
++#ifdef WITH_MED
+   MEDFileUMesh* medmesh1 = MEDFileUMesh::New(mesh_file1, mesh_name);
+   MEDFileUMesh* medmesh2 = MEDFileUMesh::New(mesh_file2, mesh_name);
+   MEDCouplingUMesh *m0_1=medmesh1->getMeshAtLevel(0,false);
+   MEDCouplingUMesh *m0_2=medmesh2->getMeshAtLevel(0,false);
+   return m0_1->isEqual(m0_2, 1e-12);
++#else
++  throw SALOME_Exception( "SMESH_DriverMesh::diffMEDFile: built without MED support" );
++#endif
+ }
  
 +#ifdef WITH_MED
-   MEDCoupling::MCAuto<MEDCoupling::DataArrayByte>
-     ExportMEDCoupling(const char*         theMeshName = NULL,
-                       bool                theAutoGroups = true,
-@@ -273,6 +276,7 @@ class SMESH_EXPORT SMESH_Mesh
-                       bool                theAddODOnVertices = false,
-                       double              theZTolerance = -1.,
-                       bool                theSaveNumbers = true);
+ std::string getMeshName(std::string mesh_file){
+   // TODO: Memory leak but destructor private check with AG
+   MEDFileUMesh * myMedMesh = MEDFileUMesh::New(mesh_file);
+ 
+   return myMedMesh->getLevel0Mesh()->getName();
+ }
 +#endif
  
-   void ExportMED(const char *        theFile,
-                  const char*         theMeshName = NULL,
+ /**
+  * @brief Import a mesh from a mesh file (MED) into a SMESH_Mesh object
+@@ -71,11 +83,15 @@ std::string getMeshName(std::string mesh_file){
+  * @return error code
+  */
+ int SMESH_DriverMesh::importMesh(const std::string mesh_file, SMESH_Mesh& aMesh){
++#ifdef WITH_MED
+   // TODO: change that as it depends on the language
+   std::string mesh_name = getMeshName(mesh_file);
+   MESSAGE("Importing mesh from " << mesh_file << " mesh " << mesh_name);
+   int ret = aMesh.MEDToMesh(mesh_file.c_str(), mesh_name.c_str());
+   return ret;
++#else
++  throw SALOME_Exception( "SMESH_DriverMesh::importMesh: built without MED support" );
++#endif
+ }
+ 
+ /**
+@@ -89,7 +105,7 @@ int SMESH_DriverMesh::importMesh(const std::string mesh_file, SMESH_Mesh& aMesh)
+  */
+  
+ int SMESH_DriverMesh::exportMesh(const std::string mesh_file, SMESH_Mesh& aMesh, const std::string mesh_name){
+-
++#ifdef WITH_MED
+   MESSAGE("Exporting mesh to " << mesh_file);
+   aMesh.ExportMED(mesh_file.c_str(), // theFile
+                   mesh_name.c_str(), // theMeshName
+@@ -102,4 +118,7 @@ int SMESH_DriverMesh::exportMesh(const std::string mesh_file, SMESH_Mesh& aMesh,
+                   true // theSaveNumbers
+                   );
+   return true;
++#else
++  throw SALOME_Exception( "SMESH_DriverMesh::exportMesh: built without MED support" );
++#endif
+ }
 diff --git a/src/SMESH/SMESH_Mesh.cxx b/src/SMESH/SMESH_Mesh.cxx
+index 19a70c2..95b4d50 100644
 --- a/src/SMESH/SMESH_Mesh.cxx
 +++ b/src/SMESH/SMESH_Mesh.cxx
 @@ -44,8 +44,10 @@
@@ -41,15 +99,6 @@ diff --git a/src/SMESH/SMESH_Mesh.cxx b/src/SMESH/SMESH_Mesh.cxx
  #include "DriverSTL_R_SMDS_Mesh.h"
  #include "DriverSTL_W_SMDS_Mesh.h"
  #include "DriverUNV_R_SMDS_Mesh.h"
-@@ -57,7 +59,7 @@
- 
- #include <GEOMUtils.hxx>
- 
--#undef _Precision_HeaderFile
-+// #undef _Precision_HeaderFile
- #include <BRepBndLib.hxx>
- #include <BRepPrimAPI_MakeBox.hxx>
- #include <Bnd_Box.hxx>
 @@ -520,6 +522,7 @@ int SMESH_Mesh::UNVToMesh(const char* theFileName)
  
  int SMESH_Mesh::MEDToMesh(const char* theFileName, const char* theMeshName)
@@ -58,7 +107,7 @@ diff --git a/src/SMESH/SMESH_Mesh.cxx b/src/SMESH/SMESH_Mesh.cxx
    if ( _isShapeToMesh )
      throw SALOME_Exception(LOCALIZED("a shape to mesh has already been defined"));
    _isShapeToMesh = false;
-@@ -554,6 +557,9 @@ int SMESH_Mesh::MEDToMesh(const char* theFileName, const char* theMeshName)
+@@ -556,6 +559,9 @@ int SMESH_Mesh::MEDToMesh(const char* theFileName, const char* theMeshName)
    _meshDS->CompactMesh();
  
    return (int) status;
@@ -68,7 +117,7 @@ diff --git a/src/SMESH/SMESH_Mesh.cxx b/src/SMESH/SMESH_Mesh.cxx
  }
  
  //=======================================================================
-@@ -1418,6 +1424,7 @@ void SMESH_Mesh::exportMEDCommmon(DriverMED_W_SMESHDS_Mesh& theWriter,
+@@ -1494,6 +1500,7 @@ void SMESH_Mesh::exportMEDCommmon(DriverMED_W_SMESHDS_Mesh& theWriter,
                                    double                    theZTolerance,
                                    bool                      theSaveNumbers)
  {
@@ -76,7 +125,7 @@ diff --git a/src/SMESH/SMESH_Mesh.cxx b/src/SMESH/SMESH_Mesh.cxx
    Driver_Mesh::Status status = Driver_Mesh::DRS_OK;
  
    SMESH_TRY;
-@@ -1477,6 +1484,7 @@ void SMESH_Mesh::exportMEDCommmon(DriverMED_W_SMESHDS_Mesh& theWriter,
+@@ -1553,6 +1560,7 @@ void SMESH_Mesh::exportMEDCommmon(DriverMED_W_SMESHDS_Mesh& theWriter,
  
    if ( status == Driver_Mesh::DRS_TOO_LARGE_MESH )
      throw TooLargeForExport("MED");
@@ -84,7 +133,7 @@ diff --git a/src/SMESH/SMESH_Mesh.cxx b/src/SMESH/SMESH_Mesh.cxx
  }
  
  //================================================================================
-@@ -1484,7 +1492,7 @@ void SMESH_Mesh::exportMEDCommmon(DriverMED_W_SMESHDS_Mesh& theWriter,
+@@ -1560,7 +1568,7 @@ void SMESH_Mesh::exportMEDCommmon(DriverMED_W_SMESHDS_Mesh& theWriter,
   * Same as SMESH_Mesh::ExportMED except for \a file and \a theVersion
   */
  //================================================================================
@@ -93,7 +142,7 @@ diff --git a/src/SMESH/SMESH_Mesh.cxx b/src/SMESH/SMESH_Mesh.cxx
  MEDCoupling::MCAuto<MEDCoupling::DataArrayByte>
  SMESH_Mesh::ExportMEDCoupling(const char*         theMeshName,
                                bool                theAutoGroups,
-@@ -1499,6 +1507,7 @@ SMESH_Mesh::ExportMEDCoupling(const char*         theMeshName,
+@@ -1575,6 +1583,7 @@ SMESH_Mesh::ExportMEDCoupling(const char*         theMeshName,
                            theAddODOnVertices, theZTolerance, theSaveNumbers);
    return writer.getData();
  }
@@ -101,7 +150,7 @@ diff --git a/src/SMESH/SMESH_Mesh.cxx b/src/SMESH/SMESH_Mesh.cxx
  
  //================================================================================
  /*!
-@@ -1535,10 +1544,12 @@ void SMESH_Mesh::ExportMED(const char *        theFile,
+@@ -1611,10 +1620,12 @@ void SMESH_Mesh::ExportMED(const char *        theFile,
                             double              theZTolerance,
                             bool                theSaveNumbers)
  {
@@ -114,3 +163,33 @@ diff --git a/src/SMESH/SMESH_Mesh.cxx b/src/SMESH/SMESH_Mesh.cxx
  }
  
  //================================================================================
+diff --git a/src/SMESH/SMESH_Mesh.hxx b/src/SMESH/SMESH_Mesh.hxx
+index 2c18c83..f32046c 100644
+--- a/src/SMESH/SMESH_Mesh.hxx
++++ b/src/SMESH/SMESH_Mesh.hxx
+@@ -42,7 +42,9 @@
+ #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+ 
++#ifdef WITH_MED
+ #include "MEDCouplingMemArray.hxx"
++#endif
+ 
+ #include <map>
+ #include <list>
+@@ -277,6 +279,7 @@ class SMESH_EXPORT SMESH_Mesh
+     TooLargeForExport(const char* format):runtime_error(format) {}
+   };
+ 
++#ifdef WITH_MED
+   MEDCoupling::MCAuto<MEDCoupling::DataArrayByte>
+     ExportMEDCoupling(const char*         theMeshName = NULL,
+                       bool                theAutoGroups = true,
+@@ -285,6 +288,7 @@ class SMESH_EXPORT SMESH_Mesh
+                       bool                theAddODOnVertices = false,
+                       double              theZTolerance = -1.,
+                       bool                theSaveNumbers = true);
++#endif
+ 
+   void ExportMED(const char *        theFile,
+                  const char*         theMeshName = NULL,
