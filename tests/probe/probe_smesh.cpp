@@ -92,6 +92,15 @@
 #include <StdMeshers_RadialPrism_3D.hxx>
 #include <StdMeshers_Regular_1D.hxx>
 #include <StdMeshers_ViscousLayers2D.hxx>
+#include <StdMeshers_Arithmetic1D.hxx>
+#include <StdMeshers_Propagation.hxx>
+#include <StdMeshers_SegmentAroundVertex_0D.hxx>
+#include <StdMeshers_SegmentLengthAroundVertex.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRep_Tool.hxx>
+#include <TopoDS_Edge.hxx>
+#include <TopoDS_Vertex.hxx>
 
 namespace {
 
@@ -1871,6 +1880,186 @@ void probe_r18_gmf_driver() {
        "as fixtures");
 }
 
+
+// --------------------------------------------------------------------------- CAT916 ----- //
+// The native catalogue entries added with SMESH 9.16 (src/bindings/mesher_catalog.cpp). Each
+// case builds the entry the way the catalogue's Factory does, new T(GetANewId(), &gen), and
+// computes on the smallest shape the entry supports. The pytest counterparts, against the
+// geometry and the upstream spec, are in tests/test_mesher_native.py.
+
+// The x coordinates of every node of the mesh, ascending. The cases below mesh one straight
+// edge along x, so this is the node distribution.
+std::vector<double> sorted_node_x(SMESHDS_Mesh* meshDS) {
+  std::vector<double> xs;
+  for (SMDS_NodeIteratorPtr it = meshDS->nodesIterator(); it->more();) {
+    xs.push_back(it->next()->X());
+  }
+  std::sort(xs.begin(), xs.end());
+  return xs;
+}
+
+// The positions of the nodes on one edge, as fractions of its length, measured from `from`.
+std::vector<double> edge_fractions(SMESHDS_Mesh* meshDS, const TopoDS_Edge& edge,
+                                   const gp_Pnt& from, double length) {
+  std::vector<double> out;
+  TopoDS_Vertex v0, v1;
+  TopExp::Vertices(edge, v0, v1);
+  std::set<const SMDS_MeshNode*> nodes;
+  if (SMESHDS_SubMesh* sm = meshDS->MeshElements(edge)) {
+    for (SMDS_NodeIteratorPtr it = sm->GetNodes(); it->more();) nodes.insert(it->next());
+  }
+  for (const TopoDS_Vertex& v : {v0, v1}) {
+    if (SMESHDS_SubMesh* sm = meshDS->MeshElements(v)) {
+      for (SMDS_NodeIteratorPtr it = sm->GetNodes(); it->more();) nodes.insert(it->next());
+    }
+  }
+  for (const SMDS_MeshNode* n : nodes) {
+    out.push_back(from.Distance(gp_Pnt(n->X(), n->Y(), n->Z())) / length);
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+// The edge of `shape` whose midpoint is closest to `p`.
+TopoDS_Edge edge_near(const TopoDS_Shape& shape, const gp_Pnt& p) {
+  TopoDS_Edge best;
+  double best_d = 1e300;
+  for (TopExp_Explorer ex(shape, TopAbs_EDGE); ex.More(); ex.Next()) {
+    const TopoDS_Edge& e = TopoDS::Edge(ex.Current());
+    TopoDS_Vertex v0, v1;
+    TopExp::Vertices(e, v0, v1);
+    const gp_Pnt a = BRep_Tool::Pnt(v0), b = BRep_Tool::Pnt(v1);
+    const double d = p.Distance(gp_Pnt(0.5 * (a.XYZ() + b.XYZ())));
+    if (d < best_d) {
+      best_d = d;
+      best = e;
+    }
+  }
+  return best;
+}
+
+// The vertex of `shape` closest to `p`.
+TopoDS_Vertex vertex_near(const TopoDS_Shape& shape, const gp_Pnt& p) {
+  TopoDS_Vertex best;
+  double best_d = 1e300;
+  for (TopExp_Explorer ex(shape, TopAbs_VERTEX); ex.More(); ex.Next()) {
+    const TopoDS_Vertex& v = TopoDS::Vertex(ex.Current());
+    const double d = p.Distance(BRep_Tool::Pnt(v));
+    if (d < best_d) {
+      best_d = d;
+      best = v;
+    }
+  }
+  return best;
+}
+
+// The closed form of StdMeshers_Regular_1D::computeBetaLaw on a straight edge of length L.
+std::vector<double> beta_law_positions(double beta, int n, double length) {
+  std::vector<double> xs(1, 0.0);
+  const double r = (1.0 + std::fabs(beta)) / (std::fabs(beta) - 1.0);
+  std::vector<double> t;
+  for (int i = 1; i < n; ++i) {
+    const double power = std::pow(r, 1.0 - static_cast<double>(i) / n);
+    t.push_back(1.0 + std::fabs(beta) * (1.0 - power) / (1.0 + power));
+  }
+  if (beta < 0) {  // the reversed law: mirror the positions
+    for (double& v : t) v = 1.0 - v;
+    std::sort(t.begin(), t.end());
+  }
+  for (double v : t) xs.push_back(v * length);
+  xs.push_back(length);
+  return xs;
+}
+
+void probe_cat916_1d_additions() {
+  section("CAT916", "native catalogue entries added with SMESH 9.16: 1-D family");
+
+  // SegmentAroundVertex_0D + SegmentLengthAroundVertex: the segment next to the vertex takes
+  // the length the hypothesis names; the rest of the edge keeps its own 1-D hypothesis.
+  {
+    Session s(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(10, 0, 0)).Edge());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+    n->SetNumberOfSegments(5);
+    StdMeshers_SegmentAroundVertex_0D* a0 = s.make<StdMeshers_SegmentAroundVertex_0D>();
+    StdMeshers_SegmentLengthAroundVertex* around = s.make<StdMeshers_SegmentLengthAroundVertex>();
+    around->SetLength(0.5);
+    const TopoDS_Vertex origin = vertex_near(s.shape(), gp_Pnt(0, 0, 0));
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), n) && s.assign(origin, a0) &&
+                    s.assign(origin, around);
+    check(ok, "CAT916 SegmentAroundVertex_0D + SegmentLengthAroundVertex assign on a vertex");
+    check(s.compute(), "CAT916 SegmentAroundVertex_0D computes with Regular_1D");
+    const std::vector<double> xs = sorted_node_x(s.meshDS());
+    check(xs.size() >= 3, "CAT916 SegmentAroundVertex_0D leaves a discretised edge");
+    if (xs.size() >= 3) {
+      check_close(xs[1] - xs[0], 0.5, 1e-9,
+                  "CAT916 SegmentAroundVertex_0D: the segment at the vertex is 0.5 long");
+    }
+  }
+
+  // PropagOfDistribution on the long side of a trapezoid: the opposite, shorter side gets the
+  // same number of nodes at the same fractions of its length.
+  {
+    BRepBuilderAPI_MakePolygon poly(gp_Pnt(0, 0, 0), gp_Pnt(4, 0, 0), gp_Pnt(3, 2, 0),
+                                    gp_Pnt(1, 2, 0), /*Close=*/true);
+    Session s(BRepBuilderAPI_MakeFace(poly.Wire()).Face());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+    n->SetNumberOfSegments(2);
+    StdMeshers_Arithmetic1D* arith = s.make<StdMeshers_Arithmetic1D>();
+    arith->SetLength(0.5, true);
+    arith->SetLength(1.5, false);
+    StdMeshers_PropagOfDistribution* prop = s.make<StdMeshers_PropagOfDistribution>();
+    const TopoDS_Edge bottom = edge_near(s.shape(), gp_Pnt(2, 0, 0));
+    const TopoDS_Edge top = edge_near(s.shape(), gp_Pnt(2, 2, 0));
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), n) &&
+                    s.assign(bottom, arith) && s.assign(bottom, prop);
+    check(ok, "CAT916 PropagOfDistribution assigns beside a local 1-D hypothesis");
+    check(s.compute(), "CAT916 PropagOfDistribution computes");
+    const std::vector<double> fb = edge_fractions(s.meshDS(), bottom, gp_Pnt(0, 0, 0), 4.0);
+    const std::vector<double> ft = edge_fractions(s.meshDS(), top, gp_Pnt(1, 2, 0), 2.0);
+    std::vector<double> ft_rev;
+    for (double v : ft) ft_rev.push_back(1.0 - v);
+    std::sort(ft_rev.begin(), ft_rev.end());
+    double worst = 0.0, worst_rev = 0.0;
+    const bool same_count = fb.size() == ft.size() && fb.size() > 3;
+    for (std::size_t i = 0; same_count && i < fb.size(); ++i) {
+      worst = std::max(worst, std::fabs(fb[i] - ft[i]));
+      worst_rev = std::max(worst_rev, std::fabs(fb[i] - ft_rev[i]));
+    }
+    char msg[200];
+    std::snprintf(msg, sizeof(msg),
+                  "CAT916 PropagOfDistribution: the 2-long top edge repeats the 4-long bottom "
+                  "edge's %zu node fractions (max deviation %.2e)",
+                  fb.size(), std::min(worst, worst_rev));
+    check(same_count && std::min(worst, worst_rev) < 1e-9, msg);
+  }
+
+  // NumberOfSegments with DT_BetaLaw (new in 9.16): the nodes sit at the closed form of the
+  // law, on a straight 10-long edge, for both signs of beta.
+  for (const double beta : {1.01, -1.05}) {
+    Session s(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(10, 0, 0)).Edge());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+    n->SetNumberOfSegments(10);
+    n->SetDistrType(StdMeshers_NumberOfSegments::DT_BetaLaw);
+    n->SetBeta(beta);
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), n);
+    check(ok && s.compute(), "CAT916 NumberOfSegments DT_BetaLaw computes");
+    const std::vector<double> got = sorted_node_x(s.meshDS());
+    const std::vector<double> want = beta_law_positions(beta, 10, 10.0);
+    double worst = got.size() == want.size() ? 0.0 : 1e300;
+    for (std::size_t i = 0; got.size() == want.size() && i < got.size(); ++i) {
+      worst = std::max(worst, std::fabs(got[i] - want[i]));
+    }
+    char msg[200];
+    std::snprintf(msg, sizeof(msg),
+                  "CAT916 DT_BetaLaw beta=%.2f: 11 nodes at the closed form (max error %.2e)",
+                  beta, worst);
+    check(worst < 1e-9, msg);
+  }
+}
+
 }  // namespace
 
 void run_smesh_probe() {
@@ -1885,4 +2074,5 @@ void run_smesh_probe() {
   probe_controls_and_groups_binding_behaviour();
   probe_editor_and_search_binding_behaviour();
   probe_r18_gmf_driver();
+  probe_cat916_1d_additions();
 }

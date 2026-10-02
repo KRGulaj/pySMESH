@@ -20,6 +20,7 @@
 
 #include "mesher/mesher.hpp"
 
+#include <cmath>
 #include <utility>
 
 #include <SMESHDS_Mesh.hxx>
@@ -54,6 +55,7 @@
 #include <StdMeshers_RadialPrism_3D.hxx>
 #include <StdMeshers_RadialQuadrangle_1D2D.hxx>
 #include <StdMeshers_Regular_1D.hxx>
+#include <StdMeshers_SegmentAroundVertex_0D.hxx>
 
 // --- hypotheses ---
 #include <StdMeshers_Adaptive1D.hxx>
@@ -104,6 +106,9 @@ class Factory {
 // The algorithms. All of them are configured entirely through their hypotheses, so none
 // takes a parameter of its own — which is why they are a separate, flat table.
 SMESH_Hypothesis* make_algorithm(const std::string& name, Factory& f) {
+  // 0-D. It meshes nothing itself: it exists so that SegmentLengthAroundVertex on a vertex is
+  // taken into account by the 1-D algorithm of the edges that vertex bounds.
+  if (name == "SegmentAroundVertex_0D") return f.make<StdMeshers_SegmentAroundVertex_0D>();
   // 1-D
   if (name == "Regular_1D") return f.make<StdMeshers_Regular_1D>();
   if (name == "CompositeSegment_1D") return f.make<StdMeshers_CompositeSegment_1D>();
@@ -140,6 +145,19 @@ SMESH_Hypothesis* make_1d_hypothesis(const std::string& name, Params& p, Factory
       h->SetScaleFactor(p.number("scale_factor"));
     } else {
       p.number("scale_factor");  // consumed so the field is not reported as unknown
+    }
+    if (distribution == StdMeshers_NumberOfSegments::DT_BetaLaw) {
+      // SMESH 9.16 places node i at 1 + beta * (1 - r^(1-i/n)) / (1 + r^(1-i/n)) with
+      // r = (1 + beta) / (beta - 1) (StdMeshers_Regular_1D::computeBetaLaw). Upstream
+      // documents |beta| <= 1 as forbidden for that log, but SetBeta does not check it, and
+      // such a value yields NaN positions; so it is refused here. Read for this law only,
+      // so a caller that never sends `beta` keeps the behaviour it had.
+      const double beta = p.number("beta");
+      if (!(std::abs(beta) > 1.0)) {
+        throw PysmeshError("NumberOfSegments: the beta law needs |beta| > 1 (got " +
+                           std::to_string(beta) + ").");
+      }
+      h->SetBeta(beta);
     }
     if (distribution == StdMeshers_NumberOfSegments::DT_TabFunc) {
       h->SetConversionMode(p.integer("conversion_mode"));
@@ -218,6 +236,9 @@ SMESH_Hypothesis* make_1d_hypothesis(const std::string& name, Params& p, Factory
     return h;
   }
   if (name == "Propagation") return f.make<StdMeshers_Propagation>();
+  // Propagates the relative node distribution, not the hypothesis: an opposite edge of a
+  // different length gets the same number of nodes at the same fractions of its length.
+  if (name == "PropagOfDistribution") return f.make<StdMeshers_PropagOfDistribution>();
   if (name == "QuadraticMesh") return f.make<StdMeshers_QuadraticMesh>();
   return nullptr;
 }
