@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -26,6 +26,7 @@
 #include "SMESH_Controls.hxx"
 
 #include "SMESH_TypeDefs.hxx"
+#include "SMESH_ControlsClassifier.hxx"
 
 #include <Bnd_B3d.hxx>
 #include <GeomAPI_ProjectPointOnCurve.hxx>
@@ -246,9 +247,35 @@ namespace SMESH{
       virtual SMDSAbs_ElementType GetType() const;
       virtual bool IsApplicable( const SMDS_MeshElement* element ) const;
 
-    private:
+    protected:
       double ComputeA( const gp_XYZ&, const gp_XYZ&, const gp_XYZ&, const gp_XYZ& ) const;
+      double ComputeValue( const TSequenceOfXYZ& thePoints ) const;
     };
+
+    /*
+      Class       : Warping3D
+      Description : Functor for calculating warping
+    */
+    class SMESHCONTROLS_EXPORT Warping3D: public virtual Warping {
+    public:
+      virtual bool IsApplicable(const SMDS_MeshElement* element) const;
+      virtual double GetValue(const TSequenceOfXYZ& thePoints);
+      virtual double GetValue(long theId);
+      virtual SMDSAbs_ElementType GetType() const;
+      
+      struct Value {
+        double myWarp;
+        std::vector<long> myPntIds;
+        bool operator<(const Value& x) const;
+      };
+
+      typedef std::vector<Value> WValues;
+      void GetValues(WValues& theValues);
+
+    private:
+      void ProcessVolumeELement(WValues& theValues);
+    };
+    typedef boost::shared_ptr<Warping3D> Warping3DPtr;
   
   
     /*
@@ -399,6 +426,17 @@ namespace SMESH{
       Description : Functor returning number of elements connected to a node
     */
     class SMESHCONTROLS_EXPORT NodeConnectivityNumber: public virtual NumericalFunctor{
+    public:
+      virtual double GetValue( long theNodeId );
+      virtual double GetBadRate( double Value, int nbNodes ) const;
+      virtual SMDSAbs_ElementType GetType() const;
+    };
+    
+    /*
+      Class       : ScaledJacobian
+      Description : Functor returning the ScaledJacobian as implemented in VTK for volumetric elements
+    */
+    class SMESHCONTROLS_EXPORT ScaledJacobian: public virtual NumericalFunctor{
     public:
       virtual double GetValue( long theNodeId );
       virtual double GetBadRate( double Value, int nbNodes ) const;
@@ -951,7 +989,6 @@ namespace SMESH{
 
     private:
 
-      struct Classifier;
       struct OctreeClassifier;
 
       void clearClassifiers();
@@ -977,7 +1014,7 @@ namespace SMESH{
 
     /*
       Class       : BelongToGeom
-      Description : Predicate for verifying whether entiy belong to
+      Description : Predicate for verifying whether entity belong to
       specified geometrical support
     */
     class SMESHCONTROLS_EXPORT BelongToGeom: public virtual Predicate
@@ -1015,7 +1052,7 @@ namespace SMESH{
 
     /*
       Class       : LyingOnGeom
-      Description : Predicate for verifying whether entiy lying or partially lying on
+      Description : Predicate for verifying whether entity lying or partially lying on
       specified geometrical support
     */
     class SMESHCONTROLS_EXPORT LyingOnGeom: public virtual Predicate

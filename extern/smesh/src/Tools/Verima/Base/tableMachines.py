@@ -1,4 +1,4 @@
-# Copyright (C) 2013-2022  EDF R&D
+# Copyright (C) 2013-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -18,7 +18,11 @@
 #
 
 import os
-from qtsalome import QSqlQuery
+if 'SALOME_USE_PYSIDE' in os.environ:
+  from PySide2.QtSql import QSqlQuery
+else:
+  from PyQt5.Qt import QSqlQuery
+
 from Base.tableDeBase import TableDeBase
 
 class TableMachines (TableDeBase):

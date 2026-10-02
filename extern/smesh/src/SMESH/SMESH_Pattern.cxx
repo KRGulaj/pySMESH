@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -1616,7 +1616,7 @@ bool SMESH_Pattern::
         double parDif = par2 - par1;
         if ( Abs( parDif ) <= DBL_MIN )
           continue;
-        // find iso-lines intersecting a bounadry
+        // find iso-lines intersecting a boundary
         double toler = tol[ 1 - iDir ];
         double minPar = Min ( par1, par2 );
         double maxPar = Max ( par1, par2 );
@@ -4925,11 +4925,12 @@ list< SMESH_Pattern::TPoint* > & SMESH_Pattern::getShapePoints(const int theShap
 
 void SMESH_Pattern::DumpPoints() const
 {
-#ifdef _DEBUG_
-  vector< TPoint >::const_iterator pVecIt = myPoints.begin();
-  for ( int i = 0; pVecIt != myPoints.end(); pVecIt++, i++ )
-    MESSAGE_ADD ( std::endl << i << ": " << *pVecIt );
-#endif
+  if (SALOME::VerbosityActivated())
+  {
+    vector< TPoint >::const_iterator pVecIt = myPoints.begin();
+    for ( int i = 0; pVecIt != myPoints.end(); pVecIt++, i++ )
+      MESSAGE_ADD ( std::endl << i << ": " << *pVecIt );
+  }
 }
 
 //=======================================================================
@@ -4939,14 +4940,15 @@ void SMESH_Pattern::DumpPoints() const
 
 SMESH_Pattern::TPoint::TPoint()
 {
-#ifdef _DEBUG_
-  myInitXYZ.SetCoord(7,7,7);
-  myInitUV.SetCoord(7.,7.);
-  myInitU = 7;
-  myXYZ.SetCoord(7,7,7);
-  myUV.SetCoord(7.,7.);
-  myU = 7;
-#endif
+  if (SALOME::VerbosityActivated())
+  {
+    myInitXYZ.SetCoord(7,7,7);
+    myInitUV.SetCoord(7.,7.);
+    myInitU = 7;
+    myXYZ.SetCoord(7,7,7);
+    myUV.SetCoord(7.,7.);
+    myU = 7;
+  }
 }
 
 //=======================================================================

@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -897,6 +897,56 @@ void SMESHGUI_ComputeDlg_QThreadQDialog::closeEvent(QCloseEvent *event)
 }
 
 //================================================================================
+void SMESHGUI_BaseComputeOp::logMeshSize()
+{
+  if(myMesh->_is_nil())
+  {
+    return;
+  }
+
+  SMESH::smIdType_array_var aRes = myMesh->GetMeshInfo();
+  QString aMessage = QString("%1").arg( aRes[SMDSAbs_EntityType::SMDSEntity_Node]) + " nodes";
+  CAM_Application::logStructuredUserEvent("Mesh",
+                                          "Result size",
+                                          "",
+                                          "",
+                                          aMessage);
+  
+  int nbEdges = aRes[SMDSAbs_EntityType::SMDSEntity_Edge] + aRes[SMDSAbs_EntityType::SMDSEntity_Quad_Edge];
+  aMessage = QString("%1").arg(nbEdges) + " edges";
+  CAM_Application::logStructuredUserEvent("Mesh",
+                                          "Result size",
+                                          "",
+                                          "",
+                                          aMessage);
+  
+  int nbFaces = aRes[SMDSAbs_EntityType::SMDSEntity_Triangle] + aRes[SMDSAbs_EntityType::SMDSEntity_Quad_Triangle] +
+                aRes[SMDSAbs_EntityType::SMDSEntity_BiQuad_Triangle] + aRes[SMDSAbs_EntityType::SMDSEntity_Quadrangle] +
+                aRes[SMDSAbs_EntityType::SMDSEntity_Quad_Quadrangle] + aRes[SMDSAbs_EntityType::SMDSEntity_BiQuad_Quadrangle] +
+                aRes[SMDSAbs_EntityType::SMDSEntity_Polygon] + aRes[SMDSAbs_EntityType::SMDSEntity_Quad_Polygon];
+  aMessage = QString("%1").arg(nbFaces) + " faces";
+  CAM_Application::logStructuredUserEvent("Mesh",
+                                          "Result size",
+                                          "",
+                                          "",
+                                          aMessage);
+  
+  int nbVolumes = aRes[SMDSAbs_EntityType::SMDSEntity_Tetra] + aRes[SMDSAbs_EntityType::SMDSEntity_Quad_Tetra] +
+                  aRes[SMDSAbs_EntityType::SMDSEntity_Pyramid] + aRes[SMDSAbs_EntityType::SMDSEntity_Quad_Pyramid] +
+                  aRes[SMDSAbs_EntityType::SMDSEntity_Hexa] + aRes[SMDSAbs_EntityType::SMDSEntity_Quad_Hexa] +
+                  aRes[SMDSAbs_EntityType::SMDSEntity_TriQuad_Hexa] + aRes[SMDSAbs_EntityType::SMDSEntity_Penta] +
+                  aRes[SMDSAbs_EntityType::SMDSEntity_Quad_Penta] + aRes[SMDSAbs_EntityType::SMDSEntity_BiQuad_Penta] +
+                  aRes[SMDSAbs_EntityType::SMDSEntity_Hexagonal_Prism] + aRes[SMDSAbs_EntityType::SMDSEntity_Polyhedra];
+  aMessage = QString("%1").arg(nbVolumes) + " volumes";
+  CAM_Application::logStructuredUserEvent("Mesh",
+                                          "Result size",
+                                          "",
+                                          "",
+                                          aMessage);
+
+}
+
+//================================================================================
 /*!
  * \brief computeMesh()
 */
@@ -1060,9 +1110,9 @@ void SMESHGUI_BaseComputeOp::computeMesh()
               }
             }
             catch (...) {
-#ifdef _DEBUG_
+
               MESSAGE ( "Exception thrown during mesh visualization" );
-#endif
+
               if ( SMDS_Mesh::CheckMemory(true) ) { // has memory to show warning?
                 SMESH::OnVisuException();
               }
@@ -1122,9 +1172,13 @@ void SMESHGUI_BaseComputeOp::computeMesh()
     isShowResultDlg = true;
   }
 
+  //log Mesh size info
+  logMeshSize();
+
   // SHOW RESULTS
   if ( isShowResultDlg )
     showComputeResult( memoryLack, noCompError,aCompErrors, noHypoError, aHypErrors );
+
 }
 
 void SMESHGUI_BaseComputeOp::showComputeResult( const bool theMemoryLack,
@@ -1731,7 +1785,7 @@ void SMESHGUI_PrecomputeOp::stopOperation()
 
 //================================================================================
 /*!
- * \brief reinitialize dialog after operaiton become active again
+ * \brief reinitialize dialog after operation become active again
  */
 //================================================================================
 

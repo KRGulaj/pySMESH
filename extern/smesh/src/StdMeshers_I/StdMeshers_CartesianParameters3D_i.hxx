@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -125,6 +125,17 @@ class STDMESHERS_I_EXPORT StdMeshers_CartesianParameters3D_i:
   void SetToCreateFaces(CORBA::Boolean toCreate);
   CORBA::Boolean GetToCreateFaces();
 
+  /*!
+   * Set quanta option to allow replace polyhedrons by hexahedrons
+   */
+  void SetToUseQuanta(CORBA::Boolean toUseQuanta);
+  CORBA::Boolean GetToUseQuanta();
+
+  /*!
+   * Define the quanta value
+   */
+  void SetQuanta(CORBA::Double quanta);
+  CORBA::Double GetQuanta();
 
   /*!
    * \brief Return true if the grid is defined by spacing functions and

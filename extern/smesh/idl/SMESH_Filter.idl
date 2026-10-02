@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -42,12 +42,14 @@ module SMESH
   {
     FT_AspectRatio,
     FT_AspectRatio3D,
-    FT_Warping,   
+    FT_Warping,
+    FT_Warping3D,
     FT_MinimumAngle,
     FT_Taper,       
     FT_Skew,         
     FT_Area,          
-    FT_Volume3D,          
+    FT_Volume3D,   
+    FT_ScaledJacobian,       
     FT_MaxElementLength2D,
     FT_MaxElementLength3D,
     FT_FreeBorders,
@@ -137,6 +139,7 @@ module SMESH
   interface AspectRatio     : NumericalFunctor{};
   interface AspectRatio3D   : NumericalFunctor{};
   interface Warping         : NumericalFunctor{};
+  interface Warping3D       : NumericalFunctor {};
   interface Taper           : NumericalFunctor{};
   interface Skew            : NumericalFunctor{};
   interface Area            : NumericalFunctor{};
@@ -170,6 +173,7 @@ module SMESH
   };
   interface BallDiameter    : NumericalFunctor{};
   interface NodeConnectivityNumber : NumericalFunctor{};
+  interface ScaledJacobian  : NumericalFunctor{};
   
 
   /*!
@@ -584,6 +588,7 @@ module SMESH
     AspectRatio        CreateAspectRatio();
     AspectRatio3D      CreateAspectRatio3D();
     Warping            CreateWarping();
+    Warping3D          CreateWarping3D();
     Taper              CreateTaper();
     Skew               CreateSkew();
     Area               CreateArea();
@@ -598,6 +603,7 @@ module SMESH
     MultiConnection2D  CreateMultiConnection2D();
     BallDiameter       CreateBallDiameter();
     NodeConnectivityNumber CreateNodeConnectivityNumber();
+    ScaledJacobian     CreateScaledJacobian();
     /*!
      *  Create logical functors ( predicates )
      */

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2007-2022  EDF R&D
+# Copyright (C) 2007-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -21,11 +21,16 @@
 # Modules Python
 # Modules Eficas
 
+import sys
 import os, subprocess
 import tempfile
 from YamsPlugDialog_ui import Ui_YamsPlugDialog
 from monViewText import MonViewText
-from qtsalome import *
+if 'SALOME_USE_PYSIDE' in os.environ:
+  from PySide2.QtWidgets import QWidget, QMessageBox, QRadioButton, QFileDialog, QApplication
+  from PySide2.QtGui import QIcon, QDoubleValidator
+else:
+  from PyQt5.Qt import *
 
 verbose = True
 
@@ -548,9 +553,10 @@ class MonYamsPlugDialog(Ui_YamsPlugDialog,QWidget):
 
     import SMeshHelper
     key = SMeshHelper.GetMGLicenseKey( self.fichierIn )
-    self.commande+=' --key ' + key
-    
-    print(self.commande)
+    if key != "0":
+      self.commande+=' --key ' + key
+
+    if verbose: print("INFO: MG-SurfOpt command:\n  %s" % self.commande)
     return True
 
   def clean(self):
@@ -597,8 +603,6 @@ def getDialog():
 # ==============================================================================
 #
 def TEST_MonYamsPlugDialog():
-  import sys
-  from qtsalome import QApplication
   app = QApplication(sys.argv)
   app.lastWindowClosed.connect(app.quit)
 

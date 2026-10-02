@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -22,7 +22,7 @@
 // File      : DriverCGNS_Read.cxx
 // Created   : Thu Jun 30 10:33:31 2011
 // Author    : Edward AGAPOV (eap)
-//#define _DEBUG_
+
 #include <utilities.h>
 
 #include "DriverCGNS_Read.hxx"
@@ -159,7 +159,7 @@ namespace
 
   //================================================================================
   /*!
-   * \brief Iterator over nodes of the structired grid using FORTRAN multidimensional
+   * \brief Iterator over nodes of the structured grid using FORTRAN multidimensional
    * array ordering.
    */
   class TPointRangeIterator

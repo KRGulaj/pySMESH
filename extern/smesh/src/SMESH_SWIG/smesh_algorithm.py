@@ -1,4 +1,4 @@
-# Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -372,7 +372,7 @@ class Mesh_Algorithm:
         """
         Defines "ViscousLayers2D" hypothesis to give parameters of layers of quadrilateral
         elements to build near mesh boundary. This hypothesis can be used by several 2D algorithms:
-        NETGEN 2D, NETGEN 1D-2D, Quadrangle (mapping), MEFISTO, MG-CADSurf
+        NETGEN 2D, NETGEN 1D-2D, Quadrangle (mapping), MG-CADSurf
 
         Parameters:
                 thickness: total thickness of layers of quadrilaterals

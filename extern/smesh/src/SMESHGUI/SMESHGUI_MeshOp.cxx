@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -37,6 +37,7 @@
 #include "SMESH_NumberFilter.hxx"
 #include "SMESH_TypeDefs.hxx"
 #include "SMESH_TypeFilter.hxx"
+#include "SMESH_Gen_i.hxx"
 
 #include CORBA_SERVER_HEADER(SMESH_BasicHypothesis)
 
@@ -78,6 +79,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Iterator.hxx>
 
 //================================================================================
 /*!
@@ -126,6 +128,57 @@ LightApp_Dialog* SMESHGUI_MeshOp::dlg() const
 
 //================================================================================
 /*!
+ * \brief Log meshers info
+*/
+//================================================================================
+void SMESHGUI_MeshOp::logSmeshParams()
+{
+  QString mesherType;
+  int curMeshType = myDlg->currentMeshType();
+  switch ( curMeshType ) {
+  case MT_ANY:
+    mesherType = "Any";
+    break;
+  case MT_TRIANGULAR:
+    mesherType = "Triangular";
+    break;
+  case MT_QUADRILATERAL:
+    mesherType = "Quadrilateral";
+    break;
+  case MT_TETRAHEDRAL:
+    mesherType = "Tetrahedral";
+    break;
+  case MT_HEXAHEDRAL:
+    mesherType = "Hexahedral";
+    break;
+  default:
+    mesherType = "";
+  }
+
+  QString aMessage = QString("Mesh type is %1").arg(mesherType);
+  CAM_Application::logStructuredUserEvent( "Mesh",
+                                           "create mesh",
+                                           "",
+                                           "",
+                                           aMessage);
+
+  for ( int dim = 0; dim <= 3; ++dim )
+  {
+    HypothesisData * curAlgo = hypData( dim, Algo, currentHyp( dim, Algo ));
+    if(curAlgo)
+    {
+      aMessage = QString("%1D algorithm is %2").arg(dim).arg(curAlgo->Label);
+      CAM_Application::logStructuredUserEvent( "Mesh",
+                                           "create mesh",
+                                           "",
+                                           "",
+                                           aMessage);
+    }
+  }
+}
+
+//================================================================================
+/*!
  * \brief Creates or edits mesh
   * \retval bool - TRUE if operation is performed successfully, FALSE otherwise
  *
@@ -157,7 +210,7 @@ bool SMESHGUI_MeshOp::onApply()
     if (( myToCreate && !myIsMesh ) || myIsInvalidSubMesh )
       aResult = createSubMesh( aMess, anEntryList );
     else if ( !myToCreate )
-      aResult = editMeshOrSubMesh( aMess );
+      aResult = editMeshOrSubMesh( aMess, anEntryList );
     if ( aResult )
     {
       SMESHGUI::Modified();
@@ -181,6 +234,7 @@ bool SMESHGUI_MeshOp::onApply()
   {
     if ( myToCreate )
       setDefaultName();
+    //connect(aAction, SIGNAL(triggered(bool)), this, SLOT(logSmeshParams()));
   }
   else
   {
@@ -189,6 +243,7 @@ bool SMESHGUI_MeshOp::onApply()
     SUIT_MessageBox::warning( myDlg, tr( "SMESH_ERROR" ), aMess );
   }
 
+  logSmeshParams();
   myHypoSet = 0;
 
   return aResult;
@@ -1291,6 +1346,7 @@ void SMESHGUI_MeshOp::createHypothesis(const int      theDim,
       initHypCreator( aCreator );
 
       myDlg->setEnabled( false );
+      myDlg->hide();
       aCreator->create(initParamHyp, aHypName, myDlg, this, SLOT( onHypoCreated( int ) ) );
       dialog = true;
     }
@@ -1322,6 +1378,7 @@ void SMESHGUI_MeshOp::onHypoCreated( int result )
     int obj = myDlg->getActiveObject();
     onActivateObject( obj ); // Issue 0020170. Restore filters
     myDlg->setEnabled( true );
+    myDlg->show();
   }
 
   _PTR(SComponent) aFather = SMESH::getStudy()->FindComponent("SMESH");
@@ -1350,7 +1407,7 @@ void SMESHGUI_MeshOp::onHypoCreated( int result )
 //================================================================================
 void SMESHGUI_MeshOp::onEditHyp( const int theHypType, const int theIndex )
 {
-  // Speicfies dimension of hypothesis to be created
+  // Specifies dimension of hypothesis to be created
   int aDim = getTabDim( sender(), myDlg );
   if (aDim == -1)
     return;
@@ -1378,6 +1435,7 @@ void SMESHGUI_MeshOp::onEditHyp( const int theHypType, const int theIndex )
 
     removeCustomFilters(); // Issue 0020170
     myDlg->setEnabled( false );
+    myDlg->hide();
 
     aCreator->edit( aHyp.in(), aHypItem.second, dlg(), this, SLOT( onHypoEdited( int ) ) );
   }
@@ -1396,6 +1454,7 @@ void SMESHGUI_MeshOp::onHypoEdited( int /*result*/ )
   int obj = myDlg->getActiveObject();
   onActivateObject( obj ); // Issue 0020170. Restore filters
   myDlg->setEnabled( true );
+  myDlg->show();
 }
 
 //================================================================================
@@ -2038,7 +2097,10 @@ bool SMESHGUI_MeshOp::createMesh( QString& theMess, QStringList& theEntryList )
           elemType = SMESH::NODE;
 
         CORBA::String_var name = geomGroups[ iG ]->GetName();
-        meshGroup = aMesh->CreateGroupFromGEOM( elemType, name, geomGroups[ iG ]);
+
+        SALOMEDS::SObject_wrap groupSO = SMESH_Gen_i::GetSMESHGen()->ObjectToSObject( geomGroups[iG] );
+        if (!groupSO->_is_nil())
+          meshGroup = aMesh->CreateGroupFromGEOM( elemType, name, geomGroups[ iG ]);
         // if ( elemType != SMESH::NODE )
         //   meshGroup = aMesh->CreateGroupFromGEOM( SMESH::NODE, name, geomGroups[ iG ]);
       }
@@ -2117,7 +2179,7 @@ bool SMESHGUI_MeshOp::createSubMesh( QString& theMess, QStringList& theEntryList
           _PTR(SObject) pSubGeom = SMESH::getStudy()->FindObjectID(aSubGeomEntry.toUtf8().data());
           GEOM::GEOM_Object_var aSubGeomVar =
             GEOM::GEOM_Object::_narrow(_CAST(SObject,pSubGeom)->GetObject());
-          TopAbs_ShapeEnum aSubShapeType = (TopAbs_ShapeEnum)aSubGeomVar->GetShapeType();
+          TopAbs_ShapeEnum aSubShapeType = (TopAbs_ShapeEnum)aSubGeomVar->GetCommonShapeType();
           if (iSubSh == 0) {
             aGroupType = aSubShapeType;
           } else {
@@ -2378,7 +2440,7 @@ SMESH::SMESH_Hypothesis_var SMESHGUI_MeshOp::getAlgo( const int theDim )
 
         // Create algorithm
         if (aCreator)
-          aCreator->create( true, aHypName, myDlg, 0, QString::null );
+          aCreator->create( true, aHypName, myDlg, 0, QString() );
         else {
           SMESH::SMESH_Hypothesis_var aHyp =
             SMESH::CreateHypothesis(aHypName, aHypData->Label, true);
@@ -2573,13 +2635,14 @@ int SMESHGUI_MeshOp::find( const SMESH::SMESH_Hypothesis_var& theHyp,
 //================================================================================
 /*!
  * \brief Edits mesh or sub-mesh
-  * \param theMess - Output parameter intended for returning error message
-  * \retval bool  - TRUE if mesh is edited successfully, FALSE otherwise
+  * \param theMess      - Output parameter intended for returning error message
+ *  \param theEntryList - List of entries of published objects
+  * \retval bool        - TRUE if mesh is edited successfully, FALSE otherwise
  *
  * Assigns new name hypotheses and algorithms to the mesh or sub-mesh
  */
 //================================================================================
-bool SMESHGUI_MeshOp::editMeshOrSubMesh( QString& theMess )
+bool SMESHGUI_MeshOp::editMeshOrSubMesh( QString& theMess, QStringList& theEntryList)
 {
   theMess = "";
 
@@ -2623,6 +2686,12 @@ bool SMESHGUI_MeshOp::editMeshOrSubMesh( QString& theMess )
   bool isMesh = !aMesh->_is_nil();
   if ( !isMesh && !aSubMeshVar->_is_nil() )
     aMesh = aSubMeshVar->GetFather();
+
+  _PTR(SObject) aMeshSO = SMESH::FindSObject(aMesh.in());
+  if (aMeshSO) {
+    if (aSubMeshVar->_is_nil()) SMESH::SetName(aMeshSO, myDlg->objectText(SMESHGUI_MeshDlg::Obj));
+    theEntryList.append(aMeshSO->GetID().c_str());
+  }
 
   // Assign new algorithms and hypotheses
   for ( int dim = aDim; dim <= SMESH::DIM_3D; dim++ )

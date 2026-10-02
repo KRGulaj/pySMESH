@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -44,8 +44,9 @@ class vtkShrinkFilter;
 class vtkUnstructuredGrid;
 class vtkLookupTable;
 class vtkImplicitBoolean;
-class vtkPassThroughFilter;
+class vtkPassThrough;
 class vtkPlaneCollection;
+class vtkTriangleFilter;
 
 class VTKViewer_Transform;
 class VTKViewer_TransformFilter;
@@ -182,8 +183,9 @@ class SMESHOBJECT_EXPORT SMESH_DeviceActor: public vtkLODActor{
 
   bool myStoreClippingMapping;
   VTKViewer_GeometryFilter *myGeomFilter;
+  vtkTriangleFilter* myTriangleFilter = nullptr;
   VTKViewer_TransformFilter *myTransformFilter;
-  std::vector<vtkPassThroughFilter*> myPassFilter;
+  std::vector<vtkPassThrough*> myPassFilter;
 
   vtkShrinkFilter* myShrinkFilter;
   bool myIsShrinkable;

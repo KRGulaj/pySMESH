@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -93,6 +93,11 @@ public:
     CheckHypothesis(SMESH_Mesh&                          aMesh,
                     const TopoDS_Shape&                  aShape,
                     SMESH_Hypothesis::Hypothesis_Status& aStatus);
+
+  // Compute thickness of the 1st layer
+  static double Get1stLayerThickness( double thickTotal,
+                                      double factor,
+                                      int    nbLayers );
 
   // Checks if viscous layers should be constructed on a shape
   bool IsShapeWithLayers(int shapeIndex) const;

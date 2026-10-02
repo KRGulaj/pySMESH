@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -23,6 +23,7 @@ INCLUDE_DIRECTORIES(
   ${Boost_INCLUDE_DIRS}
   ${HDF5_INCLUDE_DIRS}
   ${MEDFILE_INCLUDE_DIRS}
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${KERNEL_INCLUDE_DIRS}
   ${MEDCOUPLING_INCLUDE_DIRS}
 )
@@ -37,7 +38,7 @@ SET(_link_LIBRARIES
   ${Boost_LIBRARIES}
   ${HDF5_LIBS}
   ${MEDFILE_C_LIBRARIES}
-  ${KERNEL_SALOMELocalTrace}
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
   ${MEDCoupling_medloader}
 )
 

@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -2277,11 +2277,42 @@ void SMESH_MeshEditor_i::SplitVolumesIntoTetra (SMESH::SMESH_IDSource_ptr elems,
     while ( volIt->more() )
       elemSet.insert( elemSet.end(), make_pair( volIt->next(), noneFacet ));
 
-  getEditor().SplitVolumes( elemSet, int( methodFlags ));
+  getEditor().SplitVolumes( elemSet, int( methodFlags ), false );
   declareMeshModified( /*isReComputeSafe=*/true ); // it does not influence Compute()
 
   TPythonDump() << this << ".SplitVolumesIntoTetra( "
-                << elems << ", " << methodFlags << " )";
+                << elems << ", " << methodFlags << ","
+                << false << " )";
+
+  SMESH_CATCH( SMESH::throwCorbaException );
+}
+
+//============================================================================================
+/*!
+ * \brief Split volumic elements into tetrahedrons and avoid creating over-constrained volumes
+ */
+//============================================================================================
+
+void SMESH_MeshEditor_i::SplitVolumesIntoTetraAvoidOverConstrainedVolumes(SMESH::SMESH_IDSource_ptr elems,
+                                                                          CORBA::Short              methodFlags
+                                                                          )
+{
+  SMESH_TRY;
+  initData();
+
+  ::SMESH_MeshEditor::TFacetOfElem elemSet;
+  const int noneFacet = -1;
+  prepareIdSource( elems );
+  if ( SMDS_ElemIteratorPtr volIt = myMesh_i->GetElements( elems, SMESH::VOLUME ))
+    while ( volIt->more() )
+      elemSet.insert( elemSet.end(), make_pair( volIt->next(), noneFacet ));
+
+  getEditor().SplitVolumes( elemSet, int( methodFlags ), true );
+  declareMeshModified( /*isReComputeSafe=*/true ); // it does not influence Compute()
+
+  TPythonDump() << this << ".SplitVolumesIntoTetra( "
+                << elems << ", " << methodFlags << ","
+                << true << " )";
 
   SMESH_CATCH( SMESH::throwCorbaException );
 }
@@ -3664,7 +3695,7 @@ SMESH_MeshEditor_i::TranslateMakeGroups(const SMESH::smIdType_array& theIDsOfEle
                 << theIDsOfElements << ", "
                 << theVector        << " )";
   }
-  return aGroups;
+  return aGroups ? aGroups : new SMESH::ListOfGroups();
 }
 
 //=======================================================================
@@ -3689,7 +3720,7 @@ SMESH_MeshEditor_i::TranslateObjectMakeGroups(SMESH::SMESH_IDSource_ptr theObjec
                 << theObject << ", "
                 << theVector << " )";
   }
-  return aGroups;
+  return aGroups ? aGroups : new SMESH::ListOfGroups();
 }
 
 //=======================================================================
@@ -3914,7 +3945,7 @@ SMESH_MeshEditor_i::RotateMakeGroups(const SMESH::smIdType_array& theIDsOfElemen
                 << theAxis          << ", "
                 << TVar( theAngle ) << " )";
   }
-  return aGroups;
+  return aGroups ? aGroups : new SMESH::ListOfGroups();
 }
 
 //=======================================================================
@@ -3941,7 +3972,7 @@ SMESH_MeshEditor_i::RotateObjectMakeGroups(SMESH::SMESH_IDSource_ptr theObject,
                 << theAxis          << ", "
                 << TVar( theAngle ) << " )";
   }
-  return aGroups;
+  return aGroups ? aGroups : new SMESH::ListOfGroups();
 }
 
 //=======================================================================
@@ -6671,7 +6702,7 @@ SMESH_MeshEditor_i::DoubleNodeElemGroupInRegion(SMESH::SMESH_GroupBase_ptr theEl
  *  \param [in] theGrpList - groups
  *  \param [in] theMeshDS -  mesh
  *  \param [out] theElemSet - set of elements
- *  \param [in] theIsNodeGrp - is \a theGrpList includes goups of nodes
+ *  \param [in] theIsNodeGrp - is \a theGrpList includes groups of nodes
  */
 //================================================================================
 
@@ -7306,6 +7337,7 @@ SMESH_MeshEditor_i::MakeBoundaryMesh(SMESH::SMESH_IDSource_ptr idSource,
  *    mesh + created boundary elements; "" means not to create the new mesh
  *  \param toCopyAll - if true, the whole initial mesh will be copied into
  *    the new mesh else only boundary elements will be copied into the new mesh
+ *  \param toCreateAllElements - if true all the dim element are created from the mesh
  *  \param groups - optional groups of elements to make boundary around
  *  \param mesh - returns the mesh where elements were added to
  *  \param group - returns the created group, if any
@@ -7317,6 +7349,7 @@ CORBA::Long SMESH_MeshEditor_i::MakeBoundaryElements(SMESH::Bnd_Dimension dim,
                                                      const char* groupName,
                                                      const char* meshName,
                                                      CORBA::Boolean toCopyAll,
+                                                     CORBA::Boolean toCreateAllElements,
                                                      const SMESH::ListOfIDSources& groups,
                                                      SMESH::SMESH_Mesh_out mesh,
                                                      SMESH::SMESH_Group_out group)
@@ -7354,7 +7387,7 @@ CORBA::Long SMESH_MeshEditor_i::MakeBoundaryElements(SMESH::Bnd_Dimension dim,
     // process groups belonging to another mesh
     SMESH::SMESH_Mesh_var    otherMesh = groupsOfOtherMesh[0]->GetMesh();
     SMESH::SMESH_MeshEditor_var editor = otherMesh->GetMeshEditor();
-    nbAdded += editor->MakeBoundaryElements( dim, groupName, meshName, toCopyAll,
+    nbAdded += editor->MakeBoundaryElements( dim, groupName, meshName, toCopyAll, toCreateAllElements,
                                              groupsOfOtherMesh, mesh, group );
   }
 
@@ -7381,6 +7414,7 @@ CORBA::Long SMESH_MeshEditor_i::MakeBoundaryElements(SMESH::Bnd_Dimension dim,
   SMESH_Mesh*     srcMesh = ( toCopyMesh && !toCopyAll ) ? myMesh : tgtMesh;
   SMESHDS_Mesh* srcMeshDS = srcMesh->GetMeshDS();
 
+
   // group of boundary elements
   SMESH_Group* smesh_group = 0;
   SMDSAbs_ElementType elemType = (dim == SMESH::BND_2DFROM3D) ? SMDSAbs_Volume : SMDSAbs_Face;
@@ -7393,7 +7427,6 @@ CORBA::Long SMESH_MeshEditor_i::MakeBoundaryElements(SMESH::Bnd_Dimension dim,
   }
 
   TIDSortedElemSet elements;
-
   if ( groups.length() > 0 )
   {
     for ( int i = 0; i < nbGroups; ++i )
@@ -7410,7 +7443,8 @@ CORBA::Long SMESH_MeshEditor_i::MakeBoundaryElements(SMESH::Bnd_Dimension dim,
                                                  /*toCopyElements=*/false,
                                                  /*toCopyExistingBondary=*/srcMesh != tgtMesh,
                                                  /*toAddExistingBondary=*/true,
-                                                 /*aroundElements=*/true);
+                                                 /*aroundElements=*/true,
+                                                 /*toCreateAllElements=*/toCreateAllElements);
       }
     }
   }
@@ -7422,7 +7456,8 @@ CORBA::Long SMESH_MeshEditor_i::MakeBoundaryElements(SMESH::Bnd_Dimension dim,
                                              tgtMesh,
                                              /*toCopyElements=*/false,
                                              /*toCopyExistingBondary=*/srcMesh != tgtMesh,
-                                             /*toAddExistingBondary=*/true);
+                                             /*toAddExistingBondary=*/true,
+                                             /*aroundElements=*/toCreateAllElements);
   }
   tgtMesh->GetMeshDS()->Modified();
 
@@ -7437,13 +7472,21 @@ CORBA::Long SMESH_MeshEditor_i::MakeBoundaryElements(SMESH::Bnd_Dimension dim,
   if ( group_var->_is_nil() )
     pyDump << "_NoneGroup = "; // assignment to None is forbidden
   else
+
     pyDump << group_var << " = ";
-  pyDump << this << ".MakeBoundaryElements( "
-         << "SMESH." << dimName[int(dim)] << ", "
-         << "'" << groupName << "', "
-         << "'" << meshName<< "', "
-         << toCopyAll << ", "
-         << groups << ")";
+  
+  if ( toCreateAllElements )
+    pyDump << this << ".MakeBoundaryOfEachElement( ";
+  else
+  {
+    pyDump << this << ".MakeBoundaryElements( "
+           << "SMESH." << dimName[int(dim)] << ", ";
+  }
+
+  pyDump<< "'" << groupName << "', "
+        << "'" << meshName<< "', "
+        << toCopyAll << ", "
+        << groups << ")";
 
   mesh  = mesh_var._retn();
   group = group_var._retn();

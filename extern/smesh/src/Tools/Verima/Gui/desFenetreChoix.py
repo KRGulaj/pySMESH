@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2014-2022  EDF R&D
+# Copyright (C) 2014-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -24,7 +24,11 @@
 #
 # WARNING! All changes made in this file will be lost!
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+import os
+if 'SALOME_USE_PYSIDE' in os.environ:
+  PySide2 import QtCore, QtGui, QtWidgets
+else:
+  from PyQt5 import QtCore, QtGui, QtWidgets
 
 class Ui_Choix(object):
     def setupUi(self, Choix):

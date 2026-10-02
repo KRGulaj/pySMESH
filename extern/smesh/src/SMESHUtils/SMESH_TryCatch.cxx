@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -41,11 +41,8 @@ const char* SMESH::returnError(const char* txt)
 
 void SMESH::printErrorInDebugMode(const char* txt)
 {
-#ifdef _DEBUG_
-  std::cerr <<  txt << " " << __FILE__ << ": " << __LINE__ << std::endl;
-#else
-  (void)txt; // unused in release mode
-#endif
+  if (SALOME::VerbosityActivated())
+    std::cerr << txt << " " << __FILE__ << ": " << __LINE__ << std::endl;
 }
 
 // ------------------------------------------------------------------

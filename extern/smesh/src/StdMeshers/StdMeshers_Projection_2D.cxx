@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -45,6 +45,7 @@
 #include <SMESH_Comment.hxx>
 #include <SMESH_Gen.hxx>
 #include <SMESH_Mesh.hxx>
+#include <SMESH_SequentialMesh.hxx>
 #include <SMESH_MeshAlgos.hxx>
 #include <SMESH_MeshEditor.hxx>
 #include <SMESH_MesherHelper.hxx>
@@ -62,9 +63,15 @@
 #include <GeomAPI_ExtremaCurveCurve.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomAdaptor_Curve.hxx>
+#include <GeomAdaptor_Surface.hxx>
+
+#include <Basics_OCCTVersion.hxx>
+
+#if OCC_VERSION_LARGE < 0x07070000
 #include <GeomAdaptor_HCurve.hxx>
 #include <GeomAdaptor_HSurface.hxx>
-#include <GeomAdaptor_Surface.hxx>
+#endif
+
 #include <GeomLib_IsPlanarSurface.hxx>
 #include <Geom_Line.hxx>
 #include <IntCurveSurface_HInter.hxx>
@@ -318,7 +325,7 @@ namespace {
       break;
     }
     case TopAbs_EDGE: {
-      
+
       // Get submeshes of sub-vertices
       const map< int, SMESH_subMesh * >& subSM = sm->DependsOn();
       if ( subSM.size() != 2 )
@@ -705,7 +712,7 @@ namespace {
     while ( elemIt->more() ) // loop on all mesh faces on srcFace
     {
       const SMDS_MeshElement* elem = elemIt->next();
-      const int nbN = elem->NbCornerNodes(); 
+      const int nbN = elem->NbCornerNodes();
       tgtNodes.resize( nbN );
       helper->SetElementsOnShape( false );
       for ( int i = 0; i < nbN; ++i ) // loop on nodes of the source element
@@ -1090,7 +1097,7 @@ namespace {
    */
   //================================================================================
 
-  struct QuadMesh : public SMESH_Mesh
+  struct QuadMesh : public SMESH_SequentialMesh
   {
     ObjectPool< TriaCoordSys > _traiLCSPool;
     SMESH_ElementSearcher*     _elemSearcher;
@@ -1422,7 +1429,7 @@ namespace {
     //   const SMDS_MeshElement* elem = elemIt->next();
     //   TFaceConn& tgtNodes = newFacesVec[ iFaceSrc++ ];
 
-    //   const int nbN = elem->NbCornerNodes(); 
+    //   const int nbN = elem->NbCornerNodes();
     //   tgtNodes.resize( nbN );
     //   for ( int i = 0; i < nbN; ++i ) // loop on nodes of the source element
     //   {
@@ -1436,7 +1443,7 @@ namespace {
     //       {
     //         tgtNodeOrXY.first = srcN_tgtN->second; // tgt node exists
     //       }
-    //       else 
+    //       else
     //       {
     //         // find XY of src node within the quadrilateral srcFace
     //         if ( !block.ComputeParameters( SMESH_TNodeXYZ( srcNode ),
@@ -1612,7 +1619,7 @@ namespace {
     list< int > tgtNbEW, srcNbEW;
     int tgtNbW = SMESH_Block::GetOrderedEdges( TopoDS::Face( theTgtFace ), tgtEdges, tgtNbEW );
 
-    TopTools_IndexedMapOfShape tgtVV, srcVV;
+    TopTools_IndexedMapOfShape tgtVV, srcVV, srcVVtemp;
     for ( const TopoDS_Edge& tgtEdge : tgtEdges )
       tgtVV.Add( SMESH_MesherHelper::IthVertex( 0, tgtEdge ));
     // if ( tgtVV.Size() < 2 )
@@ -1629,14 +1636,16 @@ namespace {
     {
       const TopoDS_Face& srcFace = TopoDS::Face( faceExp.Current() );
 
+      srcEdges.clear();
+      srcNbEW.clear();
       int srcNbW = SMESH_Block::GetOrderedEdges( srcFace, srcEdges, srcNbEW );
       if ( tgtNbW != srcNbW )
         continue;
 
-      srcVV.Clear( false );
+      srcVVtemp.Clear( false );
       for ( const TopoDS_Edge& srcEdge : srcEdges )
-        srcVV.Add( SMESH_MesherHelper::IthVertex( 0, srcEdge ));
-      if ( srcVV.Extent() != tgtVV.Extent() )
+        srcVVtemp.Add( SMESH_MesherHelper::IthVertex( 0, srcEdge ));
+      if ( srcVVtemp.Extent() != tgtVV.Extent() )
         continue;
 
       // make srcFace computed
@@ -1668,9 +1677,9 @@ namespace {
 
       gp_Lin line;
       double vertexDist;
-      for ( int iSrcV0 = 1; iSrcV0 <= srcVV.Size(); ++iSrcV0 )
+      for ( int iSrcV0 = 1; iSrcV0 <= srcVVtemp.Size(); ++iSrcV0 )
       {
-        const gp_Pnt srcP0 = BRep_Tool::Pnt( TopoDS::Vertex( srcVV( iSrcV0 )));
+        const gp_Pnt srcP0 = BRep_Tool::Pnt( TopoDS::Vertex( srcVVtemp( iSrcV0 )));
         try {
           line.SetDirection( gp_Vec( srcP0, tgtP0 ));
         }
@@ -1688,7 +1697,7 @@ namespace {
             iTgtV = ( iTgtV + 1           ) % nbVV;
             iSrcV = ( iSrcV + iDir + nbVV ) % nbVV;
             gp_Pnt tgtP = BRep_Tool::Pnt( TopoDS::Vertex( tgtVV( iTgtV + 1 )));
-            gp_Pnt srcP = BRep_Tool::Pnt( TopoDS::Vertex( srcVV( iSrcV + 1 )));
+            gp_Pnt srcP = BRep_Tool::Pnt( TopoDS::Vertex( srcVVtemp( iSrcV + 1 )));
             line.SetLocation( tgtP );
             correspond = ( line.SquareDistance( srcP ) < tol * tol );
             vertexDist += tgtP.SquareDistance( srcP );
@@ -1704,6 +1713,11 @@ namespace {
             piercingLine    = line;
             assocSrcFace  = srcFace;
             assocTol      = tol;
+            srcVV.Clear(false);
+            for ( const TopoDS_Shape& srcVtemp : srcVVtemp )
+            {
+              srcVV.Add( srcVtemp );
+            }
           }
           break;
         }
@@ -1883,8 +1897,13 @@ namespace {
     SMESHDS_Mesh* tgtMeshDS = tgtMesh->GetMeshDS();
 
     Handle(Geom_Surface)             tgtSurface = BRep_Tool::Surface( theTgtFace );
+#if OCC_VERSION_LARGE < 0x07070000
     Handle(GeomAdaptor_HSurface) tgtSurfAdaptor = new GeomAdaptor_HSurface( tgtSurface );
     Handle(GeomAdaptor_HCurve)    piercingCurve = new GeomAdaptor_HCurve( thePiercingLine );
+#else
+    Handle(GeomAdaptor_Surface) tgtSurfAdaptor = new GeomAdaptor_Surface( tgtSurface );
+    Handle(GeomAdaptor_Curve)    piercingCurve = new GeomAdaptor_Curve( thePiercingLine );
+#endif
     IntCurveSurface_HInter intersect;
 
     SMESH_MesherHelper* srcHelper = theSrcWires[0]->FaceHelper();
@@ -2507,9 +2526,8 @@ bool StdMeshers_Projection_2D::Compute(SMESH_Mesh& theMesh, const TopoDS_Shape& 
       TAssocTool::Morph morph( srcWires );
       morph.Perform( helper, tgtWires, helper.GetSurface( tgtFace ),
                      _src2tgtNodes, /*moveAll=*/true );
-#ifdef _DEBUG_
-      cout << "StdMeshers_Projection_2D: Projection mesh IsDistorted2D() ==> do morph" << endl;
-#endif
+      if(SALOME::VerbosityActivated())
+        cout << "StdMeshers_Projection_2D: Projection mesh IsDistorted2D() ==> do morph" << endl;
 
       if ( !fixDistortedFaces( helper, tgtWires )) // smooth and check
         return error("Invalid mesh generated");

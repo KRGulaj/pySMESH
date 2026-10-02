@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -42,6 +42,7 @@
 #include <cstring>
 #include <numeric>
 #include <algorithm>
+#include <array>
 
 namespace
 {
@@ -72,7 +73,7 @@ static int Tetra_F [4][4] = { // FORWARD == EXTERNAL
   { 0, 1, 2, 0 },              // All faces have external normals
   { 0, 3, 1, 0 },
   { 1, 3, 2, 1 },
-  { 0, 2, 3, 0 }}; 
+  { 0, 2, 3, 0 }};
 static int Tetra_RE [4][4] = { // REVERSED -> FORWARD (EXTERNAL)
   { 0, 2, 1, 0 },              // All faces have external normals
   { 0, 1, 3, 0 },
@@ -80,25 +81,33 @@ static int Tetra_RE [4][4] = { // REVERSED -> FORWARD (EXTERNAL)
   { 0, 3, 2, 0 }};
 static int Tetra_nbN [] = { 3, 3, 3, 3 };
 
-//
-//     PYRAMID
-//
+/*
+//    N1 +---------+ N2
+//       | \     / |
+//       |  \   /  |
+//       |   \ /   |
+//       |   /+\   |     PYRAMID
+//       |  / N4\  |
+//       | /     \ |
+//       |/       \|
+//    N0 +---------+ N3
+*/
 static int Pyramid_F [5][5] = { // FORWARD == EXTERNAL
   { 0, 1, 2, 3, 0 },            // All faces have external normals
   { 0, 4, 1, 0, 4 },
   { 1, 4, 2, 1, 4 },
   { 2, 4, 3, 2, 4 },
   { 3, 4, 0, 3, 4 }
-}; 
+};
 static int Pyramid_RE [5][5] = { // REVERSED -> FORWARD (EXTERNAL)
   { 0, 3, 2, 1, 0 },             // All faces but a bottom have external normals
   { 0, 1, 4, 0, 4 },
   { 1, 2, 4, 1, 4 },
   { 2, 3, 4, 2, 4 },
-  { 3, 0, 4, 3, 4 }}; 
+  { 3, 0, 4, 3, 4 }};
 static int Pyramid_nbN [] = { 4, 3, 3, 3, 3 };
 
-/*   
+/*
 //            + N4
 //           /|\
 //          / | \
@@ -118,13 +127,13 @@ static int Penta_F [5][5] = { // FORWARD
   { 3, 5, 4, 3, 3 },          // 0 is bottom, 1 is top face
   { 0, 3, 4, 1, 0 },
   { 1, 4, 5, 2, 1 },
-  { 0, 2, 5, 3, 0 }}; 
+  { 0, 2, 5, 3, 0 }};
 static int Penta_RE [5][5] = { // REVERSED -> EXTERNAL
   { 0, 2, 1, 0, 0 },
   { 3, 4, 5, 3, 3 },
   { 0, 1, 4, 3, 0 },
   { 1, 2, 5, 4, 1 },
-  { 0, 3, 5, 2, 0 }}; 
+  { 0, 3, 5, 2, 0 }};
 static int Penta_nbN [] = { 3, 3, 4, 4, 4 };
 
 /*
@@ -145,19 +154,19 @@ static int Hexa_F [6][5] = { // FORWARD
   { 4, 7, 6, 5, 4 },          // all face normals are external
   { 0, 4, 5, 1, 0 },
   { 1, 5, 6, 2, 1 },
-  { 3, 2, 6, 7, 3 }, 
+  { 3, 2, 6, 7, 3 },
   { 0, 3, 7, 4, 0 }};
 static int Hexa_RE [6][5] = { // REVERSED -> EXTERNAL
   { 0, 3, 2, 1, 0 },
   { 4, 5, 6, 7, 4 },          // all face normals are external
   { 0, 1, 5, 4, 0 },
   { 1, 2, 6, 5, 1 },
-  { 3, 7, 6, 2, 3 }, 
+  { 3, 7, 6, 2, 3 },
   { 0, 4, 7, 3, 0 }};
 static int Hexa_nbN [] = { 4, 4, 4, 4, 4, 4 };
 static int Hexa_oppF[] = { 1, 0, 4, 5, 2, 3 }; // oppopsite facet indices
 
-/*   
+/*
 //      N8 +------+ N9
 //        /        \
 //       /          \
@@ -182,7 +191,7 @@ static int HexPrism_F [8][7] = { // FORWARD
   { 2, 8, 9, 3, 2, 2, 2 },
   { 3, 9,10, 4, 3, 3, 3 },
   { 4,10,11, 5, 4, 4, 4 },
-  { 5,11, 6, 0, 5, 5, 5 }}; 
+  { 5,11, 6, 0, 5, 5, 5 }};
 static int HexPrism_RE [8][7] = { // REVERSED -> EXTERNAL
   { 0, 5, 4, 3, 2, 1, 0 },
   { 6,11,10, 9, 8, 7, 6 },
@@ -191,7 +200,7 @@ static int HexPrism_RE [8][7] = { // REVERSED -> EXTERNAL
   { 2, 8, 9, 3, 2, 2, 2 },
   { 3, 9,10, 4, 3, 3, 3 },
   { 4,10,11, 5, 4, 4, 4 },
-  { 5,11, 6, 0, 5, 5, 5 }}; 
+  { 5,11, 6, 0, 5, 5, 5 }};
 static int HexPrism_nbN [] = { 6, 6, 4, 4, 4, 4, 4, 4 };
 
 
@@ -213,7 +222,7 @@ static int QuadTetra_F [4][7] = { // FORWARD
   { 0, 4, 1, 5, 2, 6, 0 },        // All faces have external normals
   { 0, 7, 3, 8, 1, 4, 0 },
   { 1, 8, 3, 9, 2, 5, 1 },
-  { 0, 6, 2, 9, 3, 7, 0 }}; 
+  { 0, 6, 2, 9, 3, 7, 0 }};
 static int QuadTetra_RE [4][7] = { // REVERSED -> FORWARD (EXTERNAL)
   { 0, 6, 2, 5, 1, 4, 0 },         // All faces have external normals
   { 0, 4, 1, 8, 3, 7, 0 },
@@ -227,7 +236,7 @@ static int QuadTetra_nbN [] = { 6, 6, 6, 6 };
 //
 //            +4
 //
-//            
+//
 //       10+-----+11
 //         |     |        9 - middle point for (0,4) etc.
 //         |     |
@@ -247,35 +256,35 @@ static int QuadPyram_F [5][9] = {  // FORWARD
   { 0, 9, 4, 10,1, 5, 0, 4, 4 },
   { 1, 10,4, 11,2, 6, 1, 4, 4 },
   { 2, 11,4, 12,3, 7, 2, 4, 4 },
-  { 3, 12,4, 9, 0, 8, 3, 4, 4 }}; 
+  { 3, 12,4, 9, 0, 8, 3, 4, 4 }};
 static int QuadPyram_RE [5][9] = { // REVERSED -> FORWARD (EXTERNAL)
   { 0, 8, 3, 7, 2, 6, 1, 5, 0 },   // All faces but a bottom have external normals
   { 0, 5, 1, 10,4, 9, 0, 4, 4 },
   { 1, 6, 2, 11,4, 10,1, 4, 4 },
   { 2, 7, 3, 12,4, 11,2, 4, 4 },
-  { 3, 8, 0, 9, 4, 12,3, 4, 4 }}; 
+  { 3, 8, 0, 9, 4, 12,3, 4, 4 }};
 static int QuadPyram_nbN [] = { 8, 6, 6, 6, 6 };
 
-/*   
-//            + N4
-//           /|\
-//         9/ | \10
-//         /  |  \
-//        /   |   \
-//    N3 +----+----+ N5
-//       |    |11  |
-//       |    |    |
-//       |    +13  |                QUADRATIC
-//       |    |    |                PENTAHEDRON
-//     12+    |    +14
-//       |    |    |
-//       |    |    |
-//       |    + N1 |
-//       |   / \   |               
-//       | 6/   \7 |
-//       | /     \ |
-//       |/       \|
-//    N0 +---------+ N2
+/*
+//            + N4                                 +
+//           /|\                                  /|\
+//         9/ | \10                              + | +
+//         /  |  \                              /  |  \
+//        /   |   \                            /   |   \
+//    N3 +----+----+ N5                       +----+----+
+//       |    |11  |                          |    |    |
+//       |    |    |                          |    |    |   Central nodes
+//       |    +13  |      QUADRATIC           | 16 +    |   of bi-quadratic
+//       |    |    |      PENTAHEDRON         |  + |  + |   PENTAHEDRON
+//     12+    |    +14                        +    | 17 +
+//       |    |    |                          |  18|    |
+//       |    |    |                          |    |    |
+//       |    + N1 |                          |    +    |
+//       |   / \   |                          |   / \   |
+//       | 6/   \7 |                          |  +   +  |
+//       | /     \ |                          | /     \ |
+//       |/       \|                          |/       \|
+//    N0 +---------+ N2                       +---------+
 //            8
 */
 static int QuadPenta_F [5][9] = {  // FORWARD
@@ -283,51 +292,65 @@ static int QuadPenta_F [5][9] = {  // FORWARD
   { 3, 11,5, 10,4, 9, 3, 3, 3 },
   { 0, 12,3, 9, 4, 13,1, 6, 0 },
   { 1, 13,4, 10,5, 14,2, 7, 1 },
-  { 0, 8, 2, 14,5, 11,3, 12,0 }}; 
+  { 0, 8, 2, 14,5, 11,3, 12,0 }};
 static int QuadPenta_RE [5][9] = { // REVERSED -> EXTERNAL
   { 0, 8, 2, 7, 1, 6, 0, 0, 0 },
   { 3, 9, 4, 10,5, 11,3, 3, 3 },
   { 0, 6, 1, 13,4, 9, 3, 12,0 },
   { 1, 7, 2, 14,5, 10,4, 13,1 },
-  { 0, 12,3, 11,5, 14,2, 8, 0 }}; 
+  { 0, 12,3, 11,5, 14,2, 8, 0 }};
 static int QuadPenta_nbN [] = { 6, 6, 8, 8, 8 };
 
+static int BiQuadPenta_F[5][9] = {  // FORWARD
+  { 0, 6, 1, 7, 2, 8, 0, 0, 0 },
+  { 3, 11,5, 10,4, 9, 3, 3, 3 },
+  { 0, 12,3, 9, 4, 13,1, 6, 16},   //!
+  { 1, 13,4, 10,5, 14,2, 7, 17},   //!
+  { 0, 8, 2, 14,5, 11,3, 12,18} }; //!
+static int BiQuadPenta_RE[5][9] = { // REVERSED -> EXTERNAL
+  { 0, 8, 2, 7, 1, 6, 0, 0, 0 },
+  { 3, 9, 4, 10,5, 11,3, 3, 3 },
+  { 0, 6, 1, 13,4, 9, 3, 12,17},   //!
+  { 1, 7, 2, 14,5, 10,4, 13,16},   //!
+  { 0, 12,3, 11,5, 14,2, 8, 18} }; //!
+static int BiQuadPenta_nbN[] = { 6, 6, 9, 9, 9 };
+
 /*
-//                 13                                                         
+//                 13
 //         N5+-----+-----+N6                          +-----+-----+
-//          /|          /|                           /|          /| 
-//       12+ |       14+ |                          + |   +25   + |    
-//        /  |        /  |                         /  |        /  |    
+//          /|          /|                           /|          /|
+//       12+ |       14+ |                          + |   +25   + |
+//        /  |        /  |                         /  |        /  |
 //     N4+-----+-----+N7 |       QUADRATIC        +-----+-----+   |  Central nodes
 //       |   | 15    |   |       HEXAHEDRON       |   |       |   |  of tri-quadratic
 //       |   |       |   |                        |   |       |   |  HEXAHEDRON
-//       | 17+       |   +18                      |   +   22+ |   +  
-//       |   |       |   |                        |21 |       |   | 
-//       |   |       |   |                        | + | 26+   | + |    
-//       |   |       |   |                        |   |       |23 |    
-//     16+   |       +19 |                        +   | +24   +   |    
-//       |   |       |   |                        |   |       |   |    
-//       |   |     9 |   |                        |   |       |   |    
-//       | N1+-----+-|---+N2                      |   +-----+-|---+    
-//       |  /        |  /                         |  /        |  /  
-//       | +8        | +10                        | +   20+   | +      
-//       |/          |/                           |/          |/       
-//     N0+-----+-----+N3                          +-----+-----+    
-//             11                              
+//       | 17+       |   +18                      |   +   22+ |   +
+//       |   |       |   |                        |21 |       |   |
+//       |   |       |   |                        | + | 26+   | + |
+//       |   |       |   |                        |   |       |23 |
+//     16+   |       +19 |                        +   | +24   +   |
+//       |   |       |   |                        |   |       |   |
+//       |   |     9 |   |                        |   |       |   |
+//       | N1+-----+-|---+N2                      |   +-----+-|---+
+//       |  /        |  /                         |  /        |  /
+//       | +8        | +10                        | +   20+   | +
+//       |/          |/                           |/          |/
+//     N0+-----+-----+N3                          +-----+-----+
+//             11
 */
 static int QuadHexa_F [6][9] = {  // FORWARD
   { 0, 8, 1, 9, 2, 10,3, 11,0 },   // all face normals are external,
   { 4, 15,7, 14,6, 13,5, 12,4 },
   { 0, 16,4, 12,5, 17,1, 8, 0 },
   { 1, 17,5, 13,6, 18,2, 9, 1 },
-  { 3, 10,2, 18,6, 14,7, 19,3 }, 
+  { 3, 10,2, 18,6, 14,7, 19,3 },
   { 0, 11,3, 19,7, 15,4, 16,0 }};
 static int QuadHexa_RE [6][9] = {  // REVERSED -> EXTERNAL
   { 0, 11,3, 10,2, 9, 1, 8, 0 },   // all face normals are external
   { 4, 12,5, 13,6, 14,7, 15,4 },
   { 0, 8, 1, 17,5, 12,4, 16,0 },
   { 1, 9, 2, 18,6, 13,5, 17,1 },
-  { 3, 19,7, 14,6, 18,2, 10,3 }, 
+  { 3, 19,7, 14,6, 18,2, 10,3 },
   { 0, 16,4, 15,7, 19,3, 11,0 }};
 static int QuadHexa_nbN [] = { 8, 8, 8, 8, 8, 8 };
 
@@ -336,14 +359,14 @@ static int TriQuadHexa_F [6][9] = {  // FORWARD
   { 4, 15,7, 14,6, 13,5, 12, 25 },
   { 0, 16,4, 12,5, 17,1, 8,  21 },
   { 1, 17,5, 13,6, 18,2, 9,  22 },
-  { 3, 10,2, 18,6, 14,7, 19, 23 }, 
+  { 3, 10,2, 18,6, 14,7, 19, 23 },
   { 0, 11,3, 19,7, 15,4, 16, 24 }};
 static int TriQuadHexa_RE [6][9] = {  // REVERSED -> EXTERNAL
   { 0, 11,3, 10,2, 9, 1, 8,  20 },   // opposite faces are neighbouring,
   { 4, 12,5, 13,6, 14,7, 15, 25 },   // all face normals are external
   { 0, 8, 1, 17,5, 12,4, 16, 21 },
   { 1, 9, 2, 18,6, 13,5, 17, 22 },
-  { 3, 19,7, 14,6, 18,2, 10, 23 }, 
+  { 3, 19,7, 14,6, 18,2, 10, 23 },
   { 0, 16,4, 15,7, 19,3, 11, 24 }};
 static int TriQuadHexa_nbN [] = { 9, 9, 9, 9, 9, 9 };
 
@@ -363,12 +386,17 @@ struct XYZ {
   inline XYZ operator-( const XYZ& other );
   inline XYZ operator+( const XYZ& other );
   inline XYZ Crossed( const XYZ& other );
+  inline XYZ operator-();
   inline double Dot( const XYZ& other );
   inline double Magnitude();
   inline double SquareMagnitude();
+  inline XYZ Normalize();
 };
 inline XYZ XYZ::operator-( const XYZ& Right ) {
   return XYZ(x - Right.x, y - Right.y, z - Right.z);
+}
+inline XYZ XYZ::operator-() {
+  return XYZ(-x,-y,-z);
 }
 inline XYZ XYZ::operator+( const XYZ& Right ) {
   return XYZ(x + Right.x, y + Right.y, z + Right.z);
@@ -386,6 +414,13 @@ inline double XYZ::Magnitude() {
 }
 inline double XYZ::SquareMagnitude() {
   return (x * x + y * y + z * z);
+}
+inline XYZ XYZ::Normalize() {
+  double magnitude = Magnitude();
+  if ( magnitude != 0.0 )
+    return XYZ(x /= magnitude,y /= magnitude,z /= magnitude );
+  else
+    return XYZ(x,y,z);
 }
 
   //================================================================================
@@ -446,7 +481,7 @@ SMDS_VolumeTool::SMDS_VolumeTool ()
 
 //=======================================================================
 //function : SMDS_VolumeTool
-//purpose  : 
+//purpose  :
 //=======================================================================
 
 SMDS_VolumeTool::SMDS_VolumeTool (const SMDS_MeshElement* theVolume,
@@ -457,7 +492,7 @@ SMDS_VolumeTool::SMDS_VolumeTool (const SMDS_MeshElement* theVolume,
 
 //=======================================================================
 //function : SMDS_VolumeTool
-//purpose  : 
+//purpose  :
 //=======================================================================
 
 SMDS_VolumeTool::~SMDS_VolumeTool()
@@ -613,6 +648,14 @@ void SMDS_VolumeTool::Inverse ()
     SWAP_NODES( myVolumeNodes, 9, 11 );
     SWAP_NODES( myVolumeNodes, 13, 14 );
     break;
+  case 18:
+    SWAP_NODES(myVolumeNodes, 1, 2);
+    SWAP_NODES(myVolumeNodes, 4, 5);
+    SWAP_NODES(myVolumeNodes, 6, 8);
+    SWAP_NODES(myVolumeNodes, 9, 11);
+    SWAP_NODES(myVolumeNodes, 13, 14);
+    SWAP_NODES(myVolumeNodes, 16, 17);
+    break;
   case 20:
     SWAP_NODES( myVolumeNodes, 1, 3 );
     SWAP_NODES( myVolumeNodes, 5, 7 );
@@ -639,7 +682,7 @@ void SMDS_VolumeTool::Inverse ()
 
 //=======================================================================
 //function : GetVolumeType
-//purpose  : 
+//purpose  :
 //=======================================================================
 
 SMDS_VolumeTool::VolumeType SMDS_VolumeTool::GetVolumeType() const
@@ -656,6 +699,7 @@ SMDS_VolumeTool::VolumeType SMDS_VolumeTool::GetVolumeType() const
   case 10: return QUAD_TETRA;
   case 13: return QUAD_PYRAM;
   case 15: return QUAD_PENTA;
+  case 18: return QUAD_PENTA;
   case 20: return QUAD_HEXA;
   case 27: return QUAD_HEXA;
   default: break;
@@ -666,7 +710,7 @@ SMDS_VolumeTool::VolumeType SMDS_VolumeTool::GetVolumeType() const
 
 //=======================================================================
 //function : getTetraVolume
-//purpose  : 
+//purpose  :
 //=======================================================================
 
 static double getTetraVolume(const SMDS_MeshNode* n1,
@@ -694,7 +738,6 @@ static double getTetraVolume(const SMDS_MeshNode* n1,
 //function : GetSize
 //purpose  : Return element volume
 //=======================================================================
-
 double SMDS_VolumeTool::GetSize() const
 {
   double V = 0.;
@@ -710,7 +753,7 @@ double SMDS_VolumeTool::GetSize() const
 
     // split a polyhedron into tetrahedrons
 
-    bool oriOk = true;
+    bool oriOk = AllFacesSameOriented();
     SMDS_VolumeTool* me = const_cast< SMDS_VolumeTool* > ( this );
     for ( int f = 0; f < NbFaces(); ++f )
     {
@@ -723,13 +766,12 @@ double SMDS_VolumeTool::GetSize() const
         p1 = p2;
       }
       V += p1.Dot( area );
-      oriOk = oriOk && IsFaceExternal( f );
     }
     V /= 6;
     if ( !oriOk && V > 0 )
       V *= -1;
   }
-  else 
+  else
   {
     const static int ind[] = {
       0, 1, 3, 6, 11, 23, 31, 44, 58, 78 };
@@ -847,9 +889,335 @@ double SMDS_VolumeTool::GetSize() const
   return V;
 }
 
+
+//=======================================================================
+//function : getTetraScaledJacobian
+//purpose  : Given the smesh nodes in the canonical order of the tetrahedron, return the scaled jacobian
+//=======================================================================
+static double getTetraScaledJacobian(const SMDS_MeshNode* n0,
+                                     const SMDS_MeshNode* n1,
+                                     const SMDS_MeshNode* n2,
+                                     const SMDS_MeshNode* n3)
+{
+  const double sqrt = std::sqrt(2.0);
+  // Get the coordinates
+  XYZ p0( n0 );
+  XYZ p1( n1 );
+  XYZ p2( n2 );
+  XYZ p3( n3 );
+  // Define the edges connecting the nodes
+  XYZ L0 = p1-p0;
+  XYZ L1 = p2-p1;
+  XYZ L2 = p2-p0; // invert the definition of doc to get the proper orientation of the crossed product
+  XYZ L3 = p3-p0;
+  XYZ L4 = p3-p1;
+  XYZ L5 = p3-p2;
+  double Jacobian = L2.Crossed( L0 ).Dot( L3 );
+  double norm0 = L0.Magnitude();
+  double norm1 = L1.Magnitude();
+  double norm2 = L2.Magnitude();
+  double norm3 = L3.Magnitude();
+  double norm4 = L4.Magnitude();
+  double norm5 = L5.Magnitude();
+
+  std::array<double, 5> norms{};
+  norms[0] = Jacobian;
+  norms[1] = norm3*norm4*norm5;
+  norms[2] = norm1*norm2*norm5;
+  norms[3] = norm0*norm1*norm4;
+  norms[4] = norm0*norm2*norm3;
+
+  auto findMaxNorm = std::max_element(norms.begin(), norms.end());
+  double maxNorm = *findMaxNorm;
+
+  if ( std::fabs( maxNorm ) < std::numeric_limits<double>::min() )
+    maxNorm = std::numeric_limits<double>::max();
+
+  return Jacobian * sqrt / maxNorm;
+}
+
+//=======================================================================
+//function : getPyramidScaledJacobian
+//purpose  : Given the pyramid, compute the scaled jacobian of the four tetrahedrons and return the minimum value.
+//=======================================================================
+static double getPyramidScaledJacobian(const SMDS_MeshNode* n0,
+                                        const SMDS_MeshNode* n1,
+                                        const SMDS_MeshNode* n2,
+                                        const SMDS_MeshNode* n3,
+                                        const SMDS_MeshNode* n4)
+{
+  const double sqrt = std::sqrt(2.0);
+  std::array<double, 4> tetScaledJacobian{};
+  tetScaledJacobian[0] = getTetraScaledJacobian(n0, n1, n3, n4);
+  tetScaledJacobian[1] = getTetraScaledJacobian(n1, n2, n0, n4);
+  tetScaledJacobian[2] = getTetraScaledJacobian(n2, n3, n1, n4);
+  tetScaledJacobian[3] = getTetraScaledJacobian(n3, n0, n2, n4);
+
+  auto minEntry = std::min_element(tetScaledJacobian.begin(), tetScaledJacobian.end());
+
+  double scaledJacobian = (*minEntry) * 2.0/sqrt;
+  return scaledJacobian < 1.0 ? scaledJacobian : 1.0 - (scaledJacobian - 1.0);
+}
+
+
+
+//=======================================================================
+//function : getHexaScaledJacobian
+//purpose  : Evaluate the scaled jacobian on the eight vertices of the hexahedron and return the minimal registered value
+//remark   : Follow the reference numeration described at the top of the class.
+//=======================================================================
+static double getHexaScaledJacobian(const SMDS_MeshNode* n0,
+                                    const SMDS_MeshNode* n1,
+                                    const SMDS_MeshNode* n2,
+                                    const SMDS_MeshNode* n3,
+                                    const SMDS_MeshNode* n4,
+                                    const SMDS_MeshNode* n5,
+                                    const SMDS_MeshNode* n6,
+                                    const SMDS_MeshNode* n7)
+{
+  // Scaled jacobian is an scalar quantity measuring the deviation of the geometry from the perfect geometry
+  // Get the coordinates
+  XYZ p0( n0 );
+  XYZ p1( n1 );
+  XYZ p2( n2 );
+  XYZ p3( n3 );
+  XYZ p4( n4 );
+  XYZ p5( n5 );
+  XYZ p6( n6 );
+  XYZ p7( n7 );
+
+  // Define the edges connecting the nodes
+  XYZ L0  = (p1-p0).Normalize();
+  XYZ L1  = (p2-p1).Normalize();
+  XYZ L2  = (p3-p2).Normalize();
+  XYZ L3  = (p3-p0).Normalize();
+  XYZ L4  = (p4-p0).Normalize();
+  XYZ L5  = (p5-p1).Normalize();
+  XYZ L6  = (p6-p2).Normalize();
+  XYZ L7  = (p7-p3).Normalize();
+  XYZ L8  = (p5-p4).Normalize();
+  XYZ L9  = (p6-p5).Normalize();
+  XYZ L10 = (p7-p6).Normalize();
+  XYZ L11 = (p7-p4).Normalize();
+  XYZ X0  = (p1-p0+p2-p3+p6-p7+p5-p4).Normalize();
+  XYZ X1  = (p3-p0+p2-p1+p7-p4+p6-p5).Normalize();
+  XYZ X2  = (p4-p0+p7-p3+p5-p1+p6-p2).Normalize();
+
+  std::array<double, 9> scaledJacobian{};
+  //Scaled jacobian of nodes following their numeration
+  scaledJacobian[0] =  L4.Crossed( L3).Dot( L0 );   // For L0
+  scaledJacobian[1] =  L5.Crossed(-L0).Dot( L1 );   // For L1
+  scaledJacobian[2] =  L6.Crossed(-L1).Dot( L2 );   // For L2
+  scaledJacobian[3] =  L7.Crossed(-L2).Dot(-L3 );   // For L3
+  scaledJacobian[4] = -L4.Crossed( L8).Dot( L11 );  // For L11
+  scaledJacobian[5] = -L5.Crossed( L9).Dot(-L8 );   // For L8
+  scaledJacobian[6] = -L6.Crossed(L10).Dot(-L9 );   // For L9
+  scaledJacobian[7] = -L7.Crossed(-L11).Dot(-L10 ); // For L10
+  scaledJacobian[8] =  X2.Crossed( X1).Dot( X0 );   // For principal axes
+
+  auto minScaledJacobian = std::min_element(scaledJacobian.begin(), scaledJacobian.end());
+  return *minScaledJacobian;
+}
+
+
+//=======================================================================
+//function : getTetraNormalizedJacobian
+//purpose  : Return the jacobian of the tetrahedron based on normalized vectors
+//=======================================================================
+static double getTetraNormalizedJacobian(const SMDS_MeshNode* n0,
+                                          const SMDS_MeshNode* n1,
+                                          const SMDS_MeshNode* n2,
+                                          const SMDS_MeshNode* n3)
+{
+  const double sqrt = std::sqrt(2.0);
+  // Get the coordinates
+  XYZ p0( n0 );
+  XYZ p1( n1 );
+  XYZ p2( n2 );
+  XYZ p3( n3 );
+  // Define the normalized edges connecting the nodes
+  XYZ L0 = (p1-p0).Normalize();
+  XYZ L2 = (p2-p0).Normalize(); // invert the definition of doc to get the proper orientation of the crossed product
+  XYZ L3 = (p3-p0).Normalize();
+  return L2.Crossed( L0 ).Dot( L3 );
+}
+
+//=======================================================================
+//function : getPentaScaledJacobian
+//purpose  : Evaluate the scaled jacobian on the pentahedron based on decomposed tetrahedrons
+//=======================================================================
+/*
+//            + N1
+//           /|\
+//          / | \
+//         /  |  \
+//        /   |   \
+//    N0 +---------+ N2
+//       |    |    |               NUMERATION RERENCE FOLLOWING POSITIVE RIGHT HAND RULE
+//       |    + N4 |
+//       |   / \   |               PENTAHEDRON
+//       |  /   \  |
+//       | /     \ |
+//       |/       \|
+//    N3 +---------+ N5
+//
+//          N1
+//          +
+//          |\
+//         /| \
+//        / |  \
+//    N0 +--|---+ N2               TETRAHEDRON ASSOCIATED TO N0
+//       \  |   /                  Numeration passed to getTetraScaledJacobian
+//        \ |  /                   N0=N0; N1=N2; N2=N3; N3=N1
+//         \| /
+//          |/
+//          +
+//          N3
+//
+//           N1
+//           +
+//          /|\
+//         / | \
+//        /  |  \
+//    N2 +---|---+ N5             TETRAHEDRON ASSOCIATED TO N2
+//       \   |  /                 Numeration passed to getTetraScaledJacobian
+//        \  | /                  N0=N2; N1=N5; N2=N0; N3=N1
+//         \ |/
+//          \|
+//           +
+//           N0
+//
+//           N4
+//           +
+//          /|\
+//         / | \
+//        /  |  \
+//    N3 +---|---+ N0             TETRAHEDRON ASSOCIATED TO N3
+//       \   |   /                Numeration passed to getTetraScaledJacobian
+//        \  |  /                 N0=N3; N1=N0; N2=N5; N3=N4
+//         \ | /
+//          \|/
+//           +
+//           N5
+//
+//           N3
+//           +
+//          /|\
+//         / | \
+//        /  |  \
+//    N1 +---|---+ N2             TETRAHEDRON ASSOCIATED TO N1
+//       \   |   /                Numeration passed to getTetraScaledJacobian
+//        \  |  /                 N0=N1; N1=N2; N2=N0; N3=N3
+//         \ | /
+//          \|/
+//           +
+//           N0
+//
+//          ...
+*/
+static double getPentaScaledJacobian(const SMDS_MeshNode* n0,
+                                     const SMDS_MeshNode* n1,
+                                     const SMDS_MeshNode* n2,
+                                     const SMDS_MeshNode* n3,
+                                     const SMDS_MeshNode* n4,
+                                     const SMDS_MeshNode* n5)
+{
+  std::array<double, 6> scaledJacobianOfReferenceTetra{};
+  scaledJacobianOfReferenceTetra[0] = getTetraNormalizedJacobian(n0, n2, n3, n1);  // For n0
+  scaledJacobianOfReferenceTetra[1] = getTetraNormalizedJacobian(n2, n5, n0, n1);  // For n2
+  scaledJacobianOfReferenceTetra[2] = getTetraNormalizedJacobian(n3, n0, n5, n4);  // For n3
+  scaledJacobianOfReferenceTetra[3] = getTetraNormalizedJacobian(n5, n3, n2, n4);  // For n5
+  scaledJacobianOfReferenceTetra[4] = getTetraNormalizedJacobian(n1, n2, n0, n3);  // For n1
+  scaledJacobianOfReferenceTetra[5] = getTetraNormalizedJacobian(n4, n3, n5, n2);  // For n4
+
+  auto minScaledJacobian = std::min_element(scaledJacobianOfReferenceTetra.begin(), scaledJacobianOfReferenceTetra.end());
+  double minScalJac = (*minScaledJacobian)* 2.0 / std::sqrt(3.0);
+
+  if (minScalJac > 0)
+    return std::min(minScalJac, std::numeric_limits<double>::max());
+
+  return std::max(minScalJac, -std::numeric_limits<double>::max());
+}
+
+//=======================================================================
+//function : getHexaPrismScaledJacobian
+//purpose  : Evaluate the scaled jacobian on the hexaprism by decomposing the geometry into three 1hexa + 2 pentahedrons
+//=======================================================================
+static double getHexaPrismScaledJacobian(const SMDS_MeshNode* n0,
+                                          const SMDS_MeshNode* n1,
+                                          const SMDS_MeshNode* n2,
+                                          const SMDS_MeshNode* n3,
+                                          const SMDS_MeshNode* n4,
+                                          const SMDS_MeshNode* n5,
+                                          const SMDS_MeshNode* n6,
+                                          const SMDS_MeshNode* n7,
+                                          const SMDS_MeshNode* n8,
+                                          const SMDS_MeshNode* n9,
+                                          const SMDS_MeshNode* n10,
+                                          const SMDS_MeshNode* n11)
+{
+  // The Pentahedron from the left
+  // n0=n0; n1=n1; n2=n2; n3=n6; n4=n7, n5=n8;
+  double scaledJacobianPentleft = getPentaScaledJacobian( n0, n1, n2, n6, n7, n8 );
+  // The core Hexahedron
+  // n0=n0; n1=n2, n2=n3; n3=n5; n4=n6; n5=n8; n6=n9; n7=n11
+  double scaledJacobianHexa     = getHexaScaledJacobian( n0, n2, n3, n5, n6, n8, n9, n11 );
+  // The Pentahedron from the right
+  // n0=n5; n1=n4; n2=n3; n3=n11; n4=n10; n5=n9
+  double scaledJacobianPentright = getPentaScaledJacobian( n5, n4, n3, n11, n10, n9 );
+
+  return std::min( scaledJacobianHexa, std::min( scaledJacobianPentleft, scaledJacobianPentright ) );
+}
+
+//=======================================================================
+//function : GetScaledJacobian
+//purpose  : Return element Scaled Jacobian using the generic definition given
+//            in https://gitlab.kitware.com/third-party/verdict/-/blob/master/SAND2007-2853p.pdf
+//=======================================================================
+
+double SMDS_VolumeTool::GetScaledJacobian() const
+{
+  // For Tetra, call directly the getTetraScaledJacobian
+  double scaledJacobian = 0.;
+
+  VolumeType type = GetVolumeType();
+  switch (type)
+  {
+  case TETRA:
+  case QUAD_TETRA:
+    scaledJacobian = getTetraScaledJacobian( myVolumeNodes[0], myVolumeNodes[1], myVolumeNodes[2], myVolumeNodes[3] );
+    break;
+  case HEXA:
+  case QUAD_HEXA:
+    scaledJacobian = getHexaScaledJacobian( myVolumeNodes[0], myVolumeNodes[1], myVolumeNodes[2], myVolumeNodes[3],
+                                            myVolumeNodes[4], myVolumeNodes[5], myVolumeNodes[6], myVolumeNodes[7] );
+    break;
+  case PYRAM:
+  case QUAD_PYRAM:
+    scaledJacobian = getPyramidScaledJacobian( myVolumeNodes[0], myVolumeNodes[1], myVolumeNodes[2], myVolumeNodes[3], myVolumeNodes[4] );
+    break;
+  case PENTA:
+  case QUAD_PENTA:
+    scaledJacobian = getPentaScaledJacobian( myVolumeNodes[0], myVolumeNodes[1],
+                                             myVolumeNodes[2], myVolumeNodes[3],
+                                             myVolumeNodes[4], myVolumeNodes[5] );
+    break;
+  case HEX_PRISM:
+    scaledJacobian = getHexaPrismScaledJacobian( myVolumeNodes[0], myVolumeNodes[1], myVolumeNodes[2], myVolumeNodes[3],
+                                                 myVolumeNodes[4], myVolumeNodes[5], myVolumeNodes[6], myVolumeNodes[7],
+                                                 myVolumeNodes[8], myVolumeNodes[9], myVolumeNodes[10], myVolumeNodes[11]);
+    break;
+  default:
+    break;
+  }
+
+  return scaledJacobian;
+}
+
+
 //=======================================================================
 //function : GetBaryCenter
-//purpose  : 
+//purpose  :
 //=======================================================================
 
 bool SMDS_VolumeTool::GetBaryCenter(double & X, double & Y, double & Z) const
@@ -1108,13 +1476,16 @@ bool SMDS_VolumeTool::IsFaceExternal( int faceIndex ) const
       setFace( iF );
       links2.clear();
       ori = 0;
-      for ( int i = 0; i < myCurFace.myNbNodes && !ori; ++i )
+      // set ori and fill links2 with ALL links of face
+      for ( int i = 0; i < myCurFace.myNbNodes; ++i )
       {
         NLink link( myCurFace.myNodes[i], myCurFace.myNodes[i+1] );
-        std::map<Link, int>::const_iterator l2o = myFwdLinks.find( link );
-        if ( l2o != myFwdLinks.end() )
-          ori = link.myOri * l2o->second * -1;
         links2.push_back( link );
+        if (!ori) {
+          std::map<Link, int>::const_iterator l2o = myFwdLinks.find( link );
+          if ( l2o != myFwdLinks.end() )
+            ori = link.myOri * l2o->second * -1;
+        }
       }
       if ( ori ) // one more facet oriented
       {
@@ -1248,6 +1619,60 @@ bool SMDS_VolumeTool::GetFaceBaryCenter (int faceIndex, double & X, double & Y, 
   return true;
 }
 
+//================================================================================
+/*!
+ * \brief Check that all the faces in a polyhedron follow the same orientation
+ * \remark there is no differentiation for outward and inward face orientation.
+ */
+//================================================================================
+bool SMDS_VolumeTool::AllFacesSameOriented() const
+{
+  SMDS_VolumeTool* me = const_cast< SMDS_VolumeTool* > ( this );
+  bool validOrientation = true;
+  std::map<Link, std::vector<int>> collectLinksOrientations;
+  me->myFwdLinks.clear();
+  for ( int faceId = 0; faceId < NbFaces(); ++faceId )
+  {
+    me->setFace( faceId );
+    myExternalFaces = false;
+
+    // Build the links
+    for ( int i = 0; i < myCurFace.myNbNodes; ++i )
+    {
+      NLink link( myCurFace.myNodes[i], myCurFace.myNodes[i+1] );
+      std::map<Link, int>::const_iterator foundLink = myFwdLinks.find( link );
+
+      if ( foundLink == myFwdLinks.end() )
+        me->myFwdLinks.insert( make_pair( link, link.myOri ));
+
+      collectLinksOrientations[ link ].push_back( link.myOri );
+    }
+  }
+
+  // Check duality of the orientations
+  std::map<Link, std::vector<int>>::const_iterator theLinks;
+  for ( theLinks = collectLinksOrientations.begin(); theLinks != collectLinksOrientations.end(); theLinks++ )
+  {
+    if ( theLinks->second.size() == 2 ) // 99% of the cases there are 2 faces per link
+    {
+      if ( 1 != -1*theLinks->second[0]*theLinks->second[1] )
+        return false;
+      continue;
+    }
+
+    if ( theLinks->second.size() % 2 != 0 )// Dont treat uneven number of links
+      continue;
+
+    // In the other 1% of the cases we count the number occurrence and check that they match
+    int minusOne  = std::count( theLinks->second.begin(), theLinks->second.end(), -1 );
+    int plusOne   = std::count( theLinks->second.begin(), theLinks->second.end(),  1 );
+    if ( minusOne != plusOne )
+      return false;
+  }
+
+  return validOrientation;
+}
+
 //=======================================================================
 //function : GetFaceArea
 //purpose  : Return face area
@@ -1304,6 +1729,16 @@ int SMDS_VolumeTool::GetCenterNodeIndex( int faceIndex ) const
       return faceIndex + 19;
     }
   }
+  else if (myAllFacesNbNodes && myVolumeNodes.size() == 18) // element with 18 nodes
+  {
+    switch (faceIndex) {
+      case 2: return 15;
+      case 3: return 16;
+      case 4: return 17;
+      default:
+        return -2;
+    }
+  }
   return -1;
 }
 
@@ -1326,6 +1761,7 @@ int SMDS_VolumeTool::GetOppFaceIndex( int faceIndex ) const
     switch ( myVolumeNodes.size() ) {
     case 6:
     case 15:
+    case 18:
       if ( faceIndex == 0 || faceIndex == 1 )
         ind = 1 - faceIndex;
       break;
@@ -1671,7 +2107,7 @@ double SMDS_VolumeTool::MaxLinearSize2() const
   int iQ = myVolume->IsQuadratic() ? 2 : 1;
 
   SaveFacet savedFacet( myCurFace );
-  
+
   // it seems that compute distance twice is faster than organization of a sole computing
   myCurFace.myIndex = -1;
   for ( int iF = 0; iF < myNbFaces; ++iF )
@@ -1719,7 +2155,7 @@ bool SMDS_VolumeTool::IsFreeFace( int faceIndex, const SMDS_MeshElement** otherV
         break;
     if ( iN == nbN ) // nbN nodes are shared with vol
     {
-      // if ( vol->IsPoly() || vol->NbFaces() > 6 ) // vol is polyhed or hex prism 
+      // if ( vol->IsPoly() || vol->NbFaces() > 6 ) // vol is polyhed or hex prism
       // {
       //   int nb = myCurFace.myNbNodes;
       //   if ( myVolume->GetEntityType() != vol->GetEntityType() )
@@ -1734,6 +2170,52 @@ bool SMDS_VolumeTool::IsFreeFace( int faceIndex, const SMDS_MeshElement** otherV
   }
   if ( otherVol ) *otherVol = 0;
   return isFree;
+}
+
+//================================================================================
+/*!
+ * \brief Check that only one volume is built on the face nodes
+ *        Different to IsFreeFace function, all nodes of the face are checked.
+ *        For non conforming meshes, the face that is not conform with the neighbor
+ *        will be identify as free.
+ */
+//================================================================================
+
+bool SMDS_VolumeTool::IsFreeFaceCheckAllNodes( int faceIndex, const SMDS_MeshElement** otherVol/*=0*/ ) const
+{
+  const bool isFree = true;
+
+  if ( !setFace( faceIndex ))
+    return !isFree;
+
+  const SMDS_MeshNode** nodes = GetFaceNodes( faceIndex );
+
+  const int  di = myVolume->IsQuadratic() ? 2 : 1;
+  const int nbN = myCurFace.myNbNodes/di;
+  std::vector<bool> allNodesCoincideWithNeighbor(nbN,false);
+
+  for (int nodeId = 0; nodeId < nbN; nodeId++)
+  {
+    SMDS_ElemIteratorPtr eIt = nodes[nodeId]->GetInverseElementIterator( SMDSAbs_Volume );
+    int count = 0;
+    while ( eIt->more() )
+    {
+      const SMDS_MeshElement* vol = eIt->next();
+      if ( vol == myVolume )
+        continue;
+      else
+      {
+        count++;
+      }
+    }
+
+    if ( count==0 /*free corner in the face means free face*/)
+    {
+      if ( otherVol ) *otherVol = 0;
+      return true;
+    }
+  }
+  return IsFreeFace( faceIndex, otherVol );
 }
 
 //================================================================================
@@ -1792,7 +2274,7 @@ bool SMDS_VolumeTool::IsFreeFaceAdv( int faceIndex, const SMDS_MeshElement** oth
         {
           // a volume shares the whole facet
           if ( otherVol ) *otherVol = vNbIt->first;
-          return !isFree; 
+          return !isFree;
         }
         ++vNbIt;
         continue;
@@ -1842,7 +2324,7 @@ bool SMDS_VolumeTool::IsFreeFaceAdv( int faceIndex, const SMDS_MeshElement** oth
 //       if ( nbSharedLinks == nbFaceNodes )
 //         return !free; // is not free
 //       if ( nbFaceNodes == 4 ) {
-//         // check traingle parts 1 & 3
+//         // check triangle parts 1 & 3
 //         if ( isShared[1] && isShared[3] )
 //           return !free; // is not free
 //         // check triangle parts 0 & 2;
@@ -1921,7 +2403,7 @@ int SMDS_VolumeTool::GetFaceIndex( const std::set<const SMDS_MeshNode*>& theFace
 
 //=======================================================================
 //function : setFace
-//purpose  : 
+//purpose  :
 //=======================================================================
 
 bool SMDS_VolumeTool::setFace( int faceIndex ) const
@@ -2022,6 +2504,7 @@ bool SMDS_VolumeTool::setFace( int faceIndex ) const
         myMaxFaceNbNodes         = sizeof(QuadPyram_F[0])/sizeof(QuadPyram_F[0][0]);
         break;
       case 15:
+      case 18:
         myAllFacesNodeIndices_F  = &QuadPenta_F [0][0];
         //myAllFacesNodeIndices_FE = &QuadPenta_FE[0][0];
         myAllFacesNodeIndices_RE = &QuadPenta_RE[0][0];
@@ -2088,7 +2571,8 @@ SMDS_VolumeTool::VolumeType SMDS_VolumeTool::GetType(int nbNodes)
   case 8: return HEXA;
   case 10: return QUAD_TETRA;
   case 13: return QUAD_PYRAM;
-  case 15: return QUAD_PENTA;
+  case 15:
+  case 18: return QUAD_PENTA;
   case 20:
   case 27: return QUAD_HEXA;
   case 12: return HEX_PRISM;
@@ -2141,7 +2625,7 @@ int SMDS_VolumeTool::NbCornerNodes(VolumeType type)
   }
   return 0;
 }
-  // 
+  //
 
 //=======================================================================
 //function : GetFaceNodesIndices

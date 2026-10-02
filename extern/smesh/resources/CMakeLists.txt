@@ -1,4 +1,4 @@
-# Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 #
 # Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 # CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -34,10 +34,11 @@ SET(SMESH_RESOURCES_FILES
   mesh_0D_elem.png
   mesh_0D_on_all_nodes.png
   mesh_2d_from_3d.png
+  mesh_2d_from_3d_elements.png
   mesh_add.png
   mesh_add_sub.png
   mesh_algo_hexa.png
-  mesh_algo_mefisto.png
+  mesh_algo_tri.png
   mesh_algo_quad.png
   mesh_algo_regular.png
   mesh_algo_tetra.png
@@ -60,6 +61,7 @@ SET(SMESH_RESOURCES_FILES
   mesh_conv_to_quad.png
   mesh_cutGroups.png
   mesh_cutquad.png
+  mesh_create_dual_mesh.png
   mesh_deflection.png
   mesh_deleteGroups.png
   mesh_diagonal.png
@@ -135,6 +137,7 @@ SET(SMESH_RESOURCES_FILES
   mesh_pattern.png
   mesh_pentahedron.png
   mesh_plugins_meshcut.png
+  mesh_plugins_boolean.png
   mesh_plus.png
   mesh_points.png
   mesh_polygon.png
@@ -167,6 +170,7 @@ SET(SMESH_RESOURCES_FILES
   mesh_renumbering_nodes.png
   mesh_revolution.png
   mesh_rotation.png
+  mesh_scaled_jacobian.png
   mesh_sew_bordertoside.png
   mesh_sew_conform_freeborders.png
   mesh_sew_freeborders.png
@@ -187,7 +191,7 @@ SET(SMESH_RESOURCES_FILES
   mesh_tree_algo_0D.png
   mesh_tree_algo_existing_2D.png
   mesh_tree_algo_hexa.png
-  mesh_tree_algo_mefisto.png
+  mesh_tree_algo_tri.png
   mesh_tree_algo_polygon.png
   mesh_tree_algo_prism.png
   mesh_tree_algo_projection_2d.png

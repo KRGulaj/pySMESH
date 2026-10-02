@@ -40,6 +40,10 @@
       <translation>タイプで要素をグループ化</translation>
     </message>
     <message>
+      <source>STRUCTUREDCGNS</source>
+      <translation>CGNS 構造化バージョンのエクスポート</translation>
+    </message>
+    <message>
       <source>GMF_ASCII_FILES_FILTER</source>
       <translation>GMFアスキーファイル</translation>
     </message>
@@ -70,6 +74,10 @@
     <message>
       <source>NODE_CONNECTIVITY_NB</source>
       <translation>節点接続番号</translation>
+    </message>
+    <message>
+      <source>SCALED_JACOBIAN</source>
+      <translation>スケーリングされたヤコビアン</translation>
     </message>
     <message>
       <source>FREE_EDGES</source>
@@ -242,6 +250,10 @@
     <message>
       <source>MEN_ADV_INFO</source>
       <translation>メッシュに関する情報</translation>
+    </message>
+    <message>
+        <source>MEN_RELOAD_FROM_FILE</source>
+        <translation>Reload from file</translation>
     </message>
     <message>
       <source>MEN_ALL</source>
@@ -720,6 +732,14 @@
       <translation>GMFファイル</translation>
     </message>
     <message>
+        <source>MEN_IMPORT_MESHIO</source>
+        <translation>他の形式</translation>
+    </message>
+    <message>
+        <source>MEN_EXPORT_MESHIO</source>
+        <translation>他の形式</translation>
+    </message>
+    <message>
       <source>MEN_MERGE</source>
       <translation>節点の結合</translation>
     </message>
@@ -1120,8 +1140,16 @@
       <translation>ボリューム</translation>
     </message>
     <message>
+      <source>MEN_SCALED_JACOBIAN</source>
+      <translation>スケーリングされたヤコビアン</translation>
+    </message>
+    <message>
       <source>MEN_WARP</source>
       <translation>変形の角度</translation>
+    </message>
+    <message>
+      <source>MEN_WARP_3D</source>
+      <translation>3Dワープ</translation>
     </message>
     <message>
       <source>MEN_WHAT_IS</source>
@@ -1732,6 +1760,10 @@
       <translation>メッシュをエクスポートすることができません。ディスクの空き領域を確認してください。</translation>
     </message>
     <message>
+        <source>SMESH_EXPORT_FAILED_SHORT</source>
+        <translation>メッシュのエクスポートに失敗しました。</translation>
+    </message>
+    <message>
       <source>SMESH_EXPORT_MED_DUPLICATED_GRP</source>
       <translation>「%1」メッシュ内で重複するグループの名前です。エクスポートをキャンセルすることができ、名前の変更、結果の MED ファイル名に非グループの場合は研究の名前を一致しません。続行しますか。</translation>
     </message>
@@ -1750,6 +1782,22 @@
     <message>
       <source>SMESH_EXPORT_MED_MESH_NAMES_COLLISION</source>
       <translation>選択したファイルには既に次の名を持つメッシュが含まれています: %1 結果ファイルが正しくない可能性があります。ファイルを上書きしますか。</translation>
+    </message>
+    <message>
+      <source>SMESH_EXPORT_MESHIO_ONLY_MESH</source>
+      <translation>現在の実装では、中間 MED ファイルを介したエクスポートが使用されます。
+ただし、mesio は複数のメッシュを含む MED ファイルの読み取りをサポートしていません。
+選択したメッシュは別のファイルに保存されます。
+
+続けたいですか？</translation>
+    </message>
+    <message>
+        <source>SMESH_MESHIO_NOT_INSTALLED</source>
+        <translation>メシオはインストールされていません！
+操作はキャンセルされます。
+
+次のコマンドで mesio をインストールしてみます。
+pip install meshio[all]</translation>
     </message>
     <message>
       <source>EXPORT_NOT_SUPPORTED</source>
@@ -1978,6 +2026,14 @@
     <message>
       <source>SMESH_LOGARITHMIC_SCALARBAR</source>
       <translation>対数</translation>
+    </message>
+    <message>
+        <source>SMESH_TRESHOLD_SCALARBAR</source>
+        <translation>しきい値</translation>
+    </message>
+    <message>
+        <source>SMESH_WIREFRAME_OFF_SCALARBAR</source>
+        <translation>ワイヤーフレーム オフ</translation>
     </message>
     <message>
       <source>SMESH_MAKE_GROUPS</source>
@@ -2928,6 +2984,10 @@
       <translation>メッシュ上の基本的な情報を得る</translation>
     </message>
     <message>
+        <source>STB_RELOAD_FROM_FILE</source>
+        <translation>Reload original mesh from file</translation>
+    </message>
+    <message>
       <source>STB_ALL</source>
       <translation>すべて</translation>
     </message>
@@ -3140,6 +3200,10 @@
       <translation>UNV形式でエクスポート</translation>
     </message>
     <message>
+      <source>STB_EXPORT_MESHIO</source>
+      <translation>GMSHまたはMESHIOを介して別の形式にエクスポートする</translation>
+    </message>
+    <message>
       <source>STB_EXTRUSION</source>
       <translation>Extrusion</translation>
     </message>
@@ -3254,6 +3318,10 @@
     <message>
       <source>STB_IMPORT_GMF</source>
       <translation>インポート組み換え</translation>
+    </message>
+    <message>
+      <source>STB_IMPORT_MESHIO</source>
+      <translation>GMSHまたはMESHIO経由でファイルをインポートする</translation>
     </message>
     <message>
       <source>STB_GMF</source>
@@ -3512,12 +3580,20 @@
       <translation>ボリューム</translation>
     </message>
     <message>
+      <source>STB_SCALED_JACOBIAN</source>
+      <translation>スケーリングされたヤコビアン</translation>
+    </message>
+    <message>
       <source>STB_VOLUME_3D</source>
       <translation>ボリューム</translation>
     </message>
     <message>
       <source>STB_WARP</source>
       <translation>変形の角度</translation>
+    </message>
+    <message>
+      <source>STB_WARP_3D</source>
+      <translation>3Dワープ</translation>
     </message>
     <message>
       <source>STB_WHAT_IS</source>
@@ -3602,6 +3678,10 @@
     <message>
       <source>TOP_ADV_INFO</source>
       <translation>メッシュに関する情報</translation>
+    </message>
+    <message>
+        <source>TOP_RELOAD_FROM_FILE</source>
+        <translation>Reload from file</translation>
     </message>
     <message>
       <source>TOP_ALL</source>
@@ -4176,12 +4256,20 @@
       <translation>ボリューム</translation>
     </message>
     <message>
+      <source>TOP_SCALED_JACOBIAN</source>
+      <translation>スケーリングされたヤコビアン</translation>
+    </message>
+    <message>
       <source>TOP_VOLUME_3D</source>
       <translation>ボリューム</translation>
     </message>
     <message>
       <source>TOP_WARP</source>
       <translation>変形の角度</translation>
+    </message>
+    <message>
+      <source>TOP_WARP_3D</source>
+      <translation>3Dワープ</translation>
     </message>
     <message>
       <source>TOP_WHAT_IS</source>
@@ -4206,6 +4294,10 @@
     <message>
       <source>WARP_ELEMENTS</source>
       <translation>変形</translation>
+    </message>
+    <message>
+      <source>WARP_3D_ELEMENTS</source>
+      <translation>3D 変形</translation>
     </message>
     <message>
       <source>MEN_FILE_INFO</source>
@@ -5913,7 +6005,7 @@
     </message>
     <message>
       <source>VOLUME_3D</source>
-      <translation>ボリューム</translation>
+      <translation>スケーリングされたヤコビアン</translation>
     </message>
     <message>
       <source>WARPING</source>
@@ -6672,6 +6764,14 @@
     <message>
       <source>ALL_DOMAINS</source>
       <translation>すべてのドメイン</translation>
+    </message>
+    <message>
+      <source>ADVANCED_OPTIONS</source>
+      <translation>詳細オプション</translation>
+    </message>
+    <message>
+      <source>AVOID_GENERATING_OVER_CONSTRAINED_VOLUMES</source>
+      <translation>過剰に制約されたボリュームの生成を避ける</translation>
     </message>
   </context>
   <context>
@@ -8218,4 +8318,12 @@
       <translation>オプション値</translation>
     </message>
   </context>
+<context>
+  <name>SMESHGUI_SpinBoxForbiddendRange</name>
+  <message>
+      <source>VALID_RANGE_NOVAR_MSG</source>
+      <translation>範囲内の浮動小数点値を指定します [%1; %2) U (%3; %4]
+%5 桁の精度</translation>
+  </message>
+</context>
 </TS>

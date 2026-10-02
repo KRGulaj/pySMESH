@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -20,6 +20,7 @@
 # --- options ---
 # additional include directories
 INCLUDE_DIRECTORIES(
+  ${QT_INCLUDES}
   ${KERNEL_INCLUDE_DIRS}
   ${GEOM_INCLUDE_DIRS}
   ${OpenCASCADE_INCLUDE_DIR}
@@ -69,6 +70,7 @@ SET(_link_LIBRARIES
   MeshDriverGMF
   ${DriverCGNS_LIB}
   ${MEDCoupling_medloader}
+  Qt5::Core
 )
 
 # --- headers ---
@@ -77,6 +79,8 @@ SET(_link_LIBRARIES
 SET(SMESHimpl_HEADERS
   SMESH_Gen.hxx
   SMESH_Mesh.hxx
+  SMESH_SequentialMesh.hxx
+  SMESH_ParallelMesh.hxx
   SMESH_subMesh.hxx
   SMESH_subMeshEventListener.hxx
   SMESH_Hypothesis.hxx
@@ -90,6 +94,9 @@ SET(SMESHimpl_HEADERS
   SMESH_SMESH.hxx
   MG_ADAPT.hxx
   SMESH_Homard.hxx
+  SMESH_DriverMesh.hxx
+  SMESH_DriverShape.hxx
+  SMESH_MeshLocker.hxx
 )
 
 # --- sources ---
@@ -99,6 +106,8 @@ SET(SMESHimpl_SOURCES
   memoire.h
   SMESH_Gen.cxx
   SMESH_Mesh.cxx
+  SMESH_SequentialMesh.cxx
+  SMESH_ParallelMesh.cxx
   SMESH_subMesh.cxx
   SMESH_Hypothesis.cxx
   SMESH_Algo.cxx
@@ -110,6 +119,9 @@ SET(SMESHimpl_SOURCES
   SMESH_MesherHelper.cxx
   MG_ADAPT.cxx
   SMESH_Homard.cxx
+  SMESH_DriverMesh.cxx
+  SMESH_DriverShape.cxx
+  SMESH_MeshLocker.cxx
 )
 
 # --- rules ---
@@ -117,7 +129,7 @@ SET(SMESHimpl_SOURCES
 ADD_LIBRARY(SMESHimpl ${SMESHimpl_SOURCES})
 IF(WIN32)
   TARGET_COMPILE_OPTIONS(SMESHimpl PRIVATE /bigobj)
-  ADD_DEFINITIONS(-DNOMINMAX) 
+  ADD_DEFINITIONS(-DNOMINMAX)
 ENDIF(WIN32)
 
 TARGET_LINK_LIBRARIES(SMESHimpl ${_link_LIBRARIES} )

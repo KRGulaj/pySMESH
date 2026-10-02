@@ -1,4 +1,4 @@
-# Copyright (C) 2013-2022  EDF R&D
+# Copyright (C) 2013-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -21,7 +21,11 @@ import os
 import datetime
 import sys
 
-from qtsalome import QSqlQuery, QSqlDatabase
+if 'SALOME_USE_PYSIDE' in os.environ:
+  from PySide2.QtSql import QSqlQuery, QSqlDatabase
+else:
+  from PyQt5.Qt import QSqlQuery, QSqlDatabase
+
 from Base.tableMaillages  import TableMaillages
 from Base.tableMailleurs  import TableMailleurs
 from Base.tableMachines   import TableMachines

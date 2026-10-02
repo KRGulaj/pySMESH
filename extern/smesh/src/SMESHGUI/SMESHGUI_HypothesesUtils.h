@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -115,6 +115,8 @@ namespace SMESH
   bool RemoveHypothesisOrAlgorithmOnMesh( _PTR(SObject),
                                           SMESH::SMESH_Hypothesis_ptr );
 
+  SMESHGUI_EXPORT void UpdateViewer(SMESH::SMESH_Mesh_ptr);
+
   typedef std::vector<_PTR(SObject)> SObjectList;
   SMESHGUI_EXPORT
   SObjectList GetMeshesUsingAlgoOrHypothesis( SMESH::SMESH_Hypothesis_ptr );
@@ -123,7 +125,7 @@ namespace SMESH
   QString GetMessageOnAlgoStateErrors( const algo_error_array& );
 
   SMESHGUI_EXPORT
-  // name of proprty saving plug-in of a hypothesis
+  // name of property saving plug-in of a hypothesis
   inline const char* Plugin_Name() { return "PLUGIN_NAME"; }
 }
 

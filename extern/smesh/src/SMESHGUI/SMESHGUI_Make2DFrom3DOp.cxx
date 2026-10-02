@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -73,17 +73,16 @@ SMESHGUI_Make2DFrom3DDlg::SMESHGUI_Make2DFrom3DDlg( QWidget* parent )
   setWindowTitle( tr("CAPTION") );
 
   // mode
-  QGroupBox* aModeGrp = new QGroupBox( tr( "MODE" ), mainFrame() );
-  QHBoxLayout* aModeGrpLayout = new QHBoxLayout( aModeGrp );
+  myModeGrp = new QGroupBox( tr( "MODE" ), mainFrame() );
+  QHBoxLayout* aModeGrpLayout = new QHBoxLayout( myModeGrp );
   aModeGrpLayout->setMargin( MARGIN );
   aModeGrpLayout->setSpacing( SPACING );
-  my2dFrom3dRB = new QRadioButton( tr( "2D_FROM_3D" ), aModeGrp );
-  my1dFrom2dRB = new QRadioButton( tr( "1D_FROM_2D" ), aModeGrp );
+  my2dFrom3dRB = new QRadioButton( tr( "2D_FROM_3D" ), myModeGrp );
+  my1dFrom2dRB = new QRadioButton( tr( "1D_FROM_2D" ), myModeGrp );
   //my1dFrom3dRB = new QRadioButton( tr( "1D_FROM_3D" ), aModeGrp );
   aModeGrpLayout->addWidget( my2dFrom3dRB );
   aModeGrpLayout->addWidget( my1dFrom2dRB );
   //aModeGrpLayout->addWidget( my1dFrom3dRB );
-
 //   // Groups of mesh faces
 //   setObjectPixmap( "SMESH", tr( "ICON_SELECT" ) );
 //   createObject( tr( "Groups" ), mainFrame(), Groups );
@@ -116,7 +115,7 @@ SMESHGUI_Make2DFrom3DDlg::SMESHGUI_Make2DFrom3DDlg( QWidget* parent )
   QGridLayout* aDlgLay = new QGridLayout( mainFrame() );
   aDlgLay->setMargin( 0 );
   aDlgLay->setSpacing( SPACING );
-  aDlgLay->addWidget( aModeGrp,     0, 0, 1, 3 );
+  aDlgLay->addWidget( myModeGrp,     0, 0, 1, 3 );
   aDlgLay->addWidget( objectWg( MeshOrGroups,  Label ),   1, 0 );
   aDlgLay->addWidget( objectWg( MeshOrGroups,  Control ), 1, 1 );
   aDlgLay->addWidget( aTargetGrp,   2, 0, 1, 3 );
@@ -298,7 +297,7 @@ void SMESHGUI_Make2DFrom3DOp::selectionDone()
         names[i] = names[i].trimmed();
       myDlg->selectObject( names, types, ids );
 
-      // enable/desable "new mesh" button
+      // enable/disable "new mesh" button
       bool isMesh = true;
       for ( int i = 0; i < ids.count() && isMesh; ++i )
       {
@@ -409,6 +408,7 @@ bool SMESHGUI_Make2DFrom3DOp::compute2DMesh( QStringList& theEntryList )
   SUIT_OverrideCursor wc;
 
   bool ok = false;
+  bool toCreateAllElements = false;
   try {
     SMESH::Bnd_Dimension mode = myDlg->mode();
     QString meshName          = myDlg->needNewMesh() ? myDlg->getNewMeshName() : QString();
@@ -453,6 +453,7 @@ bool SMESHGUI_Make2DFrom3DOp::compute2DMesh( QStringList& theEntryList )
                                                                groupName.toUtf8().constData(),
                                                                meshName.toUtf8().constData(),
                                                                copyAll,
+                                                               toCreateAllElements,
                                                                groups,
                                                                newMesh.out(),
                                                                newGrp.out() );

@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -47,7 +47,7 @@ class SMDS_EXPORT SMDS_PolygonalFaceOfNodes : public SMDS_CellOfNodes
   virtual int NbEdges() const;
   virtual int NbFaces() const;
 
-  virtual void Print (std::ostream & OS) const;
+  virtual void Print (std::ostream & OS) const override;
 
   virtual const SMDS_MeshNode* GetNode(const int ind) const;
 

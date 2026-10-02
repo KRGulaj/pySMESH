@@ -155,6 +155,10 @@ Consider creating another hypothesis instead of using this one for this mesh/sub
         <translation>Distribution with table density</translation>
     </message>
     <message>
+        <source>SMESH_DISTR_BETALAW</source>
+        <translation>Distribution with Beta Law</translation>
+    </message>
+    <message>
         <source>SMESH_DISTR_TYPE</source>
         <translation>Type of distribution</translation>
     </message>
@@ -309,6 +313,10 @@ Consider creating another hypothesis instead of using this one for this mesh/sub
     <message>
         <source>SMESH_NB_SEGMENTS_SCALE_PARAM</source>
         <translation>Scale Factor</translation>
+    </message>
+    <message>
+        <source>SMESH_NB_SEGMENTS_BETA_PARAM</source>
+        <translation>Expansion coefficient</translation>
     </message>
     <message>
         <source>SMESH_NB_SEGMENTS_TITLE</source>
@@ -585,6 +593,14 @@ Consider creating another hypothesis instead of using this one for this mesh/sub
     <message>
         <source>USE_THRESHOLD_FOR_INTERNAL_FACES</source>
         <translation>Apply Threshold to Shared / Internal Faces</translation>
+    </message>
+    <message>
+        <source>SET_QUANTA</source>
+        <translation>Set Quanta</translation>
+    </message>
+    <message>
+        <source>QUANTA_VALUE</source>
+        <translation>Quanta Value</translation>
     </message>
     <message>
         <source>AXIS_X</source>

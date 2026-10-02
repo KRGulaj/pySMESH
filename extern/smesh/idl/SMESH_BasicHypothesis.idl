@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -26,10 +26,11 @@
 #ifndef _SMESH_BASICHYPOTHESIS_IDL_
 #define _SMESH_BASICHYPOTHESIS_IDL_
 
+#include "GEOM_Gen.idl"
+
 #include "SALOME_Exception.idl"
 #include "SMESH_Hypothesis.idl"
 #include "SMESH_Mesh.idl"
-
 /*!
  * StdMeshers: interfaces to standard hypotheses and algorithms
  */
@@ -99,12 +100,12 @@ module StdMeshers
      */
     void SetPreestimatedLength(in double length);
     /*!
-     * Sets boolean parameter enabling/desabling usage of length computed
+     * Sets boolean parameter enabling/disabling usage of length computed
      * basing on size of bounding box of shape to mesh
      */
     void SetUsePreestimatedLength(in boolean toUse);
     /*!
-     * Returns value of boolean parameter enabling/desabling usage of length computed
+     * Returns value of boolean parameter enabling/disabling usage of length computed
      * basing on size of bounding box of shape to mesh
      */
     boolean GetUsePreestimatedLength();
@@ -198,6 +199,18 @@ module StdMeshers
      * Returns <scale factor> parameter value
      */
     double GetScaleFactor()
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Sets <beta> coefficient for Beta Law distribution
+     */
+    void SetBeta(in double beta)
+      raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Returns <beta> coefficient for Beta Law distribution
+     */
+    double GetBeta()
       raises (SALOME::SALOME_Exception);
 
     /*!
@@ -574,7 +587,7 @@ module StdMeshers
    * interface of "ProjectionSource1D" hypothesis.
    * This hypothesis specifies a meshed edge to take a mesh pattern from
    * and optionally association of vertices between the source edge and a
-   * target one (where a hipothesis is assigned to)
+   * target one (where a hypothesis is assigned to)
    */
   interface StdMeshers_ProjectionSource1D : SMESH::SMESH_Hypothesis
   {
@@ -624,7 +637,7 @@ module StdMeshers
    * interface of "ProjectionSource2D" hypothesis.
    * This hypothesis specifies a meshed face to take a mesh pattern from
    * and optionally association of vertices between the source face and a
-   * target one (where a hipothesis is assigned to)
+   * target one (where a hypothesis is assigned to)
    */
   interface StdMeshers_ProjectionSource2D : SMESH::SMESH_Hypothesis
   {
@@ -681,7 +694,7 @@ module StdMeshers
    * interface of "ProjectionSource3D" hypothesis.
    * This hypothesis specifies a meshed shell or solid to take a mesh pattern from
    * and optionally association of vertices between the source shape and a
-   * target one (where a hipothesis is assigned to)
+   * target one (where a hypothesis is assigned to)
    */
   interface StdMeshers_ProjectionSource3D : SMESH::SMESH_Hypothesis
   {
@@ -933,7 +946,7 @@ module StdMeshers
    * interface of "Viscous Layers 2D" hypothesis.
    * This hypothesis specifies parameters of layers of quadrilaterals to build
    * near mesh boundary. This hypothesis can be used by several 2D algorithms:
-   * Mefisto, Quadrangle (mapping), NETGEN, BLSURF
+   * Quadrangle (mapping), NETGEN, BLSURF
    */
   interface StdMeshers_ViscousLayers2D : SMESH::SMESH_Hypothesis
   {
@@ -1061,6 +1074,15 @@ module StdMeshers
      */
     void SetToCreateFaces(in boolean toCreate);
     boolean GetToCreateFaces();
+    
+    /*!
+     * Enable creation of mesh faces.
+     */
+    void SetToUseQuanta(in boolean toUseQuanta);
+    boolean GetToUseQuanta();
+
+    void SetQuanta(in double quanta) raises (SALOME::SALOME_Exception);
+    double GetQuanta();
 
     /*!
      * Return axes at which a number of generated hexahedra is maximal
@@ -1126,13 +1148,6 @@ module StdMeshers
    * StdMeshers_CompositeSegment_1D: interface of "Composite side discretisation" algorithm
    */
   interface StdMeshers_CompositeSegment_1D : SMESH::SMESH_1D_Algo
-  {
-  };
-
-  /*!
-   * StdMeshers_MEFISTO_2D: interface of "Triangle (Mefisto)" algorithm
-   */
-  interface StdMeshers_MEFISTO_2D : SMESH::SMESH_2D_Algo
   {
   };
 
@@ -1253,6 +1268,39 @@ module StdMeshers
    */
   interface StdMeshers_Cartesian_3D : SMESH::SMESH_3D_Algo
   {
+  };
+  /*!
+   * StdMeshers_Cartesian_3D: interface of "ViscousLayerBuilder" algorithm
+   */
+  interface StdMeshers_ViscousLayerBuilder : SMESH::SMESH_2D_Algo
+  {
+    /*!
+     * Set faces to exclude from the definition of face to shrink
+     */
+    void SetIgnoreFaces(in SMESH::long_array faceIDs) raises (SALOME::SALOME_Exception);
+    // SMESH::long_array GetIgnoreFaces();
+
+    /*!
+     * Set faces either to exclude from treatment or to make the offset geometry on.
+     */
+    void SetFaces(in SMESH::long_array faceIDs,
+                  in boolean           toIgnore) raises (SALOME::SALOME_Exception);
+    // SMESH::long_array GetFaces();
+    // boolean           GetIsToIgnoreFaces();
+
+    void SetTotalThickness(in double thickness) raises (SALOME::SALOME_Exception);
+    void SetNumberLayers(in short numberOfLayers ) raises (SALOME::SALOME_Exception);
+    void SetStretchFactor(in double strechFactor ) raises (SALOME::SALOME_Exception);
+    void SetMethod( in VLExtrusionMethod how ) raises (SALOME::SALOME_Exception);
+    void SetGroupName(in string name) raises (SALOME::SALOME_Exception);
+
+    GEOM::GEOM_Object GetShrinkGeometry( in SMESH::SMESH_Mesh finalMesh, in GEOM::GEOM_Object theObject ) raises (SALOME::SALOME_Exception);
+
+    /*!
+     * Build the prismatic layer from the shrink mesh
+     */
+    boolean AddLayers( in SMESH::SMESH_Mesh sourceMesh, in SMESH::SMESH_Mesh finalMesh, in GEOM::GEOM_Object theObject ) raises (SALOME::SALOME_Exception);
+
   };
 
 };

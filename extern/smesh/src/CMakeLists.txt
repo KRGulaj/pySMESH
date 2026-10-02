@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -37,14 +37,11 @@ SET(SUBDIRS_COMMON
   SMESHClient
   SMESH_SWIG
   StdMeshers
+  StdMeshers.test
   StdMeshers_I
   SMESH_PY
   Tools
 )
-
-IF(SALOME_SMESH_ENABLE_MEFISTO)
-  SET(SUBDIRS_MEFISTO2 MEFISTO2)
-ENDIF(SALOME_SMESH_ENABLE_MEFISTO)
 
 ##
 # CGNS
@@ -70,7 +67,6 @@ ENDIF(SALOME_BUILD_GUI)
 
 SET(SUBDIRS
   ${SUBDIRS_COMMON}
-  ${SUBDIRS_MEFISTO2}
   ${SUBDIRS_CGNS}
   ${SUBDIRS_GUI}
 )

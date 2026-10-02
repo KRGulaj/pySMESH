@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -85,7 +85,7 @@ namespace MED
   GetGroupInfo(const TFamilyInfoSet& theFamilyInfoSet);
 
   //---------------------------------------------------------------
-  //! Read set of MED TIMESTAMPS groupped by corresponding MED FIELDS
+  //! Read set of MED TIMESTAMPS grouped by corresponding MED FIELDS
   MEDWRAPPER_EXPORT
   TFieldInfo2TimeStampInfoSet
   GetFieldInfo2TimeStampInfoSet(const PWrapper& theWrapper,

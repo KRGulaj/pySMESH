@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -147,6 +147,7 @@ private slots:
   void             onOptimalAxes(bool);
   void             onResetAxes(bool);
   void             onGridModeChanged(int);
+  void             onSetQuanta(bool);
 
 private:
   QLineEdit*                  myName;
@@ -155,6 +156,8 @@ private:
   QCheckBox*                  myCreateFaces;
   QCheckBox*                  myConsiderInternalFaces;
   QCheckBox*                  myUseThresholdForInternalFaces;
+  QCheckBox*                  mySetQuanta;
+  SMESHGUI_SpinBox*           myQuanta;
 
   StdMeshersGUI::GridAxisTab* myAxisTabs[3];
   QGroupBox*                  myFixedPointGrp;

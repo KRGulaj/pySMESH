@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -184,6 +184,7 @@ Driver_Mesh::Status DriverUNV_W_SMDS_Mesh::Perform()
           size_t aNbNodes = anElem->NbNodes();
           switch( aNbNodes ) {
           case 4:  aRec.fe_descriptor_id = 111; break;
+          case 5:  aRec.fe_descriptor_id = 312; break; // or 119?
           case 6:  aRec.fe_descriptor_id = 112; break;
           case 8:  aRec.fe_descriptor_id = 115; break;
           case 10: aRec.fe_descriptor_id = 118; break;

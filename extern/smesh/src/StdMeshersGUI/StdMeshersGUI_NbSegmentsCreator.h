@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -49,15 +49,16 @@ class QGridLayout;
 class QRadioButton;
 class StdMeshersGUI_SubShapeSelectorWdg;
 class StdMeshersGUI_PropagationHelperWdg;
+class SMESHGUI_SpinBoxForbiddendRange;
 
 typedef struct
 {
   int                 myNbSeg, myDistrType, myConv;
   double              myScale;
+  double              myBeta;
   SMESH::double_array myTable;
   QString             myName, myExpr;
   QString             myNbSegVarName, myScaleVarName;
-
 } NbSegmentsHypothesisData;
 
 class STDMESHERSGUI_EXPORT StdMeshersGUI_NbSegmentsCreator : public StdMeshersGUI_StdHypothesisCreator
@@ -87,6 +88,7 @@ private:
   SalomeApp_IntSpinBox*   myNbSeg;
   QtxComboBox*     myDistr;
   SMESHGUI_SpinBox*   myScale;
+  SMESHGUI_SpinBoxForbiddendRange*   myBeta;
   StdMeshersGUI_DistrTableFrame*  myTable;
 #ifndef DISABLE_PLOT2DVIEWER
   StdMeshersGUI_DistrPreview* myPreview;
@@ -94,7 +96,7 @@ private:
   QLineEdit       *myName, *myExpr;
   QGroupBox*       myConvBox;
   QButtonGroup*    myConv;
-  QLabel          *myLScale, *myLTable, *myLExpr, *myInfo;
+  QLabel          *myLScale, *myLTable, *myLExpr, *myInfo, *myLBeta;
   QGridLayout*     myGroupLayout;
   int              myTableRow, myPreviewRow;
   //QRadioButton*    myCutNeg;

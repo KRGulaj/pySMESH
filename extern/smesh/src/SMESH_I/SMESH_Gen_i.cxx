@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -49,6 +49,11 @@
 #include <TopoDS_Wire.hxx>
 #include <gp_Pnt.hxx>
 
+// Have to be included before std headers
+#include <Python.h>
+#include <structmember.h>
+#include "PythonCppUtils.hxx"
+
 #ifdef WIN32
  #include <windows.h>
  #include <process.h>
@@ -97,12 +102,18 @@
 #include "SMESH_Hypothesis.hxx"
 #include "SMESH_Hypothesis_i.hxx"
 #include "SMESH_Mesh.hxx"
+#include "SMESH_ParallelMesh.hxx"
 #include "SMESH_MeshEditor.hxx"
 #include "SMESH_Mesh_i.hxx"
+#include <SMESH_SequentialMesh_i.hxx>
+#include "SMESH_ParallelMesh_i.hxx"
 #include "SMESH_PreMeshInfo.hxx"
 #include "SMESH_PythonDump.hxx"
 #include "SMESH_ControlsDef.hxx"
 #include <SMESH_BoostTxtArchive.hxx>
+#include <SMESH_SequentialMesh_i.hxx>
+#include <SMESH_ParallelMesh_i.hxx>
+#include "SMESH_Meshio.h"
 
 // to pass CORBA exception through SMESH_TRY
 #define SMY_OWN_CATCH catch( SALOME::SALOME_Exception& se ) { throw se; }
@@ -143,22 +154,20 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <QStringList>
 
 #include <boost/archive/text_oarchive.hpp>
 #include <boost/serialization/list.hpp>
 #include <boost/serialization/string.hpp>
+#include <boost/filesystem.hpp>
+
+namespace fs = boost::filesystem;
 
 using namespace std;
 using SMESH::TPythonDump;
 using SMESH::TVar;
 
 #define NUM_TMP_FILES 2
-
-#ifdef _DEBUG_
-static int MYDEBUG = 0;
-#else
-static int MYDEBUG = 0;
-#endif
 
 // Static variables definition
 GEOM::GEOM_Gen_var      SMESH_Gen_i::myGeomGen;
@@ -448,7 +457,7 @@ GenericHypothesisCreator_i* SMESH_Gen_i::getHypothesisCreator(const char* theHyp
   thePlatformLibName = aPlatformLibName;
 
   Unexpect aCatch(SALOME_SalomeException);
-  if(MYDEBUG) MESSAGE( "Create Hypothesis <" << theHypName << "> from " << aPlatformLibName);
+  MESSAGE( "Create Hypothesis <" << theHypName << "> from " << aPlatformLibName);
 
   typedef GenericHypothesisCreator_i* (*GetHypothesisCreator)(const char* );
   GenericHypothesisCreator_i* aCreator;
@@ -458,7 +467,7 @@ GenericHypothesisCreator_i* SMESH_Gen_i::getHypothesisCreator(const char* theHyp
     if (myHypCreatorMap.find(string(theHypName)) == myHypCreatorMap.end())
     {
       // load plugin library
-      if(MYDEBUG) MESSAGE("Loading server meshers plugin library ...");
+      MESSAGE("Loading server meshers plugin library ...");
 #ifdef WIN32
 #  ifdef UNICODE
       const wchar_t* path = Kernel_Utils::decode_s(aPlatformLibName);
@@ -484,7 +493,7 @@ GenericHypothesisCreator_i* SMESH_Gen_i::getHypothesisCreator(const char* theHyp
       }
 
       // get method, returning hypothesis creator
-      if(MYDEBUG) MESSAGE("Find GetHypothesisCreator() method ...");
+      MESSAGE("Find GetHypothesisCreator() method ...");
       GetHypothesisCreator procHandle =
         (GetHypothesisCreator)GetProc( libHandle, "GetHypothesisCreator" );
       if (!procHandle)
@@ -495,7 +504,7 @@ GenericHypothesisCreator_i* SMESH_Gen_i::getHypothesisCreator(const char* theHyp
       }
 
       // get hypothesis creator
-      if(MYDEBUG) MESSAGE("Get Hypothesis Creator for " << theHypName);
+      MESSAGE("Get Hypothesis Creator for " << theHypName);
       aCreator = procHandle(theHypName);
       if (!aCreator)
       {
@@ -546,8 +555,7 @@ SMESH::SMESH_Hypothesis_ptr SMESH_Gen_i::createHypothesis(const char* theHypName
     // activate the CORBA servant of hypothesis
     hypothesis_i = myHypothesis_i->_this();
     int nextId = RegisterObject( hypothesis_i );
-    if(MYDEBUG) { MESSAGE( "Add hypo to map with id = "<< nextId ); }
-    else        { (void)nextId; } // avoid "unused variable" warning in release mode
+    MESSAGE( "Add hypo to map with id = "<< nextId );
   }
   return hypothesis_i._retn();
 }
@@ -563,27 +571,66 @@ SMESH::SMESH_Hypothesis_ptr SMESH_Gen_i::createHypothesis(const char* theHypName
 SMESH::SMESH_Mesh_ptr SMESH_Gen_i::createMesh()
 {
   Unexpect aCatch(SALOME_SalomeException);
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::createMesh" );
+  MESSAGE( "SMESH_Gen_i::createMesh" );
 
   // Get or create the GEOM_Client instance
   try {
     // create a new mesh object servant, store it in a map in study context
     SMESH_Mesh_i* meshServant = new SMESH_Mesh_i( GetPOA(), this );
     // create a new mesh object
-    if(MYDEBUG) MESSAGE("myIsEmbeddedMode " << myIsEmbeddedMode);
-    meshServant->SetImpl( myGen.CreateMesh( myIsEmbeddedMode ));
+    MESSAGE("myIsEmbeddedMode " << myIsEmbeddedMode);
+    SMESH_Mesh* myImpl = dynamic_cast<SMESH_Mesh*>(myGen.CreateMesh( myIsEmbeddedMode ));
+    if(myImpl == NULL )
+      THROW_SALOME_CORBA_EXCEPTION( "Could not cast SequentialMesh as Mesh", SALOME::INTERNAL_ERROR );
+    meshServant->SetImpl(myImpl);
 
     // activate the CORBA servant of Mesh
     SMESH::SMESH_Mesh_var mesh = SMESH::SMESH_Mesh::_narrow( meshServant->_this() );
     int nextId = RegisterObject( mesh );
-    if(MYDEBUG) { MESSAGE( "Add mesh to map with id = "<< nextId); }
-    else        { (void)nextId; } // avoid "unused variable" warning in release mode
+    MESSAGE( "Add mesh to map with id = "<< nextId);
+
     return mesh._retn();
   }
   catch (SALOME_Exception& S_ex) {
     THROW_SALOME_CORBA_EXCEPTION( S_ex.what(), SALOME::BAD_PARAM );
   }
   return SMESH::SMESH_Mesh::_nil();
+}
+
+//=============================================================================
+/*!
+ *  SMESH_Gen_i::createParallelMesh
+ *
+ *  Create empty parallel mesh on shape
+ */
+//=============================================================================
+SMESH::SMESH_ParallelMesh_ptr SMESH_Gen_i::createParallelMesh()
+{
+  Unexpect aCatch(SALOME_SalomeException);
+  MESSAGE( "SMESH_Gen_i::createParallelMesh" );
+
+  // Get or create the GEOM_Client instance
+  try {
+    // create a new mesh object servant, store it in a map in study context
+    SMESH_ParallelMesh_i* meshServant = new SMESH_ParallelMesh_i( GetPOA(), this );
+    // create a new mesh object
+    MESSAGE("myIsEmbeddedMode " << myIsEmbeddedMode);
+    SMESH_Mesh* myImpl = dynamic_cast<SMESH_Mesh*>(myGen.CreateParallelMesh( myIsEmbeddedMode ));
+    if(myImpl == NULL )
+      THROW_SALOME_CORBA_EXCEPTION( "Could not cast ParallelMesh as Mesh", SALOME::INTERNAL_ERROR );
+    meshServant->SetImpl(myImpl);
+
+    // activate the CORBA servant of Mesh
+    SMESH::SMESH_ParallelMesh_var mesh = SMESH::SMESH_ParallelMesh::_narrow( meshServant->_this() );
+    int nextId = RegisterObject( mesh );
+    MESSAGE( "Add mesh to map with id = "<< nextId);
+
+    return mesh._retn();
+  }
+  catch (SALOME_Exception& S_ex) {
+    THROW_SALOME_CORBA_EXCEPTION( S_ex.what(), SALOME::BAD_PARAM );
+  }
+  return SMESH::SMESH_ParallelMesh::_nil();
 }
 
 //=============================================================================
@@ -634,14 +681,19 @@ void SMESH_Gen_i::SetEmbeddedMode( CORBA::Boolean theMode )
     if (!envNoCatchSignals || !atoi(envNoCatchSignals))
     {
       bool raiseFPE;
-#ifdef _DEBUG_
-      raiseFPE = true;
-      char* envDisableFPE = getenv("DISABLE_FPE");
-      if (envDisableFPE && atoi(envDisableFPE))
+
+      if (SALOME::VerbosityActivated())
+      {
+        raiseFPE = true;
+        char* envDisableFPE = getenv("DISABLE_FPE");
+        if (envDisableFPE && atoi(envDisableFPE))
+          raiseFPE = false;
+      }
+      else
+      {
         raiseFPE = false;
-#else
-      raiseFPE = false;
-#endif
+      }
+
       OSD::SetSignal( raiseFPE );
     }
     // else OSD::SetSignal() is called in GUI
@@ -1193,7 +1245,7 @@ char* SMESH_Gen_i::GetOption(const char* name)
 SMESH::SMESH_Mesh_ptr SMESH_Gen_i::CreateMesh( GEOM::GEOM_Object_ptr theShapeObject )
 {
   Unexpect aCatch(SALOME_SalomeException);
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::CreateMesh" );
+  MESSAGE( "SMESH_Gen_i::CreateMesh(GEOM_Object_ptr)" );
   // create mesh
   SMESH::SMESH_Mesh_var mesh = this->createMesh();
   // set shape
@@ -1218,6 +1270,40 @@ SMESH::SMESH_Mesh_ptr SMESH_Gen_i::CreateMesh( GEOM::GEOM_Object_ptr theShapeObj
 
 //=============================================================================
 /*!
+ *  SMESH_Gen_i::CreateParallelMesh
+ *
+ *  Create empty parallel mesh on a shape and publish it in the study
+ */
+//=============================================================================
+
+SMESH::SMESH_ParallelMesh_ptr SMESH_Gen_i::CreateParallelMesh( GEOM::GEOM_Object_ptr theShapeObject )
+{
+  Unexpect aCatch(SALOME_SalomeException);
+  MESSAGE( "SMESH_Gen_i::CreateParallelMesh" );
+  // create mesh
+  SMESH::SMESH_ParallelMesh_var mesh = this->createParallelMesh();
+  // set shape
+  SMESH_ParallelMesh_i* meshServant = SMESH::DownCast<SMESH_ParallelMesh_i*>( mesh );
+  ASSERT( meshServant );
+  meshServant->SetShape( theShapeObject );
+
+  // publish mesh in the study
+  if ( CanPublishInStudy( mesh ) ) {
+    SALOMEDS::StudyBuilder_var aStudyBuilder = getStudyServant()->NewBuilder();
+    aStudyBuilder->NewCommand();  // There is a transaction
+    SALOMEDS::SObject_wrap aSO = PublishMesh( mesh.in() );
+    aStudyBuilder->CommitCommand();
+    if ( !aSO->_is_nil() ) {
+      // Update Python script
+      TPythonDump(this) << aSO << " = " << this << ".CreateParallelMesh(" << theShapeObject << ")";
+    }
+  }
+
+  return mesh._retn();
+}
+
+//=============================================================================
+/*!
  *  SMESH_Gen_i::CreateEmptyMesh
  *
  *  Create empty mesh
@@ -1227,7 +1313,7 @@ SMESH::SMESH_Mesh_ptr SMESH_Gen_i::CreateMesh( GEOM::GEOM_Object_ptr theShapeObj
 SMESH::SMESH_Mesh_ptr SMESH_Gen_i::CreateEmptyMesh()
 {
   Unexpect aCatch(SALOME_SalomeException);
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::CreateMesh" );
+  MESSAGE( "SMESH_Gen_i::CreateEmptyMesh" );
   // create mesh
   SMESH::SMESH_Mesh_var mesh = this->createMesh();
 
@@ -1244,6 +1330,61 @@ SMESH::SMESH_Mesh_ptr SMESH_Gen_i::CreateEmptyMesh()
   }
 
   return mesh._retn();
+}
+
+SMESH::SMESH_Mesh_ptr SMESH_Gen_i::ReloadMeshFromFile(SMESH::SMESH_Mesh_ptr theMesh)
+{
+  SMESH::mesh_array_var aMeshes = new SMESH::mesh_array;
+
+  SMESH::MedFileInfo* aMedInfo = theMesh->GetMEDFileInfo();
+
+  // Get file path and re-import mesh
+  QString aPath = QString(aMedInfo->fileName);
+  QStringList aSplit = aPath.split('.');
+  QStringList anEntryList;
+
+  auto aStudy = getStudyServant();
+
+  SMESH::SMESH_Mesh_ptr aNewMesh;
+
+  SMESH_Mesh* aMesh = reinterpret_cast<SMESH_Mesh*> (theMesh->GetMeshPtr());
+  aMesh->GetMeshDS()->ClearMesh();
+
+  if (aSplit.last() == "cgns")
+  {
+    SMESH::DriverMED_ReadStatus res;
+    aMeshes = ReloadMeshesFromCGNS(aPath.toUtf8().constData(), theMesh, res);
+
+    aNewMesh = aMeshes[0];
+
+  }
+  else if (aSplit.last().contains("stl", Qt::CaseSensitivity::CaseInsensitive))
+  {
+    aNewMesh = ReloadMeshesFromSTL(aPath.toUtf8().constData(), theMesh);
+  }
+  else if (aSplit.last().contains("unv", Qt::CaseSensitivity::CaseInsensitive))
+  {
+    aNewMesh = ReloadMeshesFromUNV(aPath.toUtf8().constData(), theMesh);
+  }
+  else if (aSplit.last().contains("mesh", Qt::CaseSensitivity::CaseInsensitive))
+  {
+    SMESH::ComputeError_var res;
+    aNewMesh = ReloadMeshesFromGMF(aPath.toUtf8().constData(), theMesh, true, res.out());
+  }
+  else if (aSplit.last().contains("med", Qt::CaseSensitivity::CaseInsensitive))
+  {
+    SMESH::DriverMED_ReadStatus res;
+    aMeshes = ReloadMeshesFromMED(aPath.toUtf8().constData(), theMesh, res);
+
+    aNewMesh = aMeshes[0];
+  }
+  else
+  {
+    // MeshIO
+  }
+
+  theMesh = SMESH::SMESH_Mesh::_duplicate(aNewMesh);
+  return theMesh;
 }
 
 namespace
@@ -1267,6 +1408,176 @@ namespace
          SALOME::BAD_PARAM );
     }
   }
+
+  //================================================================================
+  /*!
+   * \brief Makes a python dump for a function by iterating the given SObjects 
+   */
+  //================================================================================
+
+  void functionToPythonDump(
+    SMESH_Gen_i* smesh, const std::string& functionName, std::vector<SALOMEDS::SObject_wrap>& sobjects)
+  {
+    TPythonDump aPythonDump(smesh);
+    aPythonDump << "([";
+
+    int i = 0;
+    for (const SALOMEDS::SObject_wrap& so : sobjects)
+    {
+      if (i > 0)
+      {
+        aPythonDump << ", ";
+      }
+
+      if (!so->_is_nil())
+      {
+        aPythonDump << so;
+      }
+      else
+      {
+        aPythonDump << "mesh_" << i;
+      }
+    }
+
+    aPythonDump << "], status) = " << smesh << functionName;
+  }
+
+  //================================================================================
+  /*!
+   * \brief Python function to get the error raised in the called script.py
+   */
+  //================================================================================
+
+  std::string getPythonErrorStringNoGIL()
+  {
+
+    AutoPyRef ptype, pvalue, ptraceback;
+
+    PyObject *a = nullptr, *b = nullptr, *c = nullptr;
+    PyErr_Fetch(&a, &b, &c);
+    PyErr_NormalizeException(&a, &b, &c);
+
+    ptype.set(a);
+    pvalue.set(b);
+    ptraceback.set(c);
+
+    AutoPyRef pStrObj;
+
+    if (pvalue)
+    {
+        pStrObj = PyObject_Str(pvalue.get());
+    }
+    else if (ptype)
+    {
+        pStrObj = PyObject_Str(ptype.get());
+    }
+
+    std::string errorMsg = "<unknown Python error>";
+    if (pStrObj && PyUnicode_Check(pStrObj.get()))
+    {
+        errorMsg = PyUnicode_AsUTF8(pStrObj.get());
+    }
+
+    return errorMsg;
+  }
+
+  //================================================================================
+  /*!
+    * \brief execute python script to parse the .mail file
+    */
+  //================================================================================
+
+std::string convertFileUsingMEDCouplngConverter(const std::string& inputPath, const std::string& outputPath, const std::string& converterPyFuncName)
+{
+  AutoGIL gstate;
+
+  PyObject* sys_path = PySys_GetObject("path");
+  if (!sys_path)
+  {
+    std::string anError = "Failed to get sys.path";
+    throw(SALOME_Exception( anError.c_str()));
+  }
+
+  AutoPyRef pName(PyUnicode_FromString("medcoupling"));
+  AutoPyRef pModule(PyImport_Import(pName));
+  if (pModule.isNull())
+  {
+    std::string anError = "Failed to import Python module medcoupling";
+    throw(SALOME_Exception( anError.c_str()));
+  }
+
+  AutoPyRef pFunc(PyObject_GetAttrString(pModule, converterPyFuncName.c_str() ));
+  if (pFunc.isNull() || !PyCallable_Check(pFunc))
+  {
+    std::string anError = "Python function main_for_smesh not found or not callable";
+    throw(SALOME_Exception( anError.c_str()));
+  }
+
+  AutoPyRef pArgs(PyTuple_New(2));
+  PyTuple_SetItem(pArgs, 0, PyUnicode_FromString(inputPath.c_str()));
+  PyTuple_SetItem(pArgs, 1, PyUnicode_FromString(outputPath.c_str()));
+
+  AutoPyRef pResult(PyObject_CallObject(pFunc, pArgs));
+  if (pResult.isNull() || !PyUnicode_Check(pResult))
+  {
+    std::string anError;
+    anError = getPythonErrorStringNoGIL();
+    std::ostringstream oss;
+    oss << "Python function main_for_smesh returned invalid result : " << anError << std::endl;
+    throw(SALOME_Exception( oss.str().c_str()));
+  }
+  INFOS( "MED file is created: " << outputPath );
+  return std::string(PyUnicode_AsUTF8(pResult));
+}
+
+  //================================================================================
+  /*!
+    * \brief execute python script with .mail file path and return .med file path
+    */
+  //================================================================================
+
+std::string changeExtensionToMed(const std::string& inputPath)
+{
+  AutoGIL gstate;
+
+  PyObject* sys_path = PySys_GetObject("path");
+  if (!sys_path)
+  {
+    std::string anError = "Failed to get sys.path";
+    throw(SALOME_Exception( anError.c_str()));
+  }
+
+  AutoPyRef pName(PyUnicode_FromString("salome.smesh.smeshBuilder"));
+  AutoPyRef pModule(PyImport_Import(pName));
+  if (pModule.isNull())
+  {
+    std::string anError = "Failed to import Python module salome.smesh.smeshBuilder";
+    throw(SALOME_Exception( anError.c_str()));
+  }
+
+  AutoPyRef pFunc(PyObject_GetAttrString(pModule, "changeExtensionToMed"));
+  if (pFunc.isNull() || !PyCallable_Check(pFunc))
+  {
+    std::string anError = "Python function changeExtensionToMed not found or not callable";
+    throw(SALOME_Exception( anError.c_str()));
+  }
+
+  AutoPyRef pArgs(PyTuple_New(1));
+  AutoPyRef pValue(PyUnicode_FromString(inputPath.c_str()));
+  PyTuple_SetItem(pArgs, 0, pValue.retn());
+
+  AutoPyRef pResult(PyObject_CallObject(pFunc, pArgs));
+  if (pResult.isNull() || !PyUnicode_Check(pResult))
+  {
+    std::string anError;
+    anError = getPythonErrorStringNoGIL();
+    std::ostringstream oss;
+    oss << "Python function changeExtensionToMed returned invalid result : " << anError << std::endl;
+    throw(SALOME_Exception( oss.str().c_str()));
+  }
+
+  return std::string(PyUnicode_AsUTF8(pResult));
+}
 }
 
 //=============================================================================
@@ -1284,12 +1595,15 @@ SMESH::SMESH_Mesh_ptr SMESH_Gen_i::CreateMeshesFromUNV( const char* theFileName 
   checkFileReadable( theFileName );
 
   SMESH::SMESH_Mesh_var aMesh = createMesh();
+
   string aFileName;
+
   // publish mesh in the study
   if ( CanPublishInStudy( aMesh ) ) {
     SALOMEDS::StudyBuilder_var aStudyBuilder = getStudyServant()->NewBuilder();
     aStudyBuilder->NewCommand();  // There is a transaction
-    SALOMEDS::SObject_wrap aSO = PublishMesh( aMesh.in(), aFileName.c_str() );
+    SALOMEDS::SObject_wrap aSO =
+      PublishMesh( aMesh.in(), aFileName.c_str(), "ICON_SMESH_TREE_MESH_IMPORTED" );
     aStudyBuilder->CommitCommand();
     if ( !aSO->_is_nil() ) {
       // Update Python script
@@ -1308,6 +1622,36 @@ SMESH::SMESH_Mesh_ptr SMESH_Gen_i::CreateMeshesFromUNV( const char* theFileName 
   return aMesh._retn();
 }
 
+SMESH::SMESH_Mesh_ptr SMESH_Gen_i::ReloadMeshesFromUNV(const char* theFileName, SMESH::SMESH_Mesh_ptr sourceMesh)
+{
+  Unexpect aCatch(SALOME_SalomeException);
+
+  checkFileReadable(theFileName);
+
+  string aFileName;
+  // publish mesh in the study
+  if (CanPublishInStudy(sourceMesh)) {
+    SALOMEDS::StudyBuilder_var aStudyBuilder = getStudyServant()->NewBuilder();
+    aStudyBuilder->NewCommand();  // There is a transaction
+    SALOMEDS::SObject_wrap aSO = PublishMesh(sourceMesh, aFileName.c_str());
+    aStudyBuilder->CommitCommand();
+    if (!aSO->_is_nil()) {
+      // Update Python script
+      TPythonDump(this) << aSO << " = " << this << ".ReloadMeshesFromUNV(r'" << theFileName << "')";
+    }
+  }
+
+  SMESH_Mesh_i* aServant = dynamic_cast<SMESH_Mesh_i*>(GetServant(sourceMesh).in());
+  ASSERT(aServant);
+  aServant->ImportUNVFile(theFileName);
+
+  // Dump creation of groups
+  SMESH::ListOfGroups_var groups = aServant->GetGroups();
+
+  aServant->GetImpl().GetMeshDS()->Modified();
+  return sourceMesh;
+}
+
 //=============================================================================
 /*!
  *  SMESH_Gen_i::CreateMeshFromMED
@@ -1321,13 +1665,6 @@ SMESH::mesh_array* SMESH_Gen_i::CreateMeshesFromMED( const char*                
 {
   checkFileReadable( theFileName );
 
-#ifdef WIN32
-  char bname[ _MAX_FNAME ];
-  _splitpath( theFileName, NULL, NULL, bname, NULL );
-  string aFileName = bname;
-#else
-  string aFileName = basename( const_cast<char *>( theFileName ));
-#endif
   // Retrieve mesh names from the file
   DriverMED_R_SMESHDS_Mesh myReader;
   myReader.SetFile( theFileName );
@@ -1364,7 +1701,7 @@ SMESH::mesh_array* SMESH_Gen_i::CreateMeshesFromMED( const char*                
         // publish mesh in the study
         SALOMEDS::SObject_wrap aSO;
         if ( CanPublishInStudy( mesh ) )
-          aSO = PublishMesh( mesh.in(), meshName.c_str() );
+          aSO = PublishMesh( mesh.in(), meshName.c_str(), "ICON_SMESH_TREE_MESH_IMPORTED" );
 
         // Python Dump
         if ( !aSO->_is_nil() ) {
@@ -1398,6 +1735,151 @@ SMESH::mesh_array* SMESH_Gen_i::CreateMeshesFromMED( const char*                
   return aResult._retn();
 }
 
+SMESH::mesh_array* SMESH_Gen_i::ReloadMeshesFromMED(const char* theFileName, SMESH::SMESH_Mesh_ptr sourceMesh, SMESH::DriverMED_ReadStatus& theStatus)
+{
+  SMESH::ListOfGroups anOldGroups = *sourceMesh->GetGroups();
+  checkFileReadable(theFileName);
+
+#ifdef WIN32
+  char bname[_MAX_FNAME];
+  _splitpath(theFileName, NULL, NULL, bname, NULL);
+  string aFileName = bname;
+#else
+  string aFileName = basename(const_cast<char*>(theFileName));
+#endif
+  // Retrieve mesh names from the file
+  DriverMED_R_SMESHDS_Mesh myReader;
+  myReader.SetFile(theFileName);
+  myReader.SetMeshId(-1);
+  Driver_Mesh::Status aStatus;
+  list<string> aNames = myReader.GetMeshNames(aStatus);
+  SMESH::mesh_array_var aResult = new SMESH::mesh_array();
+  theStatus = (SMESH::DriverMED_ReadStatus)aStatus;
+
+  { // open a new scope to make aPythonDump die before PythonDump in SMESH_Mesh::GetGroups()
+
+    // Python Dump
+    TPythonDump aPythonDump(this);
+    aPythonDump << "([";
+
+    if (theStatus == SMESH::DRS_OK)
+    {
+      SALOMEDS::StudyBuilder_var aStudyBuilder;
+      aStudyBuilder = getStudyServant()->NewBuilder();
+      aStudyBuilder->NewCommand();  // There is a transaction
+
+      aResult->length(aNames.size());
+      int i = 0;
+
+      // Iterate through all meshes and create mesh objects
+      for (const std::string& meshName : aNames)
+      {
+        // Python Dump
+        if (i > 0) aPythonDump << ", ";
+
+        // publish mesh in the study
+        SALOMEDS::SObject_wrap aSO;
+        if (CanPublishInStudy(sourceMesh))
+          aSO = PublishMesh(sourceMesh, meshName.c_str());
+
+        // Python Dump
+        if (!aSO->_is_nil()) {
+          aPythonDump << aSO;
+        }
+        else {
+          aPythonDump << "mesh_" << i;
+        }
+
+        // Read mesh data (groups are published automatically by ImportMEDFile())
+        SMESH_Mesh_i* meshServant = dynamic_cast<SMESH_Mesh_i*>(GetServant(sourceMesh).in());
+        ASSERT(meshServant);
+        SMESH::DriverMED_ReadStatus status1 =
+          meshServant->ImportMEDFile(theFileName, meshName.c_str());
+        if (status1 > theStatus)
+          theStatus = status1;
+
+        for (unsigned int i = 0; i < anOldGroups.length(); ++i)
+        {
+          //auto X = anOldGroups[i];
+          sourceMesh->RemoveGroup(anOldGroups[i]);
+        }
+        aResult[i++] = SMESH::SMESH_Mesh::_duplicate(sourceMesh);
+
+        meshServant->GetImpl().GetMeshDS()->Modified();
+      }
+      if (!aStudyBuilder->_is_nil())
+        aStudyBuilder->CommitCommand();
+    }
+
+    // Update Python script
+    aPythonDump << "], status) = " << this << ".ReloadMeshesFromMED( r'" << theFileName << "' )";
+  }
+  // Dump creation of groups
+  for (CORBA::ULong i = 0; i < aResult->length(); ++i)
+    SMESH::ListOfGroups_var groups = aResult[i]->GetGroups();
+
+  return aResult._retn();
+}
+
+SMESH::mesh_array* SMESH_Gen_i::CreateMeshesFromMEDConverterInMedcoupling( const char* theFileName,
+                                          SMESH::DriverMED_ReadStatus& theStatus, const std::string& converterPyFuncName)
+{
+  checkFileReadable(theFileName);
+
+  std::string outputPath;
+  std::string medFileName;
+
+  try
+  {
+    outputPath = changeExtensionToMed(std::string(theFileName));
+    medFileName = convertFileUsingMEDCouplngConverter(std::string(theFileName), outputPath, converterPyFuncName);
+    checkFileReadable(medFileName.c_str());
+    return CreateMeshesFromMED(medFileName.c_str(), theStatus);
+  }
+  catch (const SALOME_Exception& S_ex)
+  {
+    THROW_SALOME_CORBA_EXCEPTION(S_ex.what(),SALOME::INTERNAL_ERROR);
+  }
+}
+
+//=============================================================================
+/*!
+ *  SMESH_Gen_i::CreateMeshFromMED
+ *
+ *  Create mesh and import data from MED file
+ */
+//=============================================================================
+
+SMESH::mesh_array* SMESH_Gen_i::CreateMeshesFromMAIL( const char*                  theFileName,
+                                                     SMESH::DriverMED_ReadStatus& theStatus )
+{
+  return CreateMeshesFromMEDConverterInMedcoupling( theFileName, theStatus, "ConvertFromMailToMEDFile" );
+}
+
+SMESH::mesh_array* SMESH_Gen_i::CreateMeshesFromINP( const char*                  theFileName,
+                                                     SMESH::DriverMED_ReadStatus& theStatus )
+{
+  return CreateMeshesFromMEDConverterInMedcoupling( theFileName, theStatus, "ConvertFromINPToMEDFile" );
+}
+
+SMESH::mesh_array* SMESH_Gen_i::CreateMeshesFromCDB( const char*                  theFileName,
+                                                     SMESH::DriverMED_ReadStatus& theStatus )
+{
+  return CreateMeshesFromMEDConverterInMedcoupling( theFileName, theStatus, "ConvertFromCDBToMEDFile" );
+}
+
+SMESH::mesh_array* SMESH_Gen_i::CreateMeshesFromASC( const char*                  theFileName,
+                                                     SMESH::DriverMED_ReadStatus& theStatus )
+{
+  return CreateMeshesFromMEDConverterInMedcoupling( theFileName, theStatus, "ConvertFromASCToMEDFile" );
+}
+
+SMESH::mesh_array* SMESH_Gen_i::CreateMeshesFromGEOF( const char*                  theFileName,
+                                                     SMESH::DriverMED_ReadStatus& theStatus )
+{
+  return CreateMeshesFromMEDConverterInMedcoupling( theFileName, theStatus, "ConvertFromGeofToMEDFile" );
+}
+
 //=============================================================================
 /*!
  *  SMESH_Gen_i::CreateMeshFromSTL
@@ -1412,7 +1894,7 @@ SMESH::SMESH_Mesh_ptr SMESH_Gen_i::CreateMeshesFromSTL( const char* theFileName 
   checkFileReadable( theFileName );
 
   SMESH::SMESH_Mesh_var aMesh = createMesh();
-  //string aFileName;
+
 #ifdef WIN32
   char bname[ _MAX_FNAME ];
   _splitpath( theFileName, NULL, NULL, bname, NULL );
@@ -1420,11 +1902,13 @@ SMESH::SMESH_Mesh_ptr SMESH_Gen_i::CreateMeshesFromSTL( const char* theFileName 
 #else
   string aFileName = basename( const_cast<char *>(theFileName) );
 #endif
+
   // publish mesh in the study
   if ( CanPublishInStudy( aMesh ) ) {
     SALOMEDS::StudyBuilder_var aStudyBuilder = getStudyServant()->NewBuilder();
     aStudyBuilder->NewCommand();  // There is a transaction
-    SALOMEDS::SObject_wrap aSO = PublishInStudy( SALOMEDS::SObject::_nil(), aMesh.in(), aFileName.c_str() );
+    SALOMEDS::SObject_wrap aSO =
+      PublishMesh( aMesh.in(), aFileName.c_str(), "ICON_SMESH_TREE_MESH_IMPORTED" );
     aStudyBuilder->CommitCommand();
     if ( !aSO->_is_nil() ) {
       // Update Python script
@@ -1437,6 +1921,37 @@ SMESH::SMESH_Mesh_ptr SMESH_Gen_i::CreateMeshesFromSTL( const char* theFileName 
   aServant->ImportSTLFile( theFileName );
   aServant->GetImpl().GetMeshDS()->Modified();
   return aMesh._retn();
+}
+
+SMESH::SMESH_Mesh_ptr SMESH_Gen_i::ReloadMeshesFromSTL(const char* theFileName, SMESH::SMESH_Mesh_ptr sourceMesh)
+{
+  Unexpect aCatch(SALOME_SalomeException);
+  checkFileReadable(theFileName);
+
+#ifdef WIN32
+  char bname[_MAX_FNAME];
+  _splitpath(theFileName, NULL, NULL, bname, NULL);
+  string aFileName = bname;
+#else
+  string aFileName = basename(const_cast<char*>(theFileName));
+#endif
+  // publish mesh in the study
+  if (CanPublishInStudy(sourceMesh)) {
+    SALOMEDS::StudyBuilder_var aStudyBuilder = getStudyServant()->NewBuilder();
+    aStudyBuilder->NewCommand();  // There is a transaction
+    SALOMEDS::SObject_wrap aSO = PublishInStudy(SALOMEDS::SObject::_nil(), sourceMesh, aFileName.c_str());
+    aStudyBuilder->CommitCommand();
+    if (!aSO->_is_nil()) {
+      // Update Python script
+      TPythonDump(this) << aSO << " = " << this << ".ReloadMeshFromSTL(r'" << theFileName << "')";
+    }
+  }
+
+  SMESH_Mesh_i* aServant = dynamic_cast<SMESH_Mesh_i*>(GetServant(sourceMesh).in());
+  ASSERT(aServant);
+  aServant->ImportSTLFile(theFileName);
+  aServant->GetImpl().GetMeshDS()->Modified();
+  return sourceMesh;
 }
 
 //================================================================================
@@ -1499,7 +2014,7 @@ SMESH::mesh_array* SMESH_Gen_i::CreateMeshesFromCGNS( const char*               
         // publish mesh in the study
         SALOMEDS::SObject_wrap aSO;
         if ( CanPublishInStudy( mesh ) )
-          aSO = PublishMesh( mesh.in(), meshName.c_str() );
+          aSO = PublishMesh( mesh.in(), meshName.c_str(), "ICON_SMESH_TREE_MESH_IMPORTED" );
 
         // Python Dump
         if ( !aSO->_is_nil() ) {
@@ -1517,6 +2032,85 @@ SMESH::mesh_array* SMESH_Gen_i::CreateMeshesFromCGNS( const char*               
   // Dump creation of groups
   for ( CORBA::ULong i = 0; i < aResult->length(); ++i )
     SMESH::ListOfGroups_var groups = aResult[ i ]->GetGroups();
+#else
+  THROW_SALOME_CORBA_EXCEPTION("CGNS library is unavailable", SALOME::INTERNAL_ERROR);
+#endif
+
+  return aResult._retn();
+}
+
+SMESH::mesh_array* SMESH_Gen_i::ReloadMeshesFromCGNS(const char*                  theFileName,
+                                                     SMESH::SMESH_Mesh_ptr        sourceMesh,
+                                                     SMESH::DriverMED_ReadStatus& theStatus)
+{
+  Unexpect aCatch(SALOME_SalomeException);
+  checkFileReadable(theFileName);
+
+  SMESH::mesh_array_var aResult = new SMESH::mesh_array();
+
+#ifdef WITH_CGNS
+  // Retrieve nb meshes from the file
+  DriverCGNS_Read myReader;
+  myReader.SetFile(theFileName);
+  Driver_Mesh::Status aStatus;
+  int nbMeshes = myReader.GetNbMeshes(aStatus);
+  theStatus = (SMESH::DriverMED_ReadStatus)aStatus;
+
+  aResult->length(nbMeshes);
+
+  { // open a new scope to make aPythonDump die before PythonDump in SMESH_Mesh::GetGroups()
+
+    // Python Dump
+    TPythonDump aPythonDump(this);
+    aPythonDump << "([";
+
+    if (theStatus == SMESH::DRS_OK)
+    {
+      SALOMEDS::StudyBuilder_var aStudyBuilder = getStudyServant()->NewBuilder();
+      aStudyBuilder->NewCommand();  // There is a transaction
+
+      int i = 0;
+
+      // Iterate through all meshes and create mesh objects
+      for (; i < nbMeshes; ++i)
+      {
+        // Python Dump
+        if (i > 0) aPythonDump << ", ";
+
+        // create mesh
+        aResult[i] = SMESH::SMESH_Mesh::_duplicate(sourceMesh);
+
+        // Read mesh data (groups are published automatically by ImportMEDFile())
+        SMESH_Mesh_i* meshServant = dynamic_cast<SMESH_Mesh_i*>(GetServant(sourceMesh).in());
+        ASSERT(meshServant);
+        string meshName;
+        SMESH::DriverMED_ReadStatus status1 =
+          meshServant->ImportCGNSFile(theFileName, i, meshName);
+        if (status1 > theStatus)
+          theStatus = status1;
+
+        meshServant->GetImpl().GetMeshDS()->Modified();
+        // publish mesh in the study
+        SALOMEDS::SObject_wrap aSO;
+        if (CanPublishInStudy(sourceMesh))
+          aSO = PublishMesh(sourceMesh, meshName.c_str());
+
+        // Python Dump
+        if (!aSO->_is_nil()) {
+          aPythonDump << aSO;
+        }
+        else {
+          aPythonDump << "mesh_" << i;
+        }
+      }
+      aStudyBuilder->CommitCommand();
+    }
+
+    aPythonDump << "], status) = " << this << ".ReloadMeshesFromCGNS(r'" << theFileName << "')";
+  }
+  // Dump creation of groups
+  for (CORBA::ULong i = 0; i < aResult->length(); ++i)
+    SMESH::ListOfGroups_var groups = aResult[i]->GetGroups();
 #else
   THROW_SALOME_CORBA_EXCEPTION("CGNS library is unavailable", SALOME::INTERNAL_ERROR);
 #endif
@@ -1550,7 +2144,8 @@ SMESH_Gen_i::CreateMeshesFromGMF( const char*             theFileName,
   if ( CanPublishInStudy( aMesh ) ) {
     SALOMEDS::StudyBuilder_var aStudyBuilder = getStudyServant()->NewBuilder();
     aStudyBuilder->NewCommand();  // There is a transaction
-    SALOMEDS::SObject_wrap aSO = PublishInStudy( SALOMEDS::SObject::_nil(), aMesh.in(), aFileName.c_str() );
+    SALOMEDS::SObject_wrap aSO =
+      PublishMesh( aMesh.in(), aFileName.c_str(), "ICON_SMESH_TREE_MESH_IMPORTED" );
     aStudyBuilder->CommitCommand();
     if ( !aSO->_is_nil() ) {
       // Update Python script
@@ -1566,6 +2161,235 @@ SMESH_Gen_i::CreateMeshesFromGMF( const char*             theFileName,
   return aMesh._retn();
 }
 
+SMESH::SMESH_Mesh_ptr SMESH_Gen_i::ReloadMeshesFromGMF(const char* theFileName, SMESH::SMESH_Mesh_ptr sourceMesh, CORBA::Boolean theMakeRequiredGroups, SMESH::ComputeError_out theError)
+{
+  Unexpect aCatch(SALOME_SalomeException);
+  checkFileReadable(theFileName);
+
+#ifdef WIN32
+  char bname[_MAX_FNAME];
+  _splitpath(theFileName, NULL, NULL, bname, NULL);
+  string aFileName = bname;
+#else
+  string aFileName = basename(const_cast<char*>(theFileName));
+#endif
+  // publish mesh in the study
+  if (CanPublishInStudy(sourceMesh)) {
+    SALOMEDS::StudyBuilder_var aStudyBuilder = getStudyServant()->NewBuilder();
+    aStudyBuilder->NewCommand();  // There is a transaction
+    SALOMEDS::SObject_wrap aSO = PublishInStudy(SALOMEDS::SObject::_nil(), sourceMesh, aFileName.c_str());
+    aStudyBuilder->CommitCommand();
+    if (!aSO->_is_nil()) {
+      // Update Python script
+      TPythonDump(this) << "(" << aSO << ", error) = " << this << ".ReloadMeshesFromGMF(r'"
+        << theFileName << "', "
+        << theMakeRequiredGroups << " )";
+    }
+  }
+  SMESH_Mesh_i* aServant = dynamic_cast<SMESH_Mesh_i*>(GetServant(sourceMesh).in());
+  ASSERT(aServant);
+  theError = aServant->ImportGMFFile(theFileName, theMakeRequiredGroups);
+  aServant->GetImpl().GetMeshDS()->Modified();
+  return sourceMesh;
+}
+
+//================================================================================
+/*!
+ * \brief Create a mesh and import data from any file supported by meshio library
+ */
+//================================================================================
+
+SMESH::mesh_array* SMESH_Gen_i::CreateMeshesFromMESHIO(const char* theFileName,
+                                                       SMESH::DriverMED_ReadStatus& theStatus,
+                                                       const char* selectedFilter,
+                                                       const char* converter)
+{
+  Unexpect aCatch(SALOME_SalomeException);
+  checkFileReadable(theFileName);
+
+  MESSAGE("Import part with meshio through an intermediate MED file");
+
+  // Create an object that holds a temp file name and
+  // removes the file when goes out of scope.
+  SMESH_Meshio meshio((QString) selectedFilter);
+  const QString tempFileName = meshio.CreateTempFileName(theFileName);
+
+  // Convert temp file into a target one with meshio command
+  meshio.Convert(theFileName, tempFileName, true, converter);
+
+  // We don't need a python dump from SMESH_Gen_i::CreateMeshesFromMED(), so
+  // we can't use this method as is here. The followed code is an edited part of
+  // copy pasted CreateMeshesFromMED().
+
+  // Retrieve mesh names from the file
+  DriverMED_R_SMESHDS_Mesh myReader;
+  myReader.SetFile(tempFileName.toStdString());
+  myReader.SetMeshId(-1);
+  Driver_Mesh::Status aStatus;
+  list<string> aNames = myReader.GetMeshNames(aStatus);
+  SMESH::mesh_array_var aResult = new SMESH::mesh_array();
+  theStatus = (SMESH::DriverMED_ReadStatus)aStatus;
+
+  if (theStatus == SMESH::DRS_OK)
+  {
+    SALOMEDS::StudyBuilder_var aStudyBuilder;
+    aStudyBuilder = getStudyServant()->NewBuilder();
+    aStudyBuilder->NewCommand();  // There is a transaction
+
+    aResult->length(aNames.size());
+    std::vector<SALOMEDS::SObject_wrap> sobjects;
+    int i = 0;
+
+    // Iterate through all meshes and create mesh objects
+    for (const std::string& meshName : aNames)
+    {
+      // create mesh
+      SMESH::SMESH_Mesh_var mesh = createMesh();
+
+      // publish mesh in the study
+      SALOMEDS::SObject_wrap aSO;
+      if (CanPublishInStudy(mesh))
+        aSO = PublishMesh(mesh.in(), meshName.c_str(), "ICON_SMESH_TREE_MESH_IMPORTED");
+
+      // Save SO to use in a python dump
+      sobjects.emplace_back(aSO);
+
+      // Read mesh data (groups are published automatically by ImportMEDFile())
+      SMESH_Mesh_i* meshServant = dynamic_cast<SMESH_Mesh_i*>(GetServant(mesh).in());
+      ASSERT(meshServant);
+      SMESH::DriverMED_ReadStatus status1 =
+        meshServant->ImportMEDFile(tempFileName.toUtf8().data(), meshName.c_str());
+      if (status1 > theStatus)
+        theStatus = status1;
+
+      aResult[i++] = SMESH::SMESH_Mesh::_duplicate(mesh);
+      meshServant->GetImpl().GetMeshDS()->Modified();
+    }
+
+    if (!aStudyBuilder->_is_nil())
+      aStudyBuilder->CommitCommand();
+
+    // Python dump
+    std::string functionName = "";
+    SMESHIOConverter::ExternalConverter externalConverter = SMESHIOConverter::ExternalConverter::Unknown;
+    externalConverter = meshio.GetConverterForExtension(selectedFilter, tempFileName, converter);
+    switch (externalConverter)
+    {
+      case SMESHIOConverter::ExternalConverter::Gmsh:
+        functionName = std::string(".CreateMeshesFromGMSHIO(r'") + theFileName + "', '" + SMESHIOConverter::GetFilterLabel(selectedFilter) + "')";
+        break;
+
+      case SMESHIOConverter::ExternalConverter::MeshIo:
+        functionName = std::string(".CreateMeshesFromMESHIO(r'") + theFileName + "', '" + SMESHIOConverter::GetFilterLabel(selectedFilter) + "')";
+        break;
+
+      case SMESHIOConverter::ExternalConverter::Unknown:
+      default:
+        break;
+    }
+
+    functionToPythonDump(this, functionName, sobjects);
+  }
+
+  // Dump creation of groups
+  for (CORBA::ULong  i = 0; i < aResult->length(); ++i)
+    SMESH::ListOfGroups_var groups = aResult[i]->GetGroups();
+
+  return aResult._retn();
+}
+
+SMESH::mesh_array* SMESH_Gen_i::ReloadMeshesFromMESHIO(const char* theFileName, SMESH::SMESH_Mesh_ptr sourceMesh, SMESH::DriverMED_ReadStatus& theStatus, const char* converter)
+{
+  Unexpect aCatch(SALOME_SalomeException);
+  checkFileReadable(theFileName);
+
+  MESSAGE("Import part with meshio through an intermediate MED file");
+
+  // Create an object that holds a temp file name and
+  // removes the file when goes out of scope.
+  SMESH_Meshio meshio;
+  const QString tempFileName = meshio.CreateTempFileName(theFileName);
+
+  // Convert temp file into a target one with meshio command
+  meshio.Convert(theFileName, tempFileName, true, converter);
+
+  // We don't need a python dump from SMESH_Gen_i::CreateMeshesFromMED(), so
+  // we can't use this method as is here. The followed code is an edited part of
+  // copy pasted CreateMeshesFromMED().
+
+  // Retrieve mesh names from the file
+  DriverMED_R_SMESHDS_Mesh myReader;
+  myReader.SetFile(tempFileName.toStdString());
+  myReader.SetMeshId(-1);
+  Driver_Mesh::Status aStatus;
+  list<string> aNames = myReader.GetMeshNames(aStatus);
+  SMESH::mesh_array_var aResult = new SMESH::mesh_array();
+  theStatus = (SMESH::DriverMED_ReadStatus)aStatus;
+
+  if (theStatus == SMESH::DRS_OK)
+  {
+    SALOMEDS::StudyBuilder_var aStudyBuilder;
+    aStudyBuilder = getStudyServant()->NewBuilder();
+    aStudyBuilder->NewCommand();  // There is a transaction
+
+    aResult->length(aNames.size());
+    std::vector<SALOMEDS::SObject_wrap> sobjects;
+    int i = 0;
+
+    // Iterate through all meshes and create mesh objects
+    for (const std::string& meshName : aNames)
+    {
+      // publish mesh in the study
+      SALOMEDS::SObject_wrap aSO;
+      if (CanPublishInStudy(sourceMesh))
+        aSO = PublishMesh(sourceMesh, meshName.c_str());
+
+      // Save SO to use in a python dump
+      sobjects.emplace_back(aSO);
+
+      // Read mesh data (groups are published automatically by ImportMEDFile())
+      SMESH_Mesh_i* meshServant = dynamic_cast<SMESH_Mesh_i*>(GetServant(sourceMesh).in());
+      ASSERT(meshServant);
+      SMESH::DriverMED_ReadStatus status1 =
+        meshServant->ImportMEDFile(tempFileName.toUtf8().data(), meshName.c_str());
+      if (status1 > theStatus)
+        theStatus = status1;
+
+      aResult[i++] = SMESH::SMESH_Mesh::_duplicate(sourceMesh);
+      meshServant->GetImpl().GetMeshDS()->Modified();
+    }
+
+    if (!aStudyBuilder->_is_nil())
+      aStudyBuilder->CommitCommand();
+
+    // Python dump
+    std::string functionName = "";
+    SMESHIOConverter::ExternalConverter externalConverter = SMESHIOConverter::ExternalConverter::Unknown;
+    externalConverter = meshio.GetConverterForExtension(nullptr, tempFileName, converter);
+    switch (externalConverter)
+    {
+      case SMESHIOConverter::ExternalConverter::Gmsh:
+        functionName = std::string(".ReloadMeshesFromGMSHIO(r'") + theFileName + "')";
+        break;
+
+      case SMESHIOConverter::ExternalConverter::MeshIo:
+        functionName = std::string(".ReloadMeshesFromMESHIO(r'") + theFileName + "')";
+        break;
+
+      case SMESHIOConverter::ExternalConverter::Unknown:
+      default:
+        break;
+    }
+
+    functionToPythonDump(this, functionName, sobjects);
+  }
+
+  // Dump creation of groups
+  for (CORBA::ULong i = 0; i < aResult->length(); ++i)
+    SMESH::ListOfGroups_var groups = aResult[i]->GetGroups();
+
+  return aResult._retn();
+}
 
 //=============================================================================
 /*!
@@ -1579,7 +2403,7 @@ CORBA::Boolean SMESH_Gen_i::IsReadyToCompute( SMESH::SMESH_Mesh_ptr theMesh,
                                               GEOM::GEOM_Object_ptr theShapeObject )
 {
   Unexpect aCatch(SALOME_SalomeException);
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::IsReadyToCompute" );
+  MESSAGE( "SMESH_Gen_i::IsReadyToCompute" );
 
   if ( CORBA::is_nil( theShapeObject ) )
     THROW_SALOME_CORBA_EXCEPTION( "bad shape object reference",
@@ -1653,7 +2477,7 @@ SMESH::compute_error_array* SMESH_Gen_i::GetComputeErrors( SMESH::SMESH_Mesh_ptr
                                                            GEOM::GEOM_Object_ptr theSubObject )
 {
   Unexpect aCatch(SALOME_SalomeException);
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::GetComputeErrors()" );
+  MESSAGE( "SMESH_Gen_i::GetComputeErrors()" );
 
   if ( CORBA::is_nil( theSubObject ) && theMesh->HasShapeToMesh())
     THROW_SALOME_CORBA_EXCEPTION( "bad shape object reference", SALOME::BAD_PARAM );
@@ -1727,7 +2551,7 @@ SMESH_Gen_i::GetBadInputElements( SMESH::SMESH_Mesh_ptr theMesh,
                                   CORBA::Short          theSubShapeID )
 {
   Unexpect aCatch(SALOME_SalomeException);
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::GetBadInputElements()" );
+  MESSAGE( "SMESH_Gen_i::GetBadInputElements()" );
 
   if ( CORBA::is_nil( theMesh ) )
     THROW_SALOME_CORBA_EXCEPTION( "bad Mesh reference",SALOME::BAD_PARAM );
@@ -1848,7 +2672,7 @@ SMESH::algo_error_array* SMESH_Gen_i::GetAlgoState( SMESH::SMESH_Mesh_ptr theMes
                                                     GEOM::GEOM_Object_ptr theSubObject )
 {
   Unexpect aCatch(SALOME_SalomeException);
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::GetAlgoState()" );
+  MESSAGE( "SMESH_Gen_i::GetAlgoState()" );
 
   if ( CORBA::is_nil( theSubObject ) && theMesh->HasShapeToMesh())
     THROW_SALOME_CORBA_EXCEPTION( "bad shape object reference", SALOME::BAD_PARAM );
@@ -1909,7 +2733,7 @@ SMESH_Gen_i::GetSubShapesId( GEOM::GEOM_Object_ptr      theMainShapeObject,
                              const SMESH::object_array& theListOfSubShapeObject )
 {
   Unexpect aCatch(SALOME_SalomeException);
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::GetSubShapesId" );
+  MESSAGE( "SMESH_Gen_i::GetSubShapesId" );
 
   SMESH::long_array_var shapesId = new SMESH::long_array;
   set<int> setId;
@@ -1936,19 +2760,19 @@ SMESH_Gen_i::GetSubShapesId( GEOM::GEOM_Object_ptr      theMainShapeObject,
       {
         const TopoDS_Face& F = TopoDS::Face(exp.Current());
         setId.insert(myIndexToShape.FindIndex(F));
-        if(MYDEBUG) SCRUTE(myIndexToShape.FindIndex(F));
+        SCRUTE(myIndexToShape.FindIndex(F));
       }
       for (TopExp_Explorer exp(locShape,TopAbs_EDGE); exp.More(); exp.Next())
       {
         const TopoDS_Edge& E = TopoDS::Edge(exp.Current());
         setId.insert(myIndexToShape.FindIndex(E));
-        if(MYDEBUG) SCRUTE(myIndexToShape.FindIndex(E));
+        SCRUTE(myIndexToShape.FindIndex(E));
       }
       for (TopExp_Explorer exp(locShape,TopAbs_VERTEX); exp.More(); exp.Next())
       {
         const TopoDS_Vertex& V = TopoDS::Vertex(exp.Current());
         setId.insert(myIndexToShape.FindIndex(V));
-        if(MYDEBUG) SCRUTE(myIndexToShape.FindIndex(V));
+        SCRUTE(myIndexToShape.FindIndex(V));
       }
     }
     shapesId->length(setId.size());
@@ -1956,9 +2780,9 @@ SMESH_Gen_i::GetSubShapesId( GEOM::GEOM_Object_ptr      theMainShapeObject,
     int i=0;
     for (iind = setId.begin(); iind != setId.end(); iind++)
     {
-      if(MYDEBUG) SCRUTE((*iind));
+      SCRUTE((*iind));
       shapesId[i] = (*iind);
-      if(MYDEBUG) SCRUTE(shapesId[i]);
+      SCRUTE(shapesId[i]);
       i++;
     }
   }
@@ -1983,7 +2807,7 @@ CORBA::Boolean SMESH_Gen_i::Compute( SMESH::SMESH_Mesh_ptr theMesh,
 {
   //MEMOSTAT;
   Unexpect aCatch(SALOME_SalomeException);
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::Compute" );
+  MESSAGE( "SMESH_Gen_i::Compute" );
 
   if ( CORBA::is_nil( theShapeObject ) && theMesh->HasShapeToMesh())
     THROW_SALOME_CORBA_EXCEPTION( "bad shape object reference",
@@ -1995,7 +2819,9 @@ CORBA::Boolean SMESH_Gen_i::Compute( SMESH::SMESH_Mesh_ptr theMesh,
 
   // Update Python script
   TPythonDump(this) << "isDone = " << this << ".Compute( "
-                << theMesh << ", " << theShapeObject << ")";
+                    << theMesh << ", " << theShapeObject << ")";
+  TPythonDump(this) << this << ".CheckCompute( "
+                    << theMesh << ")";
 
   try {
     // get mesh servant
@@ -2078,7 +2904,7 @@ SMESH::MeshPreviewStruct* SMESH_Gen_i::Precompute( SMESH::SMESH_Mesh_ptr theMesh
                                                    SMESH::long_array&    theShapesId)
 {
   Unexpect aCatch(SALOME_SalomeException);
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::Precompute" );
+  MESSAGE( "SMESH_Gen_i::Precompute" );
 
   if ( CORBA::is_nil( theShapeObject ) && theMesh->HasShapeToMesh())
     THROW_SALOME_CORBA_EXCEPTION( "bad shape object reference",
@@ -2264,7 +3090,7 @@ SMESH::smIdType_array* SMESH_Gen_i::Evaluate(SMESH::SMESH_Mesh_ptr theMesh,
                                              GEOM::GEOM_Object_ptr theShapeObject)
 {
   Unexpect aCatch(SALOME_SalomeException);
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::Evaluate" );
+  MESSAGE( "SMESH_Gen_i::Evaluate" );
 
   if ( CORBA::is_nil( theShapeObject ) && theMesh->HasShapeToMesh())
     THROW_SALOME_CORBA_EXCEPTION( "bad shape object reference", SALOME::BAD_PARAM );
@@ -2798,6 +3624,138 @@ SMESH_Gen_i::ConcatenateCommon(const SMESH::ListOfIDSources& theMeshesArray,
   SetPixMap( meshSO, "ICON_SMESH_TREE_MESH" );
 
   newMeshDS->Modified();
+
+  return newMesh._retn();
+}
+
+
+//================================================================================
+/*!
+ * \brief Create a mesh by copying a part of another mesh
+ *  \param mesh - TetraHedron mesh
+ *  \param meshName Name of the created mesh
+ *  \retval SMESH::SMESH_Mesh_ptr - the new mesh
+ */
+//================================================================================
+
+SMESH::SMESH_Mesh_ptr SMESH_Gen_i::CreateDualMesh(SMESH::SMESH_IDSource_ptr mesh,
+                                                  const char*               meshName,
+                                                  CORBA::Boolean            adapt_to_shape)
+{
+  Unexpect aCatch(SALOME_SalomeException);
+
+  TPythonDump* pyDump = new TPythonDump(this); // prevent dump from CreateMesh()
+  std::unique_ptr<TPythonDump> pyDumpDeleter( pyDump );
+
+  // 1. Get source mesh
+
+  if ( CORBA::is_nil( mesh ))
+    THROW_SALOME_CORBA_EXCEPTION( "bad IDSource", SALOME::BAD_PARAM );
+
+  SMESH::SMESH_Mesh_var srcMesh = mesh->GetMesh();
+  SMESH_Mesh_i*       srcMesh_i = SMESH::DownCast<SMESH_Mesh_i*>( srcMesh );
+  if ( !srcMesh_i )
+    THROW_SALOME_CORBA_EXCEPTION( "bad mesh of IDSource", SALOME::BAD_PARAM );
+
+  CORBA::String_var mesh_var=GetORB()->object_to_string(mesh);
+  std::string mesh_ior = mesh_var.in();
+
+  //temporary folder for the generation of the med file
+  fs::path tmp_folder = fs::temp_directory_path() / fs::unique_path(fs::path("dual_mesh-%%%%"));
+  fs::create_directories(tmp_folder);
+  fs::path dual_mesh_file = tmp_folder / fs::path("tmp_dual_mesh.med");
+  std::string mesh_name(meshName);
+  MESSAGE("Working in folder" + tmp_folder.string());
+
+  // Running Python script
+  assert(Py_IsInitialized());
+  PyGILState_STATE gstate;
+  gstate = PyGILState_Ensure();
+
+
+  std::string ats;
+  if(adapt_to_shape)
+    ats = "True";
+  else
+    ats = "False";
+
+  std::string cmd="import salome.smesh.smesh_tools as smt\n";
+  cmd +="smt.smesh_create_dual_mesh(\"" + mesh_ior + "\", r\"" +
+        dual_mesh_file.string() + "\", mesh_name=\"" + mesh_name + "\", adapt_to_shape=" + ats + ")";
+  MESSAGE(cmd);
+
+  PyObject *py_main = PyImport_AddModule("__main__");
+  PyObject *py_dict = PyModule_GetDict(py_main);
+  PyObject *local_dict = PyDict_New();
+
+  PyRun_String(cmd.c_str(), Py_file_input, py_dict, local_dict);
+
+  if (PyErr_Occurred()) {
+    // Restrieving python error
+    MESSAGE("Catching error");
+    PyObject *errtype, *errvalue, *traceback;
+    PyErr_Fetch(&errtype, &errvalue, &traceback);
+    if(errvalue != NULL) {
+      MESSAGE("Error has a value");
+      PyObject *s = PyObject_Str(errvalue);
+      Py_ssize_t size;
+      std::string msg = PyUnicode_AsUTF8AndSize(s, &size);
+      msg = "Issue with the execution of create_dual_mesh:\n"+msg;
+      MESSAGE("throwing exception");
+      // We need to deactivate the GIL before throwing the exception
+      PyGILState_Release(gstate);
+      THROW_SALOME_CORBA_EXCEPTION(msg.c_str(), SALOME::INTERNAL_ERROR );
+      Py_DECREF(s);
+    }
+    Py_XDECREF(errvalue);
+    Py_XDECREF(errtype);
+    Py_XDECREF(traceback);
+  }
+
+  PyGILState_Release(gstate);
+
+  MESSAGE("Mesh created in " + dual_mesh_file.string());
+
+  // Import created MED
+  SMESH::SMESH_Mesh_var newMesh = CreateMesh(GEOM::GEOM_Object::_nil());
+  SMESH_Mesh_i*       newMesh_i = SMESH::DownCast<SMESH_Mesh_i*>( newMesh );
+  if ( !newMesh_i )
+    THROW_SALOME_CORBA_EXCEPTION( "can't create a mesh", SALOME::INTERNAL_ERROR );
+  SALOMEDS::SObject_wrap meshSO = ObjectToSObject( newMesh );
+  if ( !meshSO->_is_nil() )
+  {
+    SetName( meshSO, meshName, meshName );
+    SetPixMap( meshSO, "ICON_SMESH_TREE_MESH_IMPORTED");
+  }
+  int ret = newMesh_i->ImportMEDFile(dual_mesh_file.string().c_str(), meshName);
+  if(ret)
+    THROW_SALOME_CORBA_EXCEPTION( "Issue when importing mesh", SALOME::INTERNAL_ERROR );
+
+  /*
+  SMESH_Mesh& newMesh2 = newMesh_i->GetImpl();
+
+
+  MESSAGE("Loading file: " << dual_mesh_file.string() << " with mesh " << meshName);
+  int ret = newMesh2.MEDToMesh(dual_mesh_file.c_str(), meshName);
+    */
+
+  newMesh_i->GetImpl().GetMeshDS()->Modified();
+
+  *pyDump << newMesh << " = " << this
+          << ".CreateDualMesh("
+          << mesh << ", "
+          << "'" << mesh_name << "', "
+          << ats << ") ";
+
+  pyDumpDeleter.reset(); // allow dump in GetGroups()
+
+  if ( srcMesh_i->GetImpl().GetGroupIds().size() > 0 ) // dump created groups
+    MESSAGE("Dump of groups");
+    SMESH::ListOfGroups_var groups = newMesh->GetGroups();
+
+#ifndef _DEBUG_
+  fs::remove_all(tmp_folder);
+#endif
 
   return newMesh._retn();
 }
@@ -5087,7 +6045,7 @@ SALOMEDS::TMPFile* SMESH_Gen_i::Save( SALOMEDS::SComponent_ptr theComponent,
 SALOMEDS::TMPFile* SMESH_Gen_i::SaveASCII( SALOMEDS::SComponent_ptr theComponent,
                                            const char*              theURL,
                                            bool                     isMultiFile ) {
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::SaveASCII" );
+  MESSAGE( "SMESH_Gen_i::SaveASCII" );
   SALOMEDS::TMPFile_var aStreamFile = Save( theComponent, theURL, isMultiFile );
   return aStreamFile._retn();
 
@@ -5227,7 +6185,7 @@ bool SMESH_Gen_i::Load( SALOMEDS::SComponent_ptr theComponent,
               size = aDataset->GetSize();
               char* libname_str = new char[ size ];
               aDataset->ReadFromDisk( libname_str );
-              if(MYDEBUG) SCRUTE( libname_str );
+              SCRUTE( libname_str );
               libname = string( libname_str );
               delete [] libname_str;
               aDataset->CloseOnDisk();
@@ -5249,7 +6207,7 @@ bool SMESH_Gen_i::Load( SALOMEDS::SComponent_ptr theComponent,
 
           // --> restore hypothesis from data
           if ( id > 0 && !hypname.empty()/* && !hypdata.empty()*/ ) { // VSR : persistent data can be empty
-            if(MYDEBUG) MESSAGE("VSR - load hypothesis : id = " << id <<
+            MESSAGE("VSR - load hypothesis : id = " << id <<
                                 ", name = " << hypname.c_str() << ", persistent string = " << hypdata.c_str());
             SMESH::SMESH_Hypothesis_var myHyp;
 
@@ -5269,7 +6227,7 @@ bool SMESH_Gen_i::Load( SALOMEDS::SComponent_ptr theComponent,
               myStudyContext->mapOldToNew( id, newId );
             }
             else
-              if(MYDEBUG) MESSAGE( "VSR - SMESH_Gen::Load - can't get servant" );
+              MESSAGE( "VSR - SMESH_Gen::Load - can't get servant" );
           }
         }
       }
@@ -5326,7 +6284,7 @@ bool SMESH_Gen_i::Load( SALOMEDS::SComponent_ptr theComponent,
               size = aDataset->GetSize();
               char* libname_str = new char[ size ];
               aDataset->ReadFromDisk( libname_str );
-              if(MYDEBUG) SCRUTE( libname_str );
+              SCRUTE( libname_str );
               libname = string( libname_str );
               delete [] libname_str;
               aDataset->CloseOnDisk();
@@ -5338,7 +6296,7 @@ bool SMESH_Gen_i::Load( SALOMEDS::SComponent_ptr theComponent,
               size = aDataset->GetSize();
               char* hypdata_str = new char[ size ];
               aDataset->ReadFromDisk( hypdata_str );
-              if(MYDEBUG) SCRUTE( hypdata_str );
+              SCRUTE( hypdata_str );
               hypdata = string( hypdata_str );
               delete [] hypdata_str;
               aDataset->CloseOnDisk();
@@ -5349,7 +6307,7 @@ bool SMESH_Gen_i::Load( SALOMEDS::SComponent_ptr theComponent,
 
           // --> restore algorithm from data
           if ( id > 0 && !hypname.empty()/* && !hypdata.empty()*/ ) { // VSR : persistent data can be empty
-            if(MYDEBUG) MESSAGE("VSR - load algo : id = " << id <<
+            MESSAGE("VSR - load algo : id = " << id <<
                                 ", name = " << hypname.c_str() << ", persistent string = " << hypdata.c_str());
             SMESH::SMESH_Hypothesis_var myHyp;
 
@@ -5373,7 +6331,7 @@ bool SMESH_Gen_i::Load( SALOMEDS::SComponent_ptr theComponent,
               myStudyContext->mapOldToNew( id, newId );
             }
             else
-              if(MYDEBUG) MESSAGE( "VSR - SMESH_Gen::Load - can't get servant" );
+              MESSAGE( "VSR - SMESH_Gen::Load - can't get servant" );
           }
         }
       }
@@ -5402,7 +6360,7 @@ bool SMESH_Gen_i::Load( SALOMEDS::SComponent_ptr theComponent,
         int aNbObjects = aTopGroup->nInternalObjects();
         if ( aNbObjects > 0 ) {
           // create mesh
-          if(MYDEBUG) MESSAGE( "VSR - load mesh : id = " << id );
+          MESSAGE( "VSR - load mesh : id = " << id );
           SMESH::SMESH_Mesh_var myNewMesh = this->createMesh();
           SMESH_Mesh_i* myNewMeshImpl = dynamic_cast<SMESH_Mesh_i*>( GetServant( myNewMesh ).in() );
           if ( !myNewMeshImpl )
@@ -5538,7 +6496,7 @@ bool SMESH_Gen_i::Load( SALOMEDS::SComponent_ptr theComponent,
         aGroup->OpenOnDisk();
         // get number of applied algorithms
         int aNbSubObjects = aGroup->nInternalObjects();
-        if(MYDEBUG) MESSAGE( "VSR - number of applied algos " << aNbSubObjects );
+        MESSAGE( "VSR - number of applied algos " << aNbSubObjects );
         for ( int j = 0; j < aNbSubObjects; j++ ) {
           char name_dataset[ HDF_NAME_MAX_LEN+1 ];
           aGroup->InternalObjectIndentify( j, name_dataset );
@@ -6041,7 +6999,7 @@ bool SMESH_Gen_i::LoadASCII( SALOMEDS::SComponent_ptr theComponent,
                              const SALOMEDS::TMPFile& theStream,
                              const char*              theURL,
                              bool                     isMultiFile ) {
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::LoadASCII" );
+  MESSAGE( "SMESH_Gen_i::LoadASCII" );
   return Load( theComponent, theStream, theURL, isMultiFile );
 
   //before call main ::Load method it's need for decipher text format to
@@ -6078,7 +7036,7 @@ bool SMESH_Gen_i::LoadASCII( SALOMEDS::SComponent_ptr theComponent,
 
 void SMESH_Gen_i::Close( SALOMEDS::SComponent_ptr theComponent )
 {
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::Close" );
+  MESSAGE( "SMESH_Gen_i::Close" );
 
   // Clear study contexts data
   myStudyContext->Clear();
@@ -6102,7 +7060,7 @@ void SMESH_Gen_i::Close( SALOMEDS::SComponent_ptr theComponent )
 
 char* SMESH_Gen_i::ComponentDataType()
 {
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::ComponentDataType" );
+  MESSAGE( "SMESH_Gen_i::ComponentDataType" );
   return CORBA::string_dup( "SMESH" );
 }
 
@@ -6120,12 +7078,12 @@ char* SMESH_Gen_i::IORToLocalPersistentID( SALOMEDS::SObject_ptr /*theSObject*/,
                                            CORBA::Boolean        /*isMultiFile*/,
                                            CORBA::Boolean        /*isASCII*/ )
 {
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::IORToLocalPersistentID" );
+  MESSAGE( "SMESH_Gen_i::IORToLocalPersistentID" );
 
   if ( myStudyContext && strcmp( IORString, "" ) != 0 ) {
     int anId = myStudyContext->findId( IORString );
     if ( anId ) {
-      if(MYDEBUG) MESSAGE( "VSR " << anId )
+      MESSAGE( "VSR " << anId );
       char strId[ 20 ];
       sprintf( strId, "%d", anId );
       return  CORBA::string_dup( strId );
@@ -6147,7 +7105,7 @@ char* SMESH_Gen_i::LocalPersistentIDToIOR( SALOMEDS::SObject_ptr /*theSObject*/,
                                            CORBA::Boolean        /*isMultiFile*/,
                                            CORBA::Boolean        /*isASCII*/ )
 {
-  if(MYDEBUG) MESSAGE( "SMESH_Gen_i::LocalPersistentIDToIOR(): id = " << aLocalPersistentID );
+  MESSAGE( "SMESH_Gen_i::LocalPersistentIDToIOR(): id = " << aLocalPersistentID );
 
   if ( myStudyContext && strcmp( aLocalPersistentID, "" ) != 0 ) {
     int anId = atoi( aLocalPersistentID );
@@ -6182,7 +7140,7 @@ CORBA::Long  SMESH_Gen_i::GetObjectId(CORBA::Object_ptr theObject)
 {
   if ( myStudyContext && !CORBA::is_nil( theObject )) {
     CORBA::String_var iorString = GetORB()->object_to_string( theObject );
-    string iorStringCpp(iorString.in()); 
+    string iorStringCpp(iorString.in());
     return myStudyContext->findId( iorStringCpp );
   }
   return 0;
@@ -6511,8 +7469,6 @@ CORBA::Boolean SMESH_Gen_i::IsApplicable ( const char*           theAlgoType,
 
   SMESH_CATCH( SMESH::doNothing );
 
-#ifdef _DEBUG_
-  cout << "SMESH_Gen_i::IsApplicable(): exception in " << ( theAlgoType ? theAlgoType : "") << endl;
-#endif
+  MESSAGE("SMESH_Gen_i::IsApplicable(): exception in " << ( theAlgoType ? theAlgoType : ""));
   return true;
 }

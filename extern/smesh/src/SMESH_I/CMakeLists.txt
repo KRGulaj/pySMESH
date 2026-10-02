@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -25,6 +25,7 @@ INCLUDE_DIRECTORIES(
   ${HDF5_INCLUDE_DIRS}
   ${MEDFILE_INCLUDE_DIRS}
   ${Boost_INCLUDE_DIRS}
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${KERNEL_INCLUDE_DIRS}
   ${GUI_INCLUDE_DIRS}
   ${GEOM_INCLUDE_DIRS}
@@ -61,16 +62,16 @@ SET(_link_LIBRARIES
   ${KERNEL_SalomeNotification}
   ${KERNEL_ResourcesManager}
   ${KERNEL_SalomeResourcesManager}
-  ${KERNEL_SALOMEBasics}
+  ${SALOMEBOOTSTRAP_SALOMEBasics}
   ${KERNEL_SalomeContainer}
   ${KERNEL_SalomeNS}
   ${KERNEL_Registry}
   ${KERNEL_SalomeHDFPersist}
   ${KERNEL_SalomeLifeCycleCORBA}
-  ${KERNEL_TOOLSDS}  
+  ${KERNEL_TOOLSDS}
   ${KERNEL_SalomeGenericObj}
   ${KERNEL_SalomeIDLKERNEL}
-  ${KERNEL_SALOMELocalTrace}
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
   ${KERNEL_SalomeKernelHelpers}
   ${KERNEL_SalomeDS}
   ${KERNEL_SalomeCatalog}
@@ -115,6 +116,9 @@ SET(SMESHEngine_HEADERS
   SMESH.hxx
   MG_ADAPT_i.hxx
   SMESH_Homard_i.hxx
+  SMESH_SequentialMesh_i.hxx
+  SMESH_ParallelMesh_i.hxx
+  SMESH_Meshio.h
 )
 
 # --- sources ---
@@ -144,6 +148,8 @@ SET(SMESHEngine_SOURCES
   SMESH_PreMeshInfo.cxx
   MG_ADAPT_i.cxx
   SMESH_Homard_i.cxx
+  SMESH_ParallelMesh_i.cxx
+  SMESH_Meshio.cxx
 )
 
 # --- rules ---

@@ -1,4 +1,4 @@
-// Copyright (C) 2018-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2018-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -511,7 +511,7 @@ namespace
                   paths[j].myFace = 0;
               }
               if ( !goodFace )
-                throw SALOME_Exception ( SMESH_Comment("Cant move from point ") << iP+1
+                throw SALOME_Exception ( SMESH_Comment("Cannot move from point ") << iP+1
                                          << " of a PolySegment " << iSeg );
               for ( size_t j = nbPaths; j < paths.size(); ++j )
                 if ( !paths[j].myFace )

@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -43,7 +43,7 @@ StdMeshers_LengthFromEdges::StdMeshers_LengthFromEdges(int hypId, SMESH_Gen* gen
 {
   _mode =1;
   _name = "LengthFromEdges";
-  _param_algo_dim = 2; // is used by SMESH_MEFISTO_2D
+  _param_algo_dim = 2;
 }
 
 //=============================================================================

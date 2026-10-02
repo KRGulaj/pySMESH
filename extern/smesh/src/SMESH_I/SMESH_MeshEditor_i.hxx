@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -263,6 +263,8 @@ public:
                                   SMESH::NumericalFunctor_ptr   Criterion);
   void           SplitVolumesIntoTetra(SMESH::SMESH_IDSource_ptr elems,
                                        CORBA::Short             methodFlags);
+  void           SplitVolumesIntoTetraAvoidOverConstrainedVolumes(SMESH::SMESH_IDSource_ptr elems,
+                                                                  CORBA::Short              methodFlags);
   void           SplitHexahedraIntoPrisms(SMESH::SMESH_IDSource_ptr  elems,
                                           const SMESH::PointStruct & startHexPoint,
                                           const SMESH::DirStruct&    facetToSplitNormal,
@@ -837,6 +839,7 @@ public:
                                    const char* groupName,
                                    const char* meshName,
                                    CORBA::Boolean toCopyAll,
+                                   CORBA::Boolean toCreateAllElements,
                                    const SMESH::ListOfIDSources& groups,
                                    SMESH::SMESH_Mesh_out mesh,
                                    SMESH::SMESH_Group_out group);

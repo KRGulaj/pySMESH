@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2013-2022  EDF R&D
+# Copyright (C) 2013-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -21,11 +21,16 @@
 # Modules Python
 # Modules Eficas
 
+import sys
 import os, subprocess
 import tempfile
 from MGCleanerPlugDialog_ui import Ui_MGCleanerPlugDialog
 from MGCleanerMonViewText import MGCleanerMonViewText
-from qtsalome import *
+if 'SALOME_USE_PYSIDE' in os.environ:
+  from PySide2.QtWidgets import QWidget, QMessageBox, QFileDialog, QApplication
+  from PySide2.QtGui import QIcon, QDoubleValidator
+else:
+  from PyQt5.Qt import *
 
 verbose = True
 
@@ -568,9 +573,10 @@ class MGCleanerMonPlugDialog(Ui_MGCleanerPlugDialog,QWidget):
 
     import SMeshHelper
     key = SMeshHelper.GetMGLicenseKey( self.fichierIn )
-    self.commande+=' --key ' + key
+    if key != "0":
+      self.commande+=' --key ' + key
 
-    if verbose: print(("INFO: MGCCleaner command:\n  %s" % self.commande))
+    if verbose: print("INFO: MG-Cleaner command:\n  %s" % self.commande)
     return True
 
   def clean(self):
@@ -633,8 +639,6 @@ def TEST_standalone():
 # ==============================================================================
 #
 def TEST_MGCleanerMonPlugDialog():
-  import sys
-  from qtsalome import QApplication
   app = QApplication(sys.argv)
   app.lastWindowClosed.connect(app.quit)
 

@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -80,6 +80,10 @@ private:
   static QTreeWidgetItem*        newTreeItem( double v1, double v2 );
   static QListWidgetItem*        newListItem( double v1 );
   static QString                 treeItemText( double v1, double v2 );
+  static int                     getParametricPrecision();
+  static bool                    equalDbl(double a, double b);
+  static bool                    ltDbl(double a, double b);
+  static bool                    gtDbl(double a, double b);
 
 private:
   QListWidget*                   myListWidget;

@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -371,11 +371,13 @@ QString SMESHGUI_Selection::controlMode( int ind ) const
     case SMESH_Actor::eMultiConnection2D:     mode = "eMultiConnection2D";     break;
     case SMESH_Actor::eArea:                  mode = "eArea";                  break;
     case SMESH_Actor::eVolume3D:              mode = "eVolume3D";              break;
+    case SMESH_Actor::eScaledJacobian:        mode = "eScaledJacobian";        break;
     case SMESH_Actor::eMaxElementLength2D:    mode = "eMaxElementLength2D";    break;
     case SMESH_Actor::eMaxElementLength3D:    mode = "eMaxElementLength3D";    break;
     case SMESH_Actor::eTaper:                 mode = "eTaper";                 break;
     case SMESH_Actor::eAspectRatio:           mode = "eAspectRatio";           break;
     case SMESH_Actor::eAspectRatio3D:         mode = "eAspectRatio3D";         break;
+    case SMESH_Actor::eWarping3D:             mode = "eWarping3D";             break;
     case SMESH_Actor::eMinimumAngle:          mode = "eMinimumAngle";          break;
     case SMESH_Actor::eWarping:               mode = "eWarping";               break;
     case SMESH_Actor::eSkew:                  mode = "eSkew";                  break;
@@ -429,6 +431,7 @@ bool SMESHGUI_Selection::isNumFunctor( int ind ) const
     case SMESH_Actor::eMultiConnection2D:
     case SMESH_Actor::eArea:
     case SMESH_Actor::eVolume3D:
+    case SMESH_Actor::eScaledJacobian:
     case SMESH_Actor::eMaxElementLength2D:
     case SMESH_Actor::eMaxElementLength3D:
     case SMESH_Actor::eTaper:
@@ -436,6 +439,7 @@ bool SMESHGUI_Selection::isNumFunctor( int ind ) const
     case SMESH_Actor::eAspectRatio3D:
     case SMESH_Actor::eMinimumAngle:
     case SMESH_Actor::eWarping:
+    case SMESH_Actor::eWarping3D:
     case SMESH_Actor::eSkew:
       result = true;
       break;

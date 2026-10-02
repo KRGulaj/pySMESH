@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -43,6 +43,7 @@
 #include <vtkObjectFactory.h>
 #include <vtkShrinkFilter.h>
 #include <vtkShrinkPolyData.h>
+#include <vtkTriangleFilter.h>
 
 #include <vtkProperty.h>
 #include <vtkPolyData.h>
@@ -60,7 +61,7 @@
 #include <vtkUnsignedCharArray.h>
 
 #include <vtkImplicitBoolean.h>
-#include <vtkPassThroughFilter.h>
+#include <vtkPassThrough.h>
 
 #include <vtkRenderer.h>
 
@@ -68,11 +69,6 @@
 
 #include "utilities.h"
 
-#ifdef _DEBUG_
-static int MYDEBUG = 0;
-#else
-static int MYDEBUG = 0;
-#endif
 
 using namespace std;
 
@@ -83,7 +79,7 @@ vtkStandardNewMacro(SMESH_DeviceActor)
 SMESH_DeviceActor
 ::SMESH_DeviceActor()
 {
-  if(MYDEBUG) MESSAGE("SMESH_DeviceActor - "<<this);
+  MESSAGE("SMESH_DeviceActor - "<<this);
 
   myIsShrinkable = false;
   myIsShrunk = false;
@@ -114,11 +110,12 @@ SMESH_DeviceActor
   myMergeFilter = vtkMergeFilter::New();
 
   myGeomFilter = VTKViewer_GeometryFilter::New();
+  myTriangleFilter = vtkTriangleFilter::New();
 
   myTransformFilter = VTKViewer_TransformFilter::New();
 
   for(int i = 0; i < 6; i++)
-    myPassFilter.push_back(vtkPassThroughFilter::New());
+    myPassFilter.push_back(vtkPassThrough::New());
 
   // Orientation of faces
   myIsFacesOriented = false;
@@ -140,7 +137,7 @@ SMESH_DeviceActor
 SMESH_DeviceActor
 ::~SMESH_DeviceActor()
 {
-  if(MYDEBUG) MESSAGE("~SMESH_DeviceActor - "<<this);
+  MESSAGE("~SMESH_DeviceActor - "<<this);
 
   myMapper->Delete();
   // myPlaneCollection->Delete(); -- it is vtkSmartPointer
@@ -158,6 +155,7 @@ SMESH_DeviceActor
   myFaceOrientation->Delete();
 
   myGeomFilter->Delete();
+  myTriangleFilter->Delete();
 
   myTransformFilter->Delete();
 
@@ -256,8 +254,10 @@ SMESH_DeviceActor
 
     anId++; // 3
     myGeomFilter->SetInputConnection( myPassFilter[ anId ]->GetOutputPort() );
+    myTriangleFilter->SetInputConnection(myGeomFilter->GetOutputPort());
 
     anId++; // 4
+    // myPassFilter[ anId ]->SetInputConnection( myTriangleFilter->GetOutputPort() );
     myPassFilter[ anId ]->SetInputConnection( myGeomFilter->GetOutputPort() );
     myPassFilter[ anId + 1 ]->SetInputConnection( myPassFilter[ anId ]->GetOutputPort() );
 
@@ -501,6 +501,80 @@ SMESH_DeviceActor
         aCellLocationsArray->SetValue( idType, aConnectivity->GetTraversalLocation( npts ) );
 
       aDataSet->SetCells( aCellTypesArray, aCellLocationsArray,aConnectivity );
+      SetUnstructuredGrid(aDataSet);
+
+      aDataSet->GetCellData()->SetScalars(aScalars);
+      aScalars->Delete();
+
+      theLookupTable->SetRange(aScalars->GetRange());
+      theLookupTable->Build();
+
+      myMergeFilter->SetScalarsData(aDataSet);
+      aDataSet->Delete();
+    }
+    else if (Warping3D* aWarping3D = dynamic_cast<Warping3D*>(theFunctor.get())){
+
+      SMESH::Controls::Warping3D::WValues aValues;
+
+      aWarping3D->GetValues(aValues);
+      vtkUnstructuredGrid* aDataSet = vtkUnstructuredGrid::New();
+      vtkUnstructuredGrid* aGrid = myVisualObj->GetUnstructuredGrid();
+
+      aDataSet->SetPoints(aGrid->GetPoints());
+
+      vtkIdType aNbCells = aValues.size();
+
+      vtkDoubleArray* aScalars = vtkDoubleArray::New();
+      aScalars->SetNumberOfComponents(1);
+      aScalars->SetNumberOfTuples(aNbCells);
+
+      vtkIdType aCellsSize = 3 * aNbCells;
+      vtkCellArray* aConnectivity = vtkCellArray::New();
+      aConnectivity->Allocate(aCellsSize, 0);
+
+      vtkUnsignedCharArray* aCellTypesArray = vtkUnsignedCharArray::New();
+      aCellTypesArray->SetNumberOfComponents(1);
+      aCellTypesArray->Allocate(aNbCells* aCellTypesArray->GetNumberOfComponents());
+
+      Warping3D::WValues::const_iterator anIter = aValues.begin();
+      aNbCells = 0;
+      for (; anIter != aValues.end(); anIter++) {
+
+        const Warping3D::Value& aValue = *anIter;
+        vtkIdList* anIdList = vtkIdList::New();
+        anIdList->SetNumberOfIds(aValue.myPntIds.size());
+        bool isExist = true;
+        for (int i = 0; i < aValue.myPntIds.size(); ++i)
+        {
+          int aVTKId = myVisualObj->GetNodeVTKId(aValue.myPntIds[i]);
+          if (aVTKId < 0)
+          {
+            isExist = false;
+            break;
+          }
+          anIdList->SetId(i, aVTKId);
+        }
+        if (isExist)
+        {
+          aConnectivity->InsertNextCell(anIdList);
+          aCellTypesArray->InsertNextValue(VTK_POLYGON);
+          aScalars->SetValue(aNbCells, aValue.myWarp);
+          aNbCells++;
+        }
+      }
+      aCellTypesArray->SetNumberOfTuples(aNbCells);
+      aScalars->SetNumberOfTuples(aNbCells);
+
+      vtkIdTypeArray* aCellLocationsArray = vtkIdTypeArray::New();
+      aCellLocationsArray->SetNumberOfComponents(1);
+      aCellLocationsArray->SetNumberOfTuples(aNbCells);
+
+      aConnectivity->InitTraversal();
+      vtkIdType const* pts(nullptr);
+      for (vtkIdType idType = 0, npts; aConnectivity->GetNextCell(npts, pts); idType++)
+        aCellLocationsArray->SetValue(idType, aConnectivity->GetTraversalLocation(npts));
+
+      aDataSet->SetCells(aCellTypesArray, aCellLocationsArray, aConnectivity);
       SetUnstructuredGrid(aDataSet);
 
       aDataSet->GetCellData()->SetScalars(aScalars);
@@ -851,7 +925,7 @@ SMESH_DeviceActor
     anID = myExtractGeometry->GetNodeObjId(theVtkID);
 
   vtkIdType aRetID = myVisualObj->GetNodeObjId(anID);
-  if(MYDEBUG) MESSAGE("GetNodeObjId - theVtkID = "<<theVtkID<<"; anID = "<<anID<<"; aRetID = "<<aRetID);
+  MESSAGE("GetNodeObjId - theVtkID = "<<theVtkID<<"; anID = "<<anID<<"; aRetID = "<<aRetID);
   return aRetID;
 }
 
@@ -862,7 +936,7 @@ SMESH_DeviceActor
   vtkDataSet* aDataSet = myMergeFilter->GetOutput();
   vtkIdType anID = myVisualObj->GetNodeVTKId(theObjID);
   double* aCoord = (anID >=0 && anID < aDataSet->GetNumberOfPoints()) ? aDataSet->GetPoint(anID) : NULL;
-  if(MYDEBUG) MESSAGE("GetNodeCoord - theObjID = "<<theObjID<<"; anID = "<<anID);
+  MESSAGE("GetNodeCoord - theObjID = "<<theObjID<<"; anID = "<<anID);
   return aCoord;
 }
 
@@ -892,8 +966,8 @@ SMESH_DeviceActor
     return -1;
 
   vtkIdType aRetID = myVisualObj->GetElemObjId(anId3);
-  if(MYDEBUG) 
-     MESSAGE("GetElemObjId - theVtkID = "<<theVtkID<<"; anId2 = "<<anId2<<"; anId3 = "<<anId3<<"; aRetID = "<<aRetID);
+
+  MESSAGE("GetElemObjId - theVtkID = "<<theVtkID<<"; anId2 = "<<anId2<<"; anId3 = "<<anId3<<"; aRetID = "<<aRetID);
   return aRetID;
 }
 
@@ -904,8 +978,8 @@ SMESH_DeviceActor
   vtkDataSet* aDataSet = myVisualObj->GetUnstructuredGrid();
   vtkIdType aGridID = myVisualObj->GetElemVTKId(theObjID);
   vtkCell* aCell = (aGridID >= 0 ) ? aDataSet->GetCell(aGridID) : NULL;
-  if(MYDEBUG) 
-    MESSAGE("GetElemCell - theObjID = "<<theObjID<<"; aGridID = "<<aGridID);
+
+  MESSAGE("GetElemCell - theObjID = "<<theObjID<<"; aGridID = "<<aGridID);
   return aCell;
 }
 

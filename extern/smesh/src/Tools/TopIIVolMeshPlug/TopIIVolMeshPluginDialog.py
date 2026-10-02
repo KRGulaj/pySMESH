@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2013-2022  EDF R&D
+# Copyright (C) 2013-2026 CEA/DES, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -27,14 +27,17 @@ import pathlib
 
 # set seed
 from datetime import datetime
-random.seed(datetime.now())
+# see https://docs.python.org/3.13/library/random.html#random.seed
+random.seed(datetime.now().timestamp())
 
 import platform
 import tempfile
 from TopIIVolMeshPluginDialog_ui import Ui_TopIIVolMeshMainFrame
 from TopIIVolMeshMonitor import TopIIVolMeshMonitor
-from qtsalome import *
-
+if 'SALOME_USE_PYSIDE' in os.environ:
+  from PySide2.QtWidgets import QWidget, QMessageBox, QFileDialog
+else:
+  from PyQt5.Qt import QWidget, QMessageBox, QFileDialog
 verbose = True
 
 class TopIIVolMeshPluginDialog(Ui_TopIIVolMeshMainFrame,QWidget):
@@ -48,19 +51,14 @@ class TopIIVolMeshPluginDialog(Ui_TopIIVolMeshMainFrame,QWidget):
     self.qpbMeshFile.clicked.connect(self.OnQpbMeshFileClicked)
     self.qpbMeshFile.setToolTip("Select input DEM file")
     self.qpbClose.clicked.connect(self.OnQpbCloseClicked)
-    self.qcbDistributed.stateChanged[int].connect(self.OnqcbDistributedClicked)
-    self.qlbXParts.setVisible(False)
-    self.qlbYParts.setVisible(False)
-    self.qlbZParts.setVisible(False)
-    self.qsbXParts.setVisible(False)
-    self.qsbYParts.setVisible(False)
-    self.qsbZParts.setVisible(False)
+    self.qrbDist.clicked.connect(self.OnqrbDistClicked)
+    self.qrbPar.clicked.connect(self.OnqrbParClicked)
+    self.qrbSeq.clicked.connect(self.OnqrbSeqClicked)
     self.SALOME_TMP_DIR = None
     try:
       self.qleTmpDir.setText(os.path.join('/tmp',getpass.getuser(),'top-ii-vol'))
     except:
       self.qleTmpDir.setText('/tmp')
-    self.resize(800, 500)
     self.outputMesh = ''
 
   def OnQpbHelpClicked(self):
@@ -92,7 +90,7 @@ class TopIIVolMeshPluginDialog(Ui_TopIIVolMeshMainFrame,QWidget):
     zPoints = self.qsbZPoints.value()
     depth   = self.qsbDepth.value()
     nProcs  = self.qsbNBprocs.value()
-    if not self.qcbDistributed.isChecked():
+    if not self.qrbDist.isChecked():
       if nProcs == 1:
         shellCmd = "topIIvol_Mesher"
       else:
@@ -122,18 +120,30 @@ class TopIIVolMeshPluginDialog(Ui_TopIIVolMeshMainFrame,QWidget):
       pathlib.Path(self.SALOME_TMP_DIR).mkdir(parents=True, exist_ok=True)
     self.outputMesh= os.path.join(self.SALOME_TMP_DIR, inputMesh.split('/').pop().replace('.xyz','.mesh'))
     shellCmd+= " --out " + self.outputMesh
+    os.chdir(self.SALOME_TMP_DIR)
     print("INFO: ", shellCmd)
     myMonitorView=TopIIVolMeshMonitor(self, shellCmd)
 
-  def OnqcbDistributedClicked(self):
-    state = self.qcbDistributed.isChecked()
-    self.qlbXParts.setVisible(state)
-    self.qlbYParts.setVisible(state)
-    self.qlbZParts.setVisible(state)
-    self.qsbXParts.setVisible(state)
-    self.qsbYParts.setVisible(state)
-    self.qsbZParts.setVisible(state)
+  def OnqrbDistClicked(self):
+    state = self.qrbDist.isChecked()
+    self.qgbDist.setEnabled(state)
+    self.qsbNBprocs.setEnabled(state)
+    self.qlbNBprocs.setEnabled(state)
 
+  def OnqrbParClicked(self):
+    state = self.qrbPar.isChecked()
+    self.qgbDist.setEnabled(not state)
+    self.qsbNBprocs.setEnabled(state)
+    self.qlbNBprocs.setEnabled(state)
+
+  def OnqrbSeqClicked(self):
+    state = self.qrbSeq.isChecked()
+    if state:
+      self.qsbNBprocs.setValue(1)
+    self.qgbDist.setEnabled(not state)
+    self.qsbNBprocs.setEnabled(not state)
+    self.qlbNBprocs.setEnabled(not state)
+    
   def OnQpbCloseClicked(self):
     self.close()
 

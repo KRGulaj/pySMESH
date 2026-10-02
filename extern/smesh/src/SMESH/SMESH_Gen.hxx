@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -34,6 +34,7 @@
 
 #include "SMESH_Algo.hxx"
 #include "SMESH_ComputeError.hxx"
+#include "SMESH_subMesh.hxx"
 
 #include <map>
 #include <list>
@@ -41,14 +42,16 @@
 #include <vector>
 #include <string>
 
+
 #include <TopoDS_Shape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 
 class SMESHDS_Document;
 class SMESH_Algo;
 class SMESH_Mesh;
+class SMESH_ParallelMesh;
 class TopoDS_Shape;
-class SMESH_subMesh;
+
 
 typedef SMESH_Hypothesis::Hypothesis_Status TAlgoStateErrorName;
 
@@ -68,6 +71,7 @@ public:
   ~SMESH_Gen();
 
   SMESH_Mesh* CreateMesh(bool theIsEmbeddedMode);
+  SMESH_ParallelMesh* CreateParallelMesh(bool theIsEmbeddedMode);
 
   enum ComputeFlags
   {
@@ -77,7 +81,7 @@ public:
     SHAPE_ONLY_UPWARD = 3  // SHAPE_ONLY | UPWARD
   };
   /*!
-   * \brief Computes aMesh on aShape 
+   * \brief Computes aMesh on aShape
    *  \param aMesh - the mesh.
    *  \param aShape - the shape.
    *  \param aFlags - ComputeFlags. By default compute the whole mesh and compact at the end.
@@ -101,7 +105,7 @@ public:
   const SMESH_subMesh* GetCurrentSubMesh() const;
 
   /*!
-   * \brief evaluates size of prospective mesh on a shape 
+   * \brief evaluates size of prospective mesh on a shape
    * \param aMesh - the mesh
    * \param aShape - the shape
    * \param aResMap - map for prospective numbers of elements
@@ -165,7 +169,34 @@ public:
 
   int GetANewId();
 
+public:
+  void send_mesh(SMESH_Mesh & aMesh, std::string filename);
+
+  bool parallelComputeSubMeshes(
+          SMESH_Mesh & aMesh,
+          const TopoDS_Shape & aShape,
+          const ::MeshDimension       aDim,
+          TSetOfInt*                  aShapesId,
+          TopTools_IndexedMapOfShape* allowedSubShapes,
+          SMESH_subMesh::compute_event &computeEvent,
+          const bool includeSelf,
+          const bool complexShapeFirst,
+          const bool   aShapeOnly);
+
+  bool sequentialComputeSubMeshes(
+          SMESH_Mesh & aMesh,
+          const TopoDS_Shape & aShape,
+          const ::MeshDimension       aDim,
+          TSetOfInt*                  aShapesId /*=0*/,
+          TopTools_IndexedMapOfShape* allowedSubShapes,
+          SMESH_subMesh::compute_event &computeEvent,
+          const bool includeSelf,
+          const bool complexShapeFirst,
+          const bool aShapeOnly);
+
 private:
+
+
 
   int _localId;                         // unique Id of created objects, within SMESH_Gen entity
   StudyContextStruct* _studyContext;

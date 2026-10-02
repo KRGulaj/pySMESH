@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -579,6 +579,14 @@ namespace {
     case HAS_PROPAG_HYP: {  // propag hyp on this submesh
       // --------------------------------------------------------
       switch ( event ) {
+      case SMESH_subMesh::ADD_FATHER_ALGO:
+      {
+        DBGMSG("HAS_PROPAG_HYP propagation to ADD_FATHER_ALGO " << subMesh->GetId());
+
+        // Rebuild propagation chain after an algo was added on father submesh
+        buildPropagationChain(subMesh);
+        break;
+      }
       case SMESH_subMesh::REMOVE_HYP:
       case SMESH_subMesh::REMOVE_FATHER_HYP: // remove propagation hyp
         if ( isPropagHyp && !getProagationHyp( subMesh ))
