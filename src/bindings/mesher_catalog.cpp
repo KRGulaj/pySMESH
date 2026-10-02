@@ -62,6 +62,7 @@
 #include <StdMeshers_Adaptive1D.hxx>
 #include <StdMeshers_Arithmetic1D.hxx>
 #include <StdMeshers_AutomaticLength.hxx>
+#include <StdMeshers_BlockRenumber.hxx>
 #include <StdMeshers_CartesianParameters3D.hxx>
 #include <StdMeshers_Deflection1D.hxx>
 #include <StdMeshers_FixedPoints1D.hxx>
@@ -75,6 +76,7 @@
 #include <StdMeshers_MaxLength.hxx>
 #include <StdMeshers_NumberOfLayers.hxx>
 #include <StdMeshers_NumberOfLayers2D.hxx>
+#include <StdMeshers_NotConformAllowed.hxx>
 #include <StdMeshers_NumberOfSegments.hxx>
 #include <StdMeshers_ProjectionSource1D.hxx>
 #include <StdMeshers_ProjectionSource2D.hxx>
@@ -309,8 +311,30 @@ SMESH_Hypothesis* make_area_hypothesis(const std::string& name, Params& p, Facto
     h->SetToAddEdges(p.flag("add_edges"));
     h->SetToCreateFaces(p.flag("create_faces"));
     h->SetToConsiderInternalFaces(p.flag("consider_internal_faces"));
+    // New in SMESH 9.16 (9a170f0e1): a boundary polyhedron is replaced by a hexahedron when
+    // its volume divided by the volume of the equivalent hexahedron is bigger than `quanta`.
+    // Read only when sent, so the existing dataclass, which does not send it, keeps its
+    // behaviour. The range is the one SetQuanta accepts (StdMeshers_CartesianParameters3D
+    // .cxx:804); it is checked here so that a bad value raises PysmeshError.
+    if (p.has("use_quanta")) {
+      h->SetToUseQuanta(p.flag("use_quanta"));
+      const double quanta = p.number("quanta");
+      if (!(quanta >= 1e-6 && quanta <= 1.0)) {
+        throw PysmeshError("CartesianParameters3D: quanta must lie in [1e-6, 1] (got " +
+                           std::to_string(quanta) + ").");
+      }
+      h->SetQuanta(quanta);
+    }
     return h;
   }
+  // Renumbers the hexahedra and nodes of Hexa_3D like a structured i, j, k grid. Only the
+  // parameter-free form is built: for a block with edges parallel to the global axes the
+  // local axes default to the global ones (SMESH 3d_meshing_hypo.rst). The explicit form
+  // names its vertices by study entry strings, which need a SMESH_Mesh::TCallUp to resolve.
+  if (name == "BlockRenumber") return f.make<StdMeshers_BlockRenumber>();
+  // Lets local algorithms that mesh their own boundary sit side by side on adjacent
+  // sub-shapes, which gives a non-conformal mesh. Global only (SMESH_Mesh.cxx:658-668).
+  if (name == "NotConformAllowed") return f.make<StdMeshers_NotConformAllowed>();
   return nullptr;
 }
 

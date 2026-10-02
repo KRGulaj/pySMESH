@@ -92,6 +92,10 @@
 #include <StdMeshers_RadialPrism_3D.hxx>
 #include <StdMeshers_Regular_1D.hxx>
 #include <StdMeshers_ViscousLayers2D.hxx>
+#include <StdMeshers_BlockRenumber.hxx>
+#include <StdMeshers_NotConformAllowed.hxx>
+#include <StdMeshers_ViscousLayers.hxx>
+#include <BRepPrimAPI_MakeSphere.hxx>
 #include <StdMeshers_LayerDistribution2D.hxx>
 #include <StdMeshers_LengthFromEdges.hxx>
 #include <StdMeshers_RadialQuadrangle_1D2D.hxx>
@@ -2193,6 +2197,137 @@ void probe_cat916_2d_additions() {
   }
 }
 
+
+// Count the volumes of one entity type.
+int count_volumes(SMESHDS_Mesh* meshDS, SMDSAbs_EntityType type) {
+  int n = 0;
+  for (SMDS_VolumeIteratorPtr it = meshDS->volumesIterator(); it->more();) {
+    if (it->next()->GetEntityType() == type) ++n;
+  }
+  return n;
+}
+
+// Cartesian_3D on a radius-2 sphere at spacing 0.5, optionally with quanta.
+void cartesian_sphere(Session& s, bool use_quanta, double quanta) {
+  StdMeshers_Cartesian_3D* a3 = s.make<StdMeshers_Cartesian_3D>();
+  StdMeshers_CartesianParameters3D* grid = s.make<StdMeshers_CartesianParameters3D>();
+  for (int axis = 0; axis < 3; ++axis) {
+    std::vector<std::string> spacing(1, "0.5");
+    std::vector<double> internal;
+    grid->SetGridSpacing(spacing, internal, axis);
+  }
+  if (use_quanta) {
+    grid->SetToUseQuanta(true);
+    grid->SetQuanta(quanta);
+  }
+  s.assign(s.shape(), a3);
+  s.assign(s.shape(), grid);
+}
+
+void probe_cat916_3d_additions() {
+  section("CAT916", "native catalogue entries added with SMESH 9.16: 3-D family and global");
+
+  // BlockRenumber (parameter-free) with Hexa_3D on an axis-aligned box: hexahedra and nodes
+  // come in structured i, j, k order, i fastest, from the corner at the origin.
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    StdMeshers_BlockRenumber* renumber = s.make<StdMeshers_BlockRenumber>();
+    const bool ok = s.assign(s.shape(), renumber);
+    check(ok && build_hexa_mesh(s, 3), "CAT916 BlockRenumber + Hexa_3D computes");
+    std::vector<std::pair<smIdType, int>> cells;
+    for (SMDS_VolumeIteratorPtr it = s.meshDS()->volumesIterator(); it->more();) {
+      const SMDS_MeshElement* v = it->next();
+      double c[3] = {0, 0, 0};
+      for (int i = 0; i < v->NbCornerNodes(); ++i) {
+        c[0] += v->GetNode(i)->X() / v->NbCornerNodes();
+        c[1] += v->GetNode(i)->Y() / v->NbCornerNodes();
+        c[2] += v->GetNode(i)->Z() / v->NbCornerNodes();
+      }
+      const int i = static_cast<int>(c[0] / (BX / 3)), j = static_cast<int>(c[1] / (BY / 3)),
+                k = static_cast<int>(c[2] / (BZ / 3));
+      cells.emplace_back(v->GetID(), i + 3 * (j + 3 * k));
+    }
+    std::sort(cells.begin(), cells.end());
+    bool structured = cells.size() == 27;
+    for (std::size_t n = 0; structured && n < cells.size(); ++n) {
+      structured = cells[n].second == static_cast<int>(n);
+    }
+    check(structured, "CAT916 BlockRenumber: the 27 hexahedra are numbered in i, j, k order");
+  }
+
+  // NotConformAllowed is global only (SMESH_Mesh.cxx:658-668).
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    StdMeshers_NotConformAllowed* global = s.make<StdMeshers_NotConformAllowed>();
+    StdMeshers_NotConformAllowed* local = s.make<StdMeshers_NotConformAllowed>();
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+    TopExp::MapShapes(s.shape(), TopAbs_FACE, faces);
+    check(s.assign(s.shape(), global), "CAT916 NotConformAllowed assigns on the whole shape");
+    check(s.assign_status(faces.FindKey(1), local) == SMESH_Hypothesis::HYP_INCOMPATIBLE,
+          "CAT916 NotConformAllowed is refused on a sub-shape (HYP_INCOMPATIBLE)");
+    check(build_hexa_mesh(s, 2) && s.meshDS()->NbVolumes() == 8,
+          "CAT916 NotConformAllowed leaves a conformal hexahedral mesh unchanged");
+  }
+
+  // CartesianParameters3D quanta (new in 9.16): at the smallest quanta every cut cell of the
+  // boundary becomes one hexahedron, so the polyhedra disappear one for one.
+  {
+    Session plain(BRepPrimAPI_MakeSphere(2.0).Shape());
+    cartesian_sphere(plain, false, 0.0);
+    Session quanta(BRepPrimAPI_MakeSphere(2.0).Shape());
+    cartesian_sphere(quanta, true, 1e-6);
+    check(plain.compute() && quanta.compute(), "CAT916 Cartesian_3D with and without quanta computes");
+    const int poly = count_volumes(plain.meshDS(), SMDSEntity_Polyhedra);
+    const int hexa = count_volumes(plain.meshDS(), SMDSEntity_Hexa);
+    char msg[200];
+    std::snprintf(msg, sizeof(msg),
+                  "CAT916 quanta 1e-6: %d polyhedra + %d hexahedra become %d hexahedra and "
+                  "%d polyhedra",
+                  poly, hexa, count_volumes(quanta.meshDS(), SMDSEntity_Hexa),
+                  count_volumes(quanta.meshDS(), SMDSEntity_Polyhedra));
+    check(poly > 0 && count_volumes(quanta.meshDS(), SMDSEntity_Polyhedra) == 0 &&
+              count_volumes(quanta.meshDS(), SMDSEntity_Hexa) == poly + hexa,
+          msg);
+  }
+
+  // Cartesian_3D with ViscousLayers (body fitting with viscous layers, 9.16): three layers of
+  // total thickness 0.3 and stretch 1.2 off the x = 0 wall sit at the geometric closed form.
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    StdMeshers_Cartesian_3D* a3 = s.make<StdMeshers_Cartesian_3D>();
+    StdMeshers_CartesianParameters3D* grid = s.make<StdMeshers_CartesianParameters3D>();
+    for (int axis = 0; axis < 3; ++axis) {
+      std::vector<std::string> spacing(1, "1.0");
+      std::vector<double> internal;
+      grid->SetGridSpacing(spacing, internal, axis);
+    }
+    StdMeshers_ViscousLayers* vl = s.make<StdMeshers_ViscousLayers>();
+    vl->SetTotalThickness(0.3);
+    vl->SetNumberLayers(3);
+    vl->SetStretchFactor(1.2);
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+    TopExp::MapShapes(s.shape(), TopAbs_FACE, faces);
+    std::vector<int> wall(1, s.meshDS()->ShapeToIndex(faces.FindKey(1)));  // the x = 0 face
+    vl->SetBndShapes(wall, /*toIgnore=*/false);
+    const bool ok = s.assign(s.shape(), a3) && s.assign(s.shape(), grid) &&
+                    s.assign(s.shape(), vl);
+    check(ok && s.compute(), "CAT916 Cartesian_3D + ViscousLayers computes");
+    std::set<double> planes;
+    for (SMDS_NodeIteratorPtr it = s.meshDS()->nodesIterator(); it->more();) {
+      const double x = it->next()->X();
+      if (x < 0.31) planes.insert(std::round(x * 1e9) / 1e9);
+    }
+    const double t1 = 0.3 * (1.2 - 1.0) / (std::pow(1.2, 3) - 1.0);
+    const std::vector<double> want = {0.0, t1, t1 + 1.2 * t1, 0.3};
+    bool match = planes.size() == want.size();
+    std::size_t n = 0;
+    for (const double x : planes) {
+      match = match && std::fabs(x - want[n++]) < 1e-9;
+    }
+    check(match, "CAT916 Cartesian_3D + ViscousLayers: layer planes at x = 0, 0.0824, 0.1813, 0.3");
+  }
+}
+
 }  // namespace
 
 void run_smesh_probe() {
@@ -2209,4 +2344,5 @@ void run_smesh_probe() {
   probe_r18_gmf_driver();
   probe_cat916_1d_additions();
   probe_cat916_2d_additions();
+  probe_cat916_3d_additions();
 }

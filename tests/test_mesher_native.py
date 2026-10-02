@@ -24,6 +24,13 @@ hand:
 * ``UseExisting_1D`` and ``UseExisting_2D`` make nothing and count as computed, so a
   script's elements stand as that sub-shape's mesh (SMESH
   ``define_mesh_by_script.rst``).
+* ``BlockRenumber`` numbers a Hexa_3D block like a structured i, j, k grid (SMESH
+  ``3d_meshing_hypo.rst``).
+* ``NotConformAllowed`` is global only (SMESH ``SMESH_Mesh.cxx``).
+* ``CartesianParameters3D`` quanta (new in 9.16) replaces boundary polyhedra by whole
+  grid cells (SMESH ``cartesian_algo.rst``).
+* ``Cartesian_3D`` with ``ViscousLayers`` (new in 9.16, reachable through the existing
+  entries) grows the layers at their geometric closed form.
 
 The upstream sources cited are those of SMESH ``V9_16_0``.
 """
@@ -39,8 +46,11 @@ from numpy.typing import NDArray
 import pysmesh as ps
 from pysmesh import (
     Arithmetic1D,
+    Cartesian3D,
+    CartesianParameters3D,
     Distribution,
     ElementType,
+    Hexa3D,
     LayerDistribution,
     Mefisto2D,
     Mesher,
@@ -54,11 +64,13 @@ from pysmesh import (
     Session,
     SubShape,
     SubShapeKind,
+    ViscousLayers,
 )
 
 LINE_LENGTH: float = 10.0
 SQUARE_SIDE: float = 4.0
 DISK_RADIUS: float = 2.5
+SPHERE_RADIUS: float = 2.0
 BOX_DX: float = 3.0
 BOX_DY: float = 7.0
 BOX_DZ: float = 11.0
@@ -464,3 +476,208 @@ def test_use_existing_1d_makes_no_segment() -> None:
         mesh = mesher.mesh()
 
     assert int(np.count_nonzero(mesh.element_type == int(ElementType.EDGE))) == 0
+
+
+# ---- BlockRenumber (Hexa_3D) ------------------------------------------------------ #
+
+
+def _hexa_box(renumber: bool) -> ps.MeshData:
+    """Hexa_3D on the box, 3 segments per edge, with or without BlockRenumber."""
+    with Mesher(_box_shape()) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=3))
+        mesher.assign(Quadrangle2D())
+        mesher.assign(Hexa3D())
+        if renumber:
+            mesher._m.assign("BlockRenumber", {}, "", 0)
+        mesher.compute()
+        return mesher.mesh()
+
+
+def _grid_index(points: NDArray[np.float64], cells: int) -> NDArray[np.int64]:
+    """Lexicographic ``i + n (j + n k)`` index of grid points of the box, i fastest."""
+    step = np.array([BOX_DX, BOX_DY, BOX_DZ], dtype=np.float64) / cells
+    ijk = np.rint(points / step).astype(np.int64)
+    n = cells + 1
+    return np.asarray(ijk[:, 0] + n * (ijk[:, 1] + n * ijk[:, 2]), dtype=np.int64)
+
+
+def _node_order(mesh: ps.MeshData) -> NDArray[np.int64]:
+    """Grid index of every node, in increasing node id."""
+    order = np.argsort(mesh.node_id)
+    return _grid_index(mesh.node_coords[order], 3)
+
+
+def test_block_renumber_numbers_a_box_like_a_structured_grid() -> None:
+    """Hexahedra and nodes come in i, j, k order from the corner at the origin.
+
+    Spec (SMESH ``3d_meshing_hypo.rst``, "Renumber hypothesis"): it gives "hexahedra and
+    nodes ordered like in a structured grid"; for a block with edges parallel to the
+    global axes the block axes are the global ones, and the k axis runs from (0,0,0)
+    along +z by default (SMESH ``doc/examples/filters_ex39.py``). i and j follow by the
+    right-hand rule: x and y.
+    """
+    mesh = _hexa_box(renumber=True)
+
+    hexa = np.flatnonzero(mesh.element_type == int(ElementType.HEXAHEDRON))
+    hexa = hexa[np.argsort(mesh.element_id[hexa])]
+    centroids = np.array(
+        [mesh.node_coords[mesh.nodes_of(i)].mean(axis=0) for i in hexa]
+    )
+    step = np.array([BOX_DX, BOX_DY, BOX_DZ], dtype=np.float64) / 3
+    ijk = np.floor(centroids / step).astype(np.int64)
+    cell_index = ijk[:, 0] + 3 * (ijk[:, 1] + 3 * ijk[:, 2])
+    np.testing.assert_array_equal(cell_index, np.arange(27))
+    np.testing.assert_array_equal(_node_order(mesh), np.arange(64))
+
+
+def test_without_block_renumber_the_nodes_are_not_in_grid_order() -> None:
+    """The falsification: the plain Hexa_3D numbering is not the structured one."""
+    mesh = _hexa_box(renumber=False)
+
+    assert not np.array_equal(_node_order(mesh), np.arange(64))
+
+
+# ---- NotConformAllowed ------------------------------------------------------------ #
+
+
+def test_not_conform_allowed_is_refused_on_a_sub_shape() -> None:
+    """Spec: the hypothesis "can be only global" (SMESH ``SMESH_Mesh.cxx:658-668``)."""
+    with Mesher(_box_shape()) as mesher:
+        with pytest.raises(PysmeshError, match="SMESH refused 'NotConformAllowed'"):
+            mesher._m.assign("NotConformAllowed", {}, "FACE", 1)
+
+
+def test_not_conform_allowed_leaves_a_conformal_mesh_unchanged() -> None:
+    """Assigned globally it is accepted, and a mesh that is conformal anyway is kept."""
+    with Mesher(_box_shape()) as mesher:
+        mesher._m.assign("NotConformAllowed", {}, "", 0)
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=3))
+        mesher.assign(Quadrangle2D())
+        mesher.assign(Hexa3D())
+        mesher.compute()
+        allowed = mesher.mesh()
+
+    plain = _hexa_box(renumber=False)
+    assert allowed.count_of(ElementType.HEXAHEDRON) == 27
+    np.testing.assert_array_equal(
+        np.sort(allowed.node_coords, axis=0), np.sort(plain.node_coords, axis=0)
+    )
+
+
+# ---- CartesianParameters3D quanta (new in 9.16) ----------------------------------- #
+
+
+def _sphere_shape() -> ps.Shape:
+    """A sphere of radius 2."""
+    session = Session()
+    session.add_sphere(SPHERE_RADIUS)
+    return ps.load_brep(session.brep())
+
+
+def _cartesian_sphere(quanta: float | None) -> ps.MeshData:
+    """Cartesian_3D on the sphere at spacing 0.5, with quanta when given."""
+    params = CartesianParameters3D(
+        spacing_x="0.5", spacing_y="0.5", spacing_z="0.5"
+    ).params()
+    if quanta is not None:
+        params["use_quanta"] = True
+        params["quanta"] = quanta
+    with Mesher(_sphere_shape()) as mesher:
+        mesher.assign(Cartesian3D())
+        mesher._m.assign("CartesianParameters3D", params, "", 0)
+        mesher.compute()
+        return mesher.mesh()
+
+
+def test_the_smallest_quanta_turns_every_cut_cell_into_one_hexahedron() -> None:
+    """No polyhedron is left, and each one became exactly one hexahedron of its cell.
+
+    Spec (SMESH ``cartesian_algo.rst``, "Set Quanta"): a boundary polyhedron is
+    replaced by a hexahedron "if the volume of the polyhedron divided by the
+    equivalent hexahedron is bigger than Quanta"; at quanta 1e-6 every cut cell
+    qualifies. The replacement is built on the corners of the cell, a corner outside
+    the body taken where its grid line meets the boundary
+    (``StdMeshers_Cartesian_3D_Hexahedron.cxx:2974-2982``), so every hexahedron fits
+    in one 0.5 cell of the grid: the sphere's 4-wide box holds 8 cells per axis.
+    """
+    plain = _cartesian_sphere(None)
+    quantized = _cartesian_sphere(1e-6)
+
+    polyhedra = plain.count_of(ElementType.POLYHEDRON)
+    assert polyhedra > 0
+    assert quantized.count_of(ElementType.POLYHEDRON) == 0
+    assert quantized.count_of(ElementType.HEXAHEDRON) == (
+        plain.count_of(ElementType.HEXAHEDRON) + polyhedra
+    )
+    hexa = np.flatnonzero(quantized.element_type == int(ElementType.HEXAHEDRON))
+    extents = np.array(
+        [np.ptp(quantized.node_coords[quantized.nodes_of(i)], axis=0) for i in hexa]
+    )
+    assert np.all(extents > 0.0)
+    assert np.all(extents <= 0.5 + 1e-9)
+
+
+def test_a_larger_quanta_keeps_fewer_boundary_cells() -> None:
+    """The quanta is a lower bound on the kept volume fraction, so raising it can only
+    drop cells: the hexahedron count does not grow from quanta 1e-6 to 0.5 to 0.9."""
+    counts = [
+        _cartesian_sphere(q).count_of(ElementType.HEXAHEDRON) for q in (1e-6, 0.5, 0.9)
+    ]
+
+    assert counts[0] >= counts[1] >= counts[2]
+    assert counts[0] > counts[2]
+
+
+@pytest.mark.parametrize("quanta", [0.0, 1.5])
+def test_a_quanta_outside_its_range_is_refused(quanta: float) -> None:
+    """Degenerate input: SetQuanta accepts ``[1e-6, 1]`` only
+    (``StdMeshers_CartesianParameters3D.cxx:804``)."""
+    params = CartesianParameters3D(
+        spacing_x="0.5", spacing_y="0.5", spacing_z="0.5"
+    ).params()
+    params["use_quanta"] = True
+    params["quanta"] = quanta
+    with Mesher(_sphere_shape()) as mesher:
+        with pytest.raises(PysmeshError, match="quanta must lie in"):
+            mesher._m.assign("CartesianParameters3D", params, "", 0)
+
+
+# ---- Cartesian_3D with viscous layers (new in 9.16) ------------------------------- #
+
+
+def test_cartesian_viscous_layers_sit_at_the_geometric_closed_form() -> None:
+    """Three layers, total 0.3, stretch 1.2, grown off the x = 0 wall of the box.
+
+    Spec (SMESH ``cartesian_algo.rst`` with ``additional_hypo.rst``, "Viscous
+    Layers"): layer ``i`` is ``stretch`` times layer ``i - 1`` and the layers add to
+    the total thickness, so ``t1 = T (q - 1) / (q**n - 1)``. Behind the layers the
+    grid fills the remaining 2.7 with whole cells of the actual spacing
+    ``L / round(L / spacing)`` (SMESH ``cartesian_algo.rst``), here 0.9.
+    """
+    total, layers, stretch = 0.3, 3, 1.2
+    with Mesher(_box_shape()) as mesher:
+        mesher.assign(Cartesian3D())
+        mesher.assign(
+            CartesianParameters3D(spacing_x="1.0", spacing_y="1.0", spacing_z="1.0")
+        )
+        mesher.assign(
+            ViscousLayers(
+                total_thickness=total,
+                layer_count=layers,
+                stretch_factor=stretch,
+                boundary=(1,),
+                group_name="layers",
+            )
+        )
+        mesher.compute()
+        mesh = mesher.mesh()
+
+    x = np.unique(np.round(mesh.node_coords[:, 0], 9))
+    t1 = total * (stretch - 1.0) / (stretch**layers - 1.0)
+    expected = np.concatenate(
+        ([0.0], np.cumsum(t1 * stretch ** np.arange(layers)), [total + 0.9])
+    )
+    np.testing.assert_allclose(x[: layers + 2], expected, rtol=0.0, atol=1e-9)
+    assert mesh.count_of(ElementType.POLYHEDRON) == 0
