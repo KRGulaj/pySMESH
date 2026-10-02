@@ -606,9 +606,8 @@ def _circle_segments(kind: str) -> list[NDArray[np.float64]]:
     out = []
     for seg in _adaptive_segments(kind).values():
         pts = seg.reshape(-1, 3)
-        if kind == "cylinder" and np.ptp(pts[:, 2]) < 1e-9:
-            out.append(seg)
-        elif kind == "sphere":
+        rim = kind == "cylinder" and np.ptp(pts[:, 2]) < 1e-9
+        if rim or kind == "sphere":
             out.append(seg)
     return out
 

@@ -312,9 +312,11 @@ def test_the_beta_law_refuses_a_beta_inside_the_unit_interval(beta: float) -> No
     SMESH ``1d_meshing_hypo.rst``: "Values between [-1, 1] are forbidden to ensure
     validity of the log". ``SetBeta`` does not check it, so the factory must.
     """
-    with Mesher(_line_shape()) as mesher:
-        with pytest.raises(PysmeshError, match=r"needs \|beta\| > 1"):
-            mesher._m.assign("NumberOfSegments", _beta_params(beta, 10), "", 0)
+    with (
+        Mesher(_line_shape()) as mesher,
+        pytest.raises(PysmeshError, match=r"needs \|beta\| > 1"),
+    ):
+        mesher._m.assign("NumberOfSegments", _beta_params(beta, 10), "", 0)
 
 
 # ---- LengthFromEdges (MEFISTO_2D) ------------------------------------------------- #
@@ -543,9 +545,11 @@ def test_without_block_renumber_the_nodes_are_not_in_grid_order() -> None:
 
 def test_not_conform_allowed_is_refused_on_a_sub_shape() -> None:
     """Spec: the hypothesis "can be only global" (SMESH ``SMESH_Mesh.cxx:658-668``)."""
-    with Mesher(_box_shape()) as mesher:
-        with pytest.raises(PysmeshError, match="SMESH refused 'NotConformAllowed'"):
-            mesher._m.assign("NotConformAllowed", {}, "FACE", 1)
+    with (
+        Mesher(_box_shape()) as mesher,
+        pytest.raises(PysmeshError, match="SMESH refused 'NotConformAllowed'"),
+    ):
+        mesher._m.assign("NotConformAllowed", {}, "FACE", 1)
 
 
 def test_not_conform_allowed_leaves_a_conformal_mesh_unchanged() -> None:
@@ -639,9 +643,11 @@ def test_a_quanta_outside_its_range_is_refused(quanta: float) -> None:
     ).params()
     params["use_quanta"] = True
     params["quanta"] = quanta
-    with Mesher(_sphere_shape()) as mesher:
-        with pytest.raises(PysmeshError, match="quanta must lie in"):
-            mesher._m.assign("CartesianParameters3D", params, "", 0)
+    with (
+        Mesher(_sphere_shape()) as mesher,
+        pytest.raises(PysmeshError, match="quanta must lie in"),
+    ):
+        mesher._m.assign("CartesianParameters3D", params, "", 0)
 
 
 # ---- Cartesian_3D with viscous layers (new in 9.16) ------------------------------- #
