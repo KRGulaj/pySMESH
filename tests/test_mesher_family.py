@@ -15,6 +15,9 @@ Three claims, in order of how much they are worth.
   against a property of the spacing that a wrong hypothesis could not produce — a segment
   count, a first-to-last length ratio, a monotone progression — rather than against a value
   copied from a previous run.
+  :class:`Adaptive1D` once killed the process on any shape with faces (report B2), so
+  its gates run each shape in a child process and check the circle nodes, the size
+  bounds and the deflection against the geometry.
 * **The families that need a fixture of their own get one.** An extruded triangle for the
   extrusion mesher, a solid between two concentric shells for the radial one, a source and a
   target for projection, a disk for radial quadrangles, a thin strip for the medial-axis
@@ -27,7 +30,13 @@ Fixture sizing follows the project rule: a 3 x 7 x 11 box, never a unit cube.
 
 from __future__ import annotations
 
+import functools
+import json
 import math
+import os
+import subprocess
+import sys
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -499,6 +508,175 @@ def test_quadratic_mesh_produces_second_order_elements() -> None:
     assert mesh.count_of(ElementType.QUAD_HEXAHEDRON) == 8
     assert mesh.count_of(ElementType.HEXAHEDRON) == 0
     assert mesh.count_of(ElementType.QUAD_EDGE) > 0
+
+
+# ---- Adaptive1D on shapes with faces (report B2) ----------------------------------- #
+#
+# Before SMESH 9.16 a vendored patch read the bounds of a NULL array in
+# TriaTreeData::TriaTreeData, and Adaptive1D killed the process (0xC0000005) on any
+# shape with a face. Each shape therefore runs in a child process: a regression fails
+# the test with the child's exit code instead of ending the whole run.
+
+ADAPTIVE_MIN_SIZE: float = 0.05
+ADAPTIVE_MAX_SIZE: float = 1.0
+ADAPTIVE_DEFLECTION: float = 0.01
+ADAPTIVE_RADIUS: float = 1.5
+_ADAPTIVE_CHILD_TIMEOUT_S: float = 300.0
+
+# The child meshes one shape and writes the end points of every segment, by edge. It
+# sets up the DLL search exactly as tests/conftest.py does for this process.
+_ADAPTIVE_CHILD: str = """
+import json, os, sys
+occt = os.environ.get("PYSMESH_OCCT_BIN")
+if occt:
+    os.add_dll_directory(occt)
+lib = os.path.join(sys.prefix, "Library", "bin")
+if os.path.isdir(lib):
+    os.add_dll_directory(lib)
+sys.path.insert(0, sys.argv[1])
+import pysmesh as ps
+
+kind, r = sys.argv[2], float(sys.argv[3])
+s = ps.Session()
+if kind == "box":
+    s.add_box(3.0, 7.0, 11.0)
+elif kind == "cylinder":
+    s.add_cylinder(r, 4.0)
+else:
+    s.add_sphere(r)
+with ps.Mesher(ps.load_brep(s.brep())) as m:
+    m.assign(ps.Regular1D())
+    m.assign(ps.Adaptive1D(min_size=float(sys.argv[4]), max_size=float(sys.argv[5]),
+                           deflection=float(sys.argv[6])))
+    m.compute()
+    mesh = m.mesh()
+edges = {}
+for i in range(mesh.element_count):
+    if int(mesh.element_type[i]) == int(ps.ElementType.EDGE):
+        a, b = mesh.nodes_of(i)
+        edges.setdefault(int(mesh.element_ordinal[i]), []).append(
+            [mesh.node_coords[a].tolist(), mesh.node_coords[b].tolist()])
+sys.stdout.write("ADAPTIVE-RESULT " + json.dumps(edges) + "\\n")
+"""
+
+
+@functools.cache
+def _adaptive_segments(kind: str) -> dict[int, NDArray[np.float64]]:
+    """Run Adaptive1D on one shape in a child process; segments by edge, (n, 2, 3).
+
+    Raises:
+        AssertionError: The child crashed or reported no result.
+    """
+    package_root = str(Path(ps.__file__).resolve().parent.parent)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _ADAPTIVE_CHILD,
+            package_root,
+            kind,
+            repr(ADAPTIVE_RADIUS),
+            repr(ADAPTIVE_MIN_SIZE),
+            repr(ADAPTIVE_MAX_SIZE),
+            repr(ADAPTIVE_DEFLECTION),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=_ADAPTIVE_CHILD_TIMEOUT_S,
+        env=dict(os.environ),
+        check=False,
+    )
+    prefix = "ADAPTIVE-RESULT "
+    lines = [ln for ln in proc.stdout.splitlines() if ln.startswith(prefix)]
+    code = proc.returncode & 0xFFFFFFFF
+    assert proc.returncode == 0 and lines, (
+        f"Adaptive1D on a {kind}: child exit code 0x{code:08X}, "
+        f"stderr: {proc.stderr[-2000:]}"
+    )
+    raw = json.loads(lines[-1][len(prefix) :])
+    return {int(k): np.asarray(v, dtype=np.float64) for k, v in raw.items()}
+
+
+def _circle_segments(kind: str) -> list[NDArray[np.float64]]:
+    """The segments of the edges that lie on a circle of radius 1.5.
+
+    On the cylinder (axis z) those are the two rims: every node at one height. On the
+    sphere it is the seam meridian: every node at distance 1.5 from the centre.
+    """
+    out = []
+    for seg in _adaptive_segments(kind).values():
+        pts = seg.reshape(-1, 3)
+        if kind == "cylinder" and np.ptp(pts[:, 2]) < 1e-9:
+            out.append(seg)
+        elif kind == "sphere":
+            out.append(seg)
+    return out
+
+
+@pytest.mark.parametrize("kind", ["box", "cylinder", "sphere"])
+def test_adaptive_1d_meshes_a_shape_with_faces_without_crashing(kind: str) -> None:
+    """Report B2: the computation finishes and discretises every edge it reaches."""
+    segments = _adaptive_segments(kind)
+
+    assert segments
+    assert all(seg.shape[0] >= 1 for seg in segments.values())
+
+
+@pytest.mark.parametrize("kind", ["cylinder", "sphere"])
+def test_adaptive_1d_puts_every_circle_node_on_its_radius(kind: str) -> None:
+    """Nodes of a discretised circle lie on it: distance 1.5 from the axis or centre."""
+    circles = _circle_segments(kind)
+
+    assert circles
+    for seg in circles:
+        pts = seg.reshape(-1, 3)
+        if kind == "cylinder":
+            r = np.hypot(pts[:, 0], pts[:, 1])
+        else:
+            r = np.linalg.norm(pts, axis=1)
+        np.testing.assert_allclose(r, ADAPTIVE_RADIUS, rtol=0.0, atol=1e-9)
+
+
+@pytest.mark.parametrize("kind", ["box", "cylinder", "sphere"])
+def test_adaptive_1d_keeps_every_segment_between_its_size_bounds(kind: str) -> None:
+    """Spec (SMESH ``1d_meshing_hypo.rst``, "Adaptive hypothesis"): "Min size" limits
+    the minimal segment size and "Max size" the length on straight edges. The stated
+    tolerance, 1e-9, is round-off: the box's straight edges sit exactly at 1.0."""
+    for seg in _adaptive_segments(kind).values():
+        length = np.linalg.norm(seg[:, 1] - seg[:, 0], axis=1)
+        assert float(length.min()) >= ADAPTIVE_MIN_SIZE - 1e-9
+        assert float(length.max()) <= ADAPTIVE_MAX_SIZE + 1e-9
+
+
+def _max_sagitta(kind: str) -> float:
+    """The largest chord deviation of a circle segment: R - sqrt(R^2 - c^2 / 4)."""
+    worst = 0.0
+    for seg in _circle_segments(kind):
+        chord = np.linalg.norm(seg[:, 1] - seg[:, 0], axis=1)
+        sagitta = ADAPTIVE_RADIUS - np.sqrt(ADAPTIVE_RADIUS**2 - chord**2 / 4.0)
+        worst = max(worst, float(sagitta.max()))
+    return worst
+
+
+def test_adaptive_1d_keeps_the_sphere_seam_within_the_deflection() -> None:
+    """Spec (SMESH ``1d_meshing_hypo.rst``): "Deflection parameter gives maximal
+    distance of a segment from a curved edge", here the 0.01 bound on the sphere."""
+    assert _max_sagitta("sphere") <= ADAPTIVE_DEFLECTION
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "Known upstream Adaptive1D limit, kept visible until it is fixed: on the "
+        "radius-1.5 cylinder rims the largest sagitta is 0.0103727, 1.037 times the "
+        "documented deflection 0.01, identically on SMESH 9.9 with the B2 fix and on "
+        "9.16. The deflection seeds the size field; the final segments follow the "
+        "smoothed field without a re-check (StdMeshers_Adaptive1D.cxx:1193-1225)."
+    ),
+)
+def test_adaptive_1d_keeps_the_cylinder_rims_within_the_deflection() -> None:
+    """Spec (SMESH ``1d_meshing_hypo.rst``): the same 0.01 bound on the cylinder."""
+    assert _max_sagitta("cylinder") <= ADAPTIVE_DEFLECTION
 
 
 # ---- Families with a fixture of their own ------------------------------------------ #
