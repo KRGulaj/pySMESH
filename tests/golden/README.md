@@ -53,21 +53,30 @@ that a dependency upgrade may move, and nothing larger.
 ## Commands
 
 Run every command from the repository root, through `conda run`. Calling the env's
-`python.exe` by path skips the activation that puts `Library\bin` on `PATH`. The env holds
-a stale pysmesh 0.2.0 in `site-packages`. Set `PYTHONPATH` to `src` for pytest, so that the
-tree under test is imported.
+`python.exe` by path skips the activation that puts `Library\bin` on `PATH`. An env can
+hold an installed pysmesh in `site-packages` (`flux-pysmesh-build` holds a stale 0.2.0).
+Set `PYTHONPATH` to `src` for pytest, so that the tree under test is imported.
+
+Since Phase 1 the in-tree `_core.pyd` links our own OCCT 8.0.1 build
+(`ci/build_occt.py`), which lives outside the env. Set `PYSMESH_OCCT_BIN` to that build's
+`bin` directory. `tests/conftest.py` and `capture.py` add it with `os.add_dll_directory`,
+because Python does not search `PATH` for an extension's DLLs. The README "Build from
+source" section builds `_core` against it. `<env>` is the build env (Phase 1 used
+`pysmesh-p1`). `<deps>` is the directory that holds the OCCT build.
 
 ```bash
+export PYSMESH_OCCT_BIN=<deps>/occt-8.0.1/install/bin
+
 # test suite
-PYTHONPATH=src conda run -n flux-pysmesh-build python -m pytest tests -p no:cacheprovider \
+PYTHONPATH=src conda run -n <env> python -m pytest tests -p no:cacheprovider \
     --junitxml=junit.xml
-conda run -n flux-pysmesh-build python tests/golden/pytest_summary.py summarize junit.xml pytest_new.json
-conda run -n flux-pysmesh-build python tests/golden/pytest_summary.py compare \
+conda run -n <env> python tests/golden/pytest_summary.py summarize junit.xml pytest_new.json
+conda run -n <env> python tests/golden/pytest_summary.py compare \
     tests/golden/pytest_4.2.2.json pytest_new.json
 
 # golden values (about 100 s)
-conda run -n flux-pysmesh-build python tests/golden/capture.py golden_new.json
-conda run -n flux-pysmesh-build python tests/golden/compare.py \
+conda run -n <env> python tests/golden/capture.py golden_new.json
+conda run -n <env> python tests/golden/compare.py \
     tests/golden/baseline_4.2.2.json golden_new.json
 ```
 

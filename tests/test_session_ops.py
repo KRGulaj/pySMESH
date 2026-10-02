@@ -795,6 +795,96 @@ def test_thru_sections_naming_the_same_body_twice_raises() -> None:
         s.thru_sections([edges[:1], edges[1:]])
 
 
+# Coaxial circles for the ruled-loft frustum stack: plane heights and radii. The spacing
+# and the radii both vary, so every strip is a different frustum.
+FRUSTUM_Z: tuple[float, ...] = (0.0, 2.0, 3.5, 6.0, 7.0)
+FRUSTUM_RADII: dict[str, tuple[float, ...]] = {
+    "different-radii": (2.0, 3.0, 2.5, 3.5, 1.5),
+    # Degenerate frustums: r1 == r2 makes every strip a cylinder.
+    "equal-radii": (2.5, 2.5, 2.5, 2.5, 2.5),
+}
+
+
+def _coaxial_circle_sections(
+    s: Session, radii: tuple[float, ...], count: int
+) -> list[list[EntityId]]:
+    """Add ``count`` coaxial circles, each one closed edge, and return the sections."""
+    sections: list[list[EntityId]] = []
+    for z, radius in zip(FRUSTUM_Z[:count], radii[:count], strict=True):
+        before = {int(i) for i in s.entities(EntityKind.EDGE)}
+        s.add_circle((0.0, 0.0, z), (0.0, 0.0, 1.0), radius)
+        sections.append(
+            [
+                EntityId(int(i))
+                for i in s.entities(EntityKind.EDGE)
+                if int(i) not in before
+            ]
+        )
+    return sections
+
+
+@pytest.mark.parametrize("radii_name", list(FRUSTUM_RADII))
+@pytest.mark.parametrize("count", [4, 5])
+def test_ruled_loft_through_single_edge_circles_as_solid_is_a_frustum_stack(
+    count: int, radii_name: str
+) -> None:
+    """A ruled solid loft through ``count`` coaxial circles is ``count - 1`` frustums.
+
+    One frustum of height h between radii r1 and r2 has the volume
+    ``pi h / 3 (r1**2 + r1 r2 + r2**2)``. The solid has one conical face per strip, plus
+    two planar caps. Defect O1: up to OCCT 8.0.1,
+    ``BRepOffsetAPI_ThruSections::Generated()`` threw
+    ``NCollection_IndexedDataMap::FindFromKey`` for 4 or more sections that are each one
+    closed edge, so this loft raised. ``patches/occt801/0001`` fixes it.
+    """
+    radii = FRUSTUM_RADII[radii_name]
+    s = Session()
+    sections = _coaxial_circle_sections(s, radii, count)
+    expected = sum(
+        math.pi
+        * (FRUSTUM_Z[k + 1] - FRUSTUM_Z[k])
+        / 3.0
+        * (radii[k] ** 2 + radii[k] * radii[k + 1] + radii[k + 1] ** 2)
+        for k in range(count - 1)
+    )
+
+    s.thru_sections(sections, solid=True, ruled=True)
+
+    solids = [EntityId(int(i)) for i in s.entities(EntityKind.SOLID)]
+    volume = float(s.mass_properties(solids, precision=1e-9).measure.sum())
+    assert model_counts(s)[:2] == (1, count - 1 + 2)
+    assert volume == pytest.approx(expected, rel=CURVED_RTOL)
+
+
+@pytest.mark.parametrize("radii_name", list(FRUSTUM_RADII))
+@pytest.mark.parametrize("count", [4, 5])
+def test_ruled_loft_through_single_edge_circles_as_shell_has_the_frustum_side_area(
+    count: int, radii_name: str
+) -> None:
+    """A ruled shell loft through ``count`` coaxial circles is the frustums' side.
+
+    The lateral area of one frustum is ``pi (r1 + r2) s``, with the slant height
+    ``s = sqrt(h**2 + (r2 - r1)**2)``. The shell has one conical face per strip, no cap
+    and no solid. Defect O1 (see the solid test above) raised here as well.
+    """
+    radii = FRUSTUM_RADII[radii_name]
+    s = Session()
+    sections = _coaxial_circle_sections(s, radii, count)
+    expected = sum(
+        math.pi
+        * (radii[k] + radii[k + 1])
+        * math.hypot(FRUSTUM_Z[k + 1] - FRUSTUM_Z[k], radii[k + 1] - radii[k])
+        for k in range(count - 1)
+    )
+
+    s.thru_sections(sections, solid=False, ruled=True)
+
+    faces = [EntityId(int(i)) for i in s.entities(EntityKind.FACE)]
+    area = float(s.mass_properties(faces, precision=1e-9).measure.sum())
+    assert model_counts(s)[:2] == (0, count - 1)
+    assert area == pytest.approx(expected, rel=CURVED_RTOL)
+
+
 def test_a_folded_ruled_loft_is_refused_and_changes_nothing(
     folded_loft: Callable[[Session], list[list[EntityId]]],
 ) -> None:

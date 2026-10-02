@@ -3,6 +3,8 @@ name: build-test-wheel
 # Builds one self-contained win_amd64 wheel per supported CPython (3.11 - 3.14), bundling
 # the whole native closure (OCCT + Boost + VTK), runs the test suite against each, and
 # uploads them. On a version tag the wheels are attached to a GitHub Release and published.
+# Boost and VTK come from the conda-forge build env. OCCT 8.0.1 does not: the `occt` job
+# builds it from source once (ci/build_occt.py) and every leg restores that build.
 #
 # One wheel per interpreter is required, not optional: pybind11 has no Py_LIMITED_API
 # support, so `_core` is version-locked (`_core.cp313-win_amd64.pyd`) and no abi3 wheel can
@@ -23,7 +25,69 @@ permissions:
   contents: write # required for softprops/action-gh-release to create/attach to a Release
 
 jobs:
+  # ---------------------------------------------------------------------------------------
+  # OCCT 8.0.1, built from the upstream tag by ci/build_occt.py (with patches/occt801/, only
+  # the toolkits _core needs), once per input set. It does not depend on the Python version,
+  # so one job serves all four legs. The cache key is the script's input set: tag, commit,
+  # patches, CMake options and MSVC toolset. A hit restores the install; a miss builds and
+  # saves it.
+  # The same commands build it locally (README, "Build from source").
+  # ---------------------------------------------------------------------------------------
+  occt:
+    runs-on: windows-latest
+    name: occt 8.0.1 (build or restore)
+    defaults:
+      run:
+        shell: bash -el {0}
+    outputs:
+      cache-key: ${{ steps.key.outputs.key }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up MSVC (v143, x64)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Create build env (cmake, ninja, git and python come from it)
+        uses: mamba-org/setup-micromamba@v2
+        with:
+          environment-file: ci/environment.yml
+          create-args: python=3.13
+          cache-environment: true
+          # The same env and key as the 3.13 build leg, so both share one cache entry.
+          cache-environment-key: env-py3.13-${{ hashFiles('ci/environment.yml') }}
+
+      - name: OCCT location and cache key (tag, commit, CMake options, MSVC toolset)
+        id: key
+        run: |
+          echo "OCCT_ROOT=$(cygpath -m "$RUNNER_TEMP")/occt-8.0.1" >> "$GITHUB_ENV"
+          echo "key=$(python ci/build_occt.py cache-key)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore OCCT
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.OCCT_ROOT }}/install
+          key: ${{ steps.key.outputs.key }}
+
+      - name: Build OCCT 8.0.1 (cache miss only)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: python ci/build_occt.py build --root "$OCCT_ROOT"
+
+      - name: Save OCCT
+        if: steps.cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.OCCT_ROOT }}/install
+          key: ${{ steps.key.outputs.key }}
+
+      - name: Assert the install is complete and matches the input set
+        run: python ci/build_occt.py verify --root "$OCCT_ROOT"
+
   build:
+    needs: occt
     runs-on: windows-latest
     strategy:
       # A failing leg must not cancel the others: when 3.14 breaks, the 3.11-3.13 results
@@ -44,18 +108,31 @@ jobs:
         with:
           arch: x64
 
-      - name: Create build env (conda-forge; vtk/occt/boost are all build-time only)
+      - name: Create build env (conda-forge; vtk/boost are build-time only; no occt)
         uses: mamba-org/setup-micromamba@v2
         with:
           environment-file: ci/environment.yml
           # ci/environment.yml pins python=3.13 as the local-development default; this
           # overrides it per matrix leg. conda-forge ships vtk 9.6.2 for py310-py314 on
-          # win-64, and OCCT/Boost carry no Python variant, so every leg resolves.
+          # win-64, and Boost carries no Python variant, so every leg resolves.
           create-args: python=${{ matrix.python }}
           cache-environment: true
           # Per-interpreter cache key. Without it the four legs would share one cache entry
           # and thrash, each restoring an env built for a different Python.
           cache-environment-key: env-py${{ matrix.python }}-${{ hashFiles('ci/environment.yml') }}
+
+      - name: OCCT location
+        run: echo "OCCT_ROOT=$(cygpath -m "$RUNNER_TEMP")/occt-8.0.1" >> "$GITHUB_ENV"
+
+      - name: Restore OCCT 8.0.1 (built by the occt job; a miss fails, it never rebuilds)
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.OCCT_ROOT }}/install
+          key: ${{ needs.occt.outputs.cache-key }}
+          fail-on-cache-miss: true
+
+      - name: Assert the restored OCCT matches this leg's input set (MSVC toolset included)
+        run: python ci/build_occt.py verify --root "$OCCT_ROOT"
 
       - name: Assert the tag matches the version it will publish (tags only)
         # Runs before the build so a mismatched tag costs seconds, not a full compile. A
@@ -76,7 +153,10 @@ jobs:
       - name: Build wheel
         env:
           PYSMESH_DEV_ASSERTS: "ON" # extra input validation in CI only
-        run: pip wheel . --no-build-isolation --no-deps -w dist
+        # CMakeLists.txt takes OCCT only from PYSMESH_OCCT_ROOT, and only at 8.0.1.
+        run: |
+          pip wheel . --no-build-isolation --no-deps -w dist \
+            -C cmake.define.PYSMESH_OCCT_ROOT="$OCCT_ROOT/install"
 
       - name: Bundle every native dependency (OCCT + Boost + VTK)
         # delvewheel vendors _core.pyd's whole DLL closure into the wheel and name-mangles
@@ -85,10 +165,13 @@ jobs:
         # (tests/test_vtk_privacy.py enforces that), so a private, mangled copy cannot
         # collide with a VTK the host loaded for its own use. _core links only three VTK
         # components (CommonCore, CommonDataModel, FiltersVerdict), so the closure stays
-        # small: no rendering, no IO, no Python wrappers.
+        # small: no rendering, no IO, no Python wrappers. The OCCT DLLs come from the occt
+        # job's build, so its bin directory is searched first; Boost and VTK come from the
+        # env's Library/bin.
         run: |
           for whl in dist/*.whl; do
             delvewheel repair \
+              --add-path "$OCCT_ROOT/install/bin" \
               --add-path "$CONDA_PREFIX/Library/bin" \
               -w dist/repaired "$whl"
           done

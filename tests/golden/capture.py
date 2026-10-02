@@ -19,14 +19,16 @@ is a changed behaviour. Probes are grouped:
 * ``defect`` — the report's reproductions. These are *expected* to change in Phase 4, and
   :mod:`compare` lists them apart from the rest.
 
-Usage (from the repository root, inside the build env):
-    conda run -n flux-pysmesh-build python tests/golden/capture.py <out.json>
+Usage (from the repository root, inside the build env, against a dev build):
+    PYSMESH_OCCT_BIN=<occt-install>/bin \
+        conda run -n <env> python tests/golden/capture.py <out.json>
 """
 
 from __future__ import annotations
 
 import json
 import math
+import os
 import platform
 import subprocess
 import sys
@@ -40,6 +42,14 @@ import numpy as np
 
 _ROOT: Final[Path] = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_ROOT / "src"))
+
+# Dev build only, as in tests/conftest.py: the in-tree _core.pyd loads OCCT from our own
+# build, outside the conda env, and Python does not search PATH for an extension's DLLs.
+_OCCT_BIN: Final[str | None] = os.environ.get("PYSMESH_OCCT_BIN")
+if _OCCT_BIN:
+    if not Path(_OCCT_BIN).is_dir():
+        raise RuntimeError(f"PYSMESH_OCCT_BIN is not a directory: {_OCCT_BIN}")
+    os.add_dll_directory(_OCCT_BIN)
 
 import pysmesh as ps  # noqa: E402
 from pysmesh import (  # noqa: E402

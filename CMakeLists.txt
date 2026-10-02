@@ -6,9 +6,11 @@
 #   cmake/{Kernel,Geom,SMESH}/CMakeLists.txt     per-module static-lib definitions
 #   src/bindings/                                pybind11 module
 #
-# OCCT + VTK + Boost are dynamic (conda-forge is shared) and are all build-time only: every
-# one of their DLLs is bundled into the wheel at repair time and name-mangled, so none is
-# resolved from the host env. Before 4.0.0, VTK alone was excluded from the bundle and taken
+# OCCT + VTK + Boost are dynamic and are all build-time only: every one of their DLLs is
+# bundled into the wheel at repair time and name-mangled, so none is resolved from the host
+# env. OCCT is our own build of exactly 8.0.1 plus the patches in patches/occt801/
+# (ci/build_occt.py), found only under PYSMESH_OCCT_ROOT. VTK and Boost come from the
+# conda-forge build env. Before 4.0.0, VTK alone was excluded from the bundle and taken
 # from the host; see docs/reports/v4.md for why that changed.
 
 cmake_minimum_required(VERSION 3.27)
@@ -36,9 +38,42 @@ set(SMESH_SRC_DIR  ${STAGED_DIR}/src/SMESH/src)
 set(PTHREAD_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/extern/pthread)
 
 # --------------------------------------------------------------------------- #
-# Dependencies (all resolved from the conda env via CMAKE_PREFIX_PATH)
+# Dependencies
+#   OCCT                 our own build (ci/build_occt.py), only from PYSMESH_OCCT_ROOT.
+#   VTK, Boost, pybind11 the conda env, via CMAKE_PREFIX_PATH.
+# The build env holds no OCCT. A silent pick-up of any other OCCT would compile and link
+# pySMESH against the wrong toolkits, so every other version or location is an error.
 # --------------------------------------------------------------------------- #
-find_package(OpenCASCADE REQUIRED)
+set(PYSMESH_OCCT_REQUIRED_VERSION 8.0.1)
+set(PYSMESH_OCCT_ROOT "" CACHE PATH
+    "Install prefix of the OCCT ${PYSMESH_OCCT_REQUIRED_VERSION} build: <root>/install of ci/build_occt.py")
+if(NOT PYSMESH_OCCT_ROOT)
+    message(FATAL_ERROR
+        "PYSMESH_OCCT_ROOT is not set. Build OCCT ${PYSMESH_OCCT_REQUIRED_VERSION} with "
+        "`python ci/build_occt.py build --root <dir>`, then configure with "
+        "-DPYSMESH_OCCT_ROOT=<dir>/install.")
+endif()
+find_package(OpenCASCADE ${PYSMESH_OCCT_REQUIRED_VERSION} EXACT CONFIG REQUIRED
+    PATHS "${PYSMESH_OCCT_ROOT}" NO_DEFAULT_PATH)
+if(NOT OpenCASCADE_VERSION VERSION_EQUAL PYSMESH_OCCT_REQUIRED_VERSION)
+    message(FATAL_ERROR
+        "OCCT ${OpenCASCADE_VERSION} found at ${OpenCASCADE_DIR}; pySMESH needs exactly "
+        "${PYSMESH_OCCT_REQUIRED_VERSION}.")
+endif()
+# A cached OpenCASCADE_DIR from an earlier configure bypasses the PATHS search above.
+# Require the config that was actually loaded to sit inside PYSMESH_OCCT_ROOT.
+file(REAL_PATH "${PYSMESH_OCCT_ROOT}" _pysmesh_occt_root)
+file(REAL_PATH "${OpenCASCADE_DIR}" _pysmesh_occt_dir)
+string(TOLOWER "${_pysmesh_occt_root}" _pysmesh_occt_root)
+string(TOLOWER "${_pysmesh_occt_dir}" _pysmesh_occt_dir)
+cmake_path(IS_PREFIX _pysmesh_occt_root "${_pysmesh_occt_dir}" NORMALIZE _pysmesh_occt_inside)
+if(NOT _pysmesh_occt_inside)
+    message(FATAL_ERROR
+        "OCCT config ${OpenCASCADE_DIR} is not under PYSMESH_OCCT_ROOT=${PYSMESH_OCCT_ROOT}. "
+        "Clear OpenCASCADE_DIR from the CMake cache.")
+endif()
+message(STATUS "OCCT ${OpenCASCADE_VERSION} from ${OpenCASCADE_DIR}")
+
 find_package(VTK REQUIRED COMPONENTS CommonCore CommonDataModel FiltersVerdict)
 find_package(Boost REQUIRED COMPONENTS filesystem thread serialization regex)
 find_package(Threads REQUIRED)
@@ -164,7 +199,7 @@ target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
 # All are dynamic (bundled at wheel-repair time); see NOTICE.md / PROVENANCE.md.
 #
 # v2 adds the modelling toolkits the Tier-C operation surface needs. Verified against
-# the pinned occt=8.0.0 by tests/probe (PYSMESH_BUILD_V2_PROBE):
+# OCCT 8.0.1 by tests/probe (PYSMESH_BUILD_V2_PROBE):
 #   TKPrim    BRepPrimAPI_Make{Box,Cylinder,Cone,Sphere,Torus,Wedge,Prism,Revol}
 #   TKBO      BRepAlgoAPI_{Fuse,Cut,Common,Section,Splitter,Defeaturing}, BOPAlgo_*
 #   TKFillet  BRepFilletAPI_Make{Fillet,Chamfer}

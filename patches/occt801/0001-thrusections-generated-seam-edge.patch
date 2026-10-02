@@ -1,0 +1,90 @@
+Defect O1: BRepOffsetAPI_ThruSections::Generated() fails on a ruled loft through
+sections that are each one closed edge.
+
+Defect id: O1 (pySMESH defect sweep 4.2.2, sections 9 O1 and 13.3).
+
+Symptom: a ruled loft (ruled = true) through 4 or more sections, each one closed edge
+(a circle, a closed spline), builds. Generated() of any section vertex then throws
+NCollection_IndexedDataMap::FindFromKey. BRepTools_History(args, maker) calls
+Generated() for every sub-shape, so the history of the loft cannot be built at all.
+With 3 sections it does not throw, but it returns a section edge in place of the
+second longitudinal edge.
+
+Root cause: in the vertex branch of Generated(), ruled mode, the walk along the
+chain of longitudinal edges picks the next edge by its position in the
+vertex-to-edge list of a face: First() or Last(), whichever is not the current
+edge. A section of one closed edge makes every ruled face periodic. The face then
+holds its longitudinal edge twice (a seam, FORWARD and REVERSED), and the closed
+section edge carries the vertex at both of its ends. First() and Last() can be the
+same seam edge, or the section edge, so the walk stalls on a stale vertex. The next
+face does not contain that vertex, and FindFromKey throws.
+
+Change: the next longitudinal edge is the edge of the next face at the current
+vertex that is not degenerated and not an edge of the section between the two
+faces. The same rule already selects the next edge in the degenerated-section
+branch of this function. A missing edge throws Standard_DomainError instead of
+returning a null shape.
+
+Files and functions changed:
+  src/ModelingAlgorithms/TKOffset/BRepOffsetAPI/BRepOffsetAPI_ThruSections.cxx
+    BRepOffsetAPI_ThruSections::Generated(), vertex branch, ruled chain walk.
+
+Applies to: OCCT V8_0_1 (b8f597c677811d1f9f4d8a97f5ae2825c0353a42).
+
+diff --git a/src/ModelingAlgorithms/TKOffset/BRepOffsetAPI/BRepOffsetAPI_ThruSections.cxx b/src/ModelingAlgorithms/TKOffset/BRepOffsetAPI/BRepOffsetAPI_ThruSections.cxx
+index 6e60f68e..286b72a9 100644
+--- a/src/ModelingAlgorithms/TKOffset/BRepOffsetAPI/BRepOffsetAPI_ThruSections.cxx
++++ b/src/ModelingAlgorithms/TKOffset/BRepOffsetAPI/BRepOffsetAPI_ThruSections.cxx
+@@ -1609,21 +1609,45 @@ const NCollection_List<TopoDS_Shape>& BRepOffsetAPI_ThruSections::Generated(cons
+     myGenerated.Append(anEdge);
+     if (myIsRuled)
+     {
+-      // Find the chain of longitudinal edges from first to last
++      // Find the chain of longitudinal edges from first to last.
++      // The next longitudinal edge is the edge of the next face at <FirstVertex> that is
++      // not degenerated and not an edge of section <i>, the section between the two faces.
++      // It is not chosen by its position in the vertex-to-edge list. A section made of one
++      // closed edge makes every face periodic: the face holds its longitudinal edge twice
++      // (a seam), and it lists the section edge twice at <FirstVertex>. The first or last
++      // list entry can then be the seam just walked, or the section edge.
+       for (int i = 2; i < myWires.Length(); i++)
+       {
+-        FirstVertex                                  = TopExp::LastVertex(anEdge);
+-        const NCollection_List<TopoDS_Shape>& Elist1 = VEmap.FindFromKey(FirstVertex);
+-        TopoDS_Edge FirstEdge = (anEdge.IsSame(Elist1.First())) ? TopoDS::Edge(Elist1.Last())
+-                                                                : TopoDS::Edge(Elist1.First());
++        FirstVertex             = TopExp::LastVertex(anEdge);
++        TopoDS_Shape aSectionAt = myWires(i);
++        if ((myIsRuled || !myMutableInput) && !myBFGenerator.IsNull())
++        {
++          aSectionAt = myBFGenerator->ResultShape(aSectionAt);
++        }
++        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> aSectionEdges;
++        TopExp::MapShapes(aSectionAt, TopAbs_EDGE, aSectionEdges);
+         Eindex += myNbEdgesInSection;
+         FirstFace = TopoDS::Face(AllFaces(Eindex));
+         FirstFace.Orientation(TopAbs_FORWARD);
+         VEmap.Clear();
+         TopExp::MapShapesAndAncestors(FirstFace, TopAbs_VERTEX, TopAbs_EDGE, VEmap);
+         const NCollection_List<TopoDS_Shape>& Elist2 = VEmap.FindFromKey(FirstVertex);
+-        anEdge = (FirstEdge.IsSame(Elist2.First())) ? TopoDS::Edge(Elist2.Last())
+-                                                    : TopoDS::Edge(Elist2.First());
++        TopoDS_Edge                           aNextEdge;
++        for (NCollection_List<TopoDS_Shape>::Iterator itl2(Elist2); itl2.More(); itl2.Next())
++        {
++          const TopoDS_Edge& aCandidate = TopoDS::Edge(itl2.Value());
++          if (!BRep_Tool::Degenerated(aCandidate) && !aSectionEdges.Contains(aCandidate))
++          {
++            aNextEdge = aCandidate;
++            break;
++          }
++        }
++        if (aNextEdge.IsNull())
++        {
++          throw Standard_DomainError(
++            "BRepOffsetAPI_ThruSections::Generated: no longitudinal edge at a section vertex");
++        }
++        anEdge = aNextEdge;
+         myGenerated.Append(anEdge);
+       }
+     }

@@ -59,10 +59,10 @@ cannot import.
 
 macOS and Linux are not built. The blocker is packaging, not the code: PyPI
 requires Linux wheels to be `manylinux`-tagged, and this build resolves
-OCCT, Boost and VTK from conda-forge, which is a different ABI baseline.
-Supporting Linux properly means building those dependencies from source
-inside a manylinux container. That is planned separately, not skipped by
-oversight.
+Boost and VTK from conda-forge, which is a different ABI baseline. OCCT is
+already built from source (`ci/build_occt.py`), but on Windows only.
+Supporting Linux properly means building all three from source inside a
+manylinux container. That is planned separately, not skipped by oversight.
 
 Wheels are also attached to every
 [GitHub Release](https://github.com/KRGulaj/pySMESH/releases), for pinning a
@@ -359,17 +359,29 @@ binding ever exports one.
 
 ## Build from source
 
-Requires MSVC v143, GNU `patch`, and a conda-forge build environment. All of
-VTK, OCCT and Boost are build-time only, and end up inside the wheel:
+Requires MSVC v143, GNU `patch`, git, and a conda-forge build environment.
+VTK and Boost come from that environment. OCCT 8.0.1 does not: `ci/build_occt.py`
+builds it from the upstream tag, with our fixes from `patches/occt801/` and
+only the toolkits `_core` needs. All three are build-time only, and end up
+inside the wheel. The build
+environment must not contain an `occt` package. CMake accepts only OCCT 8.0.1
+from the prefix you name, and stops on any other.
 
 ```bash
 conda env create -f ci/environment.yml
 conda activate <the env name in ci/environment.yml>
 
+# From an MSVC x64 developer shell. <deps> is any directory outside the checkout.
+# A second run with the same inputs reuses the install.
+python ci/build_occt.py build --root <deps>/occt-8.0.1
+
 python prepare.py                                # stage extern/ -> staged/ and apply patches
-pip wheel . --no-build-isolation --no-deps -w dist
+pip wheel . --no-build-isolation --no-deps -w dist \
+    -C cmake.define.PYSMESH_OCCT_ROOT=<deps>/occt-8.0.1/install
 # CI additionally repairs the wheel with delvewheel, bundling the whole native closure
-# (OCCT + Boost + VTK) and name-mangling every DLL.
+# (OCCT + Boost + VTK) and name-mangling every DLL:
+delvewheel repair --add-path <deps>/occt-8.0.1/install/bin \
+    --add-path <env>/Library/bin -w dist/repaired dist/<wheel>.whl
 ```
 
 For local development (run tests against a freshly built extension without a
@@ -377,11 +389,18 @@ wheel):
 
 ```bash
 cmake -G Ninja -S . -B build -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_PREFIX_PATH=<env>/Library -DPython_EXECUTABLE=<env>/python.exe
+      -DCMAKE_PREFIX_PATH=<env>/Library -DPython_EXECUTABLE=<env>/python.exe \
+      -DPYSMESH_OCCT_ROOT=<deps>/occt-8.0.1/install
 cmake --build build --target _core               # copies _core + _build_info into src/pysmesh
-pytest tests/ -q
-python examples/box_bl.py
+PYSMESH_OCCT_BIN=<deps>/occt-8.0.1/install/bin PYTHONPATH=src pytest tests/ -q
 ```
+
+`PYSMESH_OCCT_BIN` is for this dev layout only. The in-tree `_core.pyd` loads
+the OCCT DLLs from the OCCT build, and Python does not search `PATH` for an
+extension's DLLs. `tests/conftest.py` and `tests/golden/capture.py` therefore
+add that directory with `os.add_dll_directory`. The package itself holds no
+such path: a wheel bundles OCCT and needs no variable. The examples import an
+installed `pysmesh`, so run them against the repaired wheel, as CI does.
 
 ### Capability probe
 
@@ -395,9 +414,10 @@ failure instead of a surprise mid-binding.
 ```bash
 cmake -G Ninja -S . -B build -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_PREFIX_PATH=<env>/Library -DPython_EXECUTABLE=<env>/python.exe \
-      -DPYSMESH_BUILD_V2_PROBE=ON
+      -DPYSMESH_OCCT_ROOT=<deps>/occt-8.0.1/install -DPYSMESH_BUILD_V2_PROBE=ON
 cmake --build build --target v2_probe
-./build/v2_probe.exe                             # exit 0 == every probed capability is usable
+# An executable does search PATH for its DLLs: put the OCCT build's bin first.
+PATH="<deps>/occt-8.0.1/install/bin:$PATH" ./build/v2_probe.exe   # exit 0 == every probed capability is usable
 ```
 
 ## Design principles

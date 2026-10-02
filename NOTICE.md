@@ -13,7 +13,7 @@ Full upstream URLs, commits, and the patch index are in [PROVENANCE.md](PROVENAN
 | SALOME **KERNEL** (minimal slice) | LGPL-2.1 | **static** in `_core.pyd` | As SMESH — source in `extern/kernel/`, CORBA compiled out (`SALOME_LIGHT`). |
 | SALOME **GEOM** (`GEOMUtils` only) | LGPL-2.1 | **static** in `_core.pyd` | Source slice in `extern/geom/src/GEOMUtils/`. |
 | **MEFISTO2** `trte.c` (f2c) + **pthread** shim | LGPL-2.1 | **static** in `_core.pyd` | Source in `extern/mefisto2/`, `extern/pthread/` (via `looooo/SMESH`). |
-| **Open CASCADE Technology (OCCT) 8.0.0** | LGPL-2.1 **with the exception** | **dynamic**, DLLs **bundled into the wheel** | LGPL static-linking exception is not even relied on (OCCT is dynamic); the relinking right holds because pySMESH is fully open and rebuildable. Build recipe in PROVENANCE.md. |
+| **Open CASCADE Technology (OCCT) 8.0.1** | LGPL-2.1 **with the exception** | **dynamic**, DLLs **bundled into the wheel** | **Modified:** built from the upstream tag `V8_0_1` by `ci/build_occt.py`, with our changes applied. Every change is a patch file in `patches/occt801/`, listed in PROVENANCE.md ("How OCCT is built"). LGPL static-linking exception is not even relied on (OCCT is dynamic); the relinking right holds because pySMESH is fully open and rebuildable. Build recipe in PROVENANCE.md ("How OCCT is built"). |
 | **Boost 1.90** | BSL-1.0 | **dynamic**, DLLs **bundled into the wheel** | BSL-1.0 is permissive (notice only); this entry is the notice. |
 | **VTK 9.6.2** | BSD-3-Clause | **dynamic**, DLLs **bundled into the wheel** | BSD-3-Clause is permissive (notice only); this entry is the notice. Private to `_core.pyd` since 4.0.0, name-mangled like OCCT/Boost. Only three components are linked (`CommonCore`, `CommonDataModel`, `FiltersVerdict`), so the bundle carries no rendering, IO, or Python-wrapper modules. |
 | **pybind11 3.0.3** | BSD-3-Clause | header-only (compile time) | Notice only; this entry is the notice. |
@@ -74,5 +74,5 @@ string. `tests/test_vtk_privacy.py` fails the build if a binding ever exports on
 
 - LGPL-2.1: [LICENSE](LICENSE) (this project and all vendored SALOME sources).
 - OCCT LGPL-2.1 exception, Boost BSL-1.0, VTK BSD-3, pybind11 BSD-3, NumPy BSD-3: carried by
-  their respective upstream distributions (conda-forge packages / source repos linked in
-  PROVENANCE.md).
+  their respective upstream distributions (the OCCT source repository at tag `V8_0_1`,
+  conda-forge packages for the rest / source repos linked in PROVENANCE.md).

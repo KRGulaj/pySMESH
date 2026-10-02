@@ -58,6 +58,10 @@ pair comes from conda-forge's `smesh-feedstock` recipe, which is the only place 
 working OCCT 8.0 compatibility pass for this codebase. NETGEN-related patches are left out —
 we don't build NETGEN.
 
+`patches/occt801/` is a different kind: it patches OCCT itself, not SMESH, and
+`ci/build_occt.py` applies it, not `prepare.py`. See
+[How OCCT is built](#how-occt-is-built).
+
 One detail worth recording honestly: we vendor SALOME's official `V9_9_0` **tags**, while
 looooo's patches were written against slightly newer commits on the `V9_9_0` **branch**. Most
 patches apply cleanly regardless; a few of looooo's source patches turn out to already be
@@ -145,8 +149,10 @@ them, which is why the acceptance gates for each package run the code.
 ## OCCT toolkits linked & bundled
 
 `_core.pyd` links OCCT dynamically; the wheel bundles (at delvewheel-repair time) every OCCT
-toolkit it needs directly or transitively. All are conda-forge `occt=8.0.0`, LGPL-2.1 with the
-exception (see [NOTICE.md](NOTICE.md)); this records *which* toolkits and *why*, not a new source.
+toolkit it needs directly or transitively. All come from our own build of OCCT 8.0.1 (see
+[How OCCT is built](#how-occt-is-built)), LGPL-2.1 with the exception (see
+[NOTICE.md](NOTICE.md)); this records *which* toolkits and *why*, not a new source. Up to
+4.2.2 they came from the conda-forge package `occt=8.0.0`.
 
 - Modelling / meshing (present since B2–B3): TKernel, TKMath, TKG2d, TKG3d, TKGeomBase,
   TKGeomAlgo, TKBRep, TKTopAlgo, TKPrim, TKBO, TKMesh, TKShHealing, TKOffset, plus the
@@ -164,6 +170,61 @@ exception (see [NOTICE.md](NOTICE.md)); this records *which* toolkits and *why*,
   **TKXCAF**/**TKVCAF** (XDE shape/colour/name tools), **TKLCAF**/**TKCAF**/**TKCDF** (OCAF
   document core), **TKXSBase** (data-exchange base). Explicitly listed in the root
   `CMakeLists.txt` `_core` link block. `ci/check_wheel.py` asserts these are bundled.
+
+## How OCCT is built
+
+Up to 4.2.2 OCCT came from the conda-forge package `occt=8.0.0`. Since then
+`ci/build_occt.py` builds it from source. The local build and CI run the same script, and
+CI caches the result on the script's input set (tag, commit, patches, CMake options, MSVC
+toolset).
+
+| Item | Value |
+|---|---|
+| Upstream | [Open-Cascade-SAS/OCCT](https://github.com/Open-Cascade-SAS/OCCT) |
+| Tag | `V8_0_1` |
+| Commit | `b8f597c677811d1f9f4d8a97f5ae2825c0353a42` (the script refuses any other) |
+| Patches | `patches/occt801/*.patch`, applied in file-name order (table below) |
+| Library type | shared (DLLs), bundled into the wheel and name-mangled by delvewheel |
+| Toolchain | MSVC v143, CMake, Ninja |
+| Found by | `CMakeLists.txt`, only under `PYSMESH_OCCT_ROOT`, only at exactly 8.0.1 |
+
+The patches are our own. None is upstream, and none was reported upstream. Each file
+starts with a header: the defect, the symptom, the root cause and the changed functions.
+The script resets the source tree to the pinned commit, then applies each patch with
+`git apply`. A patch that does not apply cleanly stops the build. Each patch's SHA-256
+is part of the input set, so it is part of the CI cache key.
+
+| Patch | Defect | OCCT file and function | What it changes |
+|---|---|---|---|
+| `0001-thrusections-generated-seam-edge.patch` | O1 | `BRepOffsetAPI_ThruSections.cxx`, `BRepOffsetAPI_ThruSections::Generated()` | A ruled loft through sections of one closed edge each: the walk along the longitudinal edges picked the next edge by list position, and a seam edge is listed twice. `Generated()` of a section vertex threw `FindFromKey` with 4+ sections, and returned a section edge with 3. The next edge is now the face's edge at the vertex that is not degenerated and not a section edge. |
+
+The CMake options are the script's `CMAKE_OPTIONS`:
+
+- `CMAKE_BUILD_TYPE=Release`, `CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON`,
+  `BUILD_LIBRARY_TYPE=Shared`, `BUILD_CPP_STANDARD=C++17`, `INSTALL_DIR_LAYOUT=Unix`.
+- `BUILD_RELEASE_DISABLE_EXCEPTIONS=OFF`. OCCT's default is ON, which defines
+  `No_Exception` and compiles out the `Standard_*_Raise_if` range checks.
+- `BUILD_ENABLE_FPE_SIGNAL_HANDLER=OFF`, `BUILD_OPT_PROFILE=Default`,
+  `USE_MMGR_TYPE=NATIVE`, `BUILD_WITH_DEBUG=OFF`, `BUILD_USE_PCH=OFF`.
+- Every `BUILD_MODULE_*` is OFF. `BUILD_ADDITIONAL_TOOLKITS` names the 27 toolkits that a
+  pySMESH target links. OCCT adds their closure: TKBool, TKDE, TKHLR and TKService.
+- OFF: `USE_TBB`, `USE_FREETYPE`, `USE_FREEIMAGE`, `USE_RAPIDJSON`, `USE_DRACO`,
+  `USE_OPENVR`, `USE_FFMPEG`, `USE_VTK`, `USE_TK`, `USE_OPENGL`, `USE_GLES2`, `USE_EIGEN`,
+  `BUILD_GTEST`, `BUILD_DOC_Overview`, `BUILD_DOC_RefMan`, `INSTALL_TEST_CASES`.
+
+No compiler flag is added. The flags are CMake's MSVC defaults plus OCCT's own
+`adm/cmake/occt_defs_flags.cmake`: `/W4 /GR /EHa /fp:precise /MD /O2 /Ob2 /DNDEBUG /GL`,
+and `/LTCG` at link time.
+
+The options mirror the conda-forge feedstock that built `occt 8.0.0 all_h8ecc14b_202`
+([conda-forge/occt-feedstock](https://github.com/conda-forge/occt-feedstock),
+`recipe/bld.bat`) wherever an option can change behaviour. They differ only in what is not
+built: Draw, VTK, FreeImage, RapidJSON, FreeType, OpenGL and Tcl/Tk. A control build of
+8.0.0 from source, with these options, reproduced the 4.2.2 golden baseline bit for bit.
+
+FreeType is OFF. TKService, which TKV3d and TKVCAF pull in, builds without it. FreeType
+serves only OCCT's text rendering (`Font_*`, `StdPrs_BRepFont`), and pySMESH calls none of
+it. So the wheel bundles no FreeType DLL.
 
 ## Reference-only repositories
 

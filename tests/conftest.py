@@ -11,10 +11,17 @@ The CMake build copies ``_core.pyd`` and ``_build_info.py`` into ``src/pysmesh``
 in-place import (see the root ``CMakeLists.txt``); here we only need to put the repo's
 ``src`` directory on ``sys.path``.
 
-The ``add_dll_directory`` call below serves the **dev build only**. A local CMake build
-leaves ``_core.pyd`` linked against the conda env's OCCT/Boost/VTK DLLs, which live in
-``Library/bin``. An installed wheel needs none of this: since 4.0.0 delvewheel bundles the
-whole native closure inside the package, so nothing is resolved from the environment.
+The two ``add_dll_directory`` calls below serve the **dev build only**. A local CMake build
+leaves ``_core.pyd`` linked against two DLL sets:
+
+* Boost and VTK from the conda env, which live in ``Library/bin``.
+* OCCT from our own build (``ci/build_occt.py``), outside the env. Python does not search
+  ``PATH`` for an extension's DLLs, so the environment variable ``PYSMESH_OCCT_BIN`` names
+  that build's ``bin`` directory. It must be set before the first ``import pysmesh``.
+
+An installed wheel needs none of this: since 4.0.0 delvewheel bundles the whole native
+closure inside the package, so nothing is resolved from the environment. CI sets no
+``PYSMESH_OCCT_BIN``.
 """
 
 from __future__ import annotations
@@ -30,6 +37,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from pysmesh import EntityId, Session
+
+_occt_bin = os.environ.get("PYSMESH_OCCT_BIN")
+if _occt_bin:
+    if not Path(_occt_bin).is_dir():
+        raise RuntimeError(f"PYSMESH_OCCT_BIN is not a directory: {_occt_bin}")
+    os.add_dll_directory(_occt_bin)
 
 # Prefer an installed ``pysmesh`` (the repaired wheel, exercised in CI) over the source tree.
 # Only fall back to ``src`` for a local dev build (CMake copies ``_core``/``_build_info`` into
@@ -134,14 +147,16 @@ def cylinder_brep(fixtures_dir: Path) -> bytes:
 @pytest.fixture(scope="session")
 def open_box_shell_brep(fixtures_dir: Path) -> bytes:
     """BREP bytes for the box with one face removed: a 5-face open shell whose opening is
-    bounded by exactly four naked (free-boundary) edges (see ``generate_fixtures.cpp``)."""
+    bounded by exactly four naked (free-boundary) edges (see ``generate_fixtures.cpp``).
+    """
     return (fixtures_dir / "open_box_shell.brep").read_bytes()
 
 
 @pytest.fixture(scope="session")
 def box_far_brep(fixtures_dir: Path) -> bytes:
     """BREP bytes for a second unit box translated to x in [5, 7]; its minimum distance to
-    ``box.brep`` (x in [0, 2]) is exactly 3.0 along +x (see ``generate_fixtures.cpp``)."""
+    ``box.brep`` (x in [0, 2]) is exactly 3.0 along +x (see ``generate_fixtures.cpp``).
+    """
     return (fixtures_dir / "box_far.brep").read_bytes()
 
 
