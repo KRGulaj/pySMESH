@@ -1,0 +1,142 @@
+#! /usr/bin/env python3
+# Copyright (C) 2025-2026  CEA, EDF
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
+#
+# See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
+#
+
+import os
+import sys
+import subprocess
+import os.path
+
+salome_appli_dir = os.path.dirname(os.path.realpath(__file__))
+abs_appli_path = os.path.join(salome_appli_dir,"__RUN_SALOME__")
+bootstrap_dir = os.path.join(salome_appli_dir,"__SALOME_BOOTSTRAP__")
+# Preliminary work to initialize path to SALOME Python modules
+def __initialize():
+
+  sys.path[:0] = [ os.path.join(abs_appli_path, "bin/salome") ]
+  sys.path[:0] = [ bootstrap_dir ]
+  
+  # define folder to store omniorb config (initially in virtual application folder)
+  try:
+    from salomeContextUtils import setOmniOrbUserPath
+    setOmniOrbUserPath()
+  except Exception as e:
+    print(e)
+    sys.exit(1)
+# End of preliminary work
+
+# salome doc only works for virtual applications. Therefore we overwrite it with this function
+def _showDoc(modules):
+    for module in modules:
+      modulePath = os.getenv(module+"_ROOT_DIR")
+      if modulePath != None:
+        baseDir = os.path.join(modulePath, "share", "doc", "salome")
+        docfile = os.path.join(baseDir, "gui", module.upper(), "index.html")
+        if not os.path.isfile(docfile):
+          docfile = os.path.join(baseDir, "tui", module.upper(), "index.html")
+        if not os.path.isfile(docfile):
+          docfile = os.path.join(baseDir, "dev", module.upper(), "index.html")
+        if os.path.isfile(docfile):
+          out, err = subprocess.Popen(["xdg-open", docfile]).communicate()
+        else:
+          print("Online documentation is not accessible for module:", module)
+      else:
+        print(module+"_ROOT_DIR not found!")
+
+def main(args):
+  # Identify application path then locate configuration files
+  __initialize()
+
+  if args == ['--help']:
+    from salomeContext import usage
+    usage()
+    sys.exit(0)
+
+  # Create a SalomeContext which parses configFileNames to initialize environment
+  try:
+    from salomeContext import SalomeContext, SalomeContextException
+    if 'appendVariable' not in dir(SalomeContext):
+      # check whether the appendVariable method is implemented
+      def appendVariable(self, name, value, separator=os.pathsep):
+        if value == '':
+          return
+        value = os.path.expandvars(value) # expand environment variables
+        env = os.getenv(name, None)
+        if env is None:
+          os.environ[name] = value
+        else:
+          os.environ[name] = env + separator + value
+        return
+      SalomeContext.appendVariable = appendVariable
+
+    context = SalomeContext(None)
+
+    # Logger level error
+    context.getLogger().setLevel(40)
+    # Mandatory Env Var
+    context.setVariable(r"SALOME_APPLICATION_DIR", salome_appli_dir, overwrite=True)
+    context.setVariable(r"ABSOLUTE_APPLI_PATH", abs_appli_path, overwrite=True)
+    context.setVariable(r"APPLI", os.path.join(salome_appli_dir, "salome"), overwrite=True) # KERNEL Launcher
+    context.addToPath(os.path.join(abs_appli_path,"bin/salome"))
+    context.addToPythonPath(bootstrap_dir)
+    context.addToPythonPath(os.path.join(abs_appli_path, 'lib', 'salome'))
+    context.addToLdLibraryPath(os.path.join(abs_appli_path, 'lib', 'salome'))
+
+
+    # Extension
+    from SalomeOnDemandTK.extension_utilities import  SALOME_EXTDIR
+    ext_root_dir = os.path.join(salome_appli_dir, SALOME_EXTDIR)
+
+    # Seting SALOME extension module Env Var for dynamic library
+    context.addToLdLibraryPath(os.path.join(ext_root_dir, 'lib', 'salome'))
+
+    # Seting SALOME extension prerequis and tools environment for dynamic library
+    BINDIR = os.path.join(ext_root_dir, 'bin')
+    LIBDIR = os.path.join(ext_root_dir, 'lib')
+    INCLUDEDIR = os.path.join(ext_root_dir, 'include')
+
+    context.addToPath(BINDIR)
+    context.addToLdLibraryPath(LIBDIR)
+    context.addToPythonPath(BINDIR)
+    context.addToPythonPath(LIBDIR)
+
+    import runSalomeOnDemand
+    runSalomeOnDemand.set_ext_env()
+
+    #[manage salome doc command]
+    if len(args) >1 and args[0]=='doc':
+        _showDoc(args[1:])
+        return
+
+    # Start SALOME, parsing command line arguments
+    out, err, status = context.runSalome(args)
+    sys.exit(status)
+
+  except SalomeContextException as e:
+    import logging
+    logging.getLogger("salome").error(e)
+    sys.exit(1)
+ 
+
+if __name__ == "__main__":
+  #args = ["on_demand"]
+  #args[1:]= sys.argv[1:]
+  args = sys.argv[1:]
+  main(args)
+#
