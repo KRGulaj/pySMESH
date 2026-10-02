@@ -26,10 +26,11 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------------------
-  # OCCT 8.0.1, built from the upstream tag by ci/build_occt.py (unpatched, only the
-  # toolkits _core needs), once per input set. It does not depend on the Python version, so
-  # one job serves all four legs. The cache key is the script's input set: tag, commit,
-  # CMake options and MSVC toolset. A hit restores the install; a miss builds and saves it.
+  # OCCT 8.0.1, built from the upstream tag by ci/build_occt.py (with patches/occt801/, only
+  # the toolkits _core needs), once per input set. It does not depend on the Python version,
+  # so one job serves all four legs. The cache key is the script's input set: tag, commit,
+  # patches, CMake options and MSVC toolset. A hit restores the install; a miss builds and
+  # saves it.
   # The same commands build it locally (README, "Build from source").
   # ---------------------------------------------------------------------------------------
   occt:

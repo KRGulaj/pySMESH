@@ -361,8 +361,9 @@ binding ever exports one.
 
 Requires MSVC v143, GNU `patch`, git, and a conda-forge build environment.
 VTK and Boost come from that environment. OCCT 8.0.1 does not: `ci/build_occt.py`
-builds it from the upstream tag, unpatched, with only the toolkits `_core`
-needs. All three are build-time only, and end up inside the wheel. The build
+builds it from the upstream tag, with our fixes from `patches/occt801/` and
+only the toolkits `_core` needs. All three are build-time only, and end up
+inside the wheel. The build
 environment must not contain an `occt` package. CMake accepts only OCCT 8.0.1
 from the prefix you name, and stops on any other.
 

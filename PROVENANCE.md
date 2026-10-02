@@ -58,6 +58,10 @@ pair comes from conda-forge's `smesh-feedstock` recipe, which is the only place 
 working OCCT 8.0 compatibility pass for this codebase. NETGEN-related patches are left out —
 we don't build NETGEN.
 
+`patches/occt801/` is a different kind: it patches OCCT itself, not SMESH, and
+`ci/build_occt.py` applies it, not `prepare.py`. See
+[How OCCT is built](#how-occt-is-built).
+
 One detail worth recording honestly: we vendor SALOME's official `V9_9_0` **tags**, while
 looooo's patches were written against slightly newer commits on the `V9_9_0` **branch**. Most
 patches apply cleanly regardless; a few of looooo's source patches turn out to already be
@@ -171,17 +175,28 @@ toolkit it needs directly or transitively. All come from our own build of OCCT 8
 
 Up to 4.2.2 OCCT came from the conda-forge package `occt=8.0.0`. Since then
 `ci/build_occt.py` builds it from source. The local build and CI run the same script, and
-CI caches the result on the script's input set (tag, commit, CMake options, MSVC toolset).
+CI caches the result on the script's input set (tag, commit, patches, CMake options, MSVC
+toolset).
 
 | Item | Value |
 |---|---|
 | Upstream | [Open-Cascade-SAS/OCCT](https://github.com/Open-Cascade-SAS/OCCT) |
 | Tag | `V8_0_1` |
 | Commit | `b8f597c677811d1f9f4d8a97f5ae2825c0353a42` (the script refuses any other) |
-| Patches | none: the script refuses a source tree with modified files |
+| Patches | `patches/occt801/*.patch`, applied in file-name order (table below) |
 | Library type | shared (DLLs), bundled into the wheel and name-mangled by delvewheel |
 | Toolchain | MSVC v143, CMake, Ninja |
 | Found by | `CMakeLists.txt`, only under `PYSMESH_OCCT_ROOT`, only at exactly 8.0.1 |
+
+The patches are our own. None is upstream, and none was reported upstream. Each file
+starts with a header: the defect, the symptom, the root cause and the changed functions.
+The script resets the source tree to the pinned commit, then applies each patch with
+`git apply`. A patch that does not apply cleanly stops the build. Each patch's SHA-256
+is part of the input set, so it is part of the CI cache key.
+
+| Patch | Defect | OCCT file and function | What it changes |
+|---|---|---|---|
+| `0001-thrusections-generated-seam-edge.patch` | O1 | `BRepOffsetAPI_ThruSections.cxx`, `BRepOffsetAPI_ThruSections::Generated()` | A ruled loft through sections of one closed edge each: the walk along the longitudinal edges picked the next edge by list position, and a seam edge is listed twice. `Generated()` of a section vertex threw `FindFromKey` with 4+ sections, and returned a section edge with 3. The next edge is now the face's edge at the vertex that is not degenerated and not a section edge. |
 
 The CMake options are the script's `CMAKE_OPTIONS`:
 

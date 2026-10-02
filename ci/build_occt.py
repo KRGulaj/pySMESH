@@ -2,24 +2,28 @@
 # Copyright (C) 2026 Kajetan R. Gulaj
 # Created: 2026-10-02
 
-"""Build OCCT from a pinned tag, unpatched, with only the toolkits that ``_core`` needs.
+"""Build OCCT from a pinned tag, with our patches and only the toolkits ``_core`` needs.
 
 pySMESH bundles OCCT as shared libraries (DLLs). Up to 4.2.2 they came from the
 conda-forge package ``occt=8.0.0``. They now come from this script. The local build and
-CI both run it. It does four things:
+CI both run it. It does five things:
 
 1. It fetches the pinned tag into ``<root>/src`` and verifies the commit hash. It checks
-   out with ``core.autocrlf=false``, so every file equals the upstream blob. It applies
-   no patch. It refuses a source tree with modified tracked files.
-2. It configures with CMake and Ninja into ``<root>/build``.
-3. It builds and installs into ``<root>/install``.
-4. It writes a stamp file into the install prefix. A later run with the same inputs
+   out with ``core.autocrlf=false``, so every file equals the upstream blob.
+2. It resets that tree to the pinned commit. Then it applies the pin's patches
+   (``patches/occt801/*.patch`` for 8.0.1) in file-name order with ``git apply``. A
+   patch that does not apply cleanly stops the build.
+3. It configures with CMake and Ninja into ``<root>/build``.
+4. It builds and installs into ``<root>/install``.
+5. It writes a stamp file into the install prefix. A later run with the same inputs
    finds the stamp and reuses the install.
 
-One input set defines the build: the tag, the commit, the CMake options and the MSVC
-toolset. The toolset is ``VCToolsVersion``, which ``vcvars64.bat`` and
-``ilammy/msvc-dev-cmd`` set. The ``cache-key`` command prints a key derived from exactly
-that set. CI uses it as the ``actions/cache`` key.
+One input set defines the build: the tag, the commit, the patches, the CMake options and
+the MSVC toolset. Each patch enters with its name and the SHA-256 of its text, read with
+LF line endings, so a CRLF checkout of this repository gives the same key. The toolset
+is ``VCToolsVersion``, which ``vcvars64.bat`` and ``ilammy/msvc-dev-cmd`` set. The
+``cache-key`` command prints a key derived from exactly that set. CI uses it as the
+``actions/cache`` key.
 
 The CMake options mirror the conda-forge feedstock (``conda-forge/occt-feedstock``,
 ``recipe/bld.bat``) that built ``occt 8.0.0 all_h8ecc14b_202``. They are equal wherever
@@ -37,7 +41,7 @@ Usage:
 Run every command from a shell that has the MSVC x64 environment. ``build`` also needs
 ``cmake``, ``ninja`` and ``git`` on ``PATH``. ``verify`` exits non-zero unless
 ``<root>/install`` holds a complete install that matches the input set. CI runs it after
-a cache restore.
+a cache restore. ``build`` owns ``<root>/src``: it discards any local change there.
 """
 
 from __future__ import annotations
@@ -58,6 +62,8 @@ logger = logging.getLogger(__name__)
 
 OCCT_REPO_URL: Final[str] = "https://github.com/Open-Cascade-SAS/OCCT.git"
 
+REPO_ROOT: Final[Path] = Path(__file__).resolve().parent.parent
+
 # The stamp file that marks a complete install. It lives inside the install prefix, so a
 # cached prefix carries its own proof of what it holds.
 STAMP_NAME: Final[str] = "pysmesh_occt_build.json"
@@ -65,20 +71,38 @@ STAMP_NAME: Final[str] = "pysmesh_occt_build.json"
 
 @dataclass(frozen=True)
 class OcctPin:
-    """One pinned OCCT release: the upstream tag and the commit it must resolve to."""
+    """One pinned OCCT release: tag, commit, and the directory of its patches.
+
+    ``patch_dir`` is relative to the repository root. ``None`` builds the tag unpatched.
+    """
 
     version: str
     tag: str
     commit: str
+    patch_dir: str | None
 
 
-# 8.0.1 is the version pySMESH ships. 8.0.0 is the control build. It is the exact source
-# that conda-forge built: the feedstock downloads the GitHub archive of tag V8_0_0. If a
-# from-source 8.0.0 reproduces the 4.2.2 baseline, these options change no result. Then
-# any difference on 8.0.1 comes from the OCCT version.
+@dataclass(frozen=True)
+class OcctPatch:
+    """One patch file: its name, its text with LF line endings, and the text's hash."""
+
+    name: str
+    text: bytes
+    sha256: str
+
+
+# 8.0.1 is the version pySMESH ships, with the patches in patches/occt801/. 8.0.0 is the
+# control build, unpatched. It is the exact source that conda-forge built: the feedstock
+# downloads the GitHub archive of tag V8_0_0. If a from-source 8.0.0 reproduces the
+# 4.2.2 baseline, these options change no result. Then any difference on 8.0.1 comes
+# from the OCCT version or from a patch.
 OCCT_PINS: Final[dict[str, OcctPin]] = {
-    "8.0.1": OcctPin("8.0.1", "V8_0_1", "b8f597c677811d1f9f4d8a97f5ae2825c0353a42"),
-    "8.0.0": OcctPin("8.0.0", "V8_0_0", "d3056ef80c9668f395da40f5fd7be186cae4501f"),
+    "8.0.1": OcctPin(
+        "8.0.1", "V8_0_1", "b8f597c677811d1f9f4d8a97f5ae2825c0353a42", "patches/occt801"
+    ),
+    "8.0.0": OcctPin(
+        "8.0.0", "V8_0_0", "d3056ef80c9668f395da40f5fd7be186cae4501f", None
+    ),
 }
 DEFAULT_VERSION: Final[str] = "8.0.1"
 
@@ -171,8 +195,16 @@ class BuildInputs:
     """The input set that defines one OCCT build, and so its cache key."""
 
     pin: OcctPin
+    patches: tuple[OcctPatch, ...]
     cmake_options: tuple[tuple[str, str], ...]
     msvc_toolset: str
+
+    def patch_set_sha256(self) -> str:
+        """One digest over the ordered patches: each name, then each text."""
+        digest = hashlib.sha256()
+        for patch in self.patches:
+            digest.update(patch.name.encode("utf-8") + b"\0" + patch.text + b"\0")
+        return digest.hexdigest()
 
     def as_record(self) -> dict[str, object]:
         """The input set as a JSON-ready record, in a stable key order."""
@@ -180,6 +212,10 @@ class BuildInputs:
             "version": self.pin.version,
             "tag": self.pin.tag,
             "commit": self.pin.commit,
+            "patches": [
+                f"{patch.name} sha256:{patch.sha256}" for patch in self.patches
+            ],
+            "patch_set_sha256": self.patch_set_sha256(),
             "msvc_toolset": self.msvc_toolset,
             "cmake_options": [f"{name}={value}" for name, value in self.cmake_options],
         }
@@ -220,13 +256,34 @@ def _msvc_toolset() -> str:
     return toolset
 
 
+def load_patches(pin: OcctPin) -> tuple[OcctPatch, ...]:
+    """The pin's patches in file-name order, read with LF line endings."""
+    if pin.patch_dir is None:
+        return ()
+    directory = REPO_ROOT / pin.patch_dir
+    if not directory.is_dir():
+        raise SystemExit(
+            f"patch directory of OCCT {pin.version} is missing: {directory}"
+        )
+    patches: list[OcctPatch] = []
+    for path in sorted(directory.glob("*.patch")):
+        text = path.read_bytes().replace(b"\r\n", b"\n")
+        patches.append(OcctPatch(path.name, text, hashlib.sha256(text).hexdigest()))
+    if not patches:
+        raise SystemExit(
+            f"patch directory of OCCT {pin.version} holds no *.patch: {directory}"
+        )
+    return tuple(patches)
+
+
 def _inputs(version: str) -> BuildInputs:
     """The input set for one pinned version, with the active MSVC toolset."""
     if version not in OCCT_PINS:
         raise SystemExit(
             f"no OCCT pin for version {version!r}; known: {sorted(OCCT_PINS)}"
         )
-    return BuildInputs(OCCT_PINS[version], CMAKE_OPTIONS, _msvc_toolset())
+    pin = OCCT_PINS[version]
+    return BuildInputs(pin, load_patches(pin), CMAKE_OPTIONS, _msvc_toolset())
 
 
 def _run(cmd: list[str], cwd: Path | None = None) -> str:
@@ -264,8 +321,47 @@ def _git(src: Path, *args: str) -> str:
     return _run(["git", "-c", "core.autocrlf=false", "-C", str(src), *args]).strip()
 
 
+def prepare_source(pin: OcctPin, patches: tuple[OcctPatch, ...], src: Path) -> None:
+    """Fetch the pinned commit into ``src``, reset the tree to it, apply the patches."""
+    fetch_source(pin, src)
+    logger.info(
+        "resetting %s to %s; local changes there are discarded", src, pin.commit
+    )
+    _git(src, "reset", "--hard", "--quiet", pin.commit)
+    _git(src, "clean", "-fdq")
+    for patch in patches:
+        _git_apply(src, patch, check_only=True)
+        _git_apply(src, patch, check_only=False)
+        logger.info("applied %s (sha256 %s)", patch.name, patch.sha256)
+    changed = _git(src, "status", "--porcelain")
+    logger.info(
+        "source %s at %s (%s), %d patch(es):\n%s",
+        src,
+        pin.commit,
+        pin.tag,
+        len(patches),
+        changed,
+    )
+
+
+def _git_apply(src: Path, patch: OcctPatch, check_only: bool) -> None:
+    """Apply one patch to ``src`` with ``git apply``, or only check that it applies."""
+    cmd = ["git", "-c", "core.autocrlf=false", "-C", str(src), "apply"]
+    if check_only:
+        cmd.append("--check")
+    cmd.append("-")
+    proc = subprocess.run(cmd, input=patch.text, check=False, capture_output=True)
+    if proc.returncode != 0:
+        sys.stderr.write(proc.stderr.decode("utf-8", errors="replace"))
+        action = "check of" if check_only else "apply of"
+        raise SystemExit(
+            f"git apply: {action} {patch.name} failed on {src}; the patch does not "
+            "apply cleanly to the pinned commit"
+        )
+
+
 def fetch_source(pin: OcctPin, src: Path) -> None:
-    """Fetch the pinned tag into ``src``, verify the commit and the clean tree."""
+    """Fetch the pinned tag into ``src`` and verify the commit."""
     if not (src / ".git").is_dir():
         if src.exists() and any(src.iterdir()):
             raise SystemExit(f"{src} exists, is not empty and is not a git checkout")
@@ -286,12 +382,6 @@ def fetch_source(pin: OcctPin, src: Path) -> None:
     head = _git(src, "rev-parse", "HEAD")
     if head != pin.commit:
         raise SystemExit(f"{src} is at {head}, expected {pin.commit}")
-    dirty = _git(src, "status", "--porcelain", "--untracked-files=no")
-    if dirty:
-        raise SystemExit(
-            f"{src} has modified tracked files; the OCCT build is unpatched:\n{dirty}"
-        )
-    logger.info("source %s at %s (%s), clean", src, head, pin.tag)
 
 
 def _has_commit(src: Path) -> bool:
@@ -390,7 +480,7 @@ def cmd_build(version: str, root: Path, jobs: int) -> int:
         logger.info("reusing %s (cache key %s)", tree.install, inputs.cache_key())
         return 0
     _require_tools(("git", "cmake", "ninja", "cl"))
-    fetch_source(inputs.pin, tree.src)
+    prepare_source(inputs.pin, inputs.patches, tree.src)
     if tree.install.exists():
         logger.info("removing incomplete or stale install %s", tree.install)
         shutil.rmtree(tree.install)

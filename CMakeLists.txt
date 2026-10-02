@@ -8,8 +8,9 @@
 #
 # OCCT + VTK + Boost are dynamic and are all build-time only: every one of their DLLs is
 # bundled into the wheel at repair time and name-mangled, so none is resolved from the host
-# env. OCCT is our own unpatched build of exactly 8.0.1 (ci/build_occt.py), found only under
-# PYSMESH_OCCT_ROOT. VTK and Boost come from the conda-forge build env. Before 4.0.0, VTK
+# env. OCCT is our own build of exactly 8.0.1 plus the patches in patches/occt801/
+# (ci/build_occt.py), found only under PYSMESH_OCCT_ROOT. VTK and Boost come from the
+# conda-forge build env. Before 4.0.0, VTK
 # alone was excluded from the bundle and taken from the host; see docs/reports/v4.md for
 # why that changed.
 
