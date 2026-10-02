@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -246,7 +246,7 @@ static void Test()
   }
   catch(HDFexception)
     {
-      MESSAGE( "HDFexception ! " )
+      MESSAGE("HDFexception ! ");
     } 
 }
 
@@ -275,19 +275,19 @@ int main(int argc, char** argv)
     orb->destroy();
   }
   catch(CORBA::SystemException&) {
-    MESSAGE("Caught CORBA::SystemException." )
+    MESSAGE("Caught CORBA::SystemException.");
   }
   catch(CORBA::Exception&) {
-    MESSAGE( "Caught CORBA::Exception." )
+    MESSAGE("Caught CORBA::Exception.");
   }
   catch(omniORB::fatalException& fe) { //!< TODO: unused variable
-    MESSAGE( "Caught omniORB::fatalException:" )
-    MESSAGE( "  file: " << fe.file() )
-    MESSAGE( "  line: " << fe.line() )
-    MESSAGE( "  mesg: " << fe.errmsg() )
+    MESSAGE("Caught omniORB::fatalException:");
+    MESSAGE("  file: " << fe.file());
+    MESSAGE("  line: " << fe.line());
+    MESSAGE("  mesg: " << fe.errmsg());
   }
   catch(...) {
-    MESSAGE( "Caught unknown exception." )
+    MESSAGE("Caught unknown exception.");
   }
   return 0;
 }

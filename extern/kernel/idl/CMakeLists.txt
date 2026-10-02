@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -55,7 +55,9 @@ SET(SalomeIDLKernel_IDLSOURCES
   SALOME_TestModuleCatalog.idl
   SALOME_CommonTypes.idl
   SALOME_ExternalServerLauncher.idl
+  SALOME_LogManager.idl
   SALOME_Embedded_NamingService.idl
+  SALOME_Locker.idl
   ${CMAKE_CURRENT_BINARY_DIR}/Calcium_Ports.idl
 )
 

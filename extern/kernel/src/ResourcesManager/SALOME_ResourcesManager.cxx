@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -96,7 +96,6 @@ SALOME_ResourcesManager::SALOME_ResourcesManager(CORBA::ORB_ptr orb,
                                                  PortableServer::POA_var poa, 
                                                  SALOME_NamingService_Abstract *ns) : _rm(new ResourcesManager_cpp())
 {
-  MESSAGE("SALOME_ResourcesManager constructor");
   _NS = ns;
   _orb = CORBA::ORB::_duplicate(orb) ;
   //
@@ -113,8 +112,6 @@ SALOME_ResourcesManager::SALOME_ResourcesManager(CORBA::ORB_ptr orb,
   Engines::ResourcesManager_var refContMan = Engines::ResourcesManager::_narrow(obj);
   if(_NS)
     _NS->Register(refContMan,_ResourcesManagerNameInNS);
-
-  MESSAGE("SALOME_ResourcesManager constructor end");
 }
 
 //=============================================================================
@@ -146,7 +143,10 @@ void SALOME_ResourcesManager::Shutdown()
 }
 
 /*!
- * Return list of resources available (regarding content of CatalogResources.xml). And for each resource the number of proc available of it.
+ * Return list of resources available (regarding content of CatalogResources.xml) but select only those with canRunContainers attribute set to true.
+ * And for each resource the number of proc available of it.
+ * 
+ * \sa SALOME_ResourcesManager::ListAllResourcesInCatalog, SALOME_ResourcesManager::ListAllResourceEntriesInCatalog
  */
 void SALOME_ResourcesManager::ListAllAvailableResources(Engines::ResourceList_out machines, Engines::IntegerList_out nbProcsOfMachines)
 {
@@ -171,6 +171,42 @@ void SALOME_ResourcesManager::ListAllAvailableResources(Engines::ResourceList_ou
       (*machines)[(CORBA::ULong)j]=CORBA::string_dup(ret0[j].c_str());
       (*nbProcsOfMachines)[(CORBA::ULong)j]=ret1[j];
     }
+}
+
+/*!
+ * Return list of resources available (regarding content of CatalogResources.xml) whatever canRunContainers attribute value.
+ * 
+ * \sa SALOME_ResourcesManager::ListAllAvailableResources, SALOME_ResourcesManager::ListAllResourceEntriesInCatalog
+ */
+Engines::ResourceList *SALOME_ResourcesManager::ListAllResourcesInCatalog()
+{
+  const MapOfParserResourcesType& zeList(_rm->GetList());
+  auto sz = zeList.size();
+  Engines::ResourceList *ret(new Engines::ResourceList);
+  ret->length( sz );
+  CORBA::ULong i(0);
+  for(auto it : zeList)
+  {
+    (*ret)[i++] = CORBA::string_dup( it.second.HostName.c_str() );
+  }
+  return ret;
+}
+
+/*!
+ * Return list of resources entries available. Useful to scan remotely the content of the playground
+ */
+Engines::ResourceList *SALOME_ResourcesManager::ListAllResourceEntriesInCatalog()
+{
+  const MapOfParserResourcesType& zeList(_rm->GetList());
+  auto sz = zeList.size();
+  Engines::ResourceList *ret(new Engines::ResourceList);
+  ret->length( sz );
+  CORBA::ULong i(0);
+  for(auto it : zeList)
+  {
+    (*ret)[i++] = CORBA::string_dup( it.first.c_str() );
+  }
+  return ret;
 }
 
 //=============================================================================

@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -30,10 +30,9 @@ INCLUDE_DIRECTORIES(
   ${PTHREAD_INCLUDE_DIR}
   ${Boost_INCLUDE_DIRS}
   ${LIBBATCH_INCLUDE_DIRS}
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${PROJECT_BINARY_DIR}/salome_adm
   ${CMAKE_CURRENT_SOURCE_DIR}/../ArgvKeeper
-  ${CMAKE_CURRENT_SOURCE_DIR}/../Basics
-  ${CMAKE_CURRENT_SOURCE_DIR}/../SALOMELocalTrace
   ${CMAKE_CURRENT_SOURCE_DIR}/../NamingService
   ${CMAKE_CURRENT_SOURCE_DIR}/../Utils
   ${CMAKE_CURRENT_SOURCE_DIR}/../Registry
@@ -61,8 +60,9 @@ SET(COMMON_LIBS
   SalomeResourcesManager
   SalomeNS
   OpUtil
-  SALOMELocalTrace
-  SALOMEBasics
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
+  ${SALOMEBOOTSTRAP_SALOMEBasics}
+  ${SALOMEBOOTSTRAP_KERNELBasics}
   SalomeIDLKernel
   ${Boost_FILESYSTEM_LIBRARY}
   ${Boost_SYSTEM_LIBRARY}
@@ -103,7 +103,7 @@ ADD_EXECUTABLE(TestLauncher TestLauncher.cxx)
 TARGET_LINK_LIBRARIES(TestLauncher ${TestLauncher_LIBS})
 INSTALL(TARGETS TestLauncher DESTINATION ${SALOME_INSTALL_BINS})
 
-ADD_LIBRARY(SalomeLauncher BatchTest.cxx SALOME_Launcher.cxx SALOME_ExternalServerLauncher.cxx SALOME_LauncherException.cxx SALOME_ExternalServerHandler.cxx)
+ADD_LIBRARY(SalomeLauncher BatchTest.cxx SALOME_Launcher.cxx SALOME_ExternalServerLauncher.cxx SALOME_LauncherException.cxx SALOME_ExternalServerHandler.cxx SALOME_LogManager.cxx)
 TARGET_LINK_LIBRARIES(SalomeLauncher Launcher ${COMMON_LIBS})
 INSTALL(TARGETS SalomeLauncher EXPORT ${PROJECT_NAME}TargetGroup DESTINATION ${SALOME_INSTALL_LIBS})
   
@@ -111,8 +111,9 @@ SET(SALOME_LauncherServer_LIBS
   Launcher
   SalomeLauncher
   SalomeSDS
-  SALOMEBasics
-  SALOMELocalTrace
+  ${SALOMEBOOTSTRAP_SALOMEBasics}
+  ${SALOMEBOOTSTRAP_KERNELBasics}
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
   ${LIBBATCH_LIBRARIES}
   ${OMNIORB_LIBRARIES}
   ${LIBXML2_LIBRARIES}
@@ -133,6 +134,7 @@ SET(COMMON_HEADERS_HXX
   Launcher_Job_SALOME.hxx
   Launcher_Job_YACSFile.hxx
   Launcher_Utils.hxx
+  SALOME_LogManager.hxx
   SALOME_Launcher.hxx
   SALOME_Launcher_Parser.hxx
   SALOME_Launcher_defs.hxx
@@ -143,6 +145,7 @@ SET(COMMON_HEADERS_HXX
 
 SET(LAUNCHER_PYTHON_SCRIPTS
   launcher_proxy.py
+  SALOME_LogManager.py
 )
 
 SET(KernelLauncher_HEADERS KernelLauncher.hxx KernelLauncher.i)

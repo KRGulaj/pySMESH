@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -196,6 +196,10 @@ interface ResourcesManager
 
   //! Return list of resources available (regarding content of CatalogResources.xml). And for each resource the number of proc available of it.
   void ListAllAvailableResources(out ResourceList machines, out IntegerList nbProcsOfMachines) raises (SALOME::SALOME_Exception);
+
+  ResourceList ListAllResourcesInCatalog() raises (SALOME::SALOME_Exception);
+  
+  ResourceList ListAllResourceEntriesInCatalog() raises (SALOME::SALOME_Exception);
 };
 
 };

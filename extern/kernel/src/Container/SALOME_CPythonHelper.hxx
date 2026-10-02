@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2019-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -31,6 +31,7 @@ class CONTAINER_EXPORT SALOME_CPythonHelper
 {
  public:
   void initializePython(int argc, char *argv[]);
+  void allowPythonCallsFromDifferentThread() const;
   void registerToSalomePiDict(const std::string& processName, long pid) const;
   std::vector<long> evalVL(const std::string& pyCode) const;
   std::string evalS(const std::string& pyCode) const;

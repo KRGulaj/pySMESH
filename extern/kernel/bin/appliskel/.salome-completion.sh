@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright (C) 2013-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2013-2026  CEA/DEN, EDF R&D, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -71,7 +71,7 @@ _salome()
         if [[ "$cur" == -* ]]; then
             case $command in
                 start)
-                    options='-t --terminal -g --gui -d --show-desktop= -o --hide-desktop -b --batch -l --logger -f --log-file= -r --resources= -x --xterm -m --modules= -e --embedded= -s --standalone= -p --portkill -k --killall -i --interp= -z --splash= -c --catch-exceptions= --print-port --nosave-config --pinter --ns-port-log= --test= --play= --gdb-session --ddd-session --valgrind-session -w --shutdown-servers= --foreground= --wake-up-session --server-launch-mode= --port= --version -h --help --with-mpi-module= --config='
+                    options='-t --terminal -g --gui -d --show-desktop= -o --hide-desktop -b --batch -l --logger -f --log-file= --gui-log-file= -r --resources= -x --xterm -m --modules= -e --embedded= -s --standalone= -p --portkill -k --killall -i --interp= -z --splash= -c --catch-exceptions= --print-port --nosave-config --pinter --ns-port-log= --test= --play= --gdb-session --ddd-session --valgrind-session -w --shutdown-servers= --foreground= --wake-up-session --server-launch-mode= --port= --version -h --help --with-mpi-module= --config='
                     ;;
                 shell)
                     options='-h --help -p --port= -m --machine= -d --directory= -u --user= --with-mpi-module= --config='

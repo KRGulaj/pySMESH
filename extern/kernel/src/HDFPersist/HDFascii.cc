@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -90,7 +90,8 @@ bool HDFascii::isASCII(const char* thePath) {
   int fd;
 #if defined(WIN32) && defined(UNICODE)
   const wchar_t * aPath = Kernel_Utils::utf8_decode(thePath);
-  if (!(fd = _wopen(aPath, O_RDONLY))) return false;
+  fd = _wopen(aPath, O_RDONLY);
+  if (fd == -1) return false;
 #else
   if(!(fd = open(thePath, O_RDONLY))) return false;
 #endif

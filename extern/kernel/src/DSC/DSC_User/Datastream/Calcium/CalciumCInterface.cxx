@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -23,13 +23,10 @@
 #include <stdio.h>
 
 
-//#define MYDEBUG
-#ifdef MYDEBUG
-#define DEBTRACE(msg) {std::cerr<<std::flush<<__FILE__<<" ["<<__LINE__<<"] : "<<msg<<std::endl<<std::flush;}
-#else
-#define DEBTRACE(msg)
-#endif
-
+#define DEBTRACE(msg) \
+  if (SALOME::VerbosityActivated()) \
+  { std::cerr << std::flush << __FILE__ << " [" << __LINE__ << "] : " << msg << std::endl << std::flush; } \
+  else (void)0
 
 /* Définition de l'Interface entre l'API C  et l'API C++
    L'utilisateur CALCIUM n'a normalement pas a utliser cette interface

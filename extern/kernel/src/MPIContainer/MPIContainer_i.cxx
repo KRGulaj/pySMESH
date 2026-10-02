@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -29,6 +29,7 @@
 #include "SALOME_NamingService.hxx"
 #include "Utils_SINGLETON.hxx"
 #include "OpUtil.hxx"
+#include "PythonCppUtils.hxx"
 #include "utilities.h"
 #include <time.h>
 #include <sys/time.h>
@@ -42,10 +43,10 @@
 #include "Container_init_python.hxx"
 
 // L'appel au registry SALOME ne se fait que pour le process 0
-Engines_MPIContainer_i::Engines_MPIContainer_i(CORBA::ORB_ptr orb, 
+Engines_MPIContainer_i::Engines_MPIContainer_i(CORBA::ORB_ptr orb,
                                                PortableServer::POA_ptr poa,
                                                char * containerName,
-                                               int argc, char *argv[]) 
+                                               int argc, char *argv[])
   : Engines_Container_i(orb,poa,containerName,argc,argv,nullptr,false)
 {
 
@@ -71,7 +72,7 @@ Engines_MPIContainer_i::Engines_MPIContainer_i(CORBA::ORB_ptr orb,
   BCastIOR(_orb,pobj,true);
 }
 
-Engines_MPIContainer_i::Engines_MPIContainer_i() 
+Engines_MPIContainer_i::Engines_MPIContainer_i()
   : Engines_Container_i()
 {
 }
@@ -152,8 +153,8 @@ bool Engines_MPIContainer_i::Lload_component_Library(const char* componentName)
 #else
   std::string impl_name = std::string ("lib") + aCompName + std::string("Engine.so");
 #endif
-  
-  _numInstanceMutex.lock(); // lock to be alone 
+
+  _numInstanceMutex.lock(); // lock to be alone
   // (see decInstanceCnt, finalize_removal))
   if (_toRemove_map[impl_name]) _toRemove_map.erase(impl_name);
   if (_library_map[impl_name])
@@ -162,7 +163,7 @@ bool Engines_MPIContainer_i::Lload_component_Library(const char* componentName)
       _numInstanceMutex.unlock();
       return true;
     }
-  
+
   void* handle;
   handle = dlopen( impl_name.c_str() , RTLD_LAZY | RTLD_GLOBAL ) ;
   if ( handle )
@@ -193,17 +194,20 @@ bool Engines_MPIContainer_i::Lload_component_Library(const char* componentName)
     }
   else
     {
-      Py_ACQUIRE_NEW_THREAD;
-      PyObject *mainmod = PyImport_AddModule((char *)"__main__");
-      PyObject *globals = PyModule_GetDict(mainmod);
-      PyObject *pyCont = PyDict_GetItemString(globals, "pyCont");
-      PyObject *result = PyObject_CallMethod(pyCont,
-                                             (char*)"import_component",
-                                             (char*)"s",componentName);
-      std::string ret= PyUnicode_AsUTF8(result);
-      SCRUTE(ret);
-      Py_RELEASE_NEW_THREAD;
-  
+      PyObject *pyCont = nullptr;
+      std::string ret;
+      {
+        AutoGIL agil;
+        PyObject *mainmod = PyImport_AddModule((char *)"__main__");
+        PyObject *globals = PyModule_GetDict(mainmod);
+        pyCont = PyDict_GetItemString(globals, "pyCont");
+        PyObject *result = PyObject_CallMethod(pyCont,
+                                              (char*)"import_component",
+                                              (char*)"s",componentName);
+        ret= PyUnicode_AsUTF8(result);
+        SCRUTE(ret);
+      }
+
       if (ret=="") // import possible: Python component
         {
           _library_map[aCompName] = (void *)pyCont; // any non O value OK
@@ -268,22 +272,24 @@ Engines_MPIContainer_i::Lcreate_component_instance( const char* genericRegisterN
     std::string component_registerName =
       _containerName + "/" + instanceName;
 
-    Py_ACQUIRE_NEW_THREAD;
-    PyObject *mainmod = PyImport_AddModule((char*)"__main__");
-    PyObject *globals = PyModule_GetDict(mainmod);
-    PyObject *pyCont = PyDict_GetItemString(globals, "pyCont");
-    PyObject *result = PyObject_CallMethod(pyCont,
-                                           (char*)"create_component_instance",
-                                           (char*)"ss",
-                                           aCompName.c_str(),
-                                           instanceName.c_str());
-    const char *ior;
-    const char *error;
-    PyArg_ParseTuple(result,"ss", &ior, &error);
-    std::string iors = ior;
-    SCRUTE(iors);
-    Py_RELEASE_NEW_THREAD;
-  
+    std::string iors;
+    {
+      AutoGIL agil;
+      PyObject *mainmod = PyImport_AddModule((char*)"__main__");
+      PyObject *globals = PyModule_GetDict(mainmod);
+      PyObject *pyCont = PyDict_GetItemString(globals, "pyCont");
+      PyObject *result = PyObject_CallMethod(pyCont,
+                                            (char*)"create_component_instance",
+                                            (char*)"ss",
+                                            aCompName.c_str(),
+                                            instanceName.c_str());
+      const char *ior;
+      const char *error;
+      PyArg_ParseTuple(result,"ss", &ior, &error);
+      iors = ior;
+      SCRUTE(iors);
+    }
+
     CORBA::Object_var obj = _orb->string_to_object(iors.c_str());
     iobject = Engines::EngineComponent::_narrow( obj ) ;
     pobj = Engines::MPIObject::_narrow(obj) ;
@@ -294,7 +300,7 @@ Engines_MPIContainer_i::Lcreate_component_instance( const char* genericRegisterN
 
     return iobject._retn();
   }
-  
+
   //--- try C++
 
 #ifdef __APPLE__
@@ -326,9 +332,9 @@ Engines_MPIContainer_i::createMPIInstance(std::string genericRegisterName,
 
   typedef  PortableServer::ObjectId * (*MPIFACTORY_FUNCTION)
     (CORBA::ORB_ptr,
-     PortableServer::POA_ptr, 
-     PortableServer::ObjectId *, 
-     const char *, 
+     PortableServer::POA_ptr,
+     PortableServer::ObjectId *,
+     const char *,
      const char *) ;
 
   dlerror();
@@ -462,10 +468,10 @@ Engines::EngineComponent_ptr Engines_MPIContainer_i::Lload_impl(
                                                   const char *,
                                                   const char *) =
     (PortableServer::ObjectId * (*) (CORBA::ORB_ptr,
-                                     PortableServer::POA_ptr, 
-                                     PortableServer::ObjectId *, 
-                                     const char *, 
-                                     const char *)) 
+                                     PortableServer::POA_ptr,
+                                     PortableServer::ObjectId *,
+                                     const char *,
+                                     const char *))
     dlsym(handle, factory_name.c_str());
 
   char *error ;

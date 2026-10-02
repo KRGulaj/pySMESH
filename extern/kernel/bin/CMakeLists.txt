@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -22,6 +22,8 @@ ADD_SUBDIRECTORY(appliskel)
 SALOME_CONFIGURE_FILE(VERSION.in VERSION INSTALL ${SALOME_INSTALL_BINS})
 SALOME_CONFIGURE_FILE(salomeContextUtils.py.in salomeContextUtils.py)
 
+INSTALL(FILES ${CMAKE_CURRENT_BINARY_DIR}/VERSION RENAME VERSION_KERNEL DESTINATION ${SALOME_INSTALL_BINS})
+
 # ===============================================================
 # Files to be installed
 # ===============================================================
@@ -31,7 +33,6 @@ SALOME_CONFIGURE_FILE(salomeContextUtils.py.in salomeContextUtils.py)
 
 # These files are executable scripts
 SET(SCRIPTS
-  appli_clean.sh
   runIDLparser
   addToKillList.py
   appli_gen.py
@@ -46,8 +47,8 @@ SET(SCRIPTS
   parseConfigFile.py
   PortManager.py
   runSalomeCommon.py
-  runSalome.py
   runSalomeOld.py
+  runSalomeOnDemand.py
   runSalomeNoServer.py
   runSession.py
   runConsole.py
@@ -60,7 +61,6 @@ SET(SCRIPTS
   server.py
   setenv.py
   showNS.py
-  virtual_salome.py
   waitContainers.py
   waitNS.py
   pythonpath_reduction.py

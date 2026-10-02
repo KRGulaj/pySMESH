@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -35,8 +35,6 @@
 
 #include "DSC_Exception.hxx"
 #include <vector>
-
-//#define MYDEBUG
 
 /*! \class Superv_Component_i
  *  \brief This class implements DSC_User component.
@@ -316,9 +314,8 @@ Superv_Component_i::add_port(const char * port_fab_type,
   assert(port_name);
   SpecificPortType * retPort; 
 
-#ifdef MYDEBUG
-  std::cout << "---- Superv_Component_i::add_port :  Mark 0 ----  " << port_name << "----" << std::endl;
-#endif
+  if (SALOME::VerbosityActivated())
+    std::cout << "---- Superv_Component_i::add_port :  Mark 0 ----  " << port_name << "----" << std::endl;
     
   std::string s_port_type(port_type);
   if (s_port_type == "provides") {
@@ -332,14 +329,15 @@ Superv_Component_i::add_port(const char * port_fab_type,
   else if (s_port_type == "uses") {
     uses_port * port = create_uses_data_port(port_fab_type);
     add_port(port, port_name);
-#ifdef MYDEBUG
-    std::cout << "---- Superv_Component_i::add_port :  Mark 1 ----  " << port << "----" << std::endl;
-    std::cout << "---- Superv_Component_i::add_port :  Mark 1 ----   get_repository_id()" << port->get_repository_id() << std::endl;
-#endif
+    if (SALOME::VerbosityActivated())
+    {
+      std::cout << "---- Superv_Component_i::add_port :  Mark 1 ----  " << port << "----" << std::endl;
+      std::cout << "---- Superv_Component_i::add_port :  Mark 1 ----   get_repository_id()" << port->get_repository_id() << std::endl;
+    }
     retPort = dynamic_cast<SpecificPortType *>(port);
-#ifdef MYDEBUG
-    std::cout << "---- Superv_Component_i::add_port :  Mark 2 ----  " << retPort << "----" << std::endl;
-#endif
+    if (SALOME::VerbosityActivated())
+      std::cout << "---- Superv_Component_i::add_port :  Mark 2 ----  " << retPort << "----" << std::endl;
+
     if ( retPort == NULL ) { delete port;  
       throw BadCast( LOC("Can't cast to asked port type " ));
     }

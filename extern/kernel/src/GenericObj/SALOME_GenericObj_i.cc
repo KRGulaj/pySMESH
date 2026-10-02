@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -29,12 +29,6 @@
 #include <iostream>
 #include <typeinfo>
 
-// note: in KERNEL _DEBUG_ is not defined by default
-#ifdef _DEBUG_
-static int MYDEBUG = 0;
-#else
-static int MYDEBUG = 0;
-#endif
 
 //#define IS_OBJ_IN_QUESTION(where) is_obj_in_question(this, myRefCounter, where)
 #define IS_OBJ_IN_QUESTION(where)
@@ -79,9 +73,7 @@ namespace SALOME
   */
   GenericObj_i::GenericObj_i(PortableServer::POA_ptr thePOA): myRefCounter(1)
   {
-    if(MYDEBUG) 
-      MESSAGE("GenericObj_i::GenericObj_i() - this = "<<this<<
-	      "; CORBA::is_nil(thePOA) = "<<CORBA::is_nil(thePOA));
+
     if(CORBA::is_nil(thePOA)) {
 #ifndef WIN32
       myPOA = PortableServer::ServantBase::_default_POA();
@@ -92,8 +84,6 @@ namespace SALOME
     else {
       myPOA = PortableServer::POA::_duplicate(thePOA);
     }
-    if(MYDEBUG)
-      MESSAGE("GenericObj_i::GenericObj_i thePOA: " << thePOA << " myPOA: " << myPOA);
   }
 
   /*!
@@ -106,7 +96,6 @@ namespace SALOME
   */
   PortableServer::POA_ptr GenericObj_i::_default_POA()
   {
-    MESSAGE("GenericObj_i::_default_POA: " << myPOA);
     return PortableServer::POA::_duplicate(myPOA);
   }
 
@@ -115,8 +104,7 @@ namespace SALOME
   */
   void GenericObj_i::Register()
   {
-    if(MYDEBUG)
-      MESSAGE("GenericObj_i::Register "<<this<<"; myRefCounter = "<<myRefCounter);
+    MESSAGE("GenericObj_i::Register " << this << "; myRefCounter = " << myRefCounter);
     ++myRefCounter;
     IS_OBJ_IN_QUESTION( "Register" );
   }
@@ -129,8 +117,7 @@ namespace SALOME
   */
   void GenericObj_i::UnRegister()
   {
-    if(MYDEBUG)
-      MESSAGE("GenericObj_i::UnRegister "<<this<<"; myRefCounter = "<<myRefCounter);
+    MESSAGE("GenericObj_i::UnRegister " << this << "; myRefCounter = " << myRefCounter);
     --myRefCounter;
     IS_OBJ_IN_QUESTION( "UnRegister" );
     if(myRefCounter <= 0){

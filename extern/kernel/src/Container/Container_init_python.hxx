@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -38,25 +38,6 @@
 #undef _XOPEN_SOURCE
 #endif
 #include <Python.h>
-
-
-// next two MACRO must be used together only once inside a block
-// -------------------------------------------------------------
-// protect a sequence of Python calls:
-// - Python lock must be acquired for these calls
-// - new Python thread state allows multi thread use of the sequence:
-//    - Python may release the lock within the sequence, so multiple
-//      thread execution of the sequence may occur.
-//    - For that case, each sequence call must use a specific Python
-//      thread state.
-//    - There is no need of C Lock protection of the sequence.
-
-
-#define Py_ACQUIRE_NEW_THREAD \
-  PyGILState_STATE gil_state = PyGILState_Ensure();
-
-#define Py_RELEASE_NEW_THREAD \
-  PyGILState_Release(gil_state);
 
 typedef void ContainerPyOutChanged(void* data,char * c);
 

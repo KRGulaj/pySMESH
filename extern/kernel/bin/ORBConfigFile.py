@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #  -*- coding: iso-8859-1 -*-
-# Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 #
 # Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 # CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -30,7 +30,7 @@ def readORBConfigFile(filename):
   import re
   host, port = None, None
   for line in contents:
-    m = re.match("(ORB)?InitRef = NameService=corbaname::([\D\d]+):(\d*)", line)
+    m = re.match(r"(ORB)?InitRef = NameService=corbaname::([\D\d]+):(\d*)", line)
     if m:
       host = m.group(2)
       port = m.group(3)

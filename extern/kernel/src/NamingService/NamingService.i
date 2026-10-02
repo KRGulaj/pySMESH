@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2022  CEA/DEN, EDF R&D
+// Copyright (C) 2021-2026  CEA, EDF
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -137,6 +137,19 @@ def NamingService_RefOfNS(cls):
   orb=CORBA.ORB_init([''])
   return orb.string_to_object(ret)
 NamingService.RefOfNS = classmethod(NamingService_RefOfNS)
+def NamingService_DumpIORInFile(cls,iorFileName):
+  with open( iorFileName, "w" ) as f:
+    f.write( cls.IOROfNS() )
+NamingService.DumpIORInFile = classmethod(NamingService_DumpIORInFile)
+def NamingService_LoadIORInFile(cls,iorFileName):
+  import Engines
+  import CORBA
+  orb=CORBA.ORB_init([''])
+  with open( iorFileName ) as f:
+    ior = f.read()
+  ref = orb.string_to_object(ior)
+  return ref
+NamingService.LoadIORInFile = classmethod( NamingService_LoadIORInFile )
 def NamingService_KillContainersInFile(cls,logFileName):
   import Engines
   import CORBA

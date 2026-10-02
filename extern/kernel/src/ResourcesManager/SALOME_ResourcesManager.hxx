@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -74,6 +74,11 @@ class SALOMERESOURCESMANAGER_EXPORT SALOME_ResourcesManager:
                          CORBA::Long nb_procs,
                          const char * parallelLib);
     void ListAllAvailableResources(Engines::ResourceList_out machines, Engines::IntegerList_out nbProcsOfMachines);
+    
+    Engines::ResourceList *ListAllResourcesInCatalog();
+
+    Engines::ResourceList *ListAllResourceEntriesInCatalog() override;
+
     // Cpp Methods
     void Shutdown();
     std::shared_ptr<ResourcesManager_cpp>& GetImpl() { return _rm; }

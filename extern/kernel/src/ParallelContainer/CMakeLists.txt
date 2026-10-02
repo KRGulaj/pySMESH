@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -22,12 +22,11 @@ INCLUDE_DIRECTORIES(
   ${MPI_CXX_INCLUDE_PATH}
   ${PYTHON_INCLUDE_DIRS}
   ${PACO_INCLUDE_DIRS}
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${PROJECT_BINARY_DIR}/salome_adm
   ${PROJECT_SOURCE_DIR}/src/ArgvKeeper
   ${PROJECT_SOURCE_DIR}/src/Container
   ${PROJECT_SOURCE_DIR}/src/Notification
-  ${PROJECT_SOURCE_DIR}/src/SALOMELocalTrace
-  ${PROJECT_SOURCE_DIR}/src/Basics
   ${PROJECT_SOURCE_DIR}/src/NamingService
   ${PROJECT_SOURCE_DIR}/src/Registry
   ${PROJECT_SOURCE_DIR}/src/Utils
@@ -42,8 +41,9 @@ SET(COMMON_LIBS
   ArgvKeeper
   SalomeContainer
   SalomeNS
-  SALOMELocalTrace
-  SALOMEBasics
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
+  ${SALOMEBOOTSTRAP_SALOMEBasics}
+  ${SALOMEBOOTSTRAP_KERNELBasics}
   SalomeHDFPersist
   SalomeParallelIDLKernel
   SalomeIDLKernel

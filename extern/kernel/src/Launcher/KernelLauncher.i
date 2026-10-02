@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2022  CEA/DEN, EDF R&D
+// Copyright (C) 2021-2026  CEA, EDF
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -27,9 +27,13 @@
 
 %inline
 {
+  std::string RetrieveInternalInstanceOfLocalCppResourcesManager();
   std::string GetContainerManagerInstance();
   std::string GetResourcesManagerInstance();
   std::string GetExternalServerInstance();
+  std::string GetLogManagerInstance();
+  std::string GetLockMasterEntryInNS();
+  std::string GetLockMasterInstance();
 }
 
 %pythoncode %{
@@ -50,4 +54,16 @@ def GetExternalServer():
   import CORBA
   orb=CORBA.ORB_init([''])
   return orb.string_to_object(GetExternalServerInstance())
+
+def myLogManager():
+  import Engines
+  import CORBA
+  orb=CORBA.ORB_init([''])
+  return orb.string_to_object(GetLogManagerInstance())
+
+def myLockMaster():
+  import Engines
+  import CORBA
+  orb=CORBA.ORB_init([''])
+  return orb.string_to_object(GetLockMasterInstance())
 %}

@@ -1,5 +1,5 @@
 #  -*- coding: iso-8859-1 -*-
-# Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2007-2025  CEA, EDF, OPEN CASCADE
 #
 # Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 # CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -74,7 +74,7 @@ class Server:
         for sapcfg in ["SalomeAppSLConfig","SalomeAppConfig"]:
           if sapcfg in os.environ:
             logging.getLogger().debug("{}={}".format(sapcfg,os.environ[sapcfg]))
-        command1 = (" ".join(command)).replace("(","\\\(") ; command1 = command1.replace(")","\\\)")
+        command1 = (" ".join(command))
         logging.getLogger().debug("Command to be launched : {}".format(command1))
         # print("command = ", command)
         if sys.platform == "win32":
