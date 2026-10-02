@@ -1,0 +1,5106 @@
+{
+ "totals": {
+  "passed": 1272,
+  "skipped": 2
+ },
+ "tests": {
+  "tests/test_build_info.py::test_build_info_has_expected_fields": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_build_info.py::test_build_info_records_a_real_vtk_version": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_build_info.py::test_import_does_not_require_the_vtk_package": {
+   "outcome": "passed",
+   "seconds": 0.138
+  },
+  "tests/test_build_info.py::test_import_ignores_a_mismatched_host_vtk": {
+   "outcome": "passed",
+   "seconds": 3.068
+  },
+  "tests/test_classify.py::test_point_in_solid_accepts_list_input": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_classify.py::test_point_in_solid_batch_mask": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_classify.py::test_point_in_solid_boundary_point_is_false": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_classify.py::test_point_in_solid_corner_point_is_false": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_classify.py::test_point_in_solid_empty_points_returns_empty": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_classify.py::test_point_in_solid_exterior_point_is_false": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_classify.py::test_point_in_solid_interior_point_is_true": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_classify.py::test_point_in_solid_malformed_brep_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_classify.py::test_point_in_solid_negative_octant_point_is_false": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_classify.py::test_point_in_solid_non_solid_shell_raises": {
+   "outcome": "passed",
+   "seconds": 0.018
+  },
+  "tests/test_classify.py::test_point_in_solid_result_dtype_and_shape": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_classify.py::test_point_in_solid_sphere_centre_is_true": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_classify.py::test_point_in_solid_sphere_outside_is_false": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_classify.py::test_point_in_solid_wrong_shape_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_classify.py::test_point_in_solid_zero_tol_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_classify.py::test_public_namespace_exports": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_controls.py::test_a_comparator_turns_a_measure_into_a_selection[<lambda>-0_0]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_controls.py::test_a_comparator_turns_a_measure_into_a_selection[<lambda>-0_1]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_controls.py::test_a_comparator_turns_a_measure_into_a_selection[<lambda>-27_0]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_controls.py::test_a_comparator_turns_a_measure_into_a_selection[<lambda>-27_1]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_controls.py::test_a_control_reports_the_elements_it_cannot_measure_as_skipped": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_controls.py::test_a_group_reading_predicate_is_refused_on_a_mesh_given_as_arrays": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_a_polyhedral_mesh_cannot_be_measured_through_the_array_route": {
+   "outcome": "passed",
+   "seconds": 0.412
+  },
+  "tests/test_controls.py::test_a_quality_result_is_numpy_arrays_keyed_by_mesh_id": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_controls.py::test_a_shape_reading_control_is_refused_on_a_mesh_given_as_arrays": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_controls.py::test_an_unknown_control_is_refused_by_name": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_an_unknown_parameter_is_refused_by_name": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_and_narrows_rather_than_passing_everything": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_controls.py::test_and_selects_the_intersection_and_or_the_union": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_controls.py::test_area_of_a_skewed_quadrangle_equals_its_shoelace_area": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_aspect_ratio_3d_of_a_cube_is_one": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_aspect_ratio_3d_of_a_hexahedron_worsens_as_the_cell_is_stretched": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_aspect_ratio_3d_of_a_regular_tetrahedron_is_one": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_aspect_ratio_3d_of_a_skewed_tetrahedron_matches_the_verdict_ratio": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_aspect_ratio_of_a_skewed_quadrangle_matches_its_published_definition": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_aspect_ratio_of_a_skewed_triangle_matches_its_published_definition": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_aspect_ratio_of_a_square_is_exactly_one": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_controls.py::test_aspect_ratio_of_an_equilateral_triangle_is_exactly_one": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_controls.py::test_bad_oriented_volume_flags_an_inverted_cell_and_not_a_correct_one": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_bare_border_face_flags_a_face_whose_border_has_no_edge_element": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_bare_border_volume_flags_a_cell_whose_skin_is_missing_and_not_a_covered_one": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_controls.py::test_coincident_elements_flags_a_duplicated_face_and_not_a_distinct_one": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_coincident_nodes_flags_a_duplicated_position_and_not_a_distinct_one": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_controls.py::test_deflection2d_measures_the_gap_between_a_face_and_the_surface_it_lies_on": {
+   "outcome": "passed",
+   "seconds": 0.103
+  },
+  "tests/test_controls.py::test_elements_on_shape_selects_one_face_of_the_model_and_not_the_others": {
+   "outcome": "passed",
+   "seconds": 0.011
+  },
+  "tests/test_controls.py::test_equal_to_matches_within_its_tolerance_and_not_outside_it": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_controls.py::test_free_borders_flags_an_edge_element_bordering_at_most_one_face": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_free_edges_flags_an_open_patch_and_not_a_closed_shell": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_free_faces_flags_the_skin_of_a_volume_mesh_and_not_an_internal_face": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_controls.py::test_free_nodes_flags_an_unused_node_and_not_a_used_one": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_controls.py::test_length2d_of_a_skewed_triangle_equals_its_shortest_side": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_controls.py::test_length3d_of_a_sheared_hexahedron_equals_its_shortest_edge": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_controls.py::test_length_of_an_edge_equals_the_distance_between_its_nodes": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_controls.py::test_manifold_part_keeps_a_sound_patch_and_drops_a_degenerate_face": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_max_element_length2d_of_a_skewed_quadrangle_equals_its_longest_span": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_controls.py::test_max_element_length3d_of_a_sheared_hexahedron_equals_its_body_diagonal": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_controls.py::test_minimum_angle_of_a_skewed_triangle_equals_its_smallest_interior_angle": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_controls.py::test_multi_connection2d_counts_the_elements_sharing_a_face_border": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_multi_connection_counts_every_higher_element_sharing_an_edge_element": {
+   "outcome": "passed",
+   "seconds": 0.01
+  },
+  "tests/test_controls.py::test_node_connectivity_number_counts_the_cells_using_each_node": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_controls.py::test_not_inverts_a_predicate": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_controls.py::test_over_constrained_face_flags_a_face_whose_nodes_all_carry_edge_elements": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_controls.py::test_over_constrained_volume_flags_a_cell_with_every_node_on_the_boundary": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_controls.py::test_range_of_ids_accepts_exactly_the_ids_it_was_given": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_controls.py::test_skew_of_a_rectangle_is_zero": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_controls.py::test_skew_of_a_sheared_quadrangle_equals_its_midline_departure": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_controls.py::test_skew_of_a_triangle_uses_its_medians_not_its_interior_angles": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_taper_of_a_parallelogram_is_zero": {
+   "outcome": "passed",
+   "seconds": 0.019
+  },
+  "tests/test_controls.py::test_taper_of_a_trapezium_equals_its_relative_corner_area_spread": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_volume_of_a_sheared_hexahedron_equals_the_edge_vector_determinant": {
+   "outcome": "passed",
+   "seconds": 0.025
+  },
+  "tests/test_controls.py::test_volume_of_a_tetrahedron_equals_one_sixth_of_its_triple_product": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_controls.py::test_volume_of_an_inverted_hexahedron_is_negative": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_warping_below_a_tenth_of_a_degree_reads_as_exactly_zero": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_warping_of_a_folded_quadrangle_matches_its_corner_normal_angle": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_controls.py::test_warping_of_a_planar_quadrangle_is_zero": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_discrete.py::test_a_group_of_faces_drops_a_deleted_member_on_a_shape_backed_mesher": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_discrete.py::test_a_shape_free_mesher_carries_groups_and_filters": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_discrete.py::test_add_elements_refuses_a_column_count_the_type_does_not_have": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_discrete.py::test_add_elements_refuses_a_node_the_mesh_does_not_have": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_discrete.py::test_add_elements_refuses_a_polyhedron": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_discrete.py::test_add_nodes_returns_one_id_per_row_and_places_them_where_asked": {
+   "outcome": "passed",
+   "seconds": 0.039
+  },
+  "tests/test_discrete.py::test_add_triangles_binds_them_to_the_nodes_it_was_given": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_discrete.py::test_fill_from_mesh_refuses_a_mesher_that_already_holds_something": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_discrete.py::test_from_arrays_reads_connectivity_as_row_indices": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_discrete.py::test_from_arrays_refuses_a_row_index_past_the_node_table": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_discrete.py::test_from_mesh_round_trips_every_id": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_discrete.py::test_mesher_on_a_shape_reports_has_shape_true": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_discrete.py::test_mesher_without_a_shape_reports_has_shape_false": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_discrete.py::test_named_patches_refuse_a_prefix_already_in_use": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_discrete.py::test_named_patches_survive_a_removal_with_their_index": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_discrete.py::test_remove_elements_keeps_the_nodes_by_default": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_discrete.py::test_remove_elements_listing_one_id_twice_removes_it_once": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_discrete.py::test_remove_elements_refuses_an_unknown_id_before_deleting_anything": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_discrete.py::test_remove_elements_reports_exactly_the_elements_that_went": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_discrete.py::test_remove_elements_with_free_nodes_takes_the_orphans_and_names_them": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_discrete.py::test_remove_nodes_refuses_an_unknown_id_before_deleting_anything": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_discrete.py::test_remove_nodes_takes_every_element_built_on_them_and_names_those": {
+   "outcome": "passed",
+   "seconds": 0.031
+  },
+  "tests/test_discrete.py::test_removing_everything_leaves_an_empty_reusable_mesher": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_discrete.py::test_separate_faces_by_edges_partitions_a_shape_free_mesh": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_discrete.py::test_shape_dependent_operations_name_themselves_when_there_is_no_shape[Mesher.add_group_on_shape-<lambda>]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_discrete.py::test_shape_dependent_operations_name_themselves_when_there_is_no_shape[Mesher.assign-<lambda>]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_discrete.py::test_shape_dependent_operations_name_themselves_when_there_is_no_shape[Mesher.compute-<lambda>]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_discrete.py::test_shape_dependent_operations_name_themselves_when_there_is_no_shape[Mesher.pattern_from_face-<lambda>]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_discrete.py::test_shape_dependent_operations_name_themselves_when_there_is_no_shape[Mesher.unassign-<lambda>]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_discrete.py::test_sharp_edges_finds_the_fold_of_a_shape_free_mesh": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_distance.py::test_free_boundary_edges_closed_box_is_empty": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_distance.py::test_free_boundary_edges_closed_cylinder_is_empty": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_distance.py::test_free_boundary_edges_closed_sphere_is_empty": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_distance.py::test_free_boundary_edges_ids_are_valid_and_unique": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_distance.py::test_free_boundary_edges_ids_ascending": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_distance.py::test_free_boundary_edges_ids_index_shape_edges": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_distance.py::test_free_boundary_edges_malformed_brep_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_distance.py::test_free_boundary_edges_open_shell_has_four": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_distance.py::test_public_namespace_exports": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_distance.py::test_shape_distance_identical_shapes_is_zero": {
+   "outcome": "passed",
+   "seconds": 0.013
+  },
+  "tests/test_distance.py::test_shape_distance_malformed_first_brep_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_distance.py::test_shape_distance_malformed_second_brep_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_distance.py::test_shape_distance_result_is_frozen": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_distance.py::test_shape_distance_result_types": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_distance.py::test_shape_distance_separated_boxes_returns_3": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_distance.py::test_shape_distance_witness_points_on_facing_planes": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_distance.py::test_shape_distance_witness_points_realise_the_distance": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_editor.py::test_a_group_of_nodes_survives_every_operation_that_keeps_its_nodes": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_editor.py::test_convert_from_quadratic_on_a_linear_mesh_changes_nothing": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_editor.py::test_convert_to_quadratic_adds_nodes_and_keeps_element_count": {
+   "outcome": "passed",
+   "seconds": 0.009
+  },
+  "tests/test_editor.py::test_convert_to_quadratic_after_release_raises": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_convert_to_quadratic_bi_quadratic_adds_more_nodes_than_plain": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_editor.py::test_convert_to_quadratic_round_trip_restores_the_original_connectivity": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_editor.py::test_double_elements_creates_a_coincident_twin_of_each_named_face": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_double_elements_refuses_an_empty_list": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_editor.py::test_double_elements_refuses_an_unknown_id": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_editor.py::test_every_editing_operation_refuses_a_released_mesher": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_editor.py::test_extrusion_sweep_cells_all_have_positive_volume": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_editor.py::test_extrusion_sweep_fills_the_swept_region_with_cells": {
+   "outcome": "passed",
+   "seconds": 0.013
+  },
+  "tests/test_editor.py::test_extrusion_sweep_refuses_a_zero_step": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_editor.py::test_extrusion_sweep_refuses_no_steps": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_editor.py::test_find_coincident_nodes_finds_the_seam_of_two_separate_patches": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_editor.py::test_find_coincident_nodes_on_a_conforming_mesh_finds_none": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_editor.py::test_find_equal_elements_finds_a_duplicate_and_merging_removes_it": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_find_equal_elements_on_a_clean_mesh_finds_none": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_editor.py::test_merge_node_groups_collapses_exactly_what_it_was_given": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_merge_node_groups_refuses_a_group_of_one": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_merge_nodes_joins_two_patches_into_one_surface": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_editor.py::test_merge_nodes_refuses_a_tolerance_that_is_not_a_distance": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_offset_of_a_box_skin_lands_at_the_stated_distance": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_editor.py::test_offset_refuses_a_mesh_that_is_not_all_triangles": {
+   "outcome": "passed",
+   "seconds": 0.027
+  },
+  "tests/test_editor.py::test_offset_without_copying_leaves_only_the_offset_surface": {
+   "outcome": "passed",
+   "seconds": 0.011
+  },
+  "tests/test_editor.py::test_quad_to_tri_doubles_the_face_count_and_keeps_the_area": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_quad_to_tri_refuses_an_id_that_is_not_a_face": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_quad_to_tri_with_a_criterion_chooses_a_different_diagonal_than_the_fixed_one": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_editor.py::test_reorient_2d_by_3d_leaves_the_cells_themselves_valid": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_reorient_2d_by_3d_on_a_consistent_shell_reverses_nothing": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_reorient_2d_by_3d_refuses_a_mesh_with_no_cells": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_reorient_2d_by_3d_repairs_a_deliberately_inconsistent_shell": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_editor.py::test_reorient_2d_makes_a_mixed_shell_consistent": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_editor.py::test_reorient_refuses_an_empty_list": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_reorient_reverses_exactly_the_elements_named": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_rotation_sweep_fills_the_swept_region_with_cells": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_editor.py::test_rotation_sweep_refuses_a_zero_axis": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_editor.py::test_sew_free_border_joins_two_patches_along_their_shared_rim": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_editor.py::test_sew_free_border_refuses_a_border_of_the_wrong_length": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_editor.py::test_sew_free_border_refuses_nodes_that_are_not_on_a_border": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_editor.py::test_sew_side_elements_merges_two_coincident_patches": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_editor.py::test_sew_side_elements_refuses_an_empty_side": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_editor.py::test_sew_side_elements_refuses_sides_of_different_size": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_editor.py::test_smooth_holds_the_nodes_it_is_told_to": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_smooth_moves_nodes_without_creating_or_deleting_anything": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_editor.py::test_smooth_on_shape_keeps_every_node_on_the_box_surface": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_smooth_refuses_a_target_below_a_regular_element": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_smooth_refuses_zero_iterations": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_split_quadratic_into_linear_adds_no_nodes": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_editor.py::test_the_total_volume_survives_a_split_and_a_conversion": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_editor.py::test_tri_to_quad_fuses_coplanar_triangles_back_into_quadrangles": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_editor.py::test_tri_to_quad_refuses_a_negative_angle": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_gmf.py::test_a_cartesian_mesh_cannot_be_written_and_says_which_element_stops_it": {
+   "outcome": "passed",
+   "seconds": 0.051
+  },
+  "tests/test_gmf.py::test_a_group_the_format_cannot_carry_is_refused_naming_it": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_gmf.py::test_a_mesh_built_from_arrays_writes_as_readily_as_one_from_the_mesher": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_gmf.py::test_a_mesh_round_trips_with_its_counts_in_both_formats[.mesh]": {
+   "outcome": "passed",
+   "seconds": 0.147
+  },
+  "tests/test_gmf.py::test_a_mesh_round_trips_with_its_counts_in_both_formats[.meshb]": {
+   "outcome": "passed",
+   "seconds": 0.032
+  },
+  "tests/test_gmf.py::test_a_mesh_whose_arrays_disagree_is_refused": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_gmf.py::test_a_mesh_with_no_groups_writes_and_reads_back_with_none": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_gmf.py::test_a_required_group_round_trips_with_its_membership": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_gmf.py::test_a_suffix_the_format_does_not_define_is_refused": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_gmf.py::test_a_triangle_mesh_round_trips_too": {
+   "outcome": "passed",
+   "seconds": 0.081
+  },
+  "tests/test_gmf.py::test_cell_connectivity_survives_the_round_trip": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_gmf.py::test_every_group_suffix_the_format_defines_is_accepted[Edges]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_gmf.py::test_every_group_suffix_the_format_defines_is_accepted[Quadrilaterals]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_gmf.py::test_every_group_suffix_the_format_defines_is_accepted[Triangles]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_gmf.py::test_every_group_suffix_the_format_defines_is_accepted[Vertices]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_gmf.py::test_files_written_by_another_engine_read_back": {
+   "outcome": "skipped",
+   "seconds": 0.002,
+   "message": "no engine-written .mesh/.meshb fixture in test_files/ (git-ignored); drop an MMG or fTetWild output there to exercise this gate"
+  },
+  "tests/test_gmf.py::test_ids_are_reassigned_from_position_rather_than_carried": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_gmf.py::test_ids_of_a_freshly_computed_mesh_happen_to_come_back_unchanged": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_gmf.py::test_node_coordinates_survive_the_round_trip": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_gmf.py::test_reading_a_file_that_is_not_a_mesh_raises": {
+   "outcome": "passed",
+   "seconds": 0.085
+  },
+  "tests/test_gmf.py::test_reading_a_file_that_is_not_there_raises_naming_it": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_gmf.py::test_the_binary_and_text_forms_hold_the_same_mesh": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_gmf.py::test_the_per_element_cad_binding_does_not_survive_the_round_trip": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_gmf.py::test_the_unwritable_types_can_be_asked_for_before_trying": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_gmf.py::test_writing_from_the_mesher_is_the_same_as_writing_its_mesh": {
+   "outcome": "passed",
+   "seconds": 0.02
+  },
+  "tests/test_gmf.py::test_writing_to_an_extension_the_format_does_not_know_raises": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_groups.py::test_a_bad_merge_tolerance_is_refused[-1.0]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_a_bad_merge_tolerance_is_refused[nan]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_a_conforming_mesh_merges_nothing": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_groups.py::test_a_filtered_group_is_empty_when_its_predicate_accepts_nothing": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_groups.py::test_a_filtered_group_re_evaluates_after_the_mesh_changes": {
+   "outcome": "passed",
+   "seconds": 0.036
+  },
+  "tests/test_groups.py::test_a_group_can_be_edited_by_hand_in_both_directions": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_a_group_defined_by_its_source_refuses_a_hand_edit[filter]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_a_group_defined_by_its_source_refuses_a_hand_edit[shape]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_a_group_of_nodes_survives_conversion_to_second_order": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_groups.py::test_a_group_on_a_filter_holds_what_the_same_predicate_selects": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_a_group_on_a_sub_shape_holds_what_the_mesher_bound_there": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_groups.py::test_a_group_survives_a_node_merge_and_never_names_a_deleted_element": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_a_group_survives_a_volume_split_with_its_membership_correct": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_a_group_survives_conversion_to_second_order_with_its_membership_correct": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_a_second_group_of_the_same_name_is_refused": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_a_split_along_a_zero_normal_is_refused": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_a_split_keeps_the_volume_it_started_with": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_an_explicit_group_holds_exactly_the_ids_it_was_given": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_an_id_of_the_wrong_family_is_refused_naming_it": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_an_unknown_group_name_is_refused_rather_than_answered": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_conversion_to_second_order_round_trips_back_to_first": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_converting_a_linear_mesh_from_quadratic_changes_nothing": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_groups.py::test_each_split_method_produces_the_cell_count_its_name_promises[1-5]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_groups.py::test_each_split_method_produces_the_cell_count_its_name_promises[2-6]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_each_split_method_produces_the_cell_count_its_name_promises[3-24]": {
+   "outcome": "passed",
+   "seconds": 0.025
+  },
+  "tests/test_groups.py::test_each_split_method_produces_the_cell_count_its_name_promises[4-2]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_each_split_method_produces_the_cell_count_its_name_promises[5-4]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_every_group_operation_refuses_a_released_mesher": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_groups.py::test_removing_a_group_leaves_its_elements_alone": {
+   "outcome": "passed",
+   "seconds": 0.036
+  },
+  "tests/test_groups.py::test_splitting_a_mesh_with_no_volumes_is_refused": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_groups.py::test_the_membership_check_can_fail": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_iges.py::test_iges_units_table_matches_the_iges_definitions": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_iges.py::test_public_namespace_exports": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_read_iges_accepts_path_object": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_iges.py::test_read_iges_brep_loads_to_cube": {
+   "outcome": "passed",
+   "seconds": 0.013
+  },
+  "tests/test_iges.py::test_read_iges_geometry_stays_in_native_unit[box_inch.igs]": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_iges.py::test_read_iges_geometry_stays_in_native_unit[box_m.igs]": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_iges.py::test_read_iges_geometry_stays_in_native_unit[box_mm.igs]": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_iges.py::test_read_iges_malformed_raises": {
+   "outcome": "passed",
+   "seconds": 0.032
+  },
+  "tests/test_iges.py::test_read_iges_missing_file_raises": {
+   "outcome": "passed",
+   "seconds": 0.018
+  },
+  "tests/test_iges.py::test_read_iges_physical_size_via_length_unit[box_inch.igs-0.0254]": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_iges.py::test_read_iges_physical_size_via_length_unit[box_m.igs-1.0]": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_iges.py::test_read_iges_physical_size_via_length_unit[box_mm.igs-0.001]": {
+   "outcome": "passed",
+   "seconds": 0.01
+  },
+  "tests/test_iges.py::test_read_iges_reports_declared_unit[box_inch.igs-INCH-0.0254]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_iges.py::test_read_iges_reports_declared_unit[box_m.igs-M-1.0]": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_iges.py::test_read_iges_reports_declared_unit[box_mm.igs-MM-0.001]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_iges.py::test_read_iges_returns_iges_import": {
+   "outcome": "passed",
+   "seconds": 0.055
+  },
+  "tests/test_iges.py::test_read_iges_undeclarable_unit_raises": {
+   "outcome": "passed",
+   "seconds": 0.016
+  },
+  "tests/test_iges.py::test_read_iges_unit_name_is_a_known_iges_unit": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_iges.py::test_read_iges_units_differ_between_fixtures": {
+   "outcome": "passed",
+   "seconds": 0.012
+  },
+  "tests/test_iges.py::test_write_iges_accepts_every_unit_in_the_table[CM]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_accepts_every_unit_in_the_table[FT]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_accepts_every_unit_in_the_table[INCH]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_accepts_every_unit_in_the_table[KM]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_accepts_every_unit_in_the_table[MIL]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_accepts_every_unit_in_the_table[MI]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_accepts_every_unit_in_the_table[MM]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_accepts_every_unit_in_the_table[M]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_accepts_every_unit_in_the_table[UIN]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_accepts_every_unit_in_the_table[UM]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_brep_mode_keeps_the_solid": {
+   "outcome": "passed",
+   "seconds": 0.024
+  },
+  "tests/test_iges.py::test_write_iges_brep_mode_refuses_wire_only_shape": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_iges.py::test_write_iges_does_not_rescale_coordinates[INCH]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_does_not_rescale_coordinates[MM]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_does_not_rescale_coordinates[M]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_empty_shape_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_iges.py::test_write_iges_faces_mode_drops_the_solid": {
+   "outcome": "passed",
+   "seconds": 0.014
+  },
+  "tests/test_iges.py::test_write_iges_faces_mode_roundtrips": {
+   "outcome": "passed",
+   "seconds": 0.017
+  },
+  "tests/test_iges.py::test_write_iges_header_declares_requested_unit[INCH-1]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_header_declares_requested_unit[M-6]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_iges.py::test_write_iges_header_declares_requested_unit[MM-2]": {
+   "outcome": "passed",
+   "seconds": 0.009
+  },
+  "tests/test_iges.py::test_write_iges_malformed_brep_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_iges.py::test_write_iges_returns_bytes": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_roundtrip_from_imported_unit_name": {
+   "outcome": "passed",
+   "seconds": 0.018
+  },
+  "tests/test_iges.py::test_write_iges_roundtrip_preserves_size_and_unit[INCH-0.0254]": {
+   "outcome": "passed",
+   "seconds": 0.028
+  },
+  "tests/test_iges.py::test_write_iges_roundtrip_preserves_size_and_unit[M-1.0]": {
+   "outcome": "passed",
+   "seconds": 0.049
+  },
+  "tests/test_iges.py::test_write_iges_roundtrip_preserves_size_and_unit[MM-0.001]": {
+   "outcome": "passed",
+   "seconds": 0.013
+  },
+  "tests/test_iges.py::test_write_iges_unit_is_the_only_difference": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_unit_name_is_case_insensitive": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_iges.py::test_write_iges_unknown_unit_raises[0.001]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_iges.py::test_write_iges_unknown_unit_raises[FURLONG]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_iges.py::test_write_iges_unknown_unit_raises[MILLIMETRE]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_unknown_unit_raises[]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_iges.py::test_write_iges_unknown_unit_raises[metres]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_a_block_face_asked_for_by_a_name_it_does_not_have_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_a_box_reads_as_a_block_with_the_corners_the_caller_named": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_medial.py::test_a_corner_arm_narrows_to_nothing_at_its_vertex": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_medial.py::test_a_pattern_read_from_a_face_with_no_mesh_is_refused": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_medial.py::test_a_pattern_read_off_a_meshed_face_carries_its_points_and_cells": {
+   "outcome": "passed",
+   "seconds": 0.027
+  },
+  "tests/test_medial.py::test_a_pattern_refuses_a_vertex_that_is_not_on_the_face": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_medial.py::test_a_pattern_refuses_malformed_text": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_medial.py::test_a_pattern_round_trips_through_its_own_text": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_medial.py::test_a_rectangle_axis_is_a_spine_plus_one_arm_per_corner": {
+   "outcome": "passed",
+   "seconds": 0.017
+  },
+  "tests/test_medial.py::test_a_thinner_wall_reports_a_smaller_width": {
+   "outcome": "passed",
+   "seconds": 0.01
+  },
+  "tests/test_medial.py::test_a_three_dimensional_pattern_fills_a_block": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_medial.py::test_an_axis_with_no_branches_says_so_rather_than_guessing": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_an_l_shaped_region_has_more_branches_and_junctions_than_a_rectangle": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_applying_a_pattern_creates_the_cells_it_describes": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_medial.py::test_applying_a_pattern_reversed_gives_a_different_mesh": {
+   "outcome": "passed",
+   "seconds": 0.029
+  },
+  "tests/test_medial.py::test_block_face_names_cover_the_six_faces": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_medial.py::test_block_parameters_invert_block_points_exactly": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_block_parameters_refuse_a_tolerance_of_zero": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_block_points_place_the_unit_cubes_own_corners": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_block_points_refuse_a_parameter_outside_the_unit_cube": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_block_shapes_refuse_a_solid_that_is_not_six_sided": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_block_shapes_refuse_two_corners_that_are_not_joined_by_an_edge": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_each_sample_names_the_shapes_own_edge_ordinals": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_medial.py::test_every_pattern_call_refuses_a_released_mesher": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_medial.py::test_ignoring_corners_leaves_the_rectangle_with_one_branch": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_medial.py::test_medial_axis_refuses_a_segment_length_of_zero": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_medial_axis_refuses_an_ordinal_that_names_no_face": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_medial.py::test_medial_axis_refuses_fewer_than_two_samples": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_only_the_l_shape_has_two_branches_that_are_junction_to_junction": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_the_annulus_axis_is_one_closed_branch": {
+   "outcome": "passed",
+   "seconds": 0.011
+  },
+  "tests/test_medial.py::test_the_annulus_axis_recovers_the_analytic_wall_thickness": {
+   "outcome": "passed",
+   "seconds": 0.019
+  },
+  "tests/test_medial.py::test_the_annulus_axis_sits_on_the_mid_radius_circle": {
+   "outcome": "passed",
+   "seconds": 0.011
+  },
+  "tests/test_medial.py::test_the_blocks_named_corners_are_where_their_names_say": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_the_l_shapes_spine_bends_where_a_rectangles_runs_straight": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_the_l_shapes_spine_reports_the_leg_width_along_both_legs": {
+   "outcome": "passed",
+   "seconds": 0.043
+  },
+  "tests/test_medial.py::test_the_rectangles_spine_is_the_analytic_medial_axis": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_the_rectangles_spine_reports_the_rectangles_own_width": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_medial.py::test_the_samples_boundary_points_lie_on_the_rectangles_own_boundary": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesh_injection.py::test_add_nodes_returns_unique_int64_ids": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_mesh_injection.py::test_add_triangles_bad_face_id_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesh_injection.py::test_add_triangles_unknown_node_id_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesh_injection.py::test_context_manager_releases_on_exit": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesh_injection.py::test_release_makes_further_ops_raise": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesh_injection.py::test_stats_round_trips_node_and_element_counts": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesh_injection.py::test_validate_names_face_without_elements": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesh_injection.py::test_validate_names_unclassified_node": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesh_injection.py::test_validate_passes_on_fully_classified_mesh": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesher.py::test_a_cancel_mid_algorithm_stops_a_long_cartesian_run_in_budget": {
+   "outcome": "passed",
+   "seconds": 1.005
+  },
+  "tests/test_mesher.py::test_a_cancelled_compute_leaves_no_partial_mesh": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher.py::test_a_cartesian_region_does_not_conform_and_the_check_can_see_it": {
+   "outcome": "passed",
+   "seconds": 0.015
+  },
+  "tests/test_mesher.py::test_a_failed_compute_keeps_the_partial_mesh_for_diagnosis": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher.py::test_a_hypothesis_on_a_sub_shape_overrides_the_global_one": {
+   "outcome": "passed",
+   "seconds": 0.418
+  },
+  "tests/test_mesher.py::test_a_non_callable_cancel_hook_is_refused": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher.py::test_a_non_callable_progress_hook_is_refused": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher.py::test_a_pre_set_cancel_flag_stops_even_a_mesh_that_finishes_quickly": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_mesher.py::test_a_raising_progress_callback_cancels_and_the_caller_gets_its_own_exception": {
+   "outcome": "passed",
+   "seconds": 0.147
+  },
+  "tests/test_mesher.py::test_a_released_mesher_refuses_every_operation": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesher.py::test_a_second_algorithm_of_the_same_dimension_is_refused": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher.py::test_a_sub_shape_kind_of_none_is_refused": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_mesher.py::test_a_sub_shape_ordinal_below_one_is_refused_before_the_native_call": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_mesher.py::test_an_all_dimension_algorithm_hides_a_lower_dimension_one_rather_than_refusing_it": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_mesher.py::test_an_impossible_assignment_raises_naming_the_failing_faces": {
+   "outcome": "passed",
+   "seconds": 0.054
+  },
+  "tests/test_mesher.py::test_an_out_of_range_ordinal_raises_naming_the_kind": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher.py::test_assign_global_algorithm_and_hypothesis_meshes_the_whole_shape": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_mesher.py::test_assignments_report_what_was_attached_and_where": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesher.py::test_cartesian_emits_hexahedra_inside_and_polyhedra_at_the_cut_cells": {
+   "outcome": "passed",
+   "seconds": 0.012
+  },
+  "tests/test_mesher.py::test_cartesian_meshes_a_bored_block_and_every_cell_has_positive_volume": {
+   "outcome": "passed",
+   "seconds": 0.132
+  },
+  "tests/test_mesher.py::test_computing_with_nothing_assigned_raises": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher.py::test_elements_are_grouped_by_ascending_dimension": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher.py::test_every_element_and_node_names_the_sub_shape_it_sits_on": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher.py::test_every_element_connectivity_indexes_the_node_array": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher.py::test_every_polyhedron_face_stream_sums_to_its_node_count": {
+   "outcome": "passed",
+   "seconds": 0.027
+  },
+  "tests/test_mesher.py::test_hooks_cost_nothing_measurable_on_a_mesh_that_uses_them": {
+   "outcome": "passed",
+   "seconds": 0.056
+  },
+  "tests/test_mesher.py::test_node_ids_are_unique_and_element_ids_are_unique": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_mesher.py::test_nodes_of_an_out_of_range_element_raises": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_mesher.py::test_one_solid_meshes_by_three_different_algorithms_each_with_its_own_hypotheses": {
+   "outcome": "passed",
+   "seconds": 0.107
+  },
+  "tests/test_mesher.py::test_progress_inside_one_algorithm_is_a_tick_count_not_a_fraction_of_the_work": {
+   "outcome": "passed",
+   "seconds": 0.759
+  },
+  "tests/test_mesher.py::test_progress_is_monotone_and_ends_at_one": {
+   "outcome": "passed",
+   "seconds": 0.801
+  },
+  "tests/test_mesher.py::test_reading_a_mesh_never_advances_anything": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_mesher.py::test_release_is_idempotent": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesher.py::test_segment_count_sets_the_structured_cell_count[1-1]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_mesher.py::test_segment_count_sets_the_structured_cell_count[2-8]": {
+   "outcome": "passed",
+   "seconds": 0.029
+  },
+  "tests/test_mesher.py::test_segment_count_sets_the_structured_cell_count[3-27]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_mesher.py::test_segment_count_sets_the_structured_cell_count[4-64]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_mesher.py::test_the_report_names_which_sub_shapes_received_elements": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher.py::test_the_same_mesh_completes_when_the_predicate_says_no": {
+   "outcome": "passed",
+   "seconds": 0.026
+  },
+  "tests/test_mesher.py::test_the_same_shape_meshes_when_the_algorithm_can_read_it": {
+   "outcome": "passed",
+   "seconds": 0.139
+  },
+  "tests/test_mesher.py::test_two_meshers_coexist_without_cross_talk": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_mesher.py::test_two_solids_meshed_by_different_algorithms_conform_node_by_node": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_mesher.py::test_unassign_removes_an_assignment_and_leaves_the_rest": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_mesher.py::test_unassign_something_never_assigned_raises": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_a_layer_distribution_spaces_the_radial_direction_by_a_1d_hypothesis": {
+   "outcome": "passed",
+   "seconds": 0.041
+  },
+  "tests/test_mesher_family.py::test_a_missing_parameter_is_refused_naming_it": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_a_parameter_the_factory_does_not_read_is_refused": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesher_family.py::test_a_regular_distribution_gives_equal_segments": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_a_scaled_distribution_grows_monotonically_along_the_edge": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_an_unknown_algorithm_name_is_refused": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_arithmetic_progression_gives_the_stated_first_and_last_lengths": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_element_counts_scale_with_the_hypothesis_rather_than_being_fixed": {
+   "outcome": "passed",
+   "seconds": 0.076
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[Adaptive1D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[Arithmetic1D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[AutomaticLength]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[CartesianParameters3D]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[Cartesian_3D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[CompositeHexa_3D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[CompositeSegment_1D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[Deflection1D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[FixedPoints1D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[Geometric1D]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[HexaFromSkin_3D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[Hexa_3D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[LayerDistribution]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[LocalLength]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[MEFISTO_2D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[MaxElementArea]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[MaxElementVolume]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[MaxLength]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[NumberOfLayers2D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[NumberOfLayers]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[NumberOfSegments0]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[NumberOfSegments1]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[NumberOfSegments2]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[NumberOfSegments3]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[PolygonPerFace_2D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[PolyhedronPerSolid_3D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[Prism_3D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[ProjectionSource1D0]": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[ProjectionSource1D1]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[ProjectionSource2D]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[ProjectionSource3D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[Projection_1D2D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[Projection_1D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[Projection_2D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[Projection_3D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[Propagation]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[QuadFromMedialAxis_1D2D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[QuadrangleParams0]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[QuadrangleParams1]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[QuadranglePreference]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[Quadrangle_2D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[QuadraticMesh]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[RadialPrism_3D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[RadialQuadrangle_1D2D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[Regular_1D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[SegmentLengthAroundVertex]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[StartEndLength]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[ViscousLayers2D]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_every_catalogue_entry_builds_and_attaches[ViscousLayers]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_fixed_points_split_the_edge_at_the_stated_positions": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_local_length_sizes_every_edge_to_about_that_length": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_max_length_never_exceeds_its_bound": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_number_of_segments_gives_exactly_that_many_per_edge": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_mesher_family.py::test_one_polygon_per_face_uses_the_edge_discretisation_as_its_boundary": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_mesher_family.py::test_projection_copies_a_face_mesh_onto_another_face_node_for_node": {
+   "outcome": "passed",
+   "seconds": 0.034
+  },
+  "tests/test_mesher_family.py::test_propagation_carries_a_count_to_the_opposite_edges": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_mesher_family.py::test_quadratic_mesh_produces_second_order_elements": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_mesher_family.py::test_the_catalogue_covers_every_public_algorithm_and_hypothesis": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_mesher_family.py::test_the_composite_segment_mesher_treats_a_split_edge_chain_as_one": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_mesher_family.py::test_the_extrusion_mesher_fills_a_prismatic_solid_from_its_source_face": {
+   "outcome": "passed",
+   "seconds": 0.024
+  },
+  "tests/test_mesher_family.py::test_the_medial_axis_mesher_meshes_a_thin_face": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_mesher_family.py::test_the_radial_mesher_builds_an_o_grid_between_two_shells": {
+   "outcome": "passed",
+   "seconds": 0.024
+  },
+  "tests/test_mesher_family.py::test_the_radial_quadrangle_mesher_meshes_a_disk": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_mesher_family.py::test_viscous_layers_grow_from_the_named_walls_into_a_group": {
+   "outcome": "passed",
+   "seconds": 0.01
+  },
+  "tests/test_offset.py::test_make_thick_solid_does_not_judge_the_faces_it_opens": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_make_thick_solid_empty_remove_ids_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_make_thick_solid_face_map_kept_ids_unique": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_offset.py::test_make_thick_solid_face_map_length": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_offset.py::test_make_thick_solid_face_map_new_ids_in_result_range": {
+   "outcome": "passed",
+   "seconds": 0.011
+  },
+  "tests/test_offset.py::test_make_thick_solid_invalid_face_id_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_make_thick_solid_kept_faces_map_to_positive_ids": {
+   "outcome": "passed",
+   "seconds": 0.012
+  },
+  "tests/test_offset.py::test_make_thick_solid_malformed_brep_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_make_thick_solid_multiple_removed_faces_all_minus_one": {
+   "outcome": "passed",
+   "seconds": 0.015
+  },
+  "tests/test_offset.py::test_make_thick_solid_nonpositive_tol_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_make_thick_solid_past_a_cylinder_radius_raises[-1.05]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_make_thick_solid_past_a_cylinder_radius_raises[-1.5]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_make_thick_solid_refuses_a_plate_that_came_back_inside_out": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_offset.py::test_make_thick_solid_refuses_a_result_that_is_the_input[-1.0]": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_offset.py::test_make_thick_solid_refuses_a_result_that_is_the_input[-2.0]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_offset.py::test_make_thick_solid_refuses_a_result_that_is_the_input[-5.0]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_offset.py::test_make_thick_solid_refuses_an_opening_of_the_whole_boundary": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_offset.py::test_make_thick_solid_removed_face_maps_to_minus_one": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_offset.py::test_make_thick_solid_result_brep_is_loadable": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_offset.py::test_make_thick_solid_result_has_more_faces_than_input": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_offset.py::test_make_thick_solid_result_types": {
+   "outcome": "passed",
+   "seconds": 0.012
+  },
+  "tests/test_offset.py::test_make_thick_solid_still_hollows_what_the_box_can_carry": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_offset.py::test_make_thick_solid_zero_thickness_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_offset_params_defaults": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_offset_result_is_frozen": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_offset_shape_box_outward_same_face_count": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_offset.py::test_offset_shape_cylinder_outward": {
+   "outcome": "passed",
+   "seconds": 0.015
+  },
+  "tests/test_offset.py::test_offset_shape_face_map_length": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_offset.py::test_offset_shape_face_map_new_ids_in_range": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_offset.py::test_offset_shape_face_map_outward_ids_unique": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_offset.py::test_offset_shape_inward_no_deleted_faces": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_offset.py::test_offset_shape_malformed_brep_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_offset_shape_nonpositive_tol_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_offset_shape_outward_no_deleted_faces": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_offset.py::test_offset_shape_past_a_cylinder_radius_raises[-1.01]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_offset_shape_past_a_cylinder_radius_raises[-1.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_offset.py::test_offset_shape_past_a_cylinder_radius_raises[-1.5]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_offset_shape_past_a_cylinder_radius_raises[-3.0]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_offset_shape_past_a_sphere_radius_raises[-1.0]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_offset_shape_past_a_sphere_radius_raises[-1.5]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_offset_shape_result_brep_is_loadable": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_offset.py::test_offset_shape_result_types": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_offset.py::test_offset_shape_still_grows_and_shrinks_the_box": {
+   "outcome": "passed",
+   "seconds": 0.009
+  },
+  "tests/test_offset.py::test_offset_shape_up_to_a_cylinder_radius_still_commits": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_offset.py::test_offset_shape_zero_offset_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_public_namespace_exports": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_thick_solid_params_defaults": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_offset.py::test_thick_solid_result_is_frozen": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_search.py::test_a_negative_offset_of_a_sphere_shrinks_it_by_the_same_law": {
+   "outcome": "passed",
+   "seconds": 0.486
+  },
+  "tests/test_search.py::test_closest_distance_is_zero_inside_a_cell": {
+   "outcome": "passed",
+   "seconds": 0.009
+  },
+  "tests/test_search.py::test_closest_distance_to_a_volume_cell_matches_the_geometry": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_search.py::test_elements_in_box_over_a_corner_returns_fewer": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_search.py::test_elements_in_box_over_the_whole_model_returns_every_cell": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_search.py::test_elements_in_box_refuses_an_inverted_box": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_search.py::test_elements_in_sphere_around_the_centre_finds_the_middle_cell": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_search.py::test_elements_in_sphere_far_from_the_mesh_finds_nothing": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_search.py::test_elements_in_sphere_refuses_a_radius_of_zero": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_search.py::test_elements_near_line_far_from_the_mesh_finds_nothing": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_search.py::test_elements_near_line_is_a_broad_phase_and_says_so": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_search.py::test_every_search_refuses_a_released_mesher": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_search.py::test_find_closest_refuses_a_batch_that_is_not_three_columns": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_search.py::test_find_closest_refuses_an_unknown_family": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_search.py::test_find_closest_returns_a_cell_for_a_point_far_outside": {
+   "outcome": "passed",
+   "seconds": 0.042
+  },
+  "tests/test_search.py::test_find_elements_by_point_answers_a_batch_in_order": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_search.py::test_find_elements_by_point_locates_the_cell_containing_an_interior_point": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_search.py::test_find_elements_by_point_reports_nothing_for_a_point_outside": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_search.py::test_make_slot_cuts_a_band_into_a_triangle_mesh": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_search.py::test_make_slot_refuses_a_width_of_zero": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_search.py::test_make_slot_refuses_an_id_that_is_not_a_segment": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_search.py::test_merge_obstruction_leaves_a_cell_alone_when_the_merge_misses_it": {
+   "outcome": "passed",
+   "seconds": 0.022
+  },
+  "tests/test_search.py::test_merge_obstruction_names_the_medium_node_a_merge_would_strand": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_search.py::test_merge_obstruction_refuses_an_unknown_id": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_search.py::test_merge_obstruction_reports_nothing_for_a_volume_cell": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_search.py::test_offset_of_a_sphere_lands_on_the_analytic_offset_sphere": {
+   "outcome": "passed",
+   "seconds": 0.554
+  },
+  "tests/test_search.py::test_point_state_agrees_with_the_brep_classifier": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_search.py::test_point_state_classifies_inside_outside_and_on": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_search.py::test_point_state_on_an_open_surface_reports_everything_outside": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_search.py::test_project_points_lands_on_the_wall_it_faces": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_search.py::test_ray_hits_from_inside_the_tube_meets_the_wall_once": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_search.py::test_ray_hits_is_a_half_line_and_ignores_what_is_behind_it": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_search.py::test_ray_hits_lands_where_the_torus_analytically_is": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_search.py::test_ray_hits_matches_the_analytic_intersection_count_of_a_torus[across the ring-origin2-direction2-4]": {
+   "outcome": "passed",
+   "seconds": 0.045
+  },
+  "tests/test_search.py::test_ray_hits_matches_the_analytic_intersection_count_of_a_torus[axial through the tube-origin1-direction1-2]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_search.py::test_ray_hits_matches_the_analytic_intersection_count_of_a_torus[axis through the hole-origin0-direction0-0]": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_search.py::test_ray_hits_matches_the_analytic_intersection_count_of_a_torus[clear of the body-origin3-direction3-0]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_search.py::test_ray_hits_refuses_a_tolerance_that_is_not_a_number": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_search.py::test_ray_hits_refuses_a_zero_direction": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_search.py::test_ray_hits_reports_its_hits_nearest_first": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_search.py::test_separate_faces_by_edges_recovers_the_boxs_six_faces": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_search.py::test_separate_faces_by_edges_refuses_an_unknown_node": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_search.py::test_separate_faces_by_edges_with_no_edges_gives_one_patch": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_search.py::test_sharp_edges_at_a_shallow_angle_finds_the_same_creases": {
+   "outcome": "passed",
+   "seconds": 0.02
+  },
+  "tests/test_search.py::test_sharp_edges_finds_every_crease_of_a_box": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_search.py::test_sharp_edges_refuses_an_angle_outside_the_half_turn": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_search.py::test_the_offset_converges_on_the_analytic_sphere_as_the_mesh_is_refined": {
+   "outcome": "passed",
+   "seconds": 0.51
+  },
+  "tests/test_session.py::test_a_cancelled_make_thick_solid_changes_nothing": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_a_cancelled_offset_changes_nothing": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_a_dead_id_cannot_be_used_as_an_operand": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session.py::test_a_face_cut_in_two_keeps_its_id_on_both_pieces": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session.py::test_a_filleted_faces_origin_names_the_edge_it_came_from": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_a_later_operation_does_not_mutate_a_retained_snapshots_shape": {
+   "outcome": "passed",
+   "seconds": 0.014
+  },
+  "tests/test_session.py::test_a_name_minted_on_an_abandoned_branch_resolves_lost": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_a_name_records_provenance_not_position": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_a_name_survives_a_boolean_that_keeps_the_entity": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session.py::test_a_name_survives_an_operation_that_only_moves_the_entity": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_a_non_integer_entity_id_is_rejected": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_a_refused_hollowing_does_not_accumulate_damage": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session.py::test_a_refused_hollowing_does_not_change_what_the_next_operation_makes": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session.py::test_a_refused_hollowing_leaves_the_body_byte_for_byte[opened0-0.5]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_a_refused_hollowing_leaves_the_body_byte_for_byte[opened1-2.0]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_a_refused_hollowing_leaves_the_body_byte_for_byte[opened2-5.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_a_session_per_thread_produces_the_same_result_as_sequential_use": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_a_snapshot_mark_can_be_restored_more_than_once": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_add_box_builds_the_requested_extents": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_add_box_issues_one_id_per_subshape_of_every_tracked_kind": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_add_box_with_a_non_positive_extent_raises[0.0-7.0-11.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_add_box_with_a_non_positive_extent_raises[3.0--1.0-11.0]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session.py::test_add_box_with_a_non_positive_extent_raises[3.0-7.0-0.0]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session.py::test_add_brep_imports_a_body_and_issues_ids": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_add_brep_with_malformed_bytes_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session.py::test_add_cylinder_builds_the_analytic_volume": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_add_cylinder_with_a_zero_axis_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session.py::test_an_accepted_hollowing_keeps_the_outer_walls_ids": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_an_extracted_edge_can_be_the_spine_of_a_pipe": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_an_extracted_loop_caps_a_solids_face": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_an_id_from_an_abandoned_branch_reports_dead": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_an_id_is_never_reused_after_the_entity_dies": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session.py::test_an_id_the_session_never_issued_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_discard_snapshot_makes_the_mark_unusable": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_extract_edges_copies_a_solids_face_loop_at_its_own_length": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_extract_edges_delta_creates_the_new_body_and_touches_nothing_else": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_extract_edges_leaves_the_original_edges_untouched": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_extract_edges_leaves_the_session_unchanged_when_it_fails": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_extract_edges_of_a_disconnected_selection_raises_naming_the_strays": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_extract_edges_on_a_dead_id_raises": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_extract_edges_on_a_face_id_raises_naming_the_wrong_kind": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_extract_edges_round_trips_through_a_snapshot": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_extract_edges_with_an_empty_selection_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_fillet_kills_the_filleted_edge_and_adds_a_face": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session.py::test_fillet_leaves_the_session_unchanged_when_it_fails": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_fillet_on_a_face_id_raises_naming_the_wrong_kind": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_fillet_with_an_impossible_radius_raises_naming_the_edges": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session.py::test_fuse_carries_surviving_face_ids_onto_the_same_geometry": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_session.py::test_fuse_kills_exactly_the_two_seam_faces_and_keeps_the_rest": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session.py::test_fuse_merges_seam_vertex_ids_many_to_one": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session.py::test_fuse_of_two_touching_boxes_yields_the_summed_volume": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session.py::test_fuse_with_a_face_id_as_a_target_raises": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_fuse_with_a_negative_fuzzy_value_raises": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_interleaved_operations_on_two_sessions_stay_independent": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_make_thick_solid_across_two_bodies_raises": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_make_thick_solid_at_a_thin_wall_leaves_the_closed_form_volume": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session.py::test_make_thick_solid_at_a_wall_that_clears_every_feature_hollows_the_box": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session.py::test_make_thick_solid_delta_names_every_id_it_moved": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session.py::test_make_thick_solid_does_not_judge_the_faces_it_opens_by_their_radius[-1.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_make_thick_solid_does_not_judge_the_faces_it_opens_by_their_radius[-2.5]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_make_thick_solid_does_not_judge_the_faces_it_opens_by_their_radius[-3.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_make_thick_solid_does_not_judge_the_faces_it_opens_by_their_radius[2.5]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_make_thick_solid_hollows_just_under_half_the_smallest_extent": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session.py::test_make_thick_solid_keeps_the_unopened_walls_where_they_were": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session.py::test_make_thick_solid_kills_an_edge_only_the_opened_faces_carried": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session.py::test_make_thick_solid_leaves_the_closed_form_wall_volume": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session.py::test_make_thick_solid_leaves_the_session_unchanged_when_it_fails": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_session.py::test_make_thick_solid_on_a_body_that_is_not_a_solid_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_make_thick_solid_on_a_cone_opened_at_its_large_cap_uses_the_sliding_cap": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session.py::test_make_thick_solid_on_a_cone_opened_at_its_small_cap_keeps_the_honest_wall": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session.py::test_make_thick_solid_on_a_cone_opened_at_its_small_cap_refuses_earlier": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_make_thick_solid_on_a_cylinder_opened_at_a_cap_keeps_the_closed_form_wall": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session.py::test_make_thick_solid_on_a_dead_id_raises": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session.py::test_make_thick_solid_on_an_edge_id_raises_naming_the_wrong_kind": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_make_thick_solid_opening_every_face_raises_and_changes_nothing": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_make_thick_solid_outward_past_the_smallest_extent_still_builds_the_wall": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session.py::test_make_thick_solid_past_a_cylinder_radius_raises_and_changes_nothing[-2.05]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_make_thick_solid_past_a_cylinder_radius_raises_and_changes_nothing[-2.1]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_make_thick_solid_past_a_cylinder_radius_raises_and_changes_nothing[-2.5]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_make_thick_solid_past_a_cylinder_radius_raises_and_changes_nothing[-3.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_make_thick_solid_refuses_from_half_the_smallest_extent_on[1.000001]": {
+   "outcome": "passed",
+   "seconds": 0.009
+  },
+  "tests/test_session.py::test_make_thick_solid_refuses_from_half_the_smallest_extent_on[1.04]": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session.py::test_make_thick_solid_refuses_from_half_the_smallest_extent_on[1.0]": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session.py::test_make_thick_solid_refuses_from_half_the_smallest_extent_on[10.0]": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session.py::test_make_thick_solid_refuses_from_half_the_smallest_extent_on[2.0]": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session.py::test_make_thick_solid_round_trips_through_a_snapshot": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session.py::test_make_thick_solid_that_returns_an_inside_out_wall_raises[0.05]": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session.py::test_make_thick_solid_that_returns_an_inside_out_wall_raises[0.5]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_make_thick_solid_that_returns_an_inside_out_wall_raises[2.0]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_make_thick_solid_that_returns_the_input_solid_raises_and_changes_nothing[-1.6]": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session.py::test_make_thick_solid_that_returns_the_input_solid_raises_and_changes_nothing[-2.0]": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session.py::test_make_thick_solid_that_returns_the_input_solid_raises_and_changes_nothing[-3.0]": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session.py::test_make_thick_solid_that_returns_the_input_solid_raises_and_changes_nothing[-5.0]": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session.py::test_make_thick_solid_that_returns_the_input_within_round_off_raises": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session.py::test_make_thick_solid_that_self_intersects_raises_naming_input_faces": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session.py::test_make_thick_solid_the_analyzer_rejects_raises_and_changes_nothing": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_session.py::test_make_thick_solid_with_a_non_positive_tol_raises[-1e-07]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_make_thick_solid_with_a_non_positive_tol_raises[0.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_make_thick_solid_with_a_positive_thickness_grows_the_wall_outward": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session.py::test_make_thick_solid_with_a_zero_or_non_finite_thickness_raises[0.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_make_thick_solid_with_a_zero_or_non_finite_thickness_raises[inf]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_make_thick_solid_with_a_zero_or_non_finite_thickness_raises[nan]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_naming_a_face_translates_the_whole_body_that_owns_it": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session.py::test_new_session_has_no_entities_and_no_operations": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session.py::test_offset_across_two_bodies_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_delta_keeps_every_id_and_creates_none": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_offset_enlarges_the_box_by_the_distance_on_every_side": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session.py::test_offset_inward_leaves_a_bore_alone_and_shrinks_the_wall": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_session.py::test_offset_leaves_the_session_unchanged_when_it_fails": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session.py::test_offset_of_a_body_that_is_not_a_solid_or_shell_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_of_a_cone_follows_the_cap_that_slides_with_it[-0.75]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_offset_of_a_cone_follows_the_cap_that_slides_with_it[-0.85]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_offset_of_a_cone_follows_the_cap_that_slides_with_it[-0.9]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_offset_of_a_cone_is_refused_from_the_sliding_cap_boundary_on": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_offset_of_a_cone_uses_the_half_angle_not_the_bare_radius": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_offset_of_a_cylinder_is_refused_from_its_radius_on": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session.py::test_offset_of_a_planar_body_is_not_touched_by_the_radius_rule": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session.py::test_offset_of_a_sharp_cone_is_not_judged_by_its_apex[-1.0]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_offset_of_a_sharp_cone_is_not_judged_by_its_apex[-1.4]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_offset_of_a_sharp_cone_is_not_judged_by_its_apex[0.3]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_offset_of_a_sharp_cone_is_not_judged_by_its_apex[2.0]": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session.py::test_offset_of_a_sharp_cone_is_refused_when_its_base_cannot_carry_it[-1.6]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_of_a_sharp_cone_is_refused_when_its_base_cannot_carry_it[-1.9]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_of_a_sharp_cone_is_refused_when_its_base_cannot_carry_it[-3.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_of_a_shell_gives_a_shell": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_offset_of_a_solid_gives_a_solid_not_a_shell": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session.py::test_offset_on_a_dead_id_raises": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_offset_outward_past_a_bore_radius_raises_and_changes_nothing[1.0]": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session.py::test_offset_outward_past_a_bore_radius_raises_and_changes_nothing[1.5]": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session.py::test_offset_outward_past_a_bore_radius_raises_and_changes_nothing[2.0]": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session.py::test_offset_outward_past_a_torus_major_radius_raises_and_changes_nothing[3.6]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_outward_past_a_torus_major_radius_raises_and_changes_nothing[4.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_outward_past_a_torus_major_radius_raises_and_changes_nothing[6.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_outward_up_to_a_bore_radius_still_closes_it_to_a_sliver": {
+   "outcome": "passed",
+   "seconds": 0.011
+  },
+  "tests/test_session.py::test_offset_outward_up_to_a_torus_major_radius_is_committed": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_past_a_cone_small_radius_raises_and_changes_nothing[-0.91]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_past_a_cone_small_radius_raises_and_changes_nothing[-1.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_past_a_cone_small_radius_raises_and_changes_nothing[-1.3]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_past_a_cone_small_radius_raises_and_changes_nothing[-2.1]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_past_a_cylinder_radius_raises_and_changes_nothing[-2.01]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_past_a_cylinder_radius_raises_and_changes_nothing[-2.5]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_past_a_cylinder_radius_raises_and_changes_nothing[-3.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_past_a_cylinder_radius_raises_and_changes_nothing[-5.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_past_a_sphere_radius_raises_and_changes_nothing[-3.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_past_a_sphere_radius_raises_and_changes_nothing[-3.5]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_past_a_sphere_radius_raises_and_changes_nothing[-5.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_past_a_torus_tube_radius_raises_and_changes_nothing[-1.5]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_past_a_torus_tube_radius_raises_and_changes_nothing[-11.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_past_a_torus_tube_radius_raises_and_changes_nothing[-2.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_round_trips_through_a_snapshot": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session.py::test_offset_shrinks_a_cone_up_to_its_small_radius": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_offset_shrinks_a_cylinder_to_the_closed_form_up_to_its_radius": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_offset_shrinks_a_sphere_to_the_closed_form_up_to_its_radius": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_shrinks_a_torus_up_to_its_tube_radius": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_that_self_intersects_raises_naming_input_faces": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session.py::test_offset_with_a_negative_distance_shrinks_the_box": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session.py::test_offset_with_a_non_positive_tol_raises[-1e-07]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_with_a_non_positive_tol_raises[0.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_with_a_zero_or_non_finite_distance_raises[-inf]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_with_a_zero_or_non_finite_distance_raises[0.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_offset_with_a_zero_or_non_finite_distance_raises[nan]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_origin_answers_for_a_dead_id_while_name_of_does_not": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session.py::test_resolving_a_name_that_was_never_minted_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_restore_does_not_rewind_the_id_counter": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_restore_of_an_unknown_mark_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_restore_rewinds_both_the_shape_and_the_registry": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_rotate_preserves_every_id_and_applies_the_rotation": {
+   "outcome": "passed",
+   "seconds": 0.019
+  },
+  "tests/test_session.py::test_session_brep_round_trips_through_the_stateless_loader": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_state_op_index_tracks_the_restored_state_not_the_op_count": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session.py::test_the_name_of_a_deleted_entity_resolves_lost": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session.py::test_the_name_of_a_split_entity_resolves_ambiguous": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session.py::test_the_stateless_free_functions_still_work_alongside_a_session": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_translate_moves_the_geometry_by_exactly_the_offset": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_translate_preserves_every_entity_id_one_by_one": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_translate_with_an_empty_entity_list_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_translating_one_body_leaves_the_other_body_untouched": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session.py::test_two_geometrically_identical_boxes_get_distinct_names": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_two_sessions_in_one_process_do_not_share_state": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session.py::test_two_sessions_issue_ids_from_independent_counters": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_control.py::test_a_cancel_flag_set_before_the_call_is_honoured_however_fast_the_operation": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_control.py::test_a_cancel_requested_part_way_through_stops_within_the_budget": {
+   "outcome": "passed",
+   "seconds": 0.866
+  },
+  "tests/test_session_control.py::test_a_cancelled_boolean_leaves_every_id_exactly_as_it_was": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_control.py::test_a_cancelled_boolean_leaves_the_root_shape_byte_identical": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_control.py::test_a_cancelled_boolean_raises_the_cancellation_type": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_control.py::test_a_cancelled_heal_does_not_commit_a_truncated_model": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_control.py::test_a_cancelled_operation_does_not_advance_the_id_counter": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session_control.py::test_a_cancelled_real_assembly_boolean_stops_in_budget_and_changes_nothing": {
+   "outcome": "passed",
+   "seconds": 4.705
+  },
+  "tests/test_session_control.py::test_a_cancelled_tessellation_leaves_the_next_call_reporting_every_face": {
+   "outcome": "passed",
+   "seconds": 0.073
+  },
+  "tests/test_session_control.py::test_a_cancelled_tessellation_raises_and_emits_nothing": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_control.py::test_a_fuzzy_value_below_the_gap_does_not_bridge_it": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_control.py::test_a_fuzzy_value_that_is_not_a_distance_is_refused[-1.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_control.py::test_a_fuzzy_value_that_is_not_a_distance_is_refused[-inf]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_control.py::test_a_fuzzy_value_that_is_not_a_distance_is_refused[inf]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_control.py::test_a_fuzzy_value_that_is_not_a_distance_is_refused[nan]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_control.py::test_a_gap_the_default_cannot_bridge_leaves_two_solids": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_control.py::test_a_non_callable_hook_is_refused[cancel]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_control.py::test_a_non_callable_hook_is_refused[progress]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_control.py::test_a_progress_only_caller_is_never_asked_to_cancel": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_control.py::test_a_raising_cancel_predicate_propagates_its_own_exception": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_control.py::test_a_raising_progress_callback_stops_the_operation_and_commits_nothing": {
+   "outcome": "passed",
+   "seconds": 0.328
+  },
+  "tests/test_session_control.py::test_a_real_assembly_boolean_reports_many_monotone_updates": {
+   "outcome": "passed",
+   "seconds": 3.975
+  },
+  "tests/test_session_control.py::test_a_refused_fuzzy_value_leaves_the_session_untouched": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_control.py::test_add_brep_accepts_a_cancel": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_control.py::test_defeature_and_imprint_accept_a_cancel": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_control.py::test_every_boolean_accepts_and_honours_a_cancel[common]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_control.py::test_every_boolean_accepts_and_honours_a_cancel[cut]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_control.py::test_every_boolean_accepts_and_honours_a_cancel[fragment]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_control.py::test_every_boolean_accepts_and_honours_a_cancel[fuse]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_control.py::test_every_boolean_accepts_and_honours_a_cancel[section]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_control.py::test_every_boolean_accepts_and_honours_a_cancel[split]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_control.py::test_fillet_and_chamfer_accept_a_cancel": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_control.py::test_omitting_both_hooks_runs_the_operation_unchanged": {
+   "outcome": "passed",
+   "seconds": 0.013
+  },
+  "tests/test_session_control.py::test_progress_callback_receives_a_final_value_of_one": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session_control.py::test_progress_is_reported_during_a_long_operation_not_only_at_the_end": {
+   "outcome": "passed",
+   "seconds": 0.574
+  },
+  "tests/test_session_control.py::test_progress_values_are_strictly_increasing_and_within_the_unit_interval": {
+   "outcome": "passed",
+   "seconds": 0.078
+  },
+  "tests/test_session_control.py::test_serial_and_parallel_booleans_agree_on_topology_and_volume": {
+   "outcome": "passed",
+   "seconds": 0.014
+  },
+  "tests/test_session_control.py::test_serial_and_parallel_tessellations_are_bitwise_identical": {
+   "outcome": "passed",
+   "seconds": 0.181
+  },
+  "tests/test_session_control.py::test_sew_accepts_a_cancel": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_control.py::test_tessellating_a_real_assembly_reports_monotone_progress": {
+   "outcome": "passed",
+   "seconds": 10.17
+  },
+  "tests/test_session_control.py::test_the_cancellation_type_is_a_pysmesh_error": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_control.py::test_the_same_fuse_succeeds_at_a_fuzzy_value_matching_the_gap": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_control.py::test_the_same_operation_succeeds_when_the_predicate_says_no": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session_control.py::test_the_two_repairs_without_a_progress_range_take_no_hooks": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_a_merged_model_is_refused_naming_the_ambiguous_ids": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_handoff.py::test_a_split_model_is_refused_naming_the_split_id": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_handoff.py::test_an_empty_session_exports_an_empty_manifest": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_handoff.py::test_an_exported_id_resolves_through_the_registry": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_handoff.py::test_coaxial_walls_defeat_a_centroid_map_but_not_the_shipped_one": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_handoff.py::test_each_ordinal_names_the_sub_shape_at_that_ordinal_of_the_exported_bytes": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_handoff.py::test_every_exported_id_is_a_live_id_of_that_kind[EDGE]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_every_exported_id_is_a_live_id_of_that_kind[FACE]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_every_exported_id_is_a_live_id_of_that_kind[SOLID]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_every_exported_id_is_a_live_id_of_that_kind[VERTEX]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_every_id_array_is_int64": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_every_live_id_of_that_kind_appears_exactly_once[EDGE]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_every_live_id_of_that_kind_appears_exactly_once[FACE]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_every_live_id_of_that_kind_appears_exactly_once[SOLID]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_every_live_id_of_that_kind_appears_exactly_once[VERTEX]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_export_returns_one_id_per_sub_shape_of_each_kind": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_exporting_issues_no_id_and_advances_no_counter": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_no_id_labels_two_sub_shapes[EDGE]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_no_id_labels_two_sub_shapes[FACE]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_no_id_labels_two_sub_shapes[SOLID]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_no_id_labels_two_sub_shapes[VERTEX]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_the_exported_bytes_reload_as_the_same_model": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_the_four_kinds_draw_on_one_id_space_and_never_collide": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_the_handoff_is_a_bijection_on_a_real_assembly": {
+   "outcome": "passed",
+   "seconds": 5.512
+  },
+  "tests/test_session_handoff.py::test_the_ordering_survives_an_operation_elsewhere_in_the_model": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_handoff.py::test_the_ordinals_survive_the_round_trip_on_a_real_assembly": {
+   "outcome": "passed",
+   "seconds": 22.129
+  },
+  "tests/test_session_handoff.py::test_the_pipe_fixture_really_has_two_coaxial_walls": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_handoff.py::test_the_same_model_exports_cleanly_before_the_merge": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_handoff.py::test_two_exports_of_one_session_are_identical": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_heal.py::test_a_removed_id_reports_dead_rather_than_denoting_something_else": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_heal.py::test_a_repair_reports_its_verdict_even_in_an_unvalidated_session": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_heal.py::test_an_imprinted_target_keeps_its_id_on_every_piece": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_heal.py::test_defeaturing_a_hole_restores_the_unbored_volume": {
+   "outcome": "passed",
+   "seconds": 0.011
+  },
+  "tests/test_session_heal.py::test_defeaturing_a_shallow_dimple_is_judged_on_its_own_patch_not_the_body": {
+   "outcome": "passed",
+   "seconds": 0.035
+  },
+  "tests/test_session_heal.py::test_defeaturing_a_small_fillet_on_a_large_plate_still_removes_it[0.01]": {
+   "outcome": "passed",
+   "seconds": 0.014
+  },
+  "tests/test_session_heal.py::test_defeaturing_a_small_fillet_on_a_large_plate_still_removes_it[0.7]": {
+   "outcome": "passed",
+   "seconds": 0.016
+  },
+  "tests/test_session_heal.py::test_defeaturing_an_empty_selection_raises": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_heal.py::test_defeaturing_both_halves_of_a_split_wall_removes_the_hole": {
+   "outcome": "passed",
+   "seconds": 0.024
+  },
+  "tests/test_session_heal.py::test_defeaturing_fails_loud_when_occt_removes_nothing": {
+   "outcome": "passed",
+   "seconds": 0.012
+  },
+  "tests/test_session_heal.py::test_defeaturing_half_of_a_free_form_split_wall_is_refused": {
+   "outcome": "passed",
+   "seconds": 0.589
+  },
+  "tests/test_session_heal.py::test_defeaturing_one_half_of_a_split_wall_is_refused_and_changes_nothing": {
+   "outcome": "passed",
+   "seconds": 0.02
+  },
+  "tests/test_session_heal.py::test_defeaturing_one_piece_of_an_imprinted_face_is_refused[127.0]": {
+   "outcome": "passed",
+   "seconds": 0.025
+  },
+  "tests/test_session_heal.py::test_defeaturing_one_piece_of_an_imprinted_face_is_refused[16.0]": {
+   "outcome": "passed",
+   "seconds": 0.01
+  },
+  "tests/test_session_heal.py::test_defeaturing_refuses_every_half_wall_named_together": {
+   "outcome": "passed",
+   "seconds": 0.089
+  },
+  "tests/test_session_heal.py::test_defeaturing_refuses_only_the_half_wall_beside_a_complete_hole": {
+   "outcome": "passed",
+   "seconds": 0.063
+  },
+  "tests/test_session_heal.py::test_defeaturing_rejects_an_entity_that_is_not_a_face": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_session_heal.py::test_defeaturing_rejects_faces_from_two_bodies": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_heal.py::test_every_repair_operation_reports_a_validity_verdict[heal]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_heal.py::test_every_repair_operation_reports_a_validity_verdict[remove_internal_wires]": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_session_heal.py::test_every_repair_operation_reports_a_validity_verdict[sew]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_heal.py::test_every_repair_operation_reports_a_validity_verdict[unify]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_heal.py::test_healing_a_clean_model_changes_no_entity_and_reports_valid": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_heal.py::test_healing_an_empty_selection_raises_rather_than_healing_everything": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_heal.py::test_healing_commits_a_shape_it_cannot_repair_and_says_so": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_heal.py::test_healing_one_body_leaves_every_entity_of_the_other_identical": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_heal.py::test_healing_rejects_a_max_tolerance_below_the_minimum": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_heal.py::test_healing_rejects_a_non_positive_precision": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_heal.py::test_imprinting_a_plane_splits_the_target_and_keeps_the_tool": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_heal.py::test_imprinting_rejects_a_body_named_on_both_sides": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_heal.py::test_imprinting_rejects_an_empty_tool_list": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_heal.py::test_imprinting_with_full_gluing_handles_face_coincident_bodies": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_heal.py::test_merging_keeps_every_face_id_alive_rather_than_deleting_the_losers": {
+   "outcome": "passed",
+   "seconds": 0.011
+  },
+  "tests/test_session_heal.py::test_merging_rejects_having_both_modes_off": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_heal.py::test_merging_same_domain_faces_halves_a_fused_seam": {
+   "outcome": "passed",
+   "seconds": 0.011
+  },
+  "tests/test_session_heal.py::test_removal_builds_nothing_so_it_reports_no_verdict": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_heal.py::test_removing_a_body_kills_its_ids_and_leaves_the_rest_alone": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_heal.py::test_removing_an_already_dead_id_raises": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_heal.py::test_removing_an_empty_selection_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_heal.py::test_removing_internal_wires_clears_a_small_hole": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_heal.py::test_removing_internal_wires_keeps_a_hole_above_the_threshold": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_heal.py::test_removing_internal_wires_rejects_a_non_positive_min_area": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_heal.py::test_sewing_a_box_resting_on_a_box_makes_two_solids": {
+   "outcome": "passed",
+   "seconds": 0.012
+  },
+  "tests/test_session_heal.py::test_sewing_a_closed_shell_can_close_it_into_a_solid": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_heal.py::test_sewing_a_face_onto_its_own_copy_is_refused_and_changes_nothing": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_heal.py::test_sewing_a_shell_that_folds_through_itself_is_refused_and_changes_nothing": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_session_heal.py::test_sewing_a_thin_sheet_still_commits_it": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session_heal.py::test_sewing_a_tube_and_its_caps_commits_the_solid_with_its_interior_inside[False]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_heal.py::test_sewing_a_tube_and_its_caps_commits_the_solid_with_its_interior_inside[True]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_heal.py::test_sewing_a_tube_inside_a_cavity_makes_it_a_solid_of_its_own": {
+   "outcome": "passed",
+   "seconds": 0.016
+  },
+  "tests/test_session_heal.py::test_sewing_a_tube_inside_a_tube_makes_a_hollow_solid": {
+   "outcome": "passed",
+   "seconds": 0.016
+  },
+  "tests/test_session_heal.py::test_sewing_a_tube_standing_inside_a_tube_is_refused_and_changes_nothing": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_session_heal.py::test_sewing_an_empty_selection_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_heal.py::test_sewing_into_a_solid_keeps_a_face_that_sewed_to_nothing": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_heal.py::test_sewing_leaves_an_open_shell_open_rather_than_faking_a_solid": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_heal.py::test_sewing_rejects_a_non_positive_tolerance": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_heal.py::test_sewing_six_loose_box_faces_still_commits_the_box": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_heal.py::test_sewing_two_abutting_faces_shares_their_common_edge": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_heal.py::test_sewing_two_crossing_tubes_makes_two_solids": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_heal.py::test_sewing_two_tubes_apart_makes_two_solids": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_heal.py::test_the_split_wall_plate_is_the_plate_its_closed_form_describes": {
+   "outcome": "passed",
+   "seconds": 0.011
+  },
+  "tests/test_session_identity.py::test_a_torn_history_costs_identity_on_a_real_industrial_assembly": {
+   "outcome": "passed",
+   "seconds": 24.213
+  },
+  "tests/test_session_identity.py::test_a_torn_history_is_caught_by_the_ground_truth_check": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_identity.py::test_a_torn_history_makes_names_resolve_lost_rather_than_wrong": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_identity.py::test_no_operation_sequence_makes_an_id_denote_the_wrong_entity": {
+   "outcome": "passed",
+   "seconds": 1.024
+  },
+  "tests/test_session_identity.py::test_restoring_the_same_mark_repeatedly_does_not_grow_the_id_space": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_identity.py::test_snapshot_and_restore_round_trip_at_any_depth": {
+   "outcome": "passed",
+   "seconds": 0.307
+  },
+  "tests/test_session_identity.py::test_snapshot_and_restore_stay_under_the_budget_at_every_depth": {
+   "outcome": "passed",
+   "seconds": 0.02
+  },
+  "tests/test_session_identity.py::test_snapshot_memory_growth_is_bounded_by_the_retained_state_count": {
+   "outcome": "passed",
+   "seconds": 0.039
+  },
+  "tests/test_session_identity.py::test_snapshot_stays_o1_on_a_real_industrial_assembly": {
+   "outcome": "passed",
+   "seconds": 0.661
+  },
+  "tests/test_session_identity.py::test_swapping_two_ground_truth_labels_is_caught": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_identity.py::test_the_identity_gate_holds_on_a_real_industrial_assembly": {
+   "outcome": "passed",
+   "seconds": 121.548
+  },
+  "tests/test_session_identity.py::test_the_same_fuse_passes_the_ground_truth_check_untorn": {
+   "outcome": "passed",
+   "seconds": 0.01
+  },
+  "tests/test_session_identity.py::test_two_hundred_mixed_operations_never_mis_resolve_an_id": {
+   "outcome": "passed",
+   "seconds": 27.077
+  },
+  "tests/test_session_ops.py::test_a_boolean_leaves_the_session_untouched_when_it_fails": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_a_boolean_on_a_face_id_raises_naming_the_wrong_kind[common]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_a_boolean_on_a_face_id_raises_naming_the_wrong_kind[cut]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_a_boolean_on_a_face_id_raises_naming_the_wrong_kind[section]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_a_boolean_on_a_face_id_raises_naming_the_wrong_kind[split]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_a_boolean_runs_non_destructively_so_an_earlier_snapshot_is_intact": {
+   "outcome": "passed",
+   "seconds": 0.015
+  },
+  "tests/test_session_ops.py::test_a_boolean_with_a_negative_fuzzy_raises[common]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_a_boolean_with_a_negative_fuzzy_raises[cut]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_a_boolean_with_a_negative_fuzzy_raises[section]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_a_boolean_with_a_negative_fuzzy_raises[split]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_a_chamfer_distance_occt_cannot_build_raises_naming_the_edge": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_ops.py::test_a_chamfer_face_without_its_second_distance_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_a_chamfer_removes_the_prism_of_a_right_isosceles_triangle": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_a_copy_moves_independently_of_its_original": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_a_fillet_radius_occt_cannot_build_raises_naming_the_edge": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_a_folded_ruled_loft_is_refused_and_changes_nothing": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_ops.py::test_a_half_swept_sphere_has_half_the_volume": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_ops.py::test_a_mirror_rebuilds_the_geometry_rather_than_relocating_it": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_ops.py::test_a_mirror_reflects_the_model_and_preserves_its_volume": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_ops.py::test_a_non_positive_scale_factor_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_a_rigid_transform_is_a_location_only_change": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_ops.py::test_a_scale_factor_of_one_raises_rather_than_burning_an_operation": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_a_smooth_loft_through_the_same_sections_is_committed": {
+   "outcome": "passed",
+   "seconds": 0.04
+  },
+  "tests/test_session_ops.py::test_a_split_targets_name_resolves_as_ambiguous": {
+   "outcome": "passed",
+   "seconds": 0.009
+  },
+  "tests/test_session_ops.py::test_a_sweep_angle_outside_zero_to_two_pi_raises[-1.0-angle_rad]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_ops.py::test_a_sweep_angle_outside_zero_to_two_pi_raises[0.0-angle_rad]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_ops.py::test_a_sweep_angle_outside_zero_to_two_pi_raises[6.383185307179586-angle_rad]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_a_tangent_chain_of_24_edges_fillets_in_one_call": {
+   "outcome": "passed",
+   "seconds": 0.044
+  },
+  "tests/test_session_ops.py::test_a_torus_tube_wider_than_its_ring_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_a_transform_leaves_every_entity_id_unchanged[mirror-kwargs2]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_a_transform_leaves_every_entity_id_unchanged[rotate-kwargs1]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_a_transform_leaves_every_entity_id_unchanged[scale-kwargs3]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_a_transform_leaves_every_entity_id_unchanged[translate-kwargs0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_a_transform_scoped_to_one_body_leaves_the_other_where_it_is": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_ops.py::test_a_two_distance_chamfer_against_a_reference_face_removes_the_right_wedge": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_ops.py::test_a_uniform_scale_cubes_the_volume": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_ops.py::test_a_uniform_scale_keeps_a_cylinder_analytic": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_a_variable_radius_fillet_removes_more_than_its_smaller_constant_twin": {
+   "outcome": "passed",
+   "seconds": 0.018
+  },
+  "tests/test_session_ops.py::test_add_arc_through_collinear_points_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_arc_through_three_points_of_a_semicircle_has_pi_r_length": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_box_is_valid_and_has_the_closed_form_volume": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_ops.py::test_add_bspline_starts_and_ends_at_its_outer_poles": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_bspline_with_a_degree_above_the_pole_count_is_clamped_not_rejected": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_circle_edge_length_is_the_circumference": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_cone_volume_matches_the_frustum_formula": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_add_cone_with_a_zero_top_radius_is_a_valid_sharp_cone": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_add_cone_with_two_equal_radii_raises_pointing_at_add_cylinder": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_cylinder_volume_matches_pi_r_squared_h": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_add_ellipse_closed_by_make_face_has_the_pi_a_b_area": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_add_ellipse_perimeter_matches_the_second_kind_elliptic_integral": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_ellipse_with_a_non_positive_radius_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_ellipse_with_ry_above_rx_puts_the_major_axis_along_y": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_ellipse_with_x_dir_parallel_to_the_normal_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_ellipse_x_dir_orients_the_major_axis_in_the_plane": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_helix_length_matches_the_analytic_helix": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_ops.py::test_add_line_between_coincident_points_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_line_edge_length_is_the_point_distance": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_polyline_closed_has_one_edge_per_segment_and_the_perimeter_length": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_polyline_open_leaves_the_loop_unclosed": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_polyline_with_a_malformed_array_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_rectangle_area_is_dx_times_dy": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_sphere_volume_matches_four_thirds_pi_r_cubed": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_add_spline_passes_through_its_points_within_tolerance": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_torus_volume_matches_the_pappus_value": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_add_vertex_extrudes_to_an_edge_keeping_its_id": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_vertex_is_a_body_of_its_own_carrying_one_id": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_add_wedge_volume_matches_the_trapezoidal_prism": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_ops.py::test_an_anisotropic_scale_leaves_every_entity_id_unchanged": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_session_ops.py::test_an_occt_construction_error_surfaces_as_a_typed_pysmesh_error": {
+   "outcome": "passed",
+   "seconds": 0.01
+  },
+  "tests/test_session_ops.py::test_common_keeps_only_the_overlap": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session_ops.py::test_common_leaves_both_operand_ids_on_the_one_result_solid": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_ops.py::test_copy_duplicates_the_body_with_wholly_new_ids": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_ops.py::test_copy_with_an_empty_selection_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_cut_removes_exactly_the_tool_volume": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session_ops.py::test_every_pre_fuse_face_id_lands_on_the_face_it_geometrically_belongs_to": {
+   "outcome": "passed",
+   "seconds": 0.009
+  },
+  "tests/test_session_ops.py::test_every_section_curve_is_named_against_the_operand_it_came_from": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_ops.py::test_extrude_a_rectangle_gives_the_box_volume": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_ops.py::test_extrude_keeps_the_profiles_entity_ids": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_extrude_with_a_zero_vector_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_extruded_walls_are_named_against_the_profile_they_came_from": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_extruding_a_solid_raises_rather_than_sweeping_element_wise": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_fragment_keeps_every_piece_and_both_operand_ids": {
+   "outcome": "passed",
+   "seconds": 0.016
+  },
+  "tests/test_session_ops.py::test_fragment_with_one_solid_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_fuse_of_two_touching_boxes_matches_the_split_box_fixtures_topology": {
+   "outcome": "passed",
+   "seconds": 0.009
+  },
+  "tests/test_session_ops.py::test_make_face_from_a_closed_polyline_keeps_every_edge_id": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_make_face_on_a_non_planar_boundary_raises_rather_than_approximating": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_ops.py::test_make_filling_spans_a_non_planar_boundary": {
+   "outcome": "passed",
+   "seconds": 0.011
+  },
+  "tests/test_session_ops.py::test_make_wire_joins_loose_edges_into_one_body": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_make_wire_keeps_edge_ids_when_the_vertices_are_already_shared": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_make_wire_on_an_edge_of_a_solid_raises_rather_than_consuming_the_solid": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_make_wire_over_coincident_vertices_rebuilds_the_edges_and_says_so": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_pipe_along_a_straight_spine_gives_area_times_length": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_pipe_shell_closes_into_a_solid_of_the_same_volume": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_revolve_a_rectangle_about_z_gives_the_annular_cylinder_volume": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_ops.py::test_section_adds_curves_and_consumes_nothing": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_ops.py::test_section_of_disjoint_solids_creates_nothing": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_ops.py::test_split_divides_the_target_and_keeps_the_tool": {
+   "outcome": "passed",
+   "seconds": 0.01
+  },
+  "tests/test_session_ops.py::test_thru_sections_between_two_squares_gives_the_frustum_volume": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_ops.py::test_thru_sections_naming_the_same_body_twice_raises": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_ops.py::test_thru_sections_with_one_section_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_a_bored_faces_hole_is_a_separate_inner_wire": {
+   "outcome": "passed",
+   "seconds": 0.009
+  },
+  "tests/test_session_query.py::test_a_bores_outward_normal_points_into_the_hole": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session_query.py::test_a_box_edge_and_the_same_line_as_a_free_edge_share_one_tangent": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_a_box_face_has_one_wire_of_four_edges": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_query.py::test_a_curves_axis_does_not_depend_on_the_edges_orientation": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_query.py::test_a_cylinder_matches_its_closed_form_at_every_setting[0.001]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_query.py::test_a_cylinder_matches_its_closed_form_at_every_setting[1e-06]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_query.py::test_a_cylinder_matches_its_closed_form_at_every_setting[1e-12]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_query.py::test_a_cylinder_matches_its_closed_form_at_every_setting[None]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_query.py::test_a_degenerate_edge_reports_no_tangent": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_query.py::test_a_faces_wires_partition_its_adjacency_edges": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session_query.py::test_a_free_form_edge_reports_no_curve_parameters_at_all": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_query.py::test_a_free_form_face_reports_no_parameters_at_all": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_query.py::test_a_planes_axis_and_reversed_flag_give_the_outward_normal": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_query.py::test_a_planes_origin_lies_on_the_plane": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_query.py::test_a_projections_parameters_reproduce_its_point": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_query.py::test_a_query_after_a_restore_sees_the_restored_topology": {
+   "outcome": "passed",
+   "seconds": 0.009
+  },
+  "tests/test_session_query.py::test_a_query_after_an_edit_sees_the_new_topology": {
+   "outcome": "passed",
+   "seconds": 0.01
+  },
+  "tests/test_session_query.py::test_a_seam_edge_is_listed_once_in_its_wire": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_session_query.py::test_a_strict_search_excludes_a_partly_overlapping_entity": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_a_tangent_is_not_flipped_by_the_edges_orientation": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_a_vertex_at_a_precision_is_exact": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_a_vertex_of_a_solid_is_at_no_distance_from_a_face_that_owns_it": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_adjacency_gives_a_boxs_edge_to_face_incidences": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_adjacency_gives_a_boxs_face_to_edge_incidences": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_adjacency_rejects_a_kind_related_to_itself": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_adjacency_relates_faces_to_the_solid_that_owns_them": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_an_edge_at_a_precision_matches_any_parabolas_closed_form": {
+   "outcome": "passed",
+   "seconds": 0.046
+  },
+  "tests/test_session_query.py::test_an_edge_at_a_precision_measures_the_length_the_fixed_rule_misses": {
+   "outcome": "passed",
+   "seconds": 0.025
+  },
+  "tests/test_session_query.py::test_an_ordered_wire_is_a_closed_chain_of_edges": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_query.py::test_bounding_boxes_agree_with_the_full_entity_table": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_bounding_boxes_cover_the_model": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_containment_answers_for_several_solids_at_once": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_query.py::test_containment_rejects_a_non_positive_tolerance": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_containment_rejects_an_entity_that_is_not_a_solid": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_containment_separates_inside_from_outside_and_on": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_curvature_converges_upwards_as_the_grid_refines": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_query.py::test_curvature_of_a_cone_matches_the_grids_closed_form[16]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_curvature_of_a_cone_matches_the_grids_closed_form[1]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_curvature_of_a_cone_matches_the_grids_closed_form[4]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_curvature_of_a_cylinder_is_one_over_its_radius[16]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_curvature_of_a_cylinder_is_one_over_its_radius[1]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_curvature_of_a_cylinder_is_one_over_its_radius[4]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_curvature_of_a_sphere_is_one_over_its_radius[16]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_curvature_of_a_sphere_is_one_over_its_radius[1]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_query.py::test_curvature_of_a_sphere_is_one_over_its_radius[4]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_query.py::test_curvature_of_a_torus_is_one_over_its_tube_radius[16]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_query.py::test_curvature_of_a_torus_is_one_over_its_tube_radius[1]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_query.py::test_curvature_of_a_torus_is_one_over_its_tube_radius[4]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_query.py::test_curvature_rejects_a_sample_count_below_one": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_query.py::test_curvature_rejects_an_empty_face_list": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_query.py::test_curvature_reports_where_the_peak_is_not_only_how_large": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_curvature_skips_samples_outside_the_faces_trimming": {
+   "outcome": "passed",
+   "seconds": 0.011
+  },
+  "tests/test_session_query.py::test_curve_at_accepts_both_ends_of_the_reported_range": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_query.py::test_curve_at_of_no_parameters_is_empty": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_curve_at_rejects_a_face_id": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_curve_at_rejects_a_parameter_outside_the_edges_bounds[-0.25]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_query.py::test_curve_at_rejects_a_parameter_outside_the_edges_bounds[6.533185307179586]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_query.py::test_curve_at_reproduces_a_lines_own_parametrisation": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_curve_at_walks_a_tilted_circle": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_curve_geometry_follows_the_order_named": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_curve_geometry_reads_every_analytic_curve_in_one_call": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_curve_geometry_rejects_a_face_id": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_query.py::test_curve_geometry_rejects_an_empty_edge_list": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_query.py::test_distance_between_a_box_and_a_sphere_matches_the_closed_form": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_query.py::test_distance_from_an_entity_to_itself_is_refused": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_distance_rejects_an_id_the_session_never_issued": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_distance_reports_a_minimum_that_is_attained_more_than_once": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_query.py::test_each_distance_witness_point_lies_on_its_own_entity": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_query.py::test_edge_parameter_bounds_span_each_edges_length": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_entities_in_box_finds_everything_inside_a_generous_box": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_query.py::test_entities_in_box_rejects_an_inverted_box": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_entity_types_names_a_boxs_planes_and_lines": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_entity_types_recognises_a_circular_edge": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_query.py::test_entity_types_recognises_each_analytic_surface[cone-Cone]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_entity_types_recognises_each_analytic_surface[cylinder-Cylinder]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_entity_types_recognises_each_analytic_surface[sphere-Sphere]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_query.py::test_entity_types_recognises_each_analytic_surface[torus-Torus]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_session_query.py::test_every_box_face_normal_points_out_of_the_body": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_every_face_has_exactly_one_outer_wire": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_session_query.py::test_face_parameter_bounds_rejects_an_edge_id": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_face_parameter_bounds_span_the_faces_extent": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_face_wires_follow_the_order_named": {
+   "outcome": "passed",
+   "seconds": 0.01
+  },
+  "tests/test_session_query.py::test_face_wires_of_no_faces_is_empty": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_query.py::test_face_wires_rejects_an_edge_id": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_query.py::test_mass_properties_measure_each_kind_by_its_own_dimension": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_mass_properties_of_a_solid_match_the_closed_form": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_mass_properties_refuses_a_precision_above_the_adaptive_cap[0.002]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_mass_properties_refuses_a_precision_above_the_adaptive_cap[0.5]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_mass_properties_refuses_a_precision_that_is_not_a_relative_error[-1e-09--1e-09]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_mass_properties_refuses_a_precision_that_is_not_a_relative_error[-inf--inf]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_mass_properties_refuses_a_precision_that_is_not_a_relative_error[0.0-0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_mass_properties_refuses_a_precision_that_is_not_a_relative_error[inf-inf]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_mass_properties_refuses_a_precision_that_is_not_a_relative_error[nan-nan]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_mass_properties_rejects_a_dead_id": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_no_query_advances_the_session": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_query.py::test_projecting_onto_a_sphere_finds_the_nearest_surface_point": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_projecting_rejects_points_that_are_not_triples": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_query.py::test_summing_edge_measures_does_not_double_count_shared_edges": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_surface_at_rejects_parameters_that_are_not_pairs": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_surface_at_returns_points_on_the_face": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_surface_parameters_follow_the_order_named": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session_query.py::test_surface_parameters_of_a_cone_reproduce_its_taper": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_query.py::test_surface_parameters_of_a_revolution_give_only_its_axis": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_surface_parameters_of_a_sphere_give_the_radius_its_area_implies": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_query.py::test_surface_parameters_of_a_torus_give_both_radii_the_right_way_round": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_query.py::test_surface_parameters_of_an_extrusion_name_its_sweep_line": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_surface_parameters_read_a_bores_radius_off_the_surface": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_query.py::test_surface_parameters_rejects_an_edge_id": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_surface_parameters_types_agree_with_entity_types": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_query.py::test_the_centre_sample_of_a_cone_is_provably_wrong": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_the_edge_ranges_tile_the_edge_array": {
+   "outcome": "passed",
+   "seconds": 0.01
+  },
+  "tests/test_session_query.py::test_the_hole_edges_are_circles_of_the_bores_radius": {
+   "outcome": "passed",
+   "seconds": 0.011
+  },
+  "tests/test_session_query.py::test_the_tee_at_a_precision_matches_its_closed_form": {
+   "outcome": "passed",
+   "seconds": 0.02
+  },
+  "tests/test_session_query.py::test_the_tee_closed_form_is_the_value_the_brief_cites": {
+   "outcome": "passed",
+   "seconds": 0.01
+  },
+  "tests/test_session_query.py::test_the_tee_without_a_precision_reads_the_fixed_rule_as_before": {
+   "outcome": "passed",
+   "seconds": 0.03
+  },
+  "tests/test_session_query.py::test_the_two_adjacency_directions_are_the_same_relation": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_query.py::test_two_edges_of_one_circle_report_the_same_axis": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_tessellate.py::test_a_box_tessellates_to_twelve_triangles_over_twenty_four_nodes": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_tessellate.py::test_a_coarser_request_is_ignored_unless_the_call_is_non_incremental": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session_tessellate.py::test_a_deflection_below_occts_floor_is_refused[-1.0]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_tessellate.py::test_a_deflection_below_occts_floor_is_refused[0.0]": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_tessellate.py::test_a_deflection_below_occts_floor_is_refused[1e-12]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_tessellate.py::test_a_face_created_by_the_operation_is_always_in_the_delta": {
+   "outcome": "passed",
+   "seconds": 0.013
+  },
+  "tests/test_session_tessellate.py::test_a_face_id_from_the_mesh_resolves_through_the_registry": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_tessellate.py::test_a_finer_angle_refines_a_curved_face": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_tessellate.py::test_a_finer_deflection_re_triangulates_a_curved_face": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_session_tessellate.py::test_a_first_tessellation_reports_every_face": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_tessellate.py::test_a_free_edge_gets_a_polyline_of_its_own_nodes": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_tessellate.py::test_a_full_tessellation_beats_the_reference_mesher_on_a_real_assembly": {
+   "outcome": "skipped",
+   "seconds": 0.119,
+   "message": "reference mesher not installed"
+  },
+  "tests/test_session_tessellate.py::test_a_non_incremental_call_rebuilds_everything": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_tessellate.py::test_a_relocated_face_is_reported_changed_but_not_retriangulated": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_tessellate.py::test_a_relocation_moves_the_nodes_rigidly": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_tessellate.py::test_a_restored_snapshot_keeps_its_cached_mesh": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_tessellate.py::test_a_sphere_tessellates_close_to_its_analytic_area": {
+   "outcome": "passed",
+   "seconds": 0.017
+  },
+  "tests/test_session_tessellate.py::test_a_wire_body_with_no_faces_still_yields_polylines_and_points": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_tessellate.py::test_an_angle_outside_the_open_half_turn_is_refused[-5.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_tessellate.py::test_an_angle_outside_the_open_half_turn_is_refused[0.0]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_tessellate.py::test_an_angle_outside_the_open_half_turn_is_refused[180.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_tessellate.py::test_an_angle_outside_the_open_half_turn_is_refused[400.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_tessellate.py::test_an_edge_id_from_the_mesh_bounds_the_face_beside_it": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_tessellate.py::test_an_empty_session_tessellates_to_empty_arrays": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_session_tessellate.py::test_an_operation_on_one_body_leaves_the_other_body_untouched": {
+   "outcome": "passed",
+   "seconds": 0.015
+  },
+  "tests/test_session_tessellate.py::test_both_delta_assertions_are_shown_to_bite": {
+   "outcome": "passed",
+   "seconds": 0.017
+  },
+  "tests/test_session_tessellate.py::test_box_normals_point_outward_on_all_six_faces": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_tessellate.py::test_curved_faces_get_more_nodes_at_a_finer_deflection": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_tessellate.py::test_edge_and_vertex_coverage_holds_on_a_curved_model": {
+   "outcome": "passed",
+   "seconds": 0.009
+  },
+  "tests/test_session_tessellate.py::test_every_array_has_the_dtype_the_contract_states": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_tessellate.py::test_every_edge_of_a_solid_carries_a_polyline": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_tessellate.py::test_every_shared_edge_node_pair_is_bitwise_equal_not_merely_close": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_tessellate.py::test_every_triangle_index_lands_inside_its_own_face_node_range": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_tessellate.py::test_every_vertex_of_a_solid_carries_a_point": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_tessellate.py::test_interior_nodes_of_adjacent_faces_are_never_merged": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_tessellate.py::test_no_two_nodes_are_close_without_being_bitwise_equal": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_tessellate.py::test_parallel_and_serial_meshes_are_identical": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_tessellate.py::test_polyline_nodes_are_the_face_nodes_not_a_second_discretisation": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_tessellate.py::test_polyline_segments_index_real_nodes_and_lie_on_the_geometry": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_tessellate.py::test_re_tessellation_after_one_operation_touches_a_small_fraction_of_a_real_assembly": {
+   "outcome": "passed",
+   "seconds": 13.611
+  },
+  "tests/test_session_tessellate.py::test_relative_mode_scales_the_deflection_to_each_edge": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_session_tessellate.py::test_removing_a_body_drops_its_faces_from_the_mesh": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_tessellate.py::test_tessellating_does_not_disturb_the_entity_table": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_tessellate.py::test_tessellating_issues_no_id_and_advances_no_counter": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_tessellate.py::test_tessellating_twice_with_no_operation_between_reports_nothing": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_tessellate.py::test_the_mesh_is_not_welded_so_each_face_keeps_its_own_nodes": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_tessellate.py::test_the_render_mesh_covers_every_edge_and_vertex_of_a_real_assembly": {
+   "outcome": "passed",
+   "seconds": 4.208
+  },
+  "tests/test_session_tessellate.py::test_the_reported_delta_equals_the_faces_whose_nodes_actually_changed": {
+   "outcome": "passed",
+   "seconds": 0.013
+  },
+  "tests/test_session_tessellate.py::test_the_second_tessellation_returns_the_same_arrays_as_the_first": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_session_tessellate.py::test_the_three_id_arrays_never_collide": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_tessellate.py::test_three_faces_meeting_at_a_corner_place_bitwise_identical_nodes": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_session_tessellate.py::test_triangle_edge_and_vertex_ids_are_all_session_entity_ids": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_session_tessellate.py::test_triangle_face_ids_agree_with_the_per_face_ranges": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_session_tessellate.py::test_two_sessions_tessellate_without_cross_talk": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_shape.py::test_face_adjacency_box_each_face_has_degree_four": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_face_adjacency_box_one_triple_per_edge": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_face_adjacency_cylinder_wall_touches_both_caps": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_face_adjacency_edge_ids_are_unique": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_face_adjacency_sphere_single_face_is_empty": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_face_adjacency_triples_are_ordered_and_in_range": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_face_distance_bad_face_id_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_face_distance_off_surface_equals_normal_offset": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_face_distance_on_surface_is_zero": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_face_ids_are_one_based_contiguous": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_load_brep_box_face_edge_vertex_counts": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_load_brep_box_total_area_equals_six_a_squared": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_load_brep_empty_bytes_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_shape.py::test_match_faces_beyond_tol_returns_minus_one": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_match_faces_empty_query_returns_empty": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_match_faces_mixed_batch": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_match_faces_own_centroids_is_identity": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_match_faces_result_dtype_int32": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_match_faces_within_tol_matches": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_match_faces_wrong_shape_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_match_faces_zero_tol_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_surface_type_box_all_planes": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_surface_type_cylinder_one_wall_two_caps": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_surface_type_is_str": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_shape.py::test_surface_type_sphere_is_sphere": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_step.py::test_public_namespace_exports": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_step.py::test_read_step_accepts_bytes": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_step.py::test_read_step_brep_loads_to_cube": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_step.py::test_read_step_bytes_and_path_agree": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_step.py::test_read_step_color_ordinal_matches_loaded_shape": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_step.py::test_read_step_face_color": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_step.py::test_read_step_labels_only_for_tagged_entities": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_step.py::test_read_step_m_length_unit_is_one": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_step.py::test_read_step_malformed_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_step.py::test_read_step_mm_length_unit_is_milli": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_step.py::test_read_step_native_extent_is_box_edge": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_step.py::test_read_step_physical_size_via_length_unit": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_step.py::test_read_step_returns_step_import": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_step.py::test_read_step_solid_name": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_step.py::test_read_step_unit_name_matches_length_unit": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_step.py::test_shape_solids_box_single_solid": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_step.py::test_shape_solids_centroid_is_box_center": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_step.py::test_shape_solids_open_shell_is_empty": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_step.py::test_write_step_bad_face_id_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_step.py::test_write_step_does_not_rescale_coordinates[CM]": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_step.py::test_write_step_does_not_rescale_coordinates[FT]": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_step.py::test_write_step_does_not_rescale_coordinates[INCH]": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_step.py::test_write_step_does_not_rescale_coordinates[KM]": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_step.py::test_write_step_does_not_rescale_coordinates[MM]": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_step.py::test_write_step_does_not_rescale_coordinates[M]": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_step.py::test_write_step_extreme_ratio_units_keep_the_unit_but_lose_digits[MIL]": {
+   "outcome": "passed",
+   "seconds": 0.01
+  },
+  "tests/test_step.py::test_write_step_extreme_ratio_units_keep_the_unit_but_lose_digits[UIN]": {
+   "outcome": "passed",
+   "seconds": 0.011
+  },
+  "tests/test_step.py::test_write_step_extreme_ratio_units_keep_the_unit_but_lose_digits[UM]": {
+   "outcome": "passed",
+   "seconds": 0.011
+  },
+  "tests/test_step.py::test_write_step_header_declares_requested_unit[CM-0.01]": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_step.py::test_write_step_header_declares_requested_unit[FT-0.3048]": {
+   "outcome": "passed",
+   "seconds": 0.007
+  },
+  "tests/test_step.py::test_write_step_header_declares_requested_unit[INCH-0.0254]": {
+   "outcome": "passed",
+   "seconds": 0.008
+  },
+  "tests/test_step.py::test_write_step_header_declares_requested_unit[M-1.0]": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_step.py::test_write_step_header_declares_requested_unit[MM-0.001]": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_step.py::test_write_step_returns_bytes": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_step.py::test_write_step_roundtrip_name_and_color": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_step.py::test_write_step_roundtrip_preserves_physical_size[named_box_m.step]": {
+   "outcome": "passed",
+   "seconds": 0.01
+  },
+  "tests/test_step.py::test_write_step_roundtrip_preserves_physical_size[named_box_mm.step]": {
+   "outcome": "passed",
+   "seconds": 0.013
+  },
+  "tests/test_step.py::test_write_step_unit_does_not_leak_into_iges": {
+   "outcome": "passed",
+   "seconds": 0.023
+  },
+  "tests/test_step.py::test_write_step_unit_is_case_insensitive": {
+   "outcome": "passed",
+   "seconds": 0.014
+  },
+  "tests/test_step.py::test_write_step_unknown_unit_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_tessellate.py::test_tessellate_box_all_six_faces_covered": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_tessellate.py::test_tessellate_box_face_ids_match_shape": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_tessellate.py::test_tessellate_box_nonempty": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_tessellate.py::test_tessellate_box_normals_axis_aligned": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_tessellate.py::test_tessellate_box_normals_unit_length": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_tessellate.py::test_tessellate_box_output_dtypes": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_tessellate.py::test_tessellate_box_output_shapes": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_tessellate.py::test_tessellate_box_relative_mode_valid": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_tessellate.py::test_tessellate_box_tris_index_range": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_tessellate.py::test_tessellate_box_winding_consistent_with_normals": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_tessellate.py::test_tessellate_cylinder_flat_cap_normals_axis_aligned": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_tessellate.py::test_tessellate_default_params": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_tessellate.py::test_tessellate_in_pysmesh_namespace": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_tessellate.py::test_tessellate_malformed_brep_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_tessellate.py::test_tessellate_params_invalid_ang_defl_raises[-5.0]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_tessellate.py::test_tessellate_params_invalid_ang_defl_raises[0.0]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_tessellate.py::test_tessellate_params_invalid_ang_defl_raises[180.0]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_tessellate.py::test_tessellate_params_invalid_ang_defl_raises[270.0]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_tessellate.py::test_tessellate_params_invalid_lin_defl_raises[-0.1]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_tessellate.py::test_tessellate_params_invalid_lin_defl_raises[-10000000000.0]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_tessellate.py::test_tessellate_params_invalid_lin_defl_raises[0.0]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_tessellate.py::test_tessellate_params_valid_boundary_values": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_tessellate.py::test_tessellate_relative_finer_than_absolute": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_tessellate.py::test_tessellate_sphere_face_id_range": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_tessellate.py::test_tessellate_sphere_normals_radial": {
+   "outcome": "passed",
+   "seconds": 0.009
+  },
+  "tests/test_tessellate.py::test_tessellate_sphere_tris_index_range": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_unify.py::test_unify_default_params_matches_explicit": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_unify.py::test_unify_face_map_is_int32_and_sized_to_before": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_unify.py::test_unify_faces_disabled_leaves_face_count_unchanged": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_unify.py::test_unify_malformed_brep_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_unify.py::test_unify_params_both_disabled_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_unify.py::test_unify_params_negative_angular_raises": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_unify.py::test_unify_params_nonpositive_linear_tol_raises[-1e-06]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_unify.py::test_unify_params_nonpositive_linear_tol_raises[0.0]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_unify.py::test_unify_preserves_total_surface_area": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_unify.py::test_unify_result_brep_reloads_with_healed_face_count": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_unify.py::test_unify_split_box_merges_coplanar_faces_many_to_one": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_unify.py::test_unify_split_box_perpendicular_faces_not_over_merged": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_unify.py::test_unify_split_box_reduces_face_count_to_canonical_six": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_unify.py::test_unify_split_box_removes_seam_edges": {
+   "outcome": "passed",
+   "seconds": 0.003
+  },
+  "tests/test_viscous_layers.py::test_bad_face_id_raises": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_viscous_layers.py::test_box_all_walls_prism_count": {
+   "outcome": "passed",
+   "seconds": 0.026
+  },
+  "tests/test_viscous_layers.py::test_box_first_layer_height_matches_geometric_series": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_viscous_layers.py::test_box_growth_ratio_series_present": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_viscous_layers.py::test_box_inner_surface_equals_wall_tris": {
+   "outcome": "passed",
+   "seconds": 0.005
+  },
+  "tests/test_viscous_layers.py::test_box_node_count_is_surface_times_layers": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_viscous_layers.py::test_box_zero_inverted_prisms": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_viscous_layers.py::test_degenerate_params_raise[kwargs0]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_viscous_layers.py::test_degenerate_params_raise[kwargs1]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_viscous_layers.py::test_degenerate_params_raise[kwargs2]": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_viscous_layers.py::test_degenerate_params_raise[kwargs3]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_viscous_layers.py::test_degenerate_params_raise[kwargs4]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_viscous_layers.py::test_degenerate_params_raise[kwargs5]": {
+   "outcome": "passed",
+   "seconds": 0.0
+  },
+  "tests/test_viscous_layers.py::test_is_ignore_complement_equivalence": {
+   "outcome": "passed",
+   "seconds": 0.009
+  },
+  "tests/test_viscous_layers.py::test_method_enum_values_are_fixed": {
+   "outcome": "passed",
+   "seconds": 0.001
+  },
+  "tests/test_viscous_layers.py::test_sphere_prism_count_and_coverage": {
+   "outcome": "passed",
+   "seconds": 0.006
+  },
+  "tests/test_viscous_layers.py::test_sphere_zero_inverted_prisms": {
+   "outcome": "passed",
+   "seconds": 0.017
+  },
+  "tests/test_vtk_privacy.py::test_mesh_harvest_returns_plain_numpy": {
+   "outcome": "passed",
+   "seconds": 0.004
+  },
+  "tests/test_vtk_privacy.py::test_no_vtk_type_in_any_pybind_export": {
+   "outcome": "passed",
+   "seconds": 0.016
+  },
+  "tests/test_vtk_privacy.py::test_no_vtk_type_registered_with_pybind": {
+   "outcome": "passed",
+   "seconds": 0.013
+  },
+  "tests/test_vtk_privacy.py::test_package_does_not_import_vtk": {
+   "outcome": "passed",
+   "seconds": 0.011
+  },
+  "tests/test_vtk_privacy.py::test_tessellate_returns_plain_numpy[face_id]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_vtk_privacy.py::test_tessellate_returns_plain_numpy[nodes]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_vtk_privacy.py::test_tessellate_returns_plain_numpy[tris]": {
+   "outcome": "passed",
+   "seconds": 0.002
+  },
+  "tests/test_vtk_privacy.py::test_typed_stubs_name_no_vtk_type": {
+   "outcome": "passed",
+   "seconds": 0.001
+  }
+ }
+}
