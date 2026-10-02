@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -74,13 +74,13 @@ namespace GEOMUtils
    * \brief Compute numerical functor for the shape.
    *
    * Resulting value can be used to sort out shapes according to some parameter.
-   * 
+   *
    * Returns a pair of two values (dist, functor) where
    * - \a dist is a some value that is computed according to the center of mass of given shape;
    * - \a functor is a numerical functor value
    *
    * The numerical functor is computed according to the shape's topological properties as follows:
-   * - orientation for vertices 
+   * - orientation for vertices
    * - length for edges and wires
    * - area for faces and shells
    * - volume for solids, compounds, compsolids
@@ -156,18 +156,22 @@ namespace GEOMUtils
 					TopTools_ListOfShape& theList);
 
   /*!
-   * \brief Build a triangulation on \a theShape if it is absent.
-   * \param theShape The shape to check/build triangulation on.
-   * \retval bool Returns false if the shape has no faces, i.e. impossible to build triangulation.
-   */
-  Standard_EXPORT bool CheckTriangulation (const TopoDS_Shape& theShape);
-  
-  /*!
    * \brief Return type of shape for explode. In case of compound it will be a type of its first sub shape.
    * \param theShape The shape to get type of.
    * \retval TopAbs_ShapeEnum Return type of shape for explode.
    */
   Standard_EXPORT TopAbs_ShapeEnum GetTypeOfSimplePart (const TopoDS_Shape& theShape);
+
+  /*!
+   * \brief Get the common shape type of the top-level shapes contained in the given shape.
+   *
+     *  In contrast to GetTypeOfSimplePart(), this function returns the common type of
+     *  the top-level sub-shapes of the COMPOUND, if there are multiple sub-shapes.
+     *  If there is no common shape type for the same COMPOUND, the generic SHAPE value is returned.
+   * \param theShape The shape to get common type of.
+   * \retval TopAbs_ShapeEnum Returns the common shape type.
+   */
+  Standard_EXPORT TopAbs_ShapeEnum GetCommonShapeType (const TopoDS_Shape& theShape);
 
   /*!
    * \brief Find an edge of theShape, closest to thePoint.
@@ -189,20 +193,6 @@ namespace GEOMUtils
   Standard_EXPORT Standard_Boolean PreciseBoundingBox(const TopoDS_Shape &theShape, Bnd_Box &theBox);
 
   /*!
-   * \brief Computes minumal distance between two shapes for singular cases
-   *        (workaround for bugs 19899, 19908 and 19910 from Mantis).
-   *
-   * \param aSh1 the first shape
-   * \param aSh2 the second shape
-   * \param Ptmp1 the output result point on the first shape
-   * \param Ptmp2 the output result point on the second shape
-   * \retval negative value if it is not a singular case; actual distance for singular case.
-   */
-  Standard_EXPORT Standard_Real GetMinDistanceSingular(const TopoDS_Shape& aSh1,
-						       const TopoDS_Shape& aSh2,
-						       gp_Pnt& Ptmp1, gp_Pnt& Ptmp2);
-  
-  /*!
    * \brief Computes minumal distance between two shapes.
    *
    * \param theShape1 the first shape
@@ -214,7 +204,34 @@ namespace GEOMUtils
   Standard_EXPORT Standard_Real GetMinDistance(const TopoDS_Shape& theShape1,
 					       const TopoDS_Shape& theShape2,
 					       gp_Pnt& thePnt1, gp_Pnt& thePnt2);
-  
+
+  /*!
+   * \brief Computes normal projection of \a thePoint to \a theFace.
+   *
+   * \param thePoint the 3d point
+   * \param theFace the face shape
+   * \param theU the output U parameter of the point on the face
+   * \param theV the output V parameter of the point on the face
+   * \param theTol the tolerance value. Maximum of theTol and 1e-04 will be used for calculation.
+   * \retval the projection (3d point) if found, throws an exception otherwise
+   */
+  Standard_EXPORT gp_Pnt ProjectPointOnFace(const gp_Pnt& thePoint,
+                                            const TopoDS_Shape& theFace,
+                                            double& theU, double& theV,
+                                            const double theTol = 1e-04);
+
+  /*!
+   * \brief Computes distance from \a thePoint to its normal projection on \a theFace.
+   *
+   * \param thePoint the 3d point
+   * \param theFace the face shape
+   * \param theTol the tolerance value. Maximum of theTol and 1e-04 will be used for calculation.
+   * \retval distance from \a thePoint to the projection point. If projection point is not found or is OUT of face boundary, -1 is returned.
+   */
+  Standard_EXPORT Standard_Real DistanceToProjectionOnFace(const gp_Pnt& thePoint,
+                                                           const TopoDS_Shape& theFace,
+                                                           const double theTol = 1e-04);
+
   /*!
    * \brief Returns the point clicked in 3D view.
    *
@@ -249,9 +266,12 @@ namespace GEOMUtils
    * \param shape input shape object
    * \param checkGeometry when set to \c true, causes check of underlying geometry
    *        in addition to the topology
+   * \param isExact when set to \c true, causes exact check of curves on surfaces
    * \return \c true if shape is valid or \c false otherwise
    */
-  Standard_EXPORT bool CheckShape( TopoDS_Shape& shape, bool checkGeometry = false );
+  Standard_EXPORT bool CheckShape( TopoDS_Shape& shape,
+                                   bool checkGeometry = false,
+                                   bool isExact = false );
 
   /*!
    * \brief Check boolean and partition operations arguments
@@ -261,7 +281,7 @@ namespace GEOMUtils
    *         operation or \c false otherwise
    */
   Standard_EXPORT bool CheckBOPArguments(const TopoDS_Shape &theShape);
-  
+
   /*!
    * \brief Limit shape tolerance to the given value
    *
@@ -278,34 +298,20 @@ namespace GEOMUtils
    *       passing \c true to \a checkGeometry parameter
    */
   Standard_EXPORT bool FixShapeTolerance( TopoDS_Shape& shape,
-                                          TopAbs_ShapeEnum type,
+                                          TopAbs_ShapeEnum type = TopAbs_SHAPE,
                                           Standard_Real tolerance = Precision::Confusion(),
-                                          bool checkGeometry = false );
-
-  /*!
-   * \brief Limit shape tolerance to the given value
-   * This is overloaded function, it behaves exactly as previous one
-   */
-  Standard_EXPORT bool FixShapeTolerance( TopoDS_Shape& shape,
-                                          Standard_Real tolerance = Precision::Confusion(),
-                                          bool checkGeometry = false );
-
-  /*!
-   * \brief Limit shape tolerance to the given value
-   * This is overloaded function, it behaves exactly as previous one
-   */
-  Standard_EXPORT bool FixShapeTolerance( TopoDS_Shape& shape,
-                                          bool checkGeometry );
+                                          bool checkGeometry = false,
+                                          bool isExactAdjust = false );
 
   /*!
    * \brief Fix curves of the given shape
-   * 
+   *
    * The function checks each curve of the input shape in the following way:
    * - compute deviation of the curve from the underlying surface in a set of points
    *   computed with the certain discretization step value
    * - find maximum tolerance between computed deviation values
    * - limit tolerance of the curve with the computed maximum value
-   * 
+   *
    * \param shape shape being fixed
    * \return \c true if resulting shape is valid
    */
@@ -319,7 +325,7 @@ namespace GEOMUtils
    */
   Standard_EXPORT bool Write( const TopoDS_Shape& shape,
                               const char* fileName );
-  
+
   /*!
    * \brief Extract single SOLID from COMPSOLID or COMPOUND.
    *
@@ -333,20 +339,38 @@ namespace GEOMUtils
   Standard_EXPORT TopoDS_Shape ReduceCompound( const TopoDS_Shape& shape );
 
   /*!
-   * \brief Generate triangulation for the shape.
-   *
-   * \param shape shape being meshed
-   * \param deflection deflection coefficient to be used
-   * \param forced if \c true, causes generation of mesh regardless it is already present in the shape
-   */
-  Standard_EXPORT void MeshShape( const TopoDS_Shape shape,
-                                  double deflection, bool forced = true );
-
-  /*!
    * \brief Get default deflection coefficient used for triangulation
    * \return default deflection value
    */
   Standard_EXPORT double DefaultDeflection();
+
+  /*!
+   * \brief Generate triangulation for \a theShape.
+   *
+   * \param theShape shape to be meshed.
+   * \param theDeflection deflection coefficient to be used.
+   * \param theForced if \c true, causes generation of mesh regardless it is already present in the shape.
+   * \param theAngleDeflection angular deflection coefficient to be used.
+   * \param isRelative if true, \a theDeflection is considered relative to \a theShape maximum axial dimension.
+   * \param doPostCheck if true, check mesh generation result and return corresponding boolean value.
+   * \retval bool Returns false in the following cases:
+   *              1. The shape has neither faces nor edges, i.e. impossible to build triangulation or polygon.
+   *              2. \a theForced is false and \a theShape has no mesh or has incomplete mesh.
+   *              3. \a doPostCheck is true and mesh generation failed or produced an incomplete mesh.
+   */
+  Standard_EXPORT bool MeshShape( const TopoDS_Shape theShape,
+                                  const double theDeflection = DefaultDeflection(),
+                                  const bool theForced = true,
+                                  const double theAngleDeflection = 0.5,
+                                  const bool isRelative = true,
+                                  const bool doPostCheck = false);
+
+  /*!
+   * \brief Build a triangulation on \a theShape if it is absent.
+   * \param theShape The shape to check/build triangulation on.
+   * \retval bool Returns false if the shape has no faces, i.e. impossible to build triangulation.
+   */
+  Standard_EXPORT bool CheckTriangulation (const TopoDS_Shape& theShape);
 
   /**
    * \brief Check if the shape is not a closed wire or edge.

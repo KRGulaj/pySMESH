@@ -1,4 +1,4 @@
-// Copyright (C) 2015-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2015-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -17,6 +17,10 @@
 // See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
 //
 
+
+#include <Basics_OCCTVersion.hxx>
+
+#if OCC_VERSION_LARGE < 0x07070000
 
 #include <GEOMUtils_HTrsfCurve2d.hxx>
 
@@ -45,3 +49,5 @@ GEOMUtils::HTrsfCurve2d::HTrsfCurve2d(const Handle(Geom2d_Curve) &theCurve,
 : myCurve (theCurve, theUFirst, theULast, theTrsf)
 {
 }
+
+#endif

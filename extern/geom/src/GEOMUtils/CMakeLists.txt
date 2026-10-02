@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -22,9 +22,12 @@
 # additional include directories
 INCLUDE_DIRECTORIES(
   ${OpenCASCADE_INCLUDE_DIR}
+  ${CommonGeomLib_INCLUDE_DIRS}
   ${PTHREAD_INCLUDE_DIR}
   ${LIBXML2_INCLUDE_DIR}
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${KERNEL_INCLUDE_DIRS}
+  ${PROJECT_SOURCE_DIR}/src/GEOM
   ${CMAKE_CURRENT_SOURCE_DIR}
   )
 
@@ -39,14 +42,17 @@ SET(_link_LIBRARIES
   ${OpenCASCADE_ModelingData_LIBRARIES} 
   ${OpenCASCADE_ModelingAlgorithms_LIBRARIES} 
   ${OpenCASCADE_Visualization_LIBRARIES}
+  ${CommonGeomLib_GEOMAlgo}
   ${LIBXML2_LIBRARIES}
-  ${KERNEL_SALOMELocalTrace}
+  GEOMbasic
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
   )
 
 # --- headers ---
 
 SET(GEOMUtils_HEADERS
   GEOMUtils.hxx
+  GEOMUtils_GetInPlace.hxx
   GEOMUtils_Hatcher.hxx
   GEOMUtils_HTrsfCurve2d.hxx
   GEOMUtils_ShapeStatistics.hxx
@@ -58,6 +64,7 @@ SET(GEOMUtils_HEADERS
 
 SET(GEOMUtils_SOURCES
   GEOMUtils.cxx
+  GEOMUtils_GetInPlace.cxx
   GEOMUtils_Hatcher.cxx
   GEOMUtils_HTrsfCurve2d.cxx
   GEOMUtils_ShapeStatistics.cxx
