@@ -5,7 +5,8 @@
 // pySMESH v2 capability probe — OCCT side (primitives through the Gmsh handoff, plus IGES).
 //
 // Every OCCT class the v2 Tier-C modelling surface needs is constructed and run here, against
-// the pinned conda-forge occt=8.0.0 headers. Where OCCT 8.0's API differs from what was
+// the pinned OCCT 8.0.1 headers (our own build, ci/build_occt.py; written against
+// conda-forge occt=8.0.0, the pin up to 4.2.2). Where OCCT 8.0's API differs from what was
 // assumed going in, the difference is recorded in a comment at the call site — that is the
 // "verify at source" output the C1 milestone convention asks for.
 

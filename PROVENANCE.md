@@ -145,8 +145,10 @@ them, which is why the acceptance gates for each package run the code.
 ## OCCT toolkits linked & bundled
 
 `_core.pyd` links OCCT dynamically; the wheel bundles (at delvewheel-repair time) every OCCT
-toolkit it needs directly or transitively. All are conda-forge `occt=8.0.0`, LGPL-2.1 with the
-exception (see [NOTICE.md](NOTICE.md)); this records *which* toolkits and *why*, not a new source.
+toolkit it needs directly or transitively. All come from our own build of OCCT 8.0.1 (see
+[How OCCT is built](#how-occt-is-built)), LGPL-2.1 with the exception (see
+[NOTICE.md](NOTICE.md)); this records *which* toolkits and *why*, not a new source. Up to
+4.2.2 they came from the conda-forge package `occt=8.0.0`.
 
 - Modelling / meshing (present since B2–B3): TKernel, TKMath, TKG2d, TKG3d, TKGeomBase,
   TKGeomAlgo, TKBRep, TKTopAlgo, TKPrim, TKBO, TKMesh, TKShHealing, TKOffset, plus the
@@ -164,6 +166,50 @@ exception (see [NOTICE.md](NOTICE.md)); this records *which* toolkits and *why*,
   **TKXCAF**/**TKVCAF** (XDE shape/colour/name tools), **TKLCAF**/**TKCAF**/**TKCDF** (OCAF
   document core), **TKXSBase** (data-exchange base). Explicitly listed in the root
   `CMakeLists.txt` `_core` link block. `ci/check_wheel.py` asserts these are bundled.
+
+## How OCCT is built
+
+Up to 4.2.2 OCCT came from the conda-forge package `occt=8.0.0`. Since then
+`ci/build_occt.py` builds it from source. The local build and CI run the same script, and
+CI caches the result on the script's input set (tag, commit, CMake options, MSVC toolset).
+
+| Item | Value |
+|---|---|
+| Upstream | [Open-Cascade-SAS/OCCT](https://github.com/Open-Cascade-SAS/OCCT) |
+| Tag | `V8_0_1` |
+| Commit | `b8f597c677811d1f9f4d8a97f5ae2825c0353a42` (the script refuses any other) |
+| Patches | none: the script refuses a source tree with modified files |
+| Library type | shared (DLLs), bundled into the wheel and name-mangled by delvewheel |
+| Toolchain | MSVC v143, CMake, Ninja |
+| Found by | `CMakeLists.txt`, only under `PYSMESH_OCCT_ROOT`, only at exactly 8.0.1 |
+
+The CMake options are the script's `CMAKE_OPTIONS`:
+
+- `CMAKE_BUILD_TYPE=Release`, `CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON`,
+  `BUILD_LIBRARY_TYPE=Shared`, `BUILD_CPP_STANDARD=C++17`, `INSTALL_DIR_LAYOUT=Unix`.
+- `BUILD_RELEASE_DISABLE_EXCEPTIONS=OFF`. OCCT's default is ON, which defines
+  `No_Exception` and compiles out the `Standard_*_Raise_if` range checks.
+- `BUILD_ENABLE_FPE_SIGNAL_HANDLER=OFF`, `BUILD_OPT_PROFILE=Default`,
+  `USE_MMGR_TYPE=NATIVE`, `BUILD_WITH_DEBUG=OFF`, `BUILD_USE_PCH=OFF`.
+- Every `BUILD_MODULE_*` is OFF. `BUILD_ADDITIONAL_TOOLKITS` names the 27 toolkits that a
+  pySMESH target links. OCCT adds their closure: TKBool, TKDE, TKHLR and TKService.
+- OFF: `USE_TBB`, `USE_FREETYPE`, `USE_FREEIMAGE`, `USE_RAPIDJSON`, `USE_DRACO`,
+  `USE_OPENVR`, `USE_FFMPEG`, `USE_VTK`, `USE_TK`, `USE_OPENGL`, `USE_GLES2`, `USE_EIGEN`,
+  `BUILD_GTEST`, `BUILD_DOC_Overview`, `BUILD_DOC_RefMan`, `INSTALL_TEST_CASES`.
+
+No compiler flag is added. The flags are CMake's MSVC defaults plus OCCT's own
+`adm/cmake/occt_defs_flags.cmake`: `/W4 /GR /EHa /fp:precise /MD /O2 /Ob2 /DNDEBUG /GL`,
+and `/LTCG` at link time.
+
+The options mirror the conda-forge feedstock that built `occt 8.0.0 all_h8ecc14b_202`
+([conda-forge/occt-feedstock](https://github.com/conda-forge/occt-feedstock),
+`recipe/bld.bat`) wherever an option can change behaviour. They differ only in what is not
+built: Draw, VTK, FreeImage, RapidJSON, FreeType, OpenGL and Tcl/Tk. A control build of
+8.0.0 from source, with these options, reproduced the 4.2.2 golden baseline bit for bit.
+
+FreeType is OFF. TKService, which TKV3d and TKVCAF pull in, builds without it. FreeType
+serves only OCCT's text rendering (`Font_*`, `StdPrs_BRepFont`), and pySMESH calls none of
+it. So the wheel bundles no FreeType DLL.
 
 ## Reference-only repositories
 

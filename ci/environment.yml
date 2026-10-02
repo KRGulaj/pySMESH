@@ -2,7 +2,11 @@ name: pysmesh-build
 # =============================================================================
 # pySMESH — build-only conda environment (conda-forge ONLY)
 #
-# Purpose: compile _core.pyd (SMESH + OCCT + Boost static, VTK dynamic).
+# Purpose: compile _core.pyd. SMESH + KERNEL are static. Boost and VTK are dynamic, come
+# from here, and are bundled into the wheel.
+#
+# OCCT is NOT in this env, and must not be added. ci/build_occt.py builds OCCT 8.0.1 from
+# source, and CMakeLists.txt takes it only from that build (PYSMESH_OCCT_ROOT).
 #
 # =============================================================================
 channels:
@@ -21,8 +25,7 @@ dependencies:
   # ships inside the wheel, and no consumer has to follow. ci/check_vtk_pin.py asserts this
   # pin matches the binary that was actually built.
   - vtk=9.6.2
-  # --- static-linked into _core.pyd: free to resolve ---
-  - occt=8.0.0
+  # --- Boost: dynamic, bundled into the wheel; free to resolve ---
   - libboost-devel
   # --- build toolchain ---
   - cmake>=3.27
