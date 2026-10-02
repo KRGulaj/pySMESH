@@ -56,6 +56,7 @@
 #include <StdMeshers_RadialQuadrangle_1D2D.hxx>
 #include <StdMeshers_Regular_1D.hxx>
 #include <StdMeshers_SegmentAroundVertex_0D.hxx>
+#include <StdMeshers_UseExisting_1D2D.hxx>
 
 // --- hypotheses ---
 #include <StdMeshers_Adaptive1D.hxx>
@@ -66,6 +67,8 @@
 #include <StdMeshers_FixedPoints1D.hxx>
 #include <StdMeshers_Geometric1D.hxx>
 #include <StdMeshers_LayerDistribution.hxx>
+#include <StdMeshers_LayerDistribution2D.hxx>
+#include <StdMeshers_LengthFromEdges.hxx>
 #include <StdMeshers_LocalLength.hxx>
 #include <StdMeshers_MaxElementArea.hxx>
 #include <StdMeshers_MaxElementVolume.hxx>
@@ -113,7 +116,11 @@ SMESH_Hypothesis* make_algorithm(const std::string& name, Factory& f) {
   if (name == "Regular_1D") return f.make<StdMeshers_Regular_1D>();
   if (name == "CompositeSegment_1D") return f.make<StdMeshers_CompositeSegment_1D>();
   if (name == "Projection_1D") return f.make<StdMeshers_Projection_1D>();
+  // "Use Edges/Faces to be Created Manually": they create nothing and mark their sub-mesh
+  // computed, so elements made by a script stand as that sub-shape's mesh.
+  if (name == "UseExisting_1D") return f.make<StdMeshers_UseExisting_1D>();
   // 2-D
+  if (name == "UseExisting_2D") return f.make<StdMeshers_UseExisting_2D>();
   if (name == "Quadrangle_2D") return f.make<StdMeshers_Quadrangle_2D>();
   if (name == "MEFISTO_2D") return f.make<StdMeshers_MEFISTO_2D>();
   if (name == "PolygonPerFace_2D") return f.make<StdMeshers_PolygonPerFace_2D>();
@@ -258,6 +265,9 @@ SMESH_Hypothesis* make_area_hypothesis(const std::string& name, Params& p, Facto
     h->SetMaxVolume(p.number("max_volume"));
     return h;
   }
+  // The triangle size of MEFISTO_2D taken from the mean length of the boundary segments.
+  // Its one parameter, the mode, has the single value 1 upstream, set by the constructor.
+  if (name == "LengthFromEdges") return f.make<StdMeshers_LengthFromEdges>();
   if (name == "QuadranglePreference") return f.make<StdMeshers_QuadranglePreference>();
   if (name == "QuadrangleParams") {
     StdMeshers_QuadrangleParams* h = f.make<StdMeshers_QuadrangleParams>();
@@ -385,12 +395,16 @@ SMESH_Hypothesis* Mesher::build(const std::string& name, const py::dict& values)
   }
   if (hyp == nullptr) {
     // A layer distribution carries a 1-D hypothesis of its own, so it is built through the
-    // same factory recursively rather than through a second, parallel one.
-    if (name == "LayerDistribution") {
+    // same factory recursively rather than through a second, parallel one. The 2-D form,
+    // for RadialQuadrangle_1D2D, is the same class under its own name.
+    if (name == "LayerDistribution" || name == "LayerDistribution2D") {
       const py::dict spec = p.nested("distribution");
       SMESH_Hypothesis* inner =
           build(spec["name"].cast<std::string>(), spec["params"].cast<py::dict>());
-      StdMeshers_LayerDistribution* h = factory.make<StdMeshers_LayerDistribution>();
+      StdMeshers_LayerDistribution* h =
+          name == "LayerDistribution"
+              ? factory.make<StdMeshers_LayerDistribution>()
+              : factory.make<StdMeshers_LayerDistribution2D>();
       h->SetLayerDistribution(inner);
       hyp = h;
     }

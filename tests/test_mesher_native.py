@@ -17,6 +17,13 @@ hand:
 * ``NumberOfSegments`` with the beta law (new in 9.16) puts the nodes at the closed
   form of the law, and refuses a ``beta`` that the law is undefined for (SMESH
   ``1d_meshing_hypo.rst``).
+* ``LengthFromEdges`` sizes the MEFISTO triangles from the mean boundary segment
+  (SMESH ``2d_meshing_hypo.rst``), and is MEFISTO's default.
+* ``LayerDistribution2D`` spaces the rings of ``RadialQuadrangle_1D2D`` by a 1-D
+  hypothesis, starting at the circle (SMESH ``radial_quadrangle_1D2D_algo.rst``).
+* ``UseExisting_1D`` and ``UseExisting_2D`` make nothing and count as computed, so a
+  script's elements stand as that sub-shape's mesh (SMESH
+  ``define_mesh_by_script.rst``).
 
 The upstream sources cited are those of SMESH ``V9_16_0``.
 """
@@ -32,10 +39,16 @@ from numpy.typing import NDArray
 import pysmesh as ps
 from pysmesh import (
     Arithmetic1D,
+    Distribution,
+    ElementType,
+    LayerDistribution,
+    Mefisto2D,
     Mesher,
     NumberOfSegments,
     Propagation,
     PysmeshError,
+    Quadrangle2D,
+    RadialQuadrangle1D2D,
     Regular1D,
     SegmentLengthAroundVertex,
     Session,
@@ -44,6 +57,11 @@ from pysmesh import (
 )
 
 LINE_LENGTH: float = 10.0
+SQUARE_SIDE: float = 4.0
+DISK_RADIUS: float = 2.5
+BOX_DX: float = 3.0
+BOX_DY: float = 7.0
+BOX_DZ: float = 11.0
 
 # The trapezoid of the propagation tests: a 4-long bottom, a 2-long top, height 2.
 TRAPEZOID: tuple[tuple[float, float, float], ...] = (
@@ -285,3 +303,164 @@ def test_the_beta_law_refuses_a_beta_inside_the_unit_interval(beta: float) -> No
     with Mesher(_line_shape()) as mesher:
         with pytest.raises(PysmeshError, match=r"needs \|beta\| > 1"):
             mesher._m.assign("NumberOfSegments", _beta_params(beta, 10), "", 0)
+
+
+# ---- LengthFromEdges (MEFISTO_2D) ------------------------------------------------- #
+
+
+def _square_shape() -> ps.Shape:
+    """A 4 x 4 planar square face."""
+    session = Session()
+    session.add_rectangle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), SQUARE_SIDE, SQUARE_SIDE)
+    return ps.load_brep(session.brep())
+
+
+def _mefisto_square(segments: int, length_from_edges: bool) -> ps.MeshData:
+    """MEFISTO_2D on the square, ``segments`` boundary segments per side."""
+    with Mesher(_square_shape()) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=segments))
+        mesher.assign(Mefisto2D())
+        if length_from_edges:
+            mesher._m.assign("LengthFromEdges", {}, "", 0)
+        mesher.compute()
+        return mesher.mesh()
+
+
+def _triangles(mesh: ps.MeshData) -> NDArray[np.int32]:
+    """The node rows of every triangle, shape (T, 3)."""
+    rows = [
+        mesh.nodes_of(i)
+        for i in range(mesh.element_count)
+        if int(mesh.element_type[i]) == int(ElementType.TRIANGLE)
+    ]
+    return np.asarray(rows, dtype=np.int32)
+
+
+def test_length_from_edges_is_the_default_size_of_mefisto() -> None:
+    """Assigning LengthFromEdges gives the mesh MEFISTO makes with no hypothesis.
+
+    Upstream: ``StdMeshers_MEFISTO_2D::CheckHypothesis`` (V9_9_0, carried forward)
+    states "can work with no hypothesis, LengthFromEdges is default one".
+    """
+    with_hypothesis = _mefisto_square(8, length_from_edges=True)
+    without = _mefisto_square(8, length_from_edges=False)
+
+    np.testing.assert_array_equal(
+        np.sort(with_hypothesis.node_coords, axis=0),
+        np.sort(without.node_coords, axis=0),
+    )
+
+
+@pytest.mark.parametrize("segments", [8, 16])
+def test_length_from_edges_triangles_follow_the_boundary_spacing(segments: int) -> None:
+    """The triangles fill the square, at the size of the mean boundary segment.
+
+    Spec (SMESH ``2d_meshing_hypo.rst``): LengthFromEdges "defines the maximum linear
+    size of mesh faces as an average length of mesh edges approximating the meshed
+    face boundary". MEFISTO takes that length as its ideal edge length
+    (``areteideale``), not as a hard bound, so the measured quantity is the mean
+    triangle edge, held within a factor 1.5 of the boundary segment ``h``.
+    """
+    mesh = _mefisto_square(segments, length_from_edges=True)
+    xyz = mesh.node_coords
+    tri = _triangles(mesh)
+    h = 4.0 * SQUARE_SIDE / (4 * segments)
+
+    p0, p1, p2 = xyz[tri[:, 0]], xyz[tri[:, 1]], xyz[tri[:, 2]]
+    area = 0.5 * float(np.linalg.norm(np.cross(p1 - p0, p2 - p0), axis=1).sum())
+    edges = np.concatenate(
+        [np.linalg.norm(a - b, axis=1) for a, b in ((p0, p1), (p1, p2), (p2, p0))]
+    )
+    assert area == pytest.approx(SQUARE_SIDE**2, abs=1e-9)
+    assert np.all(np.abs(xyz[:, 2]) < 1e-12)
+    assert h / 1.5 < float(edges.mean()) < 1.5 * h
+
+
+# ---- LayerDistribution2D (RadialQuadrangle_1D2D) ---------------------------------- #
+
+
+def _disk_shape() -> ps.Shape:
+    """A disk of radius 2.5 in the z = 0 plane."""
+    session = Session()
+    session.add_circle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), DISK_RADIUS)
+    session.make_face(list(session.entities(ps.EntityKind.EDGE)))
+    return ps.load_brep(session.brep())
+
+
+def _scale_positions(count: int, scale: float) -> NDArray[np.float64]:
+    """Fractions of length of the SCALE law, start and end included.
+
+    ``StdMeshers_Regular_1D`` (DT_Scale): ``s_i / L = (1 - a**i) / (1 - a**n)`` with
+    ``a = scale ** (1 / (n - 1))``, so the last segment is ``scale`` times the first.
+    """
+    a = scale ** (1.0 / (count - 1))
+    i = np.arange(count + 1, dtype=np.float64)
+    return (1.0 - a**i) / (1.0 - a**count)
+
+
+def test_layer_distribution_2d_spaces_the_rings_from_the_circle_inwards() -> None:
+    """Ring radii follow a geometric 1-D law laid from the circle to the centre.
+
+    Spec (SMESH ``radial_quadrangle_1D2D_algo.rst``): the distribution of layers "can
+    be set with any 1D Hypothesis" and "is applied to the longest radial edge starting
+    from its end lying on the elliptic curve". Four layers whose thickness grows three
+    times from the circle to the centre put the rings at ``R (1 - s_i / L)``.
+    """
+    inner = NumberOfSegments(count=4, distribution=Distribution.SCALE, scale_factor=3.0)
+    params = LayerDistribution(distribution=inner).params()
+
+    with Mesher(_disk_shape()) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=8))
+        mesher.assign(RadialQuadrangle1D2D())
+        mesher._m.assign("LayerDistribution2D", params, "", 0)
+        mesher.compute()
+        xyz = mesher.mesh().node_coords
+
+    radii = np.unique(np.round(np.hypot(xyz[:, 0], xyz[:, 1]), 9))
+    expected = np.sort(DISK_RADIUS * (1.0 - _scale_positions(4, 3.0)))
+    np.testing.assert_allclose(radii, expected, rtol=0.0, atol=1e-9)
+
+
+# ---- UseExisting_1D / UseExisting_2D ---------------------------------------------- #
+
+
+def _box_shape() -> ps.Shape:
+    """The 3 x 7 x 11 box."""
+    session = Session()
+    session.add_box(BOX_DX, BOX_DY, BOX_DZ)
+    return ps.load_brep(session.brep())
+
+
+def test_use_existing_2d_makes_nothing_on_its_face_and_lets_the_rest_mesh() -> None:
+    """The face under UseExisting_2D stays empty; the five others get 3 x 3 quads.
+
+    Spec (SMESH ``define_mesh_by_script.rst``): "Use Faces to be Created Manually"
+    lets a script create the 2-D mesh; the algorithm itself creates nothing, and the
+    sub-mesh counts as computed (``StdMeshers_UseExisting_2D::Compute``).
+    """
+    with Mesher(_box_shape()) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=3))
+        mesher.assign(Quadrangle2D())
+        mesher._m.assign("UseExisting_2D", {}, "FACE", 1)
+        mesher.compute()
+        mesh = mesher.mesh()
+
+    on_faces = mesh.element_kind == int(SubShapeKind.FACE)
+    per_face = {
+        ordinal: int(np.count_nonzero(on_faces & (mesh.element_ordinal == ordinal)))
+        for ordinal in range(1, 7)
+    }
+    assert per_face == {1: 0, 2: 9, 3: 9, 4: 9, 5: 9, 6: 9}
+
+
+def test_use_existing_1d_makes_no_segment() -> None:
+    """Spec: "Use Edges to be Created Manually" creates no segment of its own."""
+    with Mesher(_line_shape()) as mesher:
+        mesher._m.assign("UseExisting_1D", {}, "", 0)
+        mesher.compute()
+        mesh = mesher.mesh()
+
+    assert int(np.count_nonzero(mesh.element_type == int(ElementType.EDGE))) == 0

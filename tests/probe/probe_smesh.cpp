@@ -92,6 +92,15 @@
 #include <StdMeshers_RadialPrism_3D.hxx>
 #include <StdMeshers_Regular_1D.hxx>
 #include <StdMeshers_ViscousLayers2D.hxx>
+#include <StdMeshers_LayerDistribution2D.hxx>
+#include <StdMeshers_LengthFromEdges.hxx>
+#include <StdMeshers_RadialQuadrangle_1D2D.hxx>
+#include <StdMeshers_UseExisting_1D2D.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <TopoDS_Wire.hxx>
+#include <gp_Ax2.hxx>
+#include <gp_Circ.hxx>
+#include <gp_Dir.hxx>
 #include <StdMeshers_Arithmetic1D.hxx>
 #include <StdMeshers_Propagation.hxx>
 #include <StdMeshers_SegmentAroundVertex_0D.hxx>
@@ -2060,6 +2069,130 @@ void probe_cat916_1d_additions() {
   }
 }
 
+
+// Sum of the areas of the triangles and quadrangles of the mesh, by the cross product.
+double face_area_sum(SMESHDS_Mesh* meshDS) {
+  double area = 0.0;
+  for (SMDS_FaceIteratorPtr it = meshDS->facesIterator(); it->more();) {
+    const SMDS_MeshElement* f = it->next();
+    const int nb = f->NbCornerNodes();
+    const gp_Pnt p0(f->GetNode(0)->X(), f->GetNode(0)->Y(), f->GetNode(0)->Z());
+    for (int i = 1; i + 1 < nb; ++i) {
+      const gp_Pnt p1(f->GetNode(i)->X(), f->GetNode(i)->Y(), f->GetNode(i)->Z());
+      const gp_Pnt p2(f->GetNode(i + 1)->X(), f->GetNode(i + 1)->Y(), f->GetNode(i + 1)->Z());
+      area += 0.5 * gp_Vec(p0, p1).Crossed(gp_Vec(p0, p2)).Magnitude();
+    }
+  }
+  return area;
+}
+
+void probe_cat916_2d_additions() {
+  section("CAT916", "native catalogue entries added with SMESH 9.16: 2-D family");
+
+  // LengthFromEdges with MEFISTO_2D on a 4 x 4 square, 8 segments a side: the triangles fill
+  // the square, and their size follows the mean boundary segment, 0.5.
+  {
+    Session s(BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 0, 4, 0, 4)
+                  .Face());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+    n->SetNumberOfSegments(8);
+    StdMeshers_MEFISTO_2D* a2 = s.make<StdMeshers_MEFISTO_2D>();
+    StdMeshers_LengthFromEdges* lfe = s.make<StdMeshers_LengthFromEdges>();
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), n) &&
+                    s.assign(s.shape(), a2) && s.assign(s.shape(), lfe);
+    check(ok, "CAT916 MEFISTO_2D + LengthFromEdges assign");
+    check(s.compute() && s.meshDS()->NbFaces() > 0, "CAT916 MEFISTO_2D + LengthFromEdges computes");
+    check_close(face_area_sum(s.meshDS()), 16.0, 1e-9,
+                "CAT916 LengthFromEdges: the triangles cover the 4 x 4 square exactly");
+    // MEFISTO uses the length as an ideal edge length (areteideale), not as a bound, so the
+    // mean triangle edge is what follows it.
+    double sum = 0.0;
+    int count = 0;
+    for (SMDS_FaceIteratorPtr it = s.meshDS()->facesIterator(); it->more();) {
+      const SMDS_MeshElement* f = it->next();
+      for (int i = 0; i < 3; ++i) {
+        const SMDS_MeshNode* a = f->GetNode(i);
+        const SMDS_MeshNode* b = f->GetNode((i + 1) % 3);
+        sum += gp_Pnt(a->X(), a->Y(), a->Z()).Distance(gp_Pnt(b->X(), b->Y(), b->Z()));
+        ++count;
+      }
+    }
+    const double mean = count ? sum / count : 0.0;
+    char msg[200];
+    std::snprintf(msg, sizeof(msg),
+                  "CAT916 LengthFromEdges: the mean triangle edge, %.4f, is within a factor "
+                  "1.5 of the mean boundary segment 0.5",
+                  mean);
+    check(mean > 0.5 / 1.5 && mean < 0.5 * 1.5, msg);
+  }
+
+  // LayerDistribution2D with RadialQuadrangle_1D2D on a disk of radius 2.5: the rings follow
+  // the inner 1-D hypothesis, here 4 equal layers, so every node radius is a multiple of
+  // 2.5 / 4.
+  {
+    gp_Circ circ(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 2.5);
+    const TopoDS_Wire wire = BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(circ).Edge()).Wire();
+    Session s(BRepBuilderAPI_MakeFace(wire).Face());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+    n->SetNumberOfSegments(8);
+    StdMeshers_RadialQuadrangle_1D2D* a2 = s.make<StdMeshers_RadialQuadrangle_1D2D>();
+    StdMeshers_NumberOfSegments* radial = s.make<StdMeshers_NumberOfSegments>();
+    radial->SetNumberOfSegments(4);
+    StdMeshers_LayerDistribution2D* layers = s.make<StdMeshers_LayerDistribution2D>();
+    layers->SetLayerDistribution(radial);
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), n) &&
+                    s.assign(s.shape(), a2) && s.assign(s.shape(), layers);
+    check(ok, "CAT916 RadialQuadrangle_1D2D + LayerDistribution2D assign");
+    check(s.compute() && s.meshDS()->NbFaces() > 0,
+          "CAT916 RadialQuadrangle_1D2D + LayerDistribution2D computes");
+    double worst = 0.0;
+    for (SMDS_NodeIteratorPtr it = s.meshDS()->nodesIterator(); it->more();) {
+      const SMDS_MeshNode* node = it->next();
+      const double layer = std::hypot(node->X(), node->Y()) / (2.5 / 4.0);
+      worst = std::max(worst, std::fabs(layer - std::round(layer)));
+    }
+    char msg[200];
+    std::snprintf(msg, sizeof(msg),
+                  "CAT916 LayerDistribution2D: every node radius is k * 2.5 / 4 (worst %.2e "
+                  "of a layer)",
+                  worst);
+    check(worst < 1e-9, msg);
+  }
+
+  // UseExisting_2D on one face of a box: that face gets no element and its sub-mesh counts as
+  // computed; the five other faces are meshed as usual.
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+    n->SetNumberOfSegments(3);
+    StdMeshers_Quadrangle_2D* a2 = s.make<StdMeshers_Quadrangle_2D>();
+    StdMeshers_UseExisting_2D* manual = s.make<StdMeshers_UseExisting_2D>();
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+    TopExp::MapShapes(s.shape(), TopAbs_FACE, faces);
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), n) &&
+                    s.assign(s.shape(), a2) && s.assign(faces.FindKey(1), manual);
+    check(ok, "CAT916 UseExisting_2D assigns on one face beside a global Quadrangle_2D");
+    check(s.compute(), "CAT916 UseExisting_2D: the compute succeeds");
+    SMESHDS_SubMesh* sm1 = s.meshDS()->MeshElements(faces.FindKey(1));
+    check(!sm1 || sm1->NbElements() == 0, "CAT916 UseExisting_2D: its face has no element");
+    check(s.mesh().GetSubMesh(faces.FindKey(1))->IsMeshComputed(),
+          "CAT916 UseExisting_2D: its face counts as computed");
+    check(s.meshDS()->NbFaces() == 5 * 9, "CAT916 UseExisting_2D: the 5 other faces get 9 quads each");
+  }
+
+  // UseExisting_1D on a lone edge: no segment is made, and the compute succeeds.
+  {
+    Session s(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(10, 0, 0)).Edge());
+    StdMeshers_UseExisting_1D* manual = s.make<StdMeshers_UseExisting_1D>();
+    check(s.assign(s.shape(), manual), "CAT916 UseExisting_1D assigns on an edge");
+    check(s.compute(), "CAT916 UseExisting_1D: the compute succeeds");
+    check(s.meshDS()->NbEdges() == 0, "CAT916 UseExisting_1D: no segment is made");
+  }
+}
+
 }  // namespace
 
 void run_smesh_probe() {
@@ -2075,4 +2208,5 @@ void run_smesh_probe() {
   probe_editor_and_search_binding_behaviour();
   probe_r18_gmf_driver();
   probe_cat916_1d_additions();
+  probe_cat916_2d_additions();
 }
