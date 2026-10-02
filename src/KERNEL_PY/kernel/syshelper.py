@@ -1,5 +1,5 @@
 # -*- coding: iso-8859-1 -*-
-# Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 #
 # Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 # CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -41,7 +41,7 @@ def findFiles(rootpath, excludes=None):
         exclude_options+="-e %s "%excludepath
 
     listfiles=[]        
-    stream=os.popen("find %s -type f | grep -v -e '\.svn' %s 2>/dev/null"%(rootpath,exclude_options))
+    stream=os.popen(r"find %s -type f | grep -v -e '\.svn' %s 2>/dev/null"%(rootpath,exclude_options))
     for line in stream.readlines():
         listfiles.append(line.split('\n')[0])
         

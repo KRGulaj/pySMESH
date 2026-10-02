@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -156,6 +156,7 @@ Launcher_cpp::createJob(const JobParameters_cpp& job_parameters)
   new_job->setMaximumDuration(job_parameters.maximum_duration);
   new_job->setQueue(job_parameters.queue);
   new_job->setPartition(job_parameters.partition);
+  new_job->setVerbosePyLogLevel(job_parameters.verbose_py_log_level);
   new_job->setExclusive(job_parameters.exclusive);
   new_job->setMemPerCpu(job_parameters.mem_per_cpu);
   new_job->setWCKey(job_parameters.wckey);
@@ -390,6 +391,12 @@ Launcher_cpp::getJobWorkFile(int job_id,
   }
   LAUNCHER_MESSAGE("getJobWorkFile ended");
   return rtn;
+}
+
+long Launcher_cpp::getMaximumDurationInSecond(int job_id)
+{
+  Launcher::Job *job = findJob(job_id);
+  return job->getMaximumDurationInSecond();
 }
 
 //=============================================================================
@@ -753,6 +760,13 @@ Launcher_cpp::getJobWorkFile(int job_id, std::string work_file, std::string dire
 {
   LAUNCHER_INFOS("Launcher compiled without LIBBATCH - cannot get job dump state!!!");
   throw LauncherException("Method Launcher_cpp::getJobWorkFile is not available "
+                          "(libBatch was not present at compilation time)");
+}
+
+long Launcher_cpp::getMaximumDurationInSecond(int job_id)
+{
+  LAUNCHER_INFOS("Launcher compiled without LIBBATCH - cannot get job dump state!!!");
+  throw LauncherException("Method Launcher_cpp::getMaximumDurationInSecond is not available "
                           "(libBatch was not present at compilation time)");
 }
 

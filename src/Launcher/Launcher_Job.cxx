@@ -1,4 +1,4 @@
-// Copyright (C) 2009-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2009-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -37,6 +37,7 @@
 #include <process.h>
 #else
   static const char SEPARATOR = '/';
+#include <pwd.h>
 #endif
 
 Launcher::Job::Job()
@@ -191,7 +192,12 @@ Launcher::Job::setResourceDefinition(const ParserResourcesType & resource_defini
   if (resource_definition.UserName == "")
   {
 #ifndef WIN32
-    user_name = getenv("USER");
+    struct passwd *pwd = getpwuid(getuid());
+    if (pwd) {
+      user_name = std::string(pwd->pw_name);
+    }
+    if (user_name == "")
+      user_name = getenv("USER");
 #else
     user_name = getenv("USERNAME");
 #endif
@@ -368,6 +374,11 @@ Launcher::Job::setReference(const std::string & reference)
   _reference = reference;
 }
 
+void Launcher::Job::setVerbosePyLogLevel(const std::string &verbosePyLogLevel)
+{
+  _verbose_py_log_level = verbosePyLogLevel;
+}
+
 std::string
 Launcher::Job::getWorkDirectory() const
 {
@@ -470,6 +481,11 @@ Launcher::Job::getReference() const
   return _reference;
 }
 
+std::string Launcher::Job::getVerbosePyLogLevel() const
+{
+  return _verbose_py_log_level;
+}
+
 void
 Launcher::Job::setPreCommand(const std::string & preCommand)
 {
@@ -534,22 +550,32 @@ Launcher::Job::checkResourceRequiredParams(const resourceParams & resource_requi
 long
 Launcher::Job::convertMaximumDuration(const std::string & edt)
 {
-  long hh, mm, ret;
+  long dd(0), hh(0), mm(0);
 
   if( edt.size() == 0 )
     return -1;
 
-  std::string::size_type pos = edt.find(":");
-  std::string h = edt.substr(0,pos);
-  std::string m = edt.substr(pos+1,edt.size()-pos+1);
+  std::string remain( edt );
+
+  auto pos_day = edt.find('-');
+  if( pos_day != std::string::npos)
+  {
+    std::string d = edt.substr(0,pos_day);
+    if(pos_day == edt.size()-1)
+      return -1;
+    remain = edt.substr(pos_day+1);
+    std::istringstream issd(d);
+    issd >> dd;
+  }
+  std::string::size_type pos = remain.find(':');
+  std::string h = remain.substr(0,pos);
+  std::string m = remain.substr(pos+1,remain.size()-pos+1);
   std::istringstream issh(h);
   issh >> hh;
   std::istringstream issm(m);
   issm >> mm;
-  ret = hh*60 + mm;
-  ret = ret * 60;
-
-  return ret;
+  long ret = dd*60*24 + hh*60 + mm;
+  return 60*ret;
 }
 
 std::string

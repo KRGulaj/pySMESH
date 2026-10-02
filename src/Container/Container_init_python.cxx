@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -165,9 +165,6 @@ void KERNEL_PYTHON::init_python(int argc, char **argv)
       MESSAGE("Python already initialized");
       return;
     }
-  MESSAGE("=================================================================");
-  MESSAGE("Python Initialization...");
-  MESSAGE("=================================================================");
   // set stdout to line buffering (aka C++ std::cout)
   setvbuf(stdout, (char *)NULL, _IOLBF, BUFSIZ);
   char* env_python=getenv("SALOME_PYTHON");
@@ -179,7 +176,7 @@ void KERNEL_PYTHON::init_python(int argc, char **argv)
   Py_Initialize(); // Initialize the interpreter
   if (Py_IsInitialized())
     {
-      MESSAGE("Python initialized eh eh eh");
+      MESSAGE("Python initialized");
     }
   wchar_t **changed_argv = new wchar_t*[argc]; // Setting arguments
   for (int i = 0; i < argc; i++)

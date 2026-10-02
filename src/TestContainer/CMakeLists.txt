@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -18,12 +18,8 @@
 #
 
 INCLUDE_DIRECTORIES(
-  ${PTHREAD_INCLUDE_DIR}
-  ${OMNIORB_INCLUDE_DIR}
-  ${PROJECT_BINARY_DIR}/salome_adm
   ${CMAKE_CURRENT_SOURCE_DIR}/../ArgvKeeper
-  ${CMAKE_CURRENT_SOURCE_DIR}/../Basics
-  ${CMAKE_CURRENT_SOURCE_DIR}/../SALOMELocalTrace
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${CMAKE_CURRENT_SOURCE_DIR}/../NamingService
   ${CMAKE_CURRENT_SOURCE_DIR}/../Utils
   ${CMAKE_CURRENT_SOURCE_DIR}/../Registry
@@ -32,6 +28,9 @@ INCLUDE_DIRECTORIES(
   ${CMAKE_CURRENT_SOURCE_DIR}/../Container
   ${CMAKE_CURRENT_SOURCE_DIR}/../GenericObj
   ${PROJECT_BINARY_DIR}/idl
+  ${PTHREAD_INCLUDE_DIR}
+  ${OMNIORB_INCLUDE_DIR}
+  ${PROJECT_BINARY_DIR}/salome_adm
 )
 
 SET(SalomeTestComponentEngine_SOURCES
@@ -41,30 +40,37 @@ SET(SalomeTestComponentEngine_SOURCES
 )
 
 SET(COMMON_LIBS
-  ArgvKeeper
-  SalomeContainer
-  Registry
-  SalomeNotification
-  SalomeResourcesManager
-  SalomeNS
-  SALOMELocalTrace
-  SALOMEBasics
-  SalomeGenericObj
+  ${SALOMEBOOTSTRAP_SALOMEBasics}
+  ${SALOMEBOOTSTRAP_KERNELBasics}
   SalomeIDLKernel
 )
 
+IF(WIN32)
+  LIST (APPEND COMMON_LIBS
+     ArgvKeeper
+     SalomeContainer
+     Registry
+     SalomeNotification
+     SalomeResourcesManager
+     SalomeNS
+     ${SALOMEBOOTSTRAP_SALOMELocalTrace}
+     SalomeGenericObj
+     SalomeIDLKernel
+  )
+ENDIF(WIN32)
 ADD_DEFINITIONS(${OMNIORB_DEFINITIONS})
 
 ADD_LIBRARY(SalomeTestComponentEngine ${SalomeTestComponentEngine_SOURCES})
+ADD_DEPENDENCIES(SalomeTestComponentEngine SalomeIDLKernel)
 TARGET_LINK_LIBRARIES(SalomeTestComponentEngine ${COMMON_LIBS})
 
 INSTALL(TARGETS SalomeTestComponentEngine EXPORT ${PROJECT_NAME}TargetGroup DESTINATION ${SALOME_INSTALL_LIBS})
 
 ADD_EXECUTABLE(TestLogger TestLogger.cxx)
-TARGET_LINK_LIBRARIES(TestLogger SalomeTestComponentEngine SALOMEBasics ${COMMON_LIBS} ${OMNIORB_LIBRARIES})
+TARGET_LINK_LIBRARIES(TestLogger ${SALOMEBOOTSTRAP_SALOMELocalTrace} ${COMMON_LIBS} ${OMNIORB_LIBRARIES})
 
 ADD_EXECUTABLE(TestContainer TestContainer.cxx)
-TARGET_LINK_LIBRARIES(TestContainer SalomeTestComponentEngine SALOMEBasics ${COMMON_LIBS} ${OMNIORB_LIBRARIES})
+TARGET_LINK_LIBRARIES(TestContainer SalomeContainer ${COMMON_LIBS} ${OMNIORB_LIBRARIES})
 
 INSTALL(TARGETS TestLogger TestContainer EXPORT ${PROJECT_NAME}TargetGroup DESTINATION ${SALOME_INSTALL_BINS})
 

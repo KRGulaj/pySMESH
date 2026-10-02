@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -23,8 +23,7 @@ INCLUDE_DIRECTORIES(
   ${PYTHON_INCLUDE_DIRS}
   ${PROJECT_BINARY_DIR}/salome_adm
   ${CMAKE_CURRENT_SOURCE_DIR}/../ArgvKeeper
-  ${CMAKE_CURRENT_SOURCE_DIR}/../Basics
-  ${CMAKE_CURRENT_SOURCE_DIR}/../SALOMELocalTrace
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${CMAKE_CURRENT_SOURCE_DIR}/../SALOMETraceCollector
   ${CMAKE_CURRENT_SOURCE_DIR}/../NamingService
   ${CMAKE_CURRENT_SOURCE_DIR}/../Utils
@@ -46,8 +45,9 @@ SET(COMMON_LIBS
   SalomeNS
   SalomeSDS
   OpUtil
-  SALOMELocalTrace
-  SALOMEBasics
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
+  ${SALOMEBOOTSTRAP_SALOMEBasics}
+  ${SALOMEBOOTSTRAP_KERNELBasics}
   SalomeGenericObj
   SalomeIDLKernel
   SalomeLauncher

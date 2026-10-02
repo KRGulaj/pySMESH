@@ -1,4 +1,4 @@
-# Copyright (C) 2015-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2015-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -17,20 +17,25 @@
 # See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
 #
 
+import argparse
 import os
-import sys
-import select
+import shutil
 import subprocess
+from pathlib import Path
+import tempfile
+
+from salomeContextUtils import SalomeContextException  # type: ignore # @UnresolvedImport
+
 
 def __configureTests(args=None, exe=None):
-  if args is None:
-    args = []
-  if exe:
-      usage = "Usage: %s [options]"%exe
-  else:
-      usage = "Usage: %prog [options]"
-  epilog  = """\n
-Run tests of SALOME components provided with application.\n
+    if args is None:
+        args = []
+    if exe:
+        usage = "Usage: %s [options]" % exe
+    else:
+        usage = "Usage: %prog [options]"
+    epilog = """
+Run tests of SALOME components provided with application.
 Principal options are:
     -h,--help
         Show this help message and exit.
@@ -59,32 +64,85 @@ Principal options are:
     -LE <regex>, --label-exclude <regex>
         Exclude tests with labels matching regular expression.
 
-For complete description of available options, pleaser refer to ctest documentation.\n
+For complete description of available options, pleaser refer to ctest documentation.
 """
-  if not args:
-    return []
+    if not args:
+        return argparse.Namespace(run_dir=None), []
 
-  if args[0] in ["-h", "--help"]:
-    print(usage + epilog)
-    sys.exit(0)
+    parser = argparse.ArgumentParser(
+        usage=usage + epilog, epilog="Others options are passed to ctest"
+    )
+    parser.add_argument(
+        "--run-dir",
+        nargs='?',
+        const="run_in_default",
+        default=None,
+        help="directory where ctest will be run (write access is required). If used without a path, runs in the default directory.",
+    )
+    return parser.parse_known_args(args)
 
-  return args
-#
 
 # tests must be in ${ABSOLUTE_APPLI_PATH}/${__testSubDir}/
 __testSubDir = "bin/salome/test"
 
+
 def runTests(args, exe=None):
-  args = __configureTests(args, exe)
+    absolute_appli = os.getenv("ABSOLUTE_APPLI_PATH")
+    if not absolute_appli:
+        raise SalomeContextException(
+            "Unable to find application path. Please check that the variable ABSOLUTE_APPLI_PATH is set."
+        )
+    absolute_appli_path: Path = Path(absolute_appli)
+    testPath = absolute_appli_path / __testSubDir
 
-  appliPath = os.getenv("ABSOLUTE_APPLI_PATH")
-  if not appliPath:
-      raise SalomeContextException("Unable to find application path. Please check that the variable ABSOLUTE_APPLI_PATH is set.")
+    cfg, args = __configureTests(args, exe)
 
-  testPath = os.path.join(appliPath, __testSubDir)
+    run_dir_arg = cfg.run_dir
 
-  command = ["ctest"] + args
-  p = subprocess.Popen(command, cwd=testPath)
-  p.communicate()
-  return p.returncode
-#
+    if run_dir_arg and run_dir_arg != "run_in_default":
+        run_dir: Path = Path(run_dir_arg)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        testPath = run_dir
+
+    # The SALOME_TESTS_PATH env variable contains a list of ctest directories separated with a colon.
+    # We add these directories in a CTest test file in the test directory.
+    # If not test directory was given, we use a temporary one.
+    salome_tests_path = os.getenv("SALOME_TESTS_PATH")
+    if salome_tests_path:
+        salome_tests_path_list = [
+            f"subdirs({path})" for path in salome_tests_path.split(":")
+        ]
+        if not run_dir_arg:
+            with tempfile.NamedTemporaryFile() as f:
+                testPath = Path(f.name)
+            testPath.mkdir()
+        ctest_file = testPath / "CTestTestfile.cmake"
+        ctest_content = ""
+        if ctest_file.is_file():
+            ctest_content = ctest_file.read_text()
+
+        ctest_content = "\n".join(salome_tests_path_list)
+        ctest_file.write_text(ctest_content)
+        ctest_custom_file = testPath / "CTestCustom.cmake"
+        if not ctest_custom_file.exists():
+            ctest_custom_file.write_text("""set(CTEST_CUSTOM_MAXIMUM_PASSED_TEST_OUTPUT_SIZE 1048576) # 1MB
+set(CTEST_CUSTOM_MAXIMUM_FAILED_TEST_OUTPUT_SIZE 1048576) # 1MB
+""")
+
+    if run_dir_arg and run_dir_arg != "run_in_default" and not salome_tests_path:
+        appli_dir = Path(absolute_appli_path).parent
+        prefix = appli_dir.parents[2]
+        for path in testPath.glob("CTest*"):
+            if not path.is_file():
+                continue
+            content = path.read_text()
+            content = content.replace("../../../../../../..", str(prefix))
+            content = content.replace("../../..", str(appli_dir))
+            run_dir.joinpath(path.name).write_text(content)
+
+    command = ["ctest"] + args
+    p = subprocess.Popen(command, cwd=testPath)
+    p.communicate()
+    if salome_tests_path and not run_dir_arg:
+        shutil.rmtree(testPath)
+    return p.returncode

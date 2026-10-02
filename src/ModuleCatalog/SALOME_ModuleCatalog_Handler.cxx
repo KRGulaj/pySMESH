@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -34,11 +34,6 @@
 
 #include <sstream>
 
-#ifdef _DEBUG_
-static int MYDEBUG = 0;
-#else
-static int MYDEBUG = 0;
-#endif
 
 //----------------------------------------------------------------------
 // Function : SALOME_ModuleCatalog_Handler
@@ -51,8 +46,6 @@ SALOME_ModuleCatalog_Handler::SALOME_ModuleCatalog_Handler(ParserPathPrefixes& p
                                                                                _typeMap(typeMap),_typeList(typeList)
 
 {
-  if(MYDEBUG) BEGIN_OF("SALOME_ModuleCatalog_Handler");
-
   // XML Tags initialisation
   // Used in the function endElement
   test_path_prefix_name     = "path-prefix-name";
@@ -107,8 +100,6 @@ SALOME_ModuleCatalog_Handler::SALOME_ModuleCatalog_Handler(ParserPathPrefixes& p
 
   test_component_list = "component-list";
   test_component="component";
-
-  if(MYDEBUG) END_OF("SALOME_ModuleCatalog_Handler");
 }
 
 //----------------------------------------------------------------------
@@ -117,8 +108,6 @@ SALOME_ModuleCatalog_Handler::SALOME_ModuleCatalog_Handler(ParserPathPrefixes& p
 //----------------------------------------------------------------------
 SALOME_ModuleCatalog_Handler::~SALOME_ModuleCatalog_Handler()
 {
-  if(MYDEBUG) BEGIN_OF("~SALOME_ModuleCatalog_Handler()")
-  if(MYDEBUG) END_OF("~SALOME_ModuleCatalog_Handler()")
 }
 
 
@@ -130,7 +119,6 @@ SALOME_ModuleCatalog_Handler::~SALOME_ModuleCatalog_Handler()
 
 void SALOME_ModuleCatalog_Handler::ProcessXmlDocument(xmlDocPtr theDoc)
 {
-  if(MYDEBUG) MESSAGE("Begin parse document");
   // Empty the private elements
   _pathList.resize(0);
   _pathPrefix.listOfComputer.resize(0);
@@ -230,15 +218,14 @@ void SALOME_ModuleCatalog_Handler::ProcessXmlDocument(xmlDocPtr theDoc)
                   {
                     if ( _typeMap.find(aType.name) == _typeMap.end() )
                       {
-                        MESSAGE("Registered basic type: " << aType.name << " " << aType.kind );
                         _typeMap[aType.name]=aType;
                         _typeList.push_back(aType);
                       }
                     else
-                      std::cerr << "Warning: this type (" << aType.name << "," << aType.kind << ") already exists, it will be ignored."  << std::endl;
+                      INFO_MESSAGE( "Warning: this type (" << aType.name << "," << aType.kind << ") already exists, it will be ignored." );
                   }
                 else
-                  std::cerr << "Warning: this type (" << aType.name << "," << aType.kind << ") has incorrect kind, it will be ignored." << std::endl;
+                  INFO_MESSAGE( "Warning: this type (" << aType.name << "," << aType.kind << ") has incorrect kind, it will be ignored." );
               }
             else if ( !xmlStrcmp(aTypeNode->name, (const xmlChar*)"sequence" )) 
               {
@@ -260,16 +247,15 @@ void SALOME_ModuleCatalog_Handler::ProcessXmlDocument(xmlDocPtr theDoc)
                   {
                     if ( _typeMap.find(aType.name) == _typeMap.end() )
                       {
-                        MESSAGE("Registered sequence type: " << aType.name << " " << aType.content );
                         _typeMap[aType.name]=aType;
                         _typeList.push_back(aType);
                       }
                     else
-                      std::cerr << "Warning: this type (" << aType.name << "," << aType.kind << ") already exists, it will be ignored."  << std::endl;
+                      INFO_MESSAGE( "Warning: this type (" << aType.name << "," << aType.kind << ") already exists, it will be ignored." );
                   }
                 else
                   {
-                    std::cerr << "Warning: this sequence type (" << aType.name << "," << aType.content << ") has unknown content type, it will be ignored." << std::endl;
+                    INFO_MESSAGE( "Warning: this sequence type (" << aType.name << "," << aType.content << ") has unknown content type, it will be ignored." );
                   }
               }
             else if ( !xmlStrcmp(aTypeNode->name, (const xmlChar*)"objref" )) 
@@ -307,7 +293,7 @@ void SALOME_ModuleCatalog_Handler::ProcessXmlDocument(xmlDocPtr theDoc)
                               }
                             else
                               {
-                                std::cerr << "Warning: this objref type (" << aType.name << ") has unknown base type (" << base << "), it will be ignored." << std::endl;
+                                MESSAGE( "Warning: this objref type (" << aType.name << ") has unknown base type (" << base << "), it will be ignored." );
                                 error=1;
                                 break;
                               }
@@ -324,7 +310,7 @@ void SALOME_ModuleCatalog_Handler::ProcessXmlDocument(xmlDocPtr theDoc)
                         _typeList.push_back(aType);
                       }
                     else
-                      std::cerr << "Warning: this type (" << aType.name << "," << aType.kind << ") already exists, it will be ignored."  << std::endl;
+                      MESSAGE( "Warning: this type (" << aType.name << "," << aType.kind << ") already exists, it will be ignored." );
                   }
               }
             else if ( !xmlStrcmp(aTypeNode->name, (const xmlChar*)"struct" )) 
@@ -369,7 +355,7 @@ void SALOME_ModuleCatalog_Handler::ProcessXmlDocument(xmlDocPtr theDoc)
                           }
                         else
                           {
-                            std::cerr << "Warning: this struct type (" << aType.name << ") has unknown member type (" << member.first << "," << member.second << "), it will be ignored." << std::endl;
+                            MESSAGE( "Warning: this struct type (" << aType.name << ") has unknown member type (" << member.first << "," << member.second << "), it will be ignored." );
                             error=1;
                             break;
                           }
@@ -380,12 +366,11 @@ void SALOME_ModuleCatalog_Handler::ProcessXmlDocument(xmlDocPtr theDoc)
                   {
                     if ( _typeMap.find(aType.name) == _typeMap.end() )
                       {
-                        MESSAGE("Registered struct type: " << aType.name << " " << aType.id );
                         _typeMap[aType.name]=aType;
                         _typeList.push_back(aType);
                       }
                     else
-                      std::cerr << "Warning: this type (" << aType.name << "," << aType.kind << ") already exists, it will be ignored."  << std::endl;
+                      MESSAGE( "Warning: this type (" << aType.name << "," << aType.kind << ") already exists, it will be ignored.");
                   }
               } // end of struct
             aTypeNode = aTypeNode->next;

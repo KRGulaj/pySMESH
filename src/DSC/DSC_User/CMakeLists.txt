@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -26,10 +26,9 @@ INCLUDE_DIRECTORIES(
   ${PROJECT_SOURCE_DIR}/src/GenericObj
   ${PROJECT_SOURCE_DIR}/src/Notification
   ${PROJECT_SOURCE_DIR}/src/DSC/DSC_Basic
-  ${PROJECT_SOURCE_DIR}/src/SALOMELocalTrace
-  ${PROJECT_SOURCE_DIR}/src/Basics
   ${PROJECT_SOURCE_DIR}/src/Utils
   ${PROJECT_BINARY_DIR}/idl
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
 )
 
 ADD_SUBDIRECTORY(Basic)
@@ -49,7 +48,7 @@ TARGET_LINK_LIBRARIES(SalomeDSCSuperv SalomeDSCContainer ${PLATFORM_LIBS})
 INSTALL(TARGETS SalomeDSCSuperv EXPORT ${PROJECT_NAME}TargetGroup DESTINATION ${SALOME_INSTALL_LIBS})
 
 ADD_EXECUTABLE(test_DSC_Exception test_DSC_Exception.cxx)
-TARGET_LINK_LIBRARIES(test_DSC_Exception OpUtil SALOMELocalTrace 
+TARGET_LINK_LIBRARIES(test_DSC_Exception OpUtil ${SALOMEBOOTSTRAP_SALOMELocalTrace} ${SALOMEBOOTSTRAP_SALOMEException}
     ${OMNIORB_LIBRARIES} ${PLATFORM_LIBS} ${PTHREAD_LIBRARIES})
 
 FILE(GLOB COMMON_HEADERS_HXX "${CMAKE_CURRENT_SOURCE_DIR}/*.hxx")

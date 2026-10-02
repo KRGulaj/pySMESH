@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -28,13 +28,12 @@ INCLUDE_DIRECTORIES(
   ${PTHREAD_INCLUDE_DIR}
   ${OMNIORB_INCLUDE_DIR}
   ${OMNIORBPY_INCLUDE_DIR}
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${PROJECT_BINARY_DIR}/salome_adm
   ${CMAKE_CURRENT_SOURCE_DIR}
   ${CMAKE_CURRENT_BINARY_DIR}
   ${CMAKE_CURRENT_SOURCE_DIR}/../NamingService
   ${CMAKE_CURRENT_SOURCE_DIR}/../LifeCycleCORBA
-  ${CMAKE_CURRENT_SOURCE_DIR}/../Basics
-  ${CMAKE_CURRENT_SOURCE_DIR}/../SALOMELocalTrace
   ${CMAKE_CURRENT_SOURCE_DIR}/../Utils
   ${PROJECT_BINARY_DIR}/idl
   )

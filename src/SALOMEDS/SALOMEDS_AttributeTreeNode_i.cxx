@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -34,13 +34,13 @@ static SALOMEDSImpl_AttributeTreeNode* GetNode(SALOMEDS::AttributeTreeNode_ptr v
   SALOMEDSImpl_AttributeTreeNode* aResult = NULL;
   DF_Label aLabel = DF_Label::Label(aNode->Label(), value->Label());
   if (aLabel.IsNull()) {
-    MESSAGE("SALOMEDS_AttributeTreeNode_i class: no such label")
-    MESSAGE("SALOMEDS_AttributeTreeNode_i class: no such label")
+    MESSAGE("SALOMEDS_AttributeTreeNode_i class: no such label");
+    MESSAGE("SALOMEDS_AttributeTreeNode_i class: no such label");
     return aResult;
   }
   if (!(aResult=(SALOMEDSImpl_AttributeTreeNode*)aLabel.FindAttribute(aNode->ID()))) {
-    MESSAGE("SALOMEDS_AttributeTreeNode_i class: no such attribute")
-    MESSAGE("SALOMEDS_AttributeTreeNode_i class: no such attribute")
+    MESSAGE("SALOMEDS_AttributeTreeNode_i class: no such attribute");
+    MESSAGE("SALOMEDS_AttributeTreeNode_i class: no such attribute");
   }
   return aResult;
 }

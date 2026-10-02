@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -31,6 +31,7 @@
 #include "SALOME_Exception.idl"
 #include "SALOME_PyNode.idl"
 #include "SALOME_Embedded_NamingService.idl"
+#include "SALOME_Comm.idl"
 
 /*! \file SALOME_Component.idl \brief interfaces for EngineComponent and Container
 */
@@ -63,6 +64,8 @@ module Engines
 
   typedef sequence<KeyValuePair> FieldsDict;
   typedef sequence<double> vectorOfDouble;
+  typedef sequence<string> vectorOfString;
+  typedef sequence<vectorOfString> vectorOfVectorOfString;
 
   interface EngineComponent ;
   interface fileRef ;
@@ -76,6 +79,34 @@ module Engines
 
   interface Container
   {
+
+    void override_environment( in FieldsDict env );
+
+    void override_environment_python( in FieldsDict env );
+
+    FieldsDict get_os_environment();
+
+    void set_big_obj_on_disk_threshold(in long thresholdInByte);
+
+    void set_big_obj_on_disk_directory(in string directory);
+
+    void set_directory_for_replay_files(in string directory);
+    
+    void set_number_of_retry(in long nbRetry);
+    
+    void set_timeout_before_retrying(in long timeInSecond);
+
+    void set_current_directory(in string cwd);
+
+    void set_startup_code(in string codeAtStartUp);
+
+    string get_startup_code();
+
+    void addLogFileNameGroup(in vectorOfString groupOfLogFileNames);
+    
+    vectorOfVectorOfString getAllLogFileNameGroups();
+
+    void execute_python_code( in string code ) raises(SALOME::SALOME_Exception);
 
     /*! \brief Loads a new component class (dynamic library).
 
@@ -169,9 +200,22 @@ module Engines
 
     //!  name of the %container log file (this has been set by the launcher)
     attribute string logfilename ;
+    
+    //!  name of the %container log file
+    attribute string locallogfilename ;
 
-    //!  Shutdown the Container process.
+    //! interval of time between two measures of CPU/time process container
+    attribute long monitoringtimeresms;
+    
+    void verbosity(out boolean activated, out string level);
+
+    void setVerbosity(in boolean activated, in string level);
+
+    //!  Shutdown the Container process. Shutdown is not immediate. It waits for all remaining invokation completion.
     void Shutdown();
+
+    //!  Shutdown the Container process. Shutdown is immediate for this method.
+    void ShutdownNow();
 
     //!  Returns the hostname of the container
     string getHostName();

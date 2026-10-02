@@ -1,4 +1,4 @@
-# Copyright (C) 2015-2022  CEA/DEN, EDF R&D
+# Copyright (C) 2015-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -18,10 +18,12 @@
 #
 
 IF(NOT WIN32)
-  SET(TEST_NAME ${COMPONENT_NAME}_testcontainer)
-  ADD_TEST(${TEST_NAME} ${PYTHON_TEST_DRIVER} ${TIMEOUT} testcontainer.py)
-  SET_TESTS_PROPERTIES(${TEST_NAME} PROPERTIES
-                                    LABELS "${COMPONENT_NAME}"
-                                    ENVIRONMENT "LD_LIBRARY_PATH=${KERNEL_TEST_LIB}:$ENV{LD_LIBRARY_PATH}"
-                      )
+  set(TEST_NAMES testcontainer testProxy)
+  foreach(tfile ${TEST_NAMES})
+    SET(TEST_NAME ${COMPONENT_NAME}_${tfile})
+    ADD_TEST(${TEST_NAME} ${PYTHON_TEST_DRIVER} ${TIMEOUT} ${tfile}.py)
+    SET_TESTS_PROPERTIES(${TEST_NAME} PROPERTIES
+                                      LABELS "${COMPONENT_NAME}"
+                                      ENVIRONMENT "LD_LIBRARY_PATH=${KERNEL_TEST_LIB}:$ENV{LD_LIBRARY_PATH}")
+  endforeach()
 ENDIF()

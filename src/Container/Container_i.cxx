@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -31,11 +31,15 @@
 #include <stdio.h>
 #include <time.h>
 #include <sys/types.h>
+#include <memory>
+#include <vector>
 #ifndef WIN32
 #include <sys/time.h>
 #include <dlfcn.h>
 #include <unistd.h>
 #include <sys/wait.h>
+#include <errno.h>
+#include <stdlib.h>
 #else
 #include <signal.h>
 #include <process.h>
@@ -59,6 +63,9 @@ int SIGUSR1 = 1000;
 #include "SALOME_Embedded_NamingService_Client.hxx"
 #include "SALOME_Embedded_NamingService.hxx"
 #include "Basics_Utils.hxx"
+#include "KernelBasis.hxx"
+#include "PythonCppUtils.hxx"
+#include "Utils_CorbaException.hxx"
 
 #ifdef _XOPEN_SOURCE
 #undef _XOPEN_SOURCE
@@ -104,12 +111,14 @@ extern "C" {void SigIntHandler( int ) ; }
 #define SLASH '/'
 #endif
 
+const int Abstract_Engines_Container_i::DFT_TIME_INTERVAL_BTW_MEASURE = 500;
+
 std::map<std::string, int> Abstract_Engines_Container_i::_cntInstances_map;
 std::map<std::string, void *> Abstract_Engines_Container_i::_library_map;
 std::map<std::string, void *> Abstract_Engines_Container_i::_toRemove_map;
 omni_mutex Abstract_Engines_Container_i::_numInstanceMutex ;
 
-static PyObject* _pyCont;
+static PyObject *_pyCont = nullptr;
 
 int checkifexecutable(const std::string&);
 int findpathof(const std::string& path, std::string&, const std::string&);
@@ -137,18 +146,19 @@ Abstract_Engines_Container_i::Abstract_Engines_Container_i () :
 */
 //=============================================================================
 
-Abstract_Engines_Container_i::Abstract_Engines_Container_i (CORBA::ORB_ptr orb, 
+Abstract_Engines_Container_i::Abstract_Engines_Container_i (const std::string& pyContainerClsName,
+                                                            CORBA::ORB_ptr orb, 
                                                             PortableServer::POA_ptr poa,
                                                             char *containerName ,
                                                             int argc , char* argv[],
                                                             SALOME_NamingService_Container_Abstract *ns,
                                                             bool isServantAloneInProcess
                                                             ) :
-  _NS(nullptr),_id(0),_numInstance(0),_isServantAloneInProcess(isServantAloneInProcess)
+  _NS(nullptr),_py_container_name(pyContainerClsName),_id(0),_numInstance(0),_isServantAloneInProcess(isServantAloneInProcess)
 {
   _pid = (long)getpid();
 
-  if(ns)
+  if( isServantAloneInProcess )
     ActSigIntHandler() ;
 
   _argc = argc ;
@@ -156,27 +166,11 @@ Abstract_Engines_Container_i::Abstract_Engines_Container_i (CORBA::ORB_ptr orb,
 
   std::string hostname = Kernel_Utils::GetHostname();
 #ifndef WIN32
-  MESSAGE(hostname << " " << getpid() << 
-    " Engines_Container_i starting argc " <<
-    _argc << " Thread " << pthread_self() ) ;
+  INFO_MESSAGE("Starting Container servant instance on Hostname :" << hostname << " with  PID : " << getpid() ) ;
 #else
   MESSAGE(hostname << " " << _getpid() << 
     " Engines_Container_i starting argc " << _argc<< " Thread " << pthread_self().p ) ;
 #endif
-
-  int i = 0 ;
-  while ( _argv[ i ] )
-  {
-    MESSAGE("           argv" << i << " " << _argv[ i ]) ;
-    i++ ;
-  }
-
-  if ( argc < 2 )
-  {
-    INFOS("SALOME_Container usage : SALOME_Container ServerName");
-    ASSERT(0) ;
-  }
-  SCRUTE(argv[1]);
   _isSupervContainer = false;
 
   _orb = CORBA::ORB::_duplicate(orb) ;
@@ -196,54 +190,51 @@ Abstract_Engines_Container_i::Abstract_Engines_Container_i (CORBA::ORB_ptr orb,
     _remove_ref();
 
     _containerName =  SALOME_NamingService_Abstract::BuildContainerNameForNS(containerName, hostname.c_str());
-    SCRUTE(_containerName);
-    _NS->Register(pCont, _containerName.c_str());
-    MESSAGE("Engines_Container_i::Engines_Container_i : Container name " << _containerName);
 
     // Python: 
     // import SALOME_Container
     // pycont = SALOME_Container.SALOME_Container_i(containerIORStr)
 
     CORBA::String_var sior =  _orb->object_to_string(pCont);
-    std::string myCommand="pyCont = SALOME_Container.SALOME_Container_i('";
-    myCommand += _containerName + "','";
-    myCommand += sior;
-    myCommand += "')\n";
-    SCRUTE(myCommand);
+    std::ostringstream myCommand;
+    myCommand << "pyCont = SALOME_Container." << this->getPyContainerClassName() << "('" << _containerName << "','" << sior << "'," <<  DFT_TIME_INTERVAL_BTW_MEASURE << ")\n";
+    INFO_MESSAGE("Python command executed : " << myCommand.str());
 
     //[RNV]: Comment the PyEval_AcquireLock() and PyEval_ReleaseLock() because this 
     //approach leads to the deadlock of the main thread of the application on Windows platform
     //in case if cppContainer runs in the standalone mode. The problem with the PyThreadState 
     //described by ABN seems not reproduced, to be checked carefully later...
-    PyGILState_STATE gstate = PyGILState_Ensure();
-    
-    //// [ABN]: using the PyGILState* API here is unstable. omniORB logic is invoked
-    //// by the Python code executed below, and in some (random) cases, the Python code
-    //// execution ends with a PyThreadState which was not the one we have here.
-    //// (TODO: understand why ...)
-    //// To be on the safe side we get and load the thread state ourselves:    
-    //PyEval_AcquireLock();  // get GIL
-    //PyThreadState * mainThreadState = PyThreadState_Get();
-    //PyThreadState_Swap(mainThreadState);
+    {
+      AutoGIL gstate;    
+      //// [ABN]: using the PyGILState* API here is unstable. omniORB logic is invoked
+      //// by the Python code executed below, and in some (random) cases, the Python code
+      //// execution ends with a PyThreadState which was not the one we have here.
+      //// (TODO: understand why ...)
+      //// To be on the safe side we get and load the thread state ourselves:    
+      //PyEval_AcquireLock();  // get GIL
+      //PyThreadState * mainThreadState = PyThreadState_Get();
+      //PyThreadState_Swap(mainThreadState);
 
 #ifdef WIN32
-    // mpv: this is temporary solution: there is a unregular crash if not
-    //Sleep(2000);
-    //
-    // first element is the path to Registry.dll, but it's wrong
-    PyRun_SimpleString("import sys\n");
-    PyRun_SimpleString("sys.path = sys.path[1:]\n");
+      // mpv: this is temporary solution: there is a unregular crash if not
+      //Sleep(2000);
+      //
+      // first element is the path to Registry.dll, but it's wrong
+      PyRun_SimpleString("import sys\n");
+      PyRun_SimpleString("sys.path = sys.path[1:]\n");
 #endif
-    PyRun_SimpleString("import SALOME_Container\n");
-    PyRun_SimpleString((char*)myCommand.c_str());
-    PyObject *mainmod = PyImport_AddModule("__main__");
-    PyObject *globals = PyModule_GetDict(mainmod);
-    _pyCont = PyDict_GetItemString(globals, "pyCont");
-
-    //PyThreadState_Swap(NULL);
-    //PyEval_ReleaseLock();
-    PyGILState_Release(gstate);
-
+      PyRun_SimpleString("import SALOME_Container\n");
+      PyRun_SimpleString((char*)myCommand.str().c_str());
+      PyObject *mainmod = PyImport_AddModule("__main__");
+      PyObject *globals = PyModule_GetDict(mainmod);
+      _pyCont = PyDict_GetItemString(globals, "pyCont");
+      //PyThreadState_Swap(NULL);
+      //PyEval_ReleaseLock();
+    }
+    {// register to NS after python initialization to be sure that client invoke after py constructor execution
+      _NS->Register(pCont, _containerName.c_str());
+      DEBUG_MESSAGE("Container registred in NS as : " << _containerName);
+    }
     fileTransfer_i* aFileTransfer = new fileTransfer_i();
     CORBA::Object_var obref=aFileTransfer->_this();
     _fileTransfer = Engines::fileTransfer::_narrow(obref);
@@ -300,7 +291,7 @@ char* Abstract_Engines_Container_i::workingdir()
 */
 //=============================================================================
 
-char* Abstract_Engines_Container_i::logfilename()
+char *Abstract_Engines_Container_i::logfilename()
 {
   return CORBA::string_dup(_logfilename.c_str()) ;
 }
@@ -309,6 +300,76 @@ char* Abstract_Engines_Container_i::logfilename()
 void Abstract_Engines_Container_i::logfilename(const char* name)
 {
   _logfilename=name;
+}
+
+char *Abstract_Engines_Container_i::locallogfilename()
+{
+  return CORBA::string_dup( _localfilename.c_str() );
+}
+
+void Abstract_Engines_Container_i::locallogfilename(const char *name)
+{
+  AutoGIL gstate;
+  _localfilename = name;
+  AutoPyRef result = PyObject_CallMethod(_pyCont,(char*)"setLogFileName","s",name,nullptr);
+  if (PyErr_Occurred())
+  {
+    std::string error("can not set logfilename");
+    PyErr_Print();
+    THROW_SALOME_CORBA_EXCEPTION(error.c_str(),SALOME::INTERNAL_ERROR);
+  }
+}
+
+CORBA::Long Abstract_Engines_Container_i::monitoringtimeresms()
+{
+  AutoGIL gstate;
+  AutoPyRef result = PyObject_CallMethod(_pyCont,(char*)"monitoringtimeresms",nullptr);
+  if (PyErr_Occurred())
+  {
+    std::string error("can not retrieve time interval between 2 measures");
+    PyErr_Print();
+    THROW_SALOME_CORBA_EXCEPTION(error.c_str(),SALOME::INTERNAL_ERROR);
+  }
+  CORBA::Long ret = PyLong_AsLong( result );
+  return ret;
+}
+
+void Abstract_Engines_Container_i::monitoringtimeresms(CORBA::Long intervalInMs)
+{
+  AutoGIL gstate;
+  AutoPyRef result = PyObject_CallMethod(_pyCont,(char*)"SetMonitoringtimeresms","i",intervalInMs,nullptr);
+  if (PyErr_Occurred())
+  {
+    std::string error("can not set time interval between 2 measures");
+    PyErr_Print();
+    THROW_SALOME_CORBA_EXCEPTION(error.c_str(),SALOME::INTERNAL_ERROR);
+  }
+}
+
+void Abstract_Engines_Container_i::verbosity(bool& activated, CORBA::String_out level)
+{
+  activated = SALOME::VerbosityActivated();
+  level = CORBA::string_dup( SALOME::VerbosityLevelStr().c_str() );
+}
+
+void Abstract_Engines_Container_i::setVerbosity(bool activated, const char *level)
+{
+  SALOME::SetVerbosityActivated( activated );
+  SALOME::SetVerbosityLevelStr( level );
+  {
+    AutoGIL gstate;
+    AutoPyRef res = PyObject_CallMethod(_pyCont,
+      (char*)"positionVerbosityOfLogger",NULL);
+    if(res==NULL)
+    {
+      //internal error
+      PyErr_Print();
+      SALOME::ExceptionStruct es;
+      es.type = SALOME::INTERNAL_ERROR;
+      es.text = "can not create a python node";
+      throw SALOME::SALOME_Exception(es);
+    }
+  }
 }
 
 //=============================================================================
@@ -357,14 +418,11 @@ void Abstract_Engines_Container_i::ping()
 
 CORBA::Long Abstract_Engines_Container_i::getNumberOfCPUCores()
 {
-  PyGILState_STATE gstate = PyGILState_Ensure();
+  AutoGIL gstate;
   PyObject *module = PyImport_ImportModuleNoBlock((char*)"salome_psutil");
-  PyObject *result = PyObject_CallMethod(module,
+  AutoPyRef result = PyObject_CallMethod(module,
                                          (char*)"getNumberOfCPUCores", NULL);
   int n = PyLong_AsLong(result);
-  Py_DECREF(result);
-  PyGILState_Release(gstate);
-
   return (CORBA::Long)n;
 }
 
@@ -520,16 +578,15 @@ namespace {
   
 Engines::vectorOfDouble* Abstract_Engines_Container_i::loadOfCPUCores()
 {
-  PyGILState_STATE gstate = PyGILState_Ensure();
+  AutoGIL gstate;
   PyObject *module = PyImport_ImportModuleNoBlock((char*)"salome_psutil");
-  PyObject *result = PyObject_CallMethod(module,
+  AutoPyRef result = PyObject_CallMethod(module,
                                          (char*)"loadOfCPUCores", "s",
                                          _load_script.c_str());
   if (PyErr_Occurred())
   {
     std::string error = parseException();
     PyErr_Print();
-    PyGILState_Release(gstate);
     SALOME::ExceptionStruct es;
     es.type = SALOME::INTERNAL_ERROR;
     es.text = CORBA::string_dup(error.c_str());
@@ -539,8 +596,6 @@ Engines::vectorOfDouble* Abstract_Engines_Container_i::loadOfCPUCores()
   int n = this->getNumberOfCPUCores();
   if (!PyList_Check(result) || PyList_Size(result) != n) {
     // bad number of cores
-    PyGILState_Release(gstate);
-    Py_DECREF(result);
     SALOME::ExceptionStruct es;
     es.type = SALOME::INTERNAL_ERROR;
     es.text = "wrong number of cores";
@@ -555,8 +610,6 @@ Engines::vectorOfDouble* Abstract_Engines_Container_i::loadOfCPUCores()
     if (foo < 0.0 || foo > 1.0)
     {
       // value not in [0, 1] range
-      PyGILState_Release(gstate);
-      Py_DECREF(result);
       SALOME::ExceptionStruct es;
       es.type = SALOME::INTERNAL_ERROR;
       es.text = "load not in [0, 1] range";
@@ -564,9 +617,6 @@ Engines::vectorOfDouble* Abstract_Engines_Container_i::loadOfCPUCores()
     }
     loads[i] = foo;
   }
-
-  Py_DECREF(result);
-  PyGILState_Release(gstate);
 
   return loads._retn();
 }
@@ -605,13 +655,11 @@ void Abstract_Engines_Container_i::resetScriptForCPULoad()
 
 CORBA::Long Abstract_Engines_Container_i::getTotalPhysicalMemory()
 {
-  PyGILState_STATE gstate = PyGILState_Ensure();
+  AutoGIL gstate;
   PyObject *module = PyImport_ImportModuleNoBlock((char*)"salome_psutil");
-  PyObject *result = PyObject_CallMethod(module,
+  AutoPyRef result = PyObject_CallMethod(module,
                                          (char*)"getTotalPhysicalMemory", NULL);
   int n = PyLong_AsLong(result);
-  Py_DECREF(result);
-  PyGILState_Release(gstate);
 
   return (CORBA::Long)n;
 }
@@ -625,13 +673,11 @@ CORBA::Long Abstract_Engines_Container_i::getTotalPhysicalMemory()
 
 CORBA::Long Abstract_Engines_Container_i::getTotalPhysicalMemoryInUse()
 {
-  PyGILState_STATE gstate = PyGILState_Ensure();
+  AutoGIL gstate;
   PyObject *module = PyImport_ImportModuleNoBlock((char*)"salome_psutil");
-  PyObject *result = PyObject_CallMethod(module,
+  AutoPyRef result = PyObject_CallMethod(module,
                                          (char*)"getTotalPhysicalMemoryInUse", NULL);
   int n = PyLong_AsLong(result);
-  Py_DECREF(result);
-  PyGILState_Release(gstate);
 
   return (CORBA::Long)n;
 }
@@ -645,13 +691,11 @@ CORBA::Long Abstract_Engines_Container_i::getTotalPhysicalMemoryInUse()
 
 CORBA::Long Abstract_Engines_Container_i::getTotalPhysicalMemoryInUseByMe()
 {
-  PyGILState_STATE gstate = PyGILState_Ensure();
+  AutoGIL gstate;
   PyObject *module = PyImport_ImportModuleNoBlock((char*)"salome_psutil");
-  PyObject *result = PyObject_CallMethod(module,
+  AutoPyRef result = PyObject_CallMethod(module,
                                          (char*)"getTotalPhysicalMemoryInUseByMe", NULL);
   int n = PyLong_AsLong(result);
-  Py_DECREF(result);
-  PyGILState_Release(gstate);
 
   return (CORBA::Long)n;
 }
@@ -666,6 +710,24 @@ CORBA::Long Abstract_Engines_Container_i::getTotalPhysicalMemoryInUseByMe()
 */
 //=============================================================================
 void Abstract_Engines_Container_i::Shutdown()
+{
+  ShutdownCommonPart();
+  if(_isServantAloneInProcess)
+  {
+    MESSAGE("Effective Shutdown of container Begins...");
+    try
+    {
+      if(!CORBA::is_nil(_orb))
+        _orb->shutdown(0);
+    }
+    catch(...)
+    {
+    }
+    MESSAGE("Effective Shutdown of container Ends...");  
+  }
+}
+
+void Abstract_Engines_Container_i::ShutdownCommonPart()
 {
   MESSAGE("Engines_Container_i::Shutdown()");
 
@@ -692,7 +754,7 @@ void Abstract_Engines_Container_i::Shutdown()
     }
   }
   _listInstances_map.clear();
-
+  MESSAGE("Engines_Container_i::Shutdown() -- step 2");
   // NS unregistering may throw in SSL mode if master process hosting SALOME_Embedded_NamingService servant has vanished
   // In this case it's skip it and still continue.
   try
@@ -703,14 +765,28 @@ void Abstract_Engines_Container_i::Shutdown()
   catch(...)
   {
   }
-  //
-  this->cleanAllPyScripts();
-  //
-  if(_isServantAloneInProcess)
+  MESSAGE("Engines_Container_i::Shutdown() -- step 3");
+  try
   {
-    MESSAGE("Effective Shutdown of container Begins...");
-    if(!CORBA::is_nil(_orb))
-      _orb->shutdown(0);
+    this->cleanAllPyScripts();
+    //
+    {
+      AutoGIL gstate;
+      AutoPyRef result = PyObject_CallMethod(_pyCont, (char*)"shutdownPy", (char*)"",nullptr);
+    }
+  }
+  catch(...)
+  {
+  }
+  MESSAGE("Engines_Container_i::Shutdown() -- step 4");
+}
+
+void Abstract_Engines_Container_i::ShutdownNow()
+{
+  ShutdownCommonPart();if(_isServantAloneInProcess)
+  {
+    AutoGIL gstate;
+    AutoPyRef result = PyObject_CallMethod(_pyCont, (char*)"killMe", (char*)"",nullptr);
   }
 }
 
@@ -915,15 +991,15 @@ Abstract_Engines_Container_i::load_component_PythonImplementation(const char* co
   }
   _numInstanceMutex.unlock() ;
 
-  PyGILState_STATE gstate = PyGILState_Ensure();
-  PyObject *result = PyObject_CallMethod(_pyCont,
-                                         (char*)"import_component",
-                                         (char*)"s",componentName);
+  {
+    AutoGIL gstate;
+    AutoPyRef result = PyObject_CallMethod(_pyCont,
+                                          (char*)"import_component",
+                                          (char*)"s",componentName);
 
-  reason=PyUnicode_AsUTF8(result);
-  Py_XDECREF(result);
-  SCRUTE(reason);
-  PyGILState_Release(gstate);
+    reason=PyUnicode_AsUTF8(result);
+    SCRUTE(reason);
+  }
 
   if (reason=="")
   {
@@ -997,7 +1073,7 @@ Abstract_Engines_Container_i::load_component_ExecutableImplementation(const char
 //! Create a new component instance
 /*! 
 *  CORBA method: Creates a new servant instance of a component.
-*  The servant registers itself to naming service and Registry.
+*  The servant registers itself to naming service and Registry.tdlib
 *  \param genericRegisterName  Name of the component instance to register
 *                         in Registry & Name Service (without _inst_n suffix)
 *  \return a loaded component
@@ -1012,6 +1088,183 @@ Abstract_Engines_Container_i::create_component_instance(const char*genericRegist
     create_component_instance_env(genericRegisterName, env, reason);
   CORBA::string_free(reason);
   return compo;
+}
+
+void EffectiveOverrideEnvironment( const Engines::FieldsDict& env )
+{
+  MESSAGE("Positionning environment on container ");
+  for (CORBA::ULong i=0; i < env.length(); i++)
+  {
+    if (env[i].value.type()->kind() == CORBA::tk_string)
+    {
+      const char *value = nullptr;
+      env[i].value >>= value;
+      MESSAGE( env[i].key << " = " << value);
+#ifndef WIN32
+      if( setenv(env[i].key,value,1) != 0 )
+      {
+        int errsv = errno;
+        std::string sErr( strerror( errsv) );
+        MESSAGE(sErr);
+      }
+#endif
+    }
+  }
+}
+
+std::vector< std::pair<std::string,std::string> > GetOSEnvironment()
+{
+  std::vector< std::pair<std::string,std::string> > ret;
+#ifndef WIN32
+  char **envPt( environ );
+  for(;*envPt != nullptr; ++envPt)
+  {
+    std::string s( *envPt );
+    auto pos = s.find_first_of('=');
+    std::string k( s.substr(0,pos) ),v( s.substr(pos+1) );
+    ret.emplace_back( std::pair<std::string,std::string>(k,v) );
+  }
+#endif
+  return ret;
+}
+
+void Abstract_Engines_Container_i::override_environment( const Engines::FieldsDict& env )
+{
+  EffectiveOverrideEnvironment(env);
+}
+
+void Abstract_Engines_Container_i::override_environment_python( const Engines::FieldsDict& env )
+{
+  constexpr char NODE_NAME[] = "ScriptNodeForEnv";
+  constexpr char SCRIPT[] = R"foo(
+import os
+for k,v in env:
+  os.environ[k] = v
+)foo";
+  Engines::PyScriptNode_var scriptNode = this->createPyScriptNode(NODE_NAME,SCRIPT);
+  auto sz = env.length();
+  Engines::listofstring keys, vals;
+  keys.length( sz ); vals.length( sz );
+  for( auto i = 0 ; i < sz ; ++i )
+  {
+    keys[i] = CORBA::string_dup( env[i].key );
+    const char *value = nullptr;
+    env[i].value >>= value;
+    vals[i] = CORBA::string_dup( value );
+  }
+  scriptNode->executeSimple(keys,vals);
+  this->removePyScriptNode(NODE_NAME);
+}
+
+Engines::FieldsDict *Abstract_Engines_Container_i::get_os_environment()
+{
+  std::unique_ptr<Engines::FieldsDict> ret( new Engines::FieldsDict );
+  std::vector< std::pair<std::string,std::string> > retCpp( GetOSEnvironment() );
+  auto sz = retCpp.size();
+  ret->length( sz );
+  for(auto i = 0 ; i < sz ; ++i)
+  {
+    (*ret)[i].key = CORBA::string_dup( retCpp[i].first.c_str() );
+    (*ret)[i].value <<= CORBA::string_dup( retCpp[i].second.c_str() );
+  }
+  return ret.release();
+}
+
+void Abstract_Engines_Container_i::set_big_obj_on_disk_threshold(CORBA::Long thresholdInByte)
+{
+  SALOME::SetBigObjOnDiskThreshold(thresholdInByte);
+}
+
+void Abstract_Engines_Container_i::set_big_obj_on_disk_directory(const char *directory)
+{
+  SALOME::SetBigObjOnDiskDirectory(directory);
+}
+
+void Abstract_Engines_Container_i::set_number_of_retry(CORBA::Long nbRetry)
+{
+  SALOME::SetNumberOfRetry( nbRetry );
+}
+
+void Abstract_Engines_Container_i::set_timeout_before_retrying(CORBA::Long timeInSecond)
+{
+  SALOME::SetExecutionTimeOut( timeInSecond );
+}
+
+void Abstract_Engines_Container_i::set_current_directory(const char *cwd)
+{
+  AutoGIL gstate;
+  AutoPyRef result = PyObject_CallMethod(_pyCont,(char*)"setCurrentDirectory","s",cwd,nullptr);
+  if (PyErr_Occurred())
+  {
+    std::string error("can not set logfilename");
+    PyErr_Print();
+    THROW_SALOME_CORBA_EXCEPTION(error.c_str(),SALOME::INTERNAL_ERROR);
+  }
+}
+
+void Abstract_Engines_Container_i::set_directory_for_replay_files(const char *directory)
+{
+  SALOME::SetDirectoryForReplayFiles( directory );
+}
+
+void Abstract_Engines_Container_i::set_startup_code(const char *codeAtStartUp)
+{
+  _code_at_startup = codeAtStartUp;
+}
+
+char *Abstract_Engines_Container_i::get_startup_code()
+{
+  return CORBA::string_dup( this->_code_at_startup.c_str() );
+}
+
+Engines::vectorOfString_var FromVecStringCppToCORBA( const std::vector<std::string>& group)
+{
+  Engines::vectorOfString_var ret( new Engines::vectorOfString );
+  auto sz( group.size() );
+  ret->length( sz );
+  for(auto i = 0 ; i < sz ; ++i)
+  {
+    ret[i] = CORBA::string_dup( group[i].c_str() );
+  }
+  return ret;
+}
+
+std::vector<std::string> FromCORBAVecStringToCpp(const Engines::vectorOfString& groupOfLogFileNames)
+{
+  auto len = groupOfLogFileNames.length();
+  std::vector<std::string> ret( len );
+  for( auto i = 0 ; i < len ; ++i )
+  {
+    ret[i] = groupOfLogFileNames[i];
+  }
+  return ret;
+}
+
+void Abstract_Engines_Container_i::addLogFileNameGroup(const Engines::vectorOfString& groupOfLogFileNames)
+{
+  this->_groups_of_log_files.push_back( FromCORBAVecStringToCpp(groupOfLogFileNames) );
+}
+    
+Engines::vectorOfVectorOfString *Abstract_Engines_Container_i::getAllLogFileNameGroups()
+{
+  std::unique_ptr<Engines::vectorOfVectorOfString> ret( new Engines::vectorOfVectorOfString );
+  auto nbOfGrps = this->_groups_of_log_files.size();
+  ret->length( nbOfGrps );
+  for(auto i = 0 ; i < nbOfGrps ; ++i)
+  {
+    (*ret)[i] = FromVecStringCppToCORBA( _groups_of_log_files[i] );
+  }
+  return ret.release();
+}
+
+void Abstract_Engines_Container_i::execute_python_code(const char *code)
+{
+  AutoGIL gstate;
+  if( PyRun_SimpleString( code ) != 0 )
+  {
+    std::string error = parseException();
+    THROW_SALOME_CORBA_EXCEPTION(error.c_str(),SALOME::INTERNAL_ERROR);
+  }
 }
 
 //=============================================================================
@@ -1135,18 +1388,7 @@ Abstract_Engines_Container_i::createExecutableInstance(std::string CompName,
   pid_t pid = fork();
   if(pid == 0) // child
   {
-    for (CORBA::ULong i=0; i < env.length(); i++)
-    {
-      if (env[i].value.type()->kind() == CORBA::tk_string)
-      {
-        const char* value;
-        env[i].value >>= value;
-        std::string s(env[i].key);
-        s+='=';
-        s+=value;
-        putenv(strdup(s.c_str()));
-      }
-    }
+    EffectiveOverrideEnvironment(env);
 
     execl("/bin/sh", "sh", "-c", command.c_str() , (char *)0);
     status=-1;
@@ -1251,20 +1493,20 @@ Abstract_Engines_Container_i::createPythonInstance(std::string CompName,
   sprintf( aNumI , "%d" , numInstance ) ;
   std::string instanceName = CompName + "_inst_" + aNumI ;
   std::string component_registerName = _containerName + "/" + instanceName;
-
-  PyGILState_STATE gstate = PyGILState_Ensure();
-  PyObject *result = PyObject_CallMethod(_pyCont,
-                                         (char*)"create_component_instance",
-                                         (char*)"ss",
-                                         CompName.c_str(),
-                                         instanceName.c_str());
-  const char *ior;
-  const char *error;
-  PyArg_ParseTuple(result,"ss", &ior, &error);
-  std::string iors = ior;
-  reason=error;
-  Py_DECREF(result);
-  PyGILState_Release(gstate);
+  std::string iors;
+  {
+    AutoGIL gstate;
+    AutoPyRef result = PyObject_CallMethod(_pyCont,
+                                          (char*)"create_component_instance",
+                                          (char*)"ss",
+                                          CompName.c_str(),
+                                          instanceName.c_str());
+    const char *ior;
+    const char *error;
+    PyArg_ParseTuple(result,"ss", &ior, &error);
+    iors = ior;
+    reason=error;
+  }
 
   if( iors!="" )
   {
@@ -1291,20 +1533,20 @@ Abstract_Engines_Container_i::create_python_service_instance(const char * CompNa
   std::string instanceName = std::string(CompName) + "_inst_" + aNumI ;
   std::string component_registerName = _containerName + "/" + instanceName;
 
-  PyGILState_STATE gstate = PyGILState_Ensure();
-  PyObject *result = PyObject_CallMethod(_pyCont,
-                                         (char*)"create_component_instance",
-                                         (char*)"ss",
-                                         CompName,
-                                         instanceName.c_str());
-  const char *ior;
-  const char *error;
-  PyArg_ParseTuple(result,"ss", &ior, &error);
-  reason = CORBA::string_dup(error);
-  char * _ior = CORBA::string_dup(ior);
-  Py_DECREF(result);
-  PyGILState_Release(gstate);
-
+  char * _ior = nullptr;
+  {
+    AutoGIL gstate;
+    AutoPyRef result = PyObject_CallMethod(_pyCont,
+                                          (char*)"create_component_instance",
+                                          (char*)"ss",
+                                          CompName,
+                                          instanceName.c_str());
+    const char *ior;
+    const char *error;
+    PyArg_ParseTuple(result,"ss", &ior, &error);
+    reason = CORBA::string_dup(error);
+    _ior = CORBA::string_dup(ior);
+  }
   return _ior;
 }
 
@@ -1961,28 +2203,29 @@ void Abstract_Engines_Container_i::copyFile(Engines::Container_ptr container, co
 Engines::PyNode_ptr Abstract_Engines_Container_i::createPyNode(const char* nodeName, const char* code)
 {
   Engines::PyNode_var node= Engines::PyNode::_nil();
-
-  PyGILState_STATE gstate = PyGILState_Ensure();
-  PyObject *res = PyObject_CallMethod(_pyCont,
-    (char*)"create_pynode",
-    (char*)"ss",
-    nodeName,
-    code);
-  if(res==NULL)
+  long ierr(-1);
+  std::string astr;
   {
-    //internal error
-    PyErr_Print();
-    PyGILState_Release(gstate);
-    SALOME::ExceptionStruct es;
-    es.type = SALOME::INTERNAL_ERROR;
-    es.text = "can not create a python node";
-    throw SALOME::SALOME_Exception(es);
+    AutoGIL gstate;
+    PyObject *res = PyObject_CallMethod(_pyCont,
+      (char*)"create_pynode",
+      (char*)"ss",
+      nodeName,
+      code);
+    if(res==NULL)
+    {
+      //internal error
+      PyErr_Print();
+      SALOME::ExceptionStruct es;
+      es.type = SALOME::INTERNAL_ERROR;
+      es.text = "can not create a python node";
+      throw SALOME::SALOME_Exception(es);
+    }
+    ierr=PyLong_AsLong(PyTuple_GetItem(res,0));
+    PyObject* result=PyTuple_GetItem(res,1);
+    astr = PyUnicode_AsUTF8(result);
+    Py_DECREF(res);
   }
-  long ierr=PyLong_AsLong(PyTuple_GetItem(res,0));
-  PyObject* result=PyTuple_GetItem(res,1);
-  std::string astr=PyUnicode_AsUTF8(result);
-  Py_DECREF(res);
-  PyGILState_Release(gstate);
   if(ierr==0)
   {
     Utils_Locker lck(&_mutexForDftPy);
@@ -2044,28 +2287,28 @@ Engines::PyNode_ptr Abstract_Engines_Container_i::getDefaultPyNode(const char *n
 Engines::PyScriptNode_ptr Abstract_Engines_Container_i::createPyScriptNode(const char* nodeName, const char* code)
 {
   Engines::PyScriptNode_var node= Engines::PyScriptNode::_nil();
-
-  PyGILState_STATE gstate = PyGILState_Ensure();
-  PyObject *res = PyObject_CallMethod(_pyCont,
-    (char*)"create_pyscriptnode",
-    (char*)"ss",
-    nodeName,
-    code);
-  if(res==NULL)
+  long ierr(-1);
+  std::string astr;
   {
-    //internal error
-    PyErr_Print();
-    PyGILState_Release(gstate);
-    SALOME::ExceptionStruct es;
-    es.type = SALOME::INTERNAL_ERROR;
-    es.text = "can not create a python node";
-    throw SALOME::SALOME_Exception(es);
+    AutoGIL gstate;
+    AutoPyRef res = PyObject_CallMethod(_pyCont,
+      (char*)"create_pyscriptnode",
+      (char*)"ss",
+      nodeName,
+      code);
+    if( res.isNull() )
+    {
+      //internal error
+      PyErr_Print();
+      SALOME::ExceptionStruct es;
+      es.type = SALOME::INTERNAL_ERROR;
+      es.text = "can not create a python node";
+      throw SALOME::SALOME_Exception(es);
+    }
+    ierr=PyLong_AsLong(PyTuple_GetItem(res,0));
+    PyObject* result=PyTuple_GetItem(res,1);
+    astr = PyUnicode_AsUTF8(result);
   }
-  long ierr=PyLong_AsLong(PyTuple_GetItem(res,0));
-  PyObject* result=PyTuple_GetItem(res,1);
-  std::string astr=PyUnicode_AsUTF8(result);
-  Py_DECREF(res);
-  PyGILState_Release(gstate);
 
   if(ierr==0)
   {
@@ -2250,7 +2493,7 @@ static Engines_Container_SSL_i *_container_singleton_ssl = nullptr;
 
 static Engines::Container_var _container_ref_singleton_ssl;
 
-Engines_Container_SSL_i *KERNEL::getContainerSA()
+Abstract_Engines_Container_SSL_i *KERNEL::getContainerSA()
 {
   if(!_container_singleton_ssl)
   {
@@ -2261,9 +2504,24 @@ Engines_Container_SSL_i *KERNEL::getContainerSA()
     CORBA::PolicyList policies;
     policies.length(0);
     //
-    char *argv[4] = {"Container","FactoryServer","toto",nullptr};
+    constexpr int ARGC = 4;
+    constexpr const char *ARGV[ARGC] = {"Container","FactoryServer","toto",nullptr};
+    std::unique_ptr<char*[]> argv( new char *[ARGC+1] );
+    std::vector< std::unique_ptr<char[]> > argvv(ARGC);
+    argv[ARGC] = nullptr;
+    for(int i = 0 ; i < ARGC ; ++i)
+    {
+      if(ARGV[i])
+      {
+        argvv[i].reset( new char[strlen(ARGV[i])+1] );
+        strcpy(argvv[i].get(),ARGV[i]);
+        argv[i] = argvv[i].get();
+      }
+      else
+        argv[i] = nullptr;
+    }
     SALOME_Fake_NamingService ns;
-    _container_singleton_ssl = new Engines_Container_SSL_i(orb,poa,"FactoryServer",2,argv,&ns,false);
+    _container_singleton_ssl = new Engines_Container_SSL_i(orb,poa,(char *)"FactoryServer",2,argv.get(),&ns,false);
     PortableServer::ObjectId * cont_id = _container_singleton_ssl->getCORBAId();
     //
     CORBA::Object_var zeRef = poa->id_to_reference(*cont_id);

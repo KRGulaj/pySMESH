@@ -1,4 +1,4 @@
-# Copyright (C) 2013-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2013-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -17,13 +17,16 @@
 # See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
 #
 
-import os
-import sys
+""" This file must be compatible with python 3.6 as it is used by the salome boostrap."""
+
 import glob
-import subprocess
+import json
+import os
 import re
 import socket
-import json
+import sys
+import tempfile
+from pathlib import Path
 
 """
 Define a specific exception class to manage exceptions related to SalomeContext
@@ -41,14 +44,18 @@ def __listDirectory(path):
   return allFiles
 #
 
-def __getConfigFileNamesDefault():
-  absoluteAppliPath = os.getenv('ABSOLUTE_APPLI_PATH','')
-  if not absoluteAppliPath:
-    return []
+def __getConfigFileNamesDefault(default_cfg_directory=""):
+  if not default_cfg_directory or not os.path.exists(default_cfg_directory):
+    absoluteAppliPath = os.getenv('ABSOLUTE_APPLI_PATH','')
+    if not absoluteAppliPath:
+      print("No ABSOLUTE_APPLI_PATH detected.")
+      return []
 
-  envdDir = absoluteAppliPath + '/env.d'
-  if not os.path.isdir(envdDir):
-    return []
+    envdDir = absoluteAppliPath + '/env.d'
+    if not os.path.isdir(envdDir):
+      return []
+  else:
+    envdDir = default_cfg_directory
 
   return __listDirectory(envdDir)
 #
@@ -79,11 +86,11 @@ def __getEnvironmentFileNames(args, optionPrefix, checkExistence):
   return configFileNames, args, unexisting
 #
 
-def getConfigFileNames(args, checkExistence=False):
+def getConfigFileNames(args, checkExistence=False, default_cfg_directory=""):
   configOptionPrefix = "--config="
   configArgs = [ str(x) for x in args if str(x).startswith(configOptionPrefix) ]
   if len(configArgs) == 0:
-    configFileNames, unexist = __getConfigFileNamesDefault(), []
+    configFileNames, unexist = __getConfigFileNamesDefault(default_cfg_directory=default_cfg_directory), []
   else:
     # get configuration filenames
     configFileNames, args, unexist = __getEnvironmentFileNames(args, configOptionPrefix, checkExistence)
@@ -181,7 +188,7 @@ def getScriptsAndArgs(args=None, searchPathList=None):
       # myscript.py args:['file1','file2'],val1,"done",[1,2,3],[True,False],"ok"
       # With such a call, an elt variable contains the string representing ['file1','file2'],val1,"done",[1,2,3],[True,False],"ok" that is '[file1,file2],val1,done,[1,2,3],[True,False],ok'
       # We have to split elt to obtain: ['[file1,file2]','val1','done','[1,2,3]','[True,False]','ok']
-      contains_list = re.findall('(\[[^\]]*\])', elt)
+      contains_list = re.findall(r'(\[[^\]]*\])', elt)
       if contains_list:
         extracted_args = []
         x = elt.split(",")
@@ -261,9 +268,10 @@ def getScriptsAndArgs(args=None, searchPathList=None):
                 ispython = True
                 break
               pass
-            fn.close()
           except Exception:
             pass
+          finally:
+            fn.close()
           if not ispython and script_extension == ".py":
             currentKey = "@PYTHONBIN@ "+currentScript
           else:
@@ -297,7 +305,7 @@ def formatScriptsAndArgs(scriptArgs=None, escapeSpaces=False):
           cmd = cmd.replace(' ', ' "', 1)
           cmd = cmd + '"'
         else:
-          cmd = cmd.replace(' ', '\ ').replace('\ ', ' ', 1)
+          cmd = cmd.replace(' ', r'\ ').replace(r'\ ', ' ', 1)
       if sa_obj.args:
         cmd = " ".join([cmd]+sa_obj.args)
       commands.append(cmd)
@@ -323,28 +331,19 @@ def setOmniOrbUserPath():
   omniorbUserPath = os.getenv("OMNIORB_USER_PATH")
   if omniorbUserPath:
     if not os.access(omniorbUserPath, os.W_OK):
-      raise Exception("Unable to get write access to directory: %s"%omniorbUserPath)
+      raise Exception(f"Unable to get write access to directory: {omniorbUserPath}")
     pass
   else:
     # Must be in /tmp (or equivalent) to handle application concurrency
     try:
-      import tempfile
-      temp = tempfile.NamedTemporaryFile()
-      temp_dir = os.path.dirname(temp.name)
-      temp.close()
+      # #35633 If using tempfile.TemporaryDirectory() os.access(omniorbUserPath, os.W_OK)
+      # can return False in some situations
+      temp_dir = tempfile.gettempdir()
       if not os.access(temp_dir, os.W_OK):
-        raise Exception("Unable to get write access to directory: %s"%temp_dir)
+        raise Exception(f"Unable to get write access to directory: {temp_dir}")
       os.environ["OMNIORB_USER_PATH"] = temp_dir
-    except Exception:
-      homePath = os.path.realpath(os.path.expanduser('~'))
-      #defaultOmniorbUserPath = os.path.join(homePath, ".salomeConfig/USERS")
-      defaultOmniorbUserPath = homePath
-      if os.getenv("APPLI"):
-        appli_users_path=os.path.join(homePath, os.getenv("APPLI"), "USERS")
-        if os.access(appli_users_path, os.W_OK):
-          defaultOmniorbUserPath = appli_users_path
-        pass
-      os.environ["OMNIORB_USER_PATH"] = defaultOmniorbUserPath
+    except Exception as e:
+      os.environ["OMNIORB_USER_PATH"] = Path.home().as_posix()
 #
 
 def getHostname():

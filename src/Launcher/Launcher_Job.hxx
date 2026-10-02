@@ -1,4 +1,4 @@
-// Copyright (C) 2009-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2009-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -84,6 +84,7 @@ namespace Launcher
       void setWCKey(const std::string & wckey);
       void setExtraParams(const std::string & extra_params);
       void setReference(const std::string & reference);
+      void setVerbosePyLogLevel(const std::string& verbosePyLogLevel);
       // For COORM
       void setLauncherFile(const std::string & launcher_file);
       void setLauncherArgs(const std::string & launcher_args);
@@ -97,6 +98,7 @@ namespace Launcher
       const std::list<std::string> & get_in_files() const;
       const std::list<std::string> & get_out_files() const;
       std::string getMaximumDuration() const;
+      long getMaximumDurationInSecond() const { return this->_maximum_duration_in_second; }
       resourceParams getResourceRequiredParams() const;
       std::string getQueue() const;
       std::string getPartition() const;
@@ -108,6 +110,7 @@ namespace Launcher
       std::string getWCKey() const;
       std::string getExtraParams() const;
       std::string getReference() const;
+      std::string getVerbosePyLogLevel() const;
 
       // For COORM
       std::string getLauncherFile() const;
@@ -168,6 +171,7 @@ namespace Launcher
       std::string _wckey;
       std::string _extra_params;
       std::string _reference; //! Reference of the job for the batch manager
+      std::string _verbose_py_log_level; //! same semantics than driver --verbose_level
 
       // Parameters for COORM
       std::string _launcher_file;

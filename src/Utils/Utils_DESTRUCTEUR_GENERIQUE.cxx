@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -37,12 +37,6 @@ extern "C"
 //# include "utilities.h"
 # include "LocalTraceBufferPool.hxx"
 void Nettoyage();
-
-#ifdef _DEBUG_
-// static int MYDEBUG = 0;
-#else
-// static int MYDEBUG = 0;
-#endif
 
 std::list<DESTRUCTEUR_GENERIQUE_*> *DESTRUCTEUR_GENERIQUE_::Destructeurs=0 ;
 
@@ -116,16 +110,16 @@ static ATEXIT_ nettoyage = ATEXIT_( false );    /* singleton statique */
 void Nettoyage( void )
 {
   //cerr << "Nettoyage()" << endl;
-  //if(MYDEBUG) BEGIN_OF("Nettoyage( void )") ;
+  //BEGIN_OF("Nettoyage( void )") ;
         assert(DESTRUCTEUR_GENERIQUE_::Destructeurs) ;
-        //if(MYDEBUG) SCRUTE( DESTRUCTEUR_GENERIQUE_::Destructeurs->size() ) ;
+        //SCRUTE( DESTRUCTEUR_GENERIQUE_::Destructeurs->size() ) ;
         if( DESTRUCTEUR_GENERIQUE_::Destructeurs->size() )
         {
                 std::list<DESTRUCTEUR_GENERIQUE_*>::iterator it = DESTRUCTEUR_GENERIQUE_::Destructeurs->end() ;
 
                 do
                 {
-                  //if(MYDEBUG) MESSAGE( "DESTRUCTION d'un SINGLETON");
+                  //MESSAGE( "DESTRUCTION d'un SINGLETON");
                         it-- ;
                         DESTRUCTEUR_GENERIQUE_* ptr = *it ;
                         //DESTRUCTEUR_GENERIQUE_::Destructeurs->remove( *it ) ;
@@ -134,14 +128,14 @@ void Nettoyage( void )
                 }while( it!=  DESTRUCTEUR_GENERIQUE_::Destructeurs->begin() ) ;
 
                 DESTRUCTEUR_GENERIQUE_::Destructeurs->clear() ;
-                //if(MYDEBUG) SCRUTE( DESTRUCTEUR_GENERIQUE_::Destructeurs->size() ) ;
+                //SCRUTE( DESTRUCTEUR_GENERIQUE_::Destructeurs->size() ) ;
                 assert( DESTRUCTEUR_GENERIQUE_::Destructeurs->size()==0 ) ;
                 assert( DESTRUCTEUR_GENERIQUE_::Destructeurs->empty() ) ;
         }
 
         delete DESTRUCTEUR_GENERIQUE_::Destructeurs;
         DESTRUCTEUR_GENERIQUE_::Destructeurs=0;
-        //if(MYDEBUG) END_OF("Nettoyage( void )") ;
+        //END_OF("Nettoyage( void )") ;
         return ;
 }
 

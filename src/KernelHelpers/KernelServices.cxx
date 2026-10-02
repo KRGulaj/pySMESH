@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2022  CEA/DEN, EDF R&D
+// Copyright (C) 2021-2026  CEA, EDF
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -19,6 +19,12 @@
 
 #include "SALOME_KernelServices.hxx"
 
+#include <iostream>
+#include <mutex>
+#include <thread>
+
+static std::mutex global_mut;
+
 void RegisterCompoInternal(const std::string& compoName, const std::string& compoIOR)
 {
     CORBA::ORB_ptr orb = KERNEL::getORB();
@@ -32,4 +38,38 @@ std::string RetrieveCompoInternal(const std::string& compoName)
     CORBA::ORB_ptr orb = KERNEL::getORB();
     CORBA::String_var ior = orb->object_to_string(obj);
     return std::string(ior.in());
+}
+
+/*!
+ * This method generates a SIGSEGV to test robustness of higher level layers.
+ */
+void GenerateViolentMemoryFaultForTestPurpose()
+{
+    double *a = nullptr;
+    *a = 0;
+}
+
+void goForLock()
+{
+    std::cout << "Start thread" << std::endl;
+    std::cout << "going to deadlock" << std::endl;
+    global_mut.lock();
+}
+
+/*!
+ * This method wrapped into Python is useful to have a break point in C++ when complex python script is invoked in the stack
+ */
+void EntryForDebuggerBreakPoint()
+{
+    std::cout << "b KernelServices.cxx:64" << std::endl;
+}
+
+/*!
+ * This method leads to a deadlock to test robustness of higher level layers.
+ */
+void GenerateDeadLockForTestPurpose()
+{
+    global_mut.lock();
+    std::thread t1(goForLock);
+    t1.join();
 }

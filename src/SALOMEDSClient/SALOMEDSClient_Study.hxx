@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -70,6 +70,7 @@ public:
   virtual _PTR(SComponentIterator) NewComponentIterator() = 0;
   virtual _PTR(StudyBuilder) NewBuilder() = 0;
   virtual std::string Name() = 0;
+  virtual void  Name(const std::string& aName) = 0;
   virtual bool IsSaved() = 0;
   virtual void  IsSaved(bool save) = 0;
   virtual bool IsModified() = 0;

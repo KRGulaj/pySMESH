@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -23,6 +23,7 @@
 #ifndef _SALOME_COMM_IDL_
 #define _SALOME_COMM_IDL_
 
+#include "SALOME_GenericObj.idl"
 #include "SALOME_Exception.idl"
 
 /*!
@@ -39,6 +40,8 @@ module SALOME {
   typedef sequence<double> vectorOfDouble;
   
   typedef sequence<long> vectorOfLong;
+  
+  typedef sequence<octet> vectorOfByte;
   
   interface MultiCommClass {
     void setProtocol(in TypeOfCommunication typ);
@@ -132,6 +135,14 @@ module SALOME {
     long getSizeOfColumn();
     void release();
   };
+
+  interface SenderByte : GenericObj
+  {
+    unsigned long long getSize();
+    vectorOfByte sendPart(in unsigned long long n1,in unsigned long long n2);
+  };
+
+  typedef sequence<SenderByte> SenderByteSeq;
 };
 
 #endif

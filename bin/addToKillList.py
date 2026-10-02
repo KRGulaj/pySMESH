@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 #  -*- coding: iso-8859-1 -*-
-# Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 #
 # Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 # CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -78,7 +78,9 @@ def addToKillList(command_pid, command, port=None):
             if verbose(): print("addToKillList: %s : %s" % ( str(command_pid), command ))
             process_ids.append({int(command_pid): [command]})
             dir = os.path.dirname(filedict)
-            if not os.path.exists(dir): os.makedirs(dir, 0o777)
+            if not os.path.exists(dir):
+                from salome_utils import makeDir
+                makeDir(dir)
             with open(filedict,'wb') as fpid:
                 pickle.dump(process_ids, fpid)
         except Exception:

@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -19,6 +19,7 @@
 
 INCLUDE_DIRECTORIES(
   ${OMNIORB_INCLUDE_DIR}
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${PROJECT_BINARY_DIR}/salome_adm
   ${PROJECT_SOURCE_DIR}/src/DSC/DSC_User
   ${PROJECT_SOURCE_DIR}/src/DSC/DSC_User/Datastream
@@ -26,7 +27,6 @@ INCLUDE_DIRECTORIES(
   ${PROJECT_SOURCE_DIR}/src/Container
   ${PROJECT_SOURCE_DIR}/src/GenericObj
   ${PROJECT_SOURCE_DIR}/src/Notification
-  ${PROJECT_SOURCE_DIR}/src/SALOMELocalTrace
   ${PROJECT_SOURCE_DIR}/src/Basics
   ${PROJECT_SOURCE_DIR}/src/Utils
   ${PROJECT_BINARY_DIR}/idl

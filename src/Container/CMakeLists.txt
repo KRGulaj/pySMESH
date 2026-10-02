@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -24,10 +24,9 @@ INCLUDE_DIRECTORIES(
   ${PTHREAD_INCLUDE_DIR}
   ${HDF5_INCLUDE_DIRS}
   ${PYTHON_INCLUDE_DIRS}
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${PROJECT_BINARY_DIR}/salome_adm
   ${CMAKE_CURRENT_SOURCE_DIR}/../ArgvKeeper
-  ${CMAKE_CURRENT_SOURCE_DIR}/../Basics
-  ${CMAKE_CURRENT_SOURCE_DIR}/../SALOMELocalTrace
   ${CMAKE_CURRENT_SOURCE_DIR}/../NamingService
   ${CMAKE_CURRENT_SOURCE_DIR}/../Utils
   ${CMAKE_CURRENT_SOURCE_DIR}/../Registry
@@ -45,7 +44,9 @@ SET(SCRIPTS
   SALOME_ComponentPy.py
   SALOME_PyNode.py
   SALOME_Container.py
+  SALOME_ContainerHelper.py
   SALOME_ContainerPy.py
+  SALOME_GlobalsImpl.py
 )
 
 ADD_DEFINITIONS(${HDF5_DEFINITIONS} ${OMNIORB_DEFINITIONS})
@@ -57,8 +58,9 @@ SET(COMMON_LIBS
   ResourcesManager
   SalomeNS
   OpUtil
-  SALOMELocalTrace
-  SALOMEBasics
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
+  ${SALOMEBOOTSTRAP_SALOMEBasics}
+  ${SALOMEBOOTSTRAP_KERNELBasics}
   SalomeHDFPersist
   SalomeGenericObj
   SalomeIDLKernel
@@ -88,15 +90,19 @@ SET(SalomeContainer_SOURCES
   SALOME_ContainerManager.cxx
   Salome_file_i.cxx
   SALOME_CPythonHelper.cxx
+  SALOME_LockMasterImpl.cxx
+  SALOME_LockServantImpl.cxx
 )
 
 ADD_LIBRARY(SalomeContainer ${SalomeContainer_SOURCES})
+ADD_DEPENDENCIES(SalomeContainer SalomeIDLKernel)
 TARGET_LINK_LIBRARIES(SalomeContainer ${COMMON_LIBS} ${PTHREAD_LIBRARIES})
 INSTALL(TARGETS SalomeContainer EXPORT ${PROJECT_NAME}TargetGroup DESTINATION ${SALOME_INSTALL_LIBS})
 
 SET(SALOME_Container_LIBS
   SalomeContainer
-  SALOMEBasics
+  ${SALOMEBOOTSTRAP_SALOMEBasics}
+  ${SALOMEBOOTSTRAP_KERNELBasics}
   ${COMMON_LIBS}
   ${HDF5_LIBRARIES}
   ${MPI_LIBRARIES}
@@ -112,11 +118,23 @@ TARGET_LINK_LIBRARIES(SALOME_Container SalomeContainerServer)
 ADD_EXECUTABLE(SALOME_Container_No_NS_Serv SALOME_Container_No_NS_Serv.cxx)
 TARGET_LINK_LIBRARIES(SALOME_Container_No_NS_Serv SalomeContainerServer)
 
+ADD_EXECUTABLE(SALOME_Container_No_NS_Serv_OutProcess SALOME_Container_No_NS_Serv_OutProcess.cxx)
+TARGET_LINK_LIBRARIES(SALOME_Container_No_NS_Serv_OutProcess SalomeContainerServer)
+
+ADD_EXECUTABLE(SALOME_Container_No_NS_Serv_OutProcess_Replay SALOME_Container_No_NS_Serv_OutProcess_Replay.cxx)
+TARGET_LINK_LIBRARIES(SALOME_Container_No_NS_Serv_OutProcess_Replay SalomeContainerServer)
+
+ADD_EXECUTABLE(SALOME_Container_No_NS_Serv_OutProcess_FT SALOME_Container_No_NS_Serv_OutProcess_FT.cxx)
+TARGET_LINK_LIBRARIES(SALOME_Container_No_NS_Serv_OutProcess_FT SalomeContainerServer)
+
+ADD_EXECUTABLE(SALOME_Container_No_NS_Serv_OutProcess_Replay_FT SALOME_Container_No_NS_Serv_OutProcess_Replay_FT.cxx)
+TARGET_LINK_LIBRARIES(SALOME_Container_No_NS_Serv_OutProcess_Replay_FT SalomeContainerServer)
+
 IF(SALOME_BUILD_TESTS)
   ADD_EXECUTABLE(TestSalome_file TestSalome_file.cxx)
   TARGET_LINK_LIBRARIES(TestSalome_file SALOMETraceCollectorTest ${SALOME_Container_LIBS})
 ENDIF()
-INSTALL(TARGETS SALOME_Container SALOME_Container_No_NS_Serv DESTINATION ${SALOME_INSTALL_BINS})
+INSTALL(TARGETS SALOME_Container SALOME_Container_No_NS_Serv SALOME_Container_No_NS_Serv_OutProcess SALOME_Container_No_NS_Serv_OutProcess_Replay SALOME_Container_No_NS_Serv_OutProcess_FT SALOME_Container_No_NS_Serv_OutProcess_Replay_FT DESTINATION ${SALOME_INSTALL_BINS})
 
 # Executable scripts to be installed
 SALOME_INSTALL_SCRIPTS("${SCRIPTS}" ${SALOME_INSTALL_SCRIPT_PYTHON})
@@ -145,3 +163,6 @@ SWIG_LINK_LIBRARIES(KernelContainer ${PYTHON_LIBRARIES} ${PLATFORM_LIBS} SalomeC
 install(TARGETS _KernelContainer DESTINATION ${SALOME_INSTALL_LIBS})
 install(FILES ${KernelContainer_HEADERS} DESTINATION ${SALOME_INSTALL_HEADERS})
 SALOME_INSTALL_SCRIPTS("${_swig_SCRIPTS}"  ${SALOME_INSTALL_BINS} EXTRA_DPYS "${SWIG_MODULE_KernelContainer_REAL_NAME}")
+
+INSTALL(DIRECTORY ScriptsTemplate DESTINATION ${SALOME_KERNEL_INSTALL_RES_DATA})
+INSTALL(FILES salome_process_launcher salome_process_attach PERMISSIONS OWNER_EXECUTE OWNER_WRITE OWNER_READ GROUP_EXECUTE GROUP_READ WORLD_EXECUTE WORLD_READ DESTINATION ${SALOME_INSTALL_BINS} )

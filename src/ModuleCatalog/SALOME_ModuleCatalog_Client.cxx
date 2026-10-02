@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -62,7 +62,7 @@ int main(int argc,char **argv)
 
    SALOME_ModuleCatalog::ModuleCatalog_var Catalogue 
      = SALOME_ModuleCatalog::ModuleCatalog::_narrow(objVarN); 
-   MESSAGE("Distant catalog of component found")
+   MESSAGE("Distant catalog of component found");
 
      // Get component list
    SALOME_ModuleCatalog::ListOfComponents_var list_composants 

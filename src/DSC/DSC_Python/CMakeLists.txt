@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -39,7 +39,6 @@ INCLUDE_DIRECTORIES(
   ${PROJECT_BINARY_DIR}/src/DSC/DSC_User/Datastream/Calcium
   ${PROJECT_SOURCE_DIR}/src/DSC/DSC_User/Basic
   ${PROJECT_SOURCE_DIR}/src/DSC/DSC_Basic
-  ${PROJECT_SOURCE_DIR}/src/SALOMELocalTrace
   ${PROJECT_SOURCE_DIR}/src/Basics
   ${PROJECT_SOURCE_DIR}/src/Utils
   ${PROJECT_SOURCE_DIR}/src/Container

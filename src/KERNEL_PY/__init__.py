@@ -1,5 +1,5 @@
 #  -*- coding: iso-8859-1 -*-
-# Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 #
 # Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 # CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -161,7 +161,7 @@ if not flags:
 #    sys.setdlopenflags(flags)
 #    pass
 
-orb, lcc, naming_service, cm, sg, esm, dsm, modulcat = None,None,None,None,None,None,None,None
+orb, lcc, naming_service, cm, sg, esm, dsm, logm, modulcat, rm, lm = None,None,None,None,None,None,None,None,None,None,None
 myStudy, myStudyName = None,None
 
 salome_initial=True
@@ -216,7 +216,7 @@ def salome_init_without_session_common(path=None, embedded=False):
         writeORBConfigFileSSL(os.environ[OMNIORB_USER_PATH],kwargs={"with_pid":True})
         atexit.register(RemoveOmniorbConfigFile)
 
-    global lcc,naming_service,myStudy,orb,modulcat,sg
+    global lcc,naming_service,myStudy,myStudyName,orb,modulcat,sg
     import KernelBasis
     KernelBasis.setSSLMode(True)
     import KernelDS
@@ -245,14 +245,17 @@ def salome_init_without_session(path=None, embedded=False, iorfakensfile=None):
     A Fake NamingService is created storing reference of all servants in the current process.
     """
     salome_init_without_session_common(path,embedded)
-    global lcc,cm,dsm,esm
+    global lcc,cm,dsm,esm,rm,logm,lm
     import KernelLauncher
     cm = KernelLauncher.myContainerManager()
+    type(cm).SetOverrideEnvForContainersSimple = ContainerManagerSetOverrideEnvForContainersSimple
+    rm = KernelLauncher.myResourcesManager()
     from LifeCycleCORBA import LifeCycleCORBASSL
     lcc = LifeCycleCORBASSL()
     # create a FactoryServer Container servant
     import KernelContainer
     KernelContainer.myContainer()
+    lm = KernelLauncher.myLockMaster()
     # activate poaManager to accept co-localized CORBA calls.
     from KernelSDS import GetDSMInstance
     import sys
@@ -264,6 +267,15 @@ def salome_init_without_session(path=None, embedded=False, iorfakensfile=None):
     # esm inherits from SALOME_CPythonHelper singleton already initialized by GetDSMInstance
     # esm inherits also from SALOME_ResourcesManager creation/initialization (concerning SingleThreadPOA POA) when KernelLauncher.GetContainerManager() has been called
     esm = KernelLauncher.GetExternalServer()
+    # idem for logm
+    logm = KernelLauncher.myLogManager()
+    type(logm).NaiveFetch = LogManagerNaiveFetch
+    type(logm).Fetch = LogManagerFetch
+    type(logm).DumpInFile = LogManagerDumpInFile
+    type(logm).LaunchMonitoringDumpFile = LogManagerLaunchMonitoringDumpFile
+    type(logm).FinalFetchBeforeDying = LogManagerFinalFetchBeforeDying
+    type(logm).GetLatestMonitoringDumpFile = LogManagerGetLatestMonitoringDumpFile
+    type(logm).DumpIORInFile = LogManagerDumpIORInFile
     #
     import KernelLogger
     naming_service.Register(KernelLogger.myLogger(),"/Logger")
@@ -273,6 +285,13 @@ def salome_init_without_session(path=None, embedded=False, iorfakensfile=None):
         with open(iorfakensfile,"w") as iorfakensf:
             iorfakensf.write(NamingService.IOROfNS())
     
+CM_NAME_IN_NS = "/ContainerManager"
+RM_NAME_IN_NS = "/ResourcesManager"
+DSM_NAME_IN_NS = "/DataServerManager"
+ESM_NAME_IN_NS = "/ExternalServers"
+LOGM_NAME_IN_NS = "/LogManager"
+LAUNCHER_NAME_IN_NS = "/SalomeLauncher"
+
 def salome_init_without_session_attached(path=None, embedded=False):
     """
     Configuration SSL inside a python interpretor launched in the SALOME_Container_No_NS_Serv.
@@ -280,29 +299,36 @@ def salome_init_without_session_attached(path=None, embedded=False):
     lcc is pointing to the FakeNamingService above.
     """
     salome_init_without_session_common(path,embedded)
-    global lcc,cm,dsm,esm
+    global lcc,cm,dsm,esm,rm,logm,lm
     import CORBA
     orb=CORBA.ORB_init([''])
     import Engines
     import KernelBasis
+    import KernelLauncher
     nsAbroad = orb.string_to_object( KernelBasis.getIOROfEmbeddedNS() )
     import SALOME
-    CM_NAME_IN_NS = "/ContainerManager"
     cm = orb.string_to_object( nsAbroad.Resolve(CM_NAME_IN_NS).decode() )
+    type(cm).SetOverrideEnvForContainersSimple = ContainerManagerSetOverrideEnvForContainersSimple
     naming_service.Register(cm,CM_NAME_IN_NS)
-    RM_NAME_IN_NS = "/ResourcesManager"
     rm = orb.string_to_object( nsAbroad.Resolve(RM_NAME_IN_NS).decode() )
     naming_service.Register(rm,RM_NAME_IN_NS)
     #
     from LifeCycleCORBA import LifeCycleCORBASSL
     lcc = LifeCycleCORBASSL()
-    DSM_NAME_IN_NS = "/DataServerManager"
     dsm = orb.string_to_object( nsAbroad.Resolve(DSM_NAME_IN_NS).decode() )
     naming_service.Register(dsm,DSM_NAME_IN_NS)
     #
-    ESM_NAME_IN_NS = "/ExternalServers"
     esm = orb.string_to_object( nsAbroad.Resolve(ESM_NAME_IN_NS).decode() )
     naming_service.Register(esm,ESM_NAME_IN_NS)
+    #
+    logm = orb.string_to_object( nsAbroad.Resolve(LOGM_NAME_IN_NS).decode() )
+    naming_service.Register(logm,LOGM_NAME_IN_NS)
+    #
+    lm = orb.string_to_object( nsAbroad.Resolve(KernelLauncher.GetLockMasterEntryInNS()).decode() )
+    naming_service.Register(lm,KernelLauncher.GetLockMasterEntryInNS())
+    #
+    sl = orb.string_to_object( nsAbroad.Resolve(LAUNCHER_NAME_IN_NS).decode() )
+    naming_service.Register(sl, LAUNCHER_NAME_IN_NS)
 
 def salome_init_with_session(path=None, embedded=False):
     """
@@ -410,11 +436,16 @@ def salome_shutdown_containers_with_session():
         ref_in_ns = "/".join(root+[cont_name])
         naming_service.Destroy_Name(ref_in_ns)
     print("Number of containers in NS after clean : {}".format( len( list(salome_walk_on_containers(ns,[""])) )))
+
+def retrieve_containers_in_ns():
+    return [elt for elt in naming_service.repr() if "/Containers/" == elt[:12]]
+
+def get_all_containers():
+    containersEntries = retrieve_containers_in_ns()
+    return [naming_service.Resolve(containerEntry) for containerEntry in containersEntries]
     
 def salome_shutdown_containers_without_session():
-    containersEntries = [elt for elt in naming_service.repr() if "/Containers/" == elt[:12]]
-    for containerEntry in containersEntries:
-        cont = naming_service.Resolve(containerEntry)
+    for cont in get_all_containers():
         try:
             cont.Shutdown()
         except:
@@ -434,5 +465,192 @@ class SessionContextManager:
     def __exit__(self, type, value, traceback):
         salome_close()
 
+def ContainerManagerSetOverrideEnvForContainersSimple(self,env):
+    envEff = [ Engines.KeyValPairString(key=k,val=v) for k,v in env ]
+    return self.SetOverrideEnvForContainers( envEff )
+
+def LogManagerNaiveFetch(self):
+    """
+    Fetch data from server with multiple CORBA invokations.
+    """
+    import SALOME_ContainerHelper
+    return [SALOME_ContainerHelper.ContainerLogInfoClt(elt) for elt in self.listOfContainerLogs()]
+
+def LogManagerFetch(self,clearMemory = False):
+    """
+    Fetch data from server in one shot mode.
+    """
+    from SALOME_ContainerHelper import unserializeLogManager
+    return unserializeLogManager( self.getAllStruct(clearMemory) )
+
+def LogManagerDumpInFile(self,fileName,clearMemory = False):
+    with open(fileName,"wb") as f:
+        f.write( self.getAllStruct( clearMemory ) )
+
+
+class LogManagerLaunchMonitoringFileCtxMgr:
+    def __init__(self, intervalInMs, outFileName):
+        self._interval_in_ms = intervalInMs
+        self._out_filename = outFileName
+        self._monitoring_params = None
+    def __enter__(self):
+        import salome
+        self._monitoring_params = salome.logm.LaunchMonitoringDumpFile(self._interval_in_ms, self._out_filename)
+        return self._monitoring_params
+    def __exit__(self,exctype, exc, tb):
+        import SALOME_PyNode
+        import salome
+        SALOME_PyNode.StopMonitoring( self._monitoring_params )
+        salome.logm.GetLatestMonitoringDumpFile()
+        pass
+
+def LogManagerLaunchMonitoringDumpFile(self, intervalInMs, outFileName):
+    """
+    This method loops indefinitely every intervalInMs milliseconds to dump the singleton 
+    content of perf log stored in salome.logm.
+    This method runs in a dedicated subprocess that can be killed at any time.
+    So subprocess code must deal with.
+
+    See also LogManagerGetLatestMonitoringDumpFile
+    """
+    global orb,logm
+    ior = orb.object_to_string( logm )
+    import os
+    outFileName2 = os.path.abspath( os.path.expanduser(outFileName) )
+    import tempfile
+    import logging
+    import SALOME_PyNode
+    import KernelBasis
+    # outFileNameSave stores the content of outFileName during phase of dumping
+    with tempfile.NamedTemporaryFile(prefix=os.path.basename(outFileName2),dir=os.path.dirname(outFileName2)) as f:
+      outFileNameSave = f.name
+    with tempfile.NamedTemporaryFile(prefix="htopmain_",suffix=".py") as f:
+      tempPyFile = f.name
+    with open(tempPyFile,"w") as f:
+        f.write("""import Engines
+import os
+import shutil
+import CORBA
+import time
+orb=CORBA.ORB_init([''], CORBA.ORB_ID)
+logm = orb.string_to_object("{ior}")
+outFileName = "{outFileName}"
+outFileNameSave = "{outFileNameSave}"
+logm.setFileNamePairOfLogger(outFileName, outFileNameSave )
+import salome
+while(True):
+  if os.path.exists( outFileName ):
+    shutil.copy(outFileName,outFileNameSave)
+    logm.versionB_IsTheLatestValidVersion()
+  salome.LogManagerDumpInFile(logm,outFileName)
+  logm.versionA_IsTheLatestValidVersion()
+  time.sleep( {intervalInMs} / 1000.0 )
+""".format( **locals()))
+    logging.debug( "File for monitoring dump file : {}".format(tempPyFile) )
+    pyFileName = SALOME_PyNode.FileDeleter( tempPyFile )
+    pid = KernelBasis.LaunchMonitoring( tempPyFile )
+    return SALOME_PyNode.MonitoringInfo(pyFileName,intervalInMs,None,pid)
+
+def LogManagerDumpIORInFile(self, iorFileName):
+    global logm
+    with open(iorFileName,"w") as f:
+        f.write( orb.object_to_string( logm ) )
+
+def LogManagerLoadFromFile(fileName):
+    from SALOME_ContainerHelper import unserializeLogManager
+    with open(fileName,"rb") as f:
+        data = f.read()
+    return unserializeLogManager( data )
+
+def LogManagerLoadFromIORFile( iorFile ):
+    global orb
+    def LoadAndWrite(logm,tempFileName):
+        import SALOME_PyNode
+        logm.putStructInFileAtomic( False, tempFileName )
+        tempFileAuto = SALOME_PyNode.FileDeleter( tempFileName )
+        ret = LogManagerLoadFromFile( tempFileAuto.filename )
+        return ret
+    with open(iorFile,"r") as f:
+        ior = f.read()
+    import Engines
+    import tempfile
+    salome_init_without_session()
+    logm = orb.string_to_object( ior )
+    with tempfile.NamedTemporaryFile(dir=os.path.expanduser("~")) as f:
+        tempFileName = f.name
+    return LoadAndWrite( logm, tempFileName )
+
+def LogManagerFinalFetchBeforeDying(self):
+    import shutil
+    a,b = self.getFileNamePairOfLogger()
+    self.DumpInFile( b )
+    shutil.move( b, a)
+
+def LogManagerGetLatestMonitoringDumpFile(self):
+    import shutil
+    import logging
+    a,b = self.getFileNamePairOfLogger()
+    if a=="" or b=="":
+        return ""
+    if a == b:
+        return a
+    lastVersion = self.getLastVersionOfFileNameLogger()
+    if lastVersion == a:
+        logging.debug("LogManagerGetLatestMonitoringDumpFile SITUATION A")
+        if os.path.exists( b ):
+            os.remove( b )
+        self.FinalFetchBeforeDying()
+        return a
+    if lastVersion == b:
+        logging.debug("LogManagerGetLatestMonitoringDumpFile SITUATION B")
+        if os.path.exists( b ):
+            shutil.move( b, a)
+        self.FinalFetchBeforeDying()
+        return a
+    logging.warning("in LogManagerGetLatestMonitoringDumpFile an unexpected situation araises.")
+    return ""
+
+class Barrier:
+  def __init__(self, nbClients):
+    import CORBA
+    orb=CORBA.ORB_init([''])
+    self._ior = orb.object_to_string( lm.buildRendezVous( nbClients ) )
+  def barrier(self):
+    import CORBA
+    import Engines
+    orb=CORBA.ORB_init([''])
+    rvPtr = orb.string_to_object( self._ior )
+    rvPtr.acquire()
+
+class LockGuardCM:
+  def __init__(self, key):
+    if lm is None:
+        raise RuntimeError("SALOME has not been initialized !")
+    self._lock = lm.getLockerFor( key )
+  def __enter__(self):
+    self._lock.acquire()
+  def __exit__(self,exctype, exc, tb):
+    self._lock.release()
+
+class ContainerLauncherCM:
+  def __init__(self, cp, aggressiveShutdown = False):
+    """
+    :param cp: Engines.ContainerParameters instance specifying the request where the container will be launched
+    :param aggressiveShutdown:
+    """
+    self._cp = cp
+    self.aggressiveShutdown = aggressiveShutdown
+  def __enter__(self):
+    self._cont = cm.GiveContainer(self._cp)
+    return self._cont
+  def __exit__(self,exctype, exc, tb):
+    if not self.aggressiveShutdown:
+      self._cont.Shutdown()
+    else:
+      try:# we are in aggressive situation the following call is not expected to return normally
+        self._cont.ShutdownNow()
+      except:
+        pass
+
 #to expose all objects to pydoc
-__all__=dir()
+__all__ = dir()

@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -24,11 +24,14 @@
 #include "SALOME_ResourcesManager.hxx"
 #include "SALOME_LoadRateManager.hxx"
 #include "SALOME_NamingService.hxx"
+#include "SALOME_Container_i.hxx"
 #include "SALOME_ResourcesManager_Client.hxx"
 #include "SALOME_Embedded_NamingService.hxx"
 #include "SALOME_ModuleCatalog.hh"
 #include "Basics_Utils.hxx"
 #include "Basics_DirUtils.hxx"
+#include "PythonCppUtils.hxx"
+#include "KernelBasis.hxx"
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <signal.h>
@@ -39,6 +42,9 @@
 #include "Utils_CorbaException.hxx"
 #include <sstream>
 #include <string>
+#include <queue>
+#include <thread>
+#include <chrono>
 
 #include <SALOMEconfig.h>
 #include CORBA_CLIENT_HEADER(SALOME_Session)
@@ -64,8 +70,9 @@
 
 const int SALOME_ContainerManager::TIME_OUT_TO_LAUNCH_CONT=60;
 
-const char *SALOME_ContainerManager::_ContainerManagerNameInNS =
-  "/ContainerManager";
+const int SALOME_ContainerManager::DFT_DELTA_TIME_NS_LOOKUP_IN_MS=1000;
+
+const char *SALOME_ContainerManager::_ContainerManagerNameInNS = "/ContainerManager";
 
 omni_mutex SALOME_ContainerManager::_numInstanceMutex;
 
@@ -83,11 +90,11 @@ Utils_Mutex SALOME_ContainerManager::_systemMutex;
 //=============================================================================
 
 SALOME_ContainerManager::SALOME_ContainerManager(CORBA::ORB_ptr orb, PortableServer::POA_var poa, SALOME_NamingService_Abstract *ns)
-  : _nbprocUsed(1)
+  : _nbprocUsed(1),_delta_time_ns_lookup_in_ms(DFT_DELTA_TIME_NS_LOOKUP_IN_MS),_delta_time_measure_in_ms(Abstract_Engines_Container_i::DFT_TIME_INTERVAL_BTW_MEASURE)
 {
-  MESSAGE("constructor");
   _NS = ns;
   _resManager = new SALOME_ResourcesManager_Client(ns);
+  _time_out_in_second = GetTimeOutToLoaunchServer();
 
   PortableServer::POAManager_var pman = poa->the_POAManager();
   _orb = CORBA::ORB::_duplicate(orb) ;
@@ -151,8 +158,6 @@ SALOME_ContainerManager::SALOME_ContainerManager(CORBA::ORB_ptr orb, PortableSer
   }
 #endif
 #endif
-
-  MESSAGE("constructor end");
 }
 
 //=============================================================================
@@ -201,15 +206,70 @@ void SALOME_ContainerManager::Shutdown()
   _poa->deactivate_object(oid);
 }
 
+CORBA::Long SALOME_ContainerManager::GetTimeOutToLaunchServerInSecond()
+{
+  return this->_time_out_in_second;
+}
+
+void SALOME_ContainerManager::SetTimeOutToLaunchServerInSecond(CORBA::Long timeInSecond)
+{
+  this->_time_out_in_second = timeInSecond;
+}
+
+CORBA::Long SALOME_ContainerManager::GetDeltaTimeBetweenNSLookupAtLaunchTimeInMilliSecond()
+{
+  return this->_delta_time_ns_lookup_in_ms;
+}
+
+void SALOME_ContainerManager::SetDeltaTimeBetweenNSLookupAtLaunchTimeInMilliSecond(CORBA::Long timeInMS)
+{
+  this->_delta_time_ns_lookup_in_ms = timeInMS;
+}
+
+CORBA::Long SALOME_ContainerManager::GetDeltaTimeBetweenCPUMemMeasureInMilliSecond()
+{
+  return this->_delta_time_measure_in_ms;
+}
+
+void SALOME_ContainerManager::SetDeltaTimeBetweenCPUMemMeasureInMilliSecond(CORBA::Long timeInMS)
+{
+  this->_delta_time_measure_in_ms = timeInMS;
+}
+
+void SALOME_ContainerManager::SetBigObjOnDiskThreshold(CORBA::Long thresholdInByte)
+{
+  SALOME::SetBigObjOnDiskThreshold(thresholdInByte);
+}
+
+void SALOME_ContainerManager::SetBigObjOnDiskDirectory(const char *directory)
+{
+  SALOME::SetBigObjOnDiskDirectory(directory);
+}
+
+void SALOME_ContainerManager::SetDirectoryForReplayFiles(const char *directory)
+{
+  SALOME::SetDirectoryForReplayFiles( directory );
+}
+
+ void SALOME_ContainerManager::SetNumberOfRetry(CORBA::Long nbRetry)
+ {
+    SALOME::SetNumberOfRetry( nbRetry );
+ }
+
+CORBA::Long SALOME_ContainerManager::GetNumberOfRetry()
+{
+  return SALOME::GetNumberOfRetry();
+}
+
 //=============================================================================
 //! Loop on all the containers listed in naming service, ask shutdown on each
 /*! CORBA Method:
  */
 //=============================================================================
 
-void SALOME_ContainerManager::ShutdownContainers()
+void SALOME_ContainerManager::ShutdownContainersGeneric(std::function<void(Engines::Container_ptr)> funcToBeCalledOnContainer)
 {
-  MESSAGE("ShutdownContainers");
+  MESSAGE("ShutdownContainersGeneric");
   if(!_NS)
     return ;
   SALOME::Session_var session = SALOME::Session::_nil();
@@ -255,11 +315,12 @@ void SALOME_ContainerManager::ShutdownContainers()
         Engines::Container_var cont=Engines::Container::_narrow(obj);
         if(!CORBA::is_nil(cont))
         {
-          MESSAGE("ShutdownContainers: " << (*iter));
-          cont->Shutdown();
+          MESSAGE("ShutdownContainersGeneric: " << (*iter));
+          funcToBeCalledOnContainer( cont );
+          MESSAGE("ShutdownContainersGeneric: after call of shutdown" << (*iter));
         }
         else
-          MESSAGE("ShutdownContainers: no container ref for " << (*iter));
+          MESSAGE("ShutdownContainersGeneric: no container ref for " << (*iter));
       }
       catch(CORBA::SystemException& e)
       {
@@ -275,6 +336,57 @@ void SALOME_ContainerManager::ShutdownContainers()
       }
     }
   }
+}
+
+void SALOME_ContainerManager::ShutdownContainers()
+{
+  this->ShutdownContainersGeneric( [](Engines::Container_ptr cont) { cont->Shutdown(); } );
+}
+
+void SALOME_ContainerManager::ShutdownContainersNow()
+{
+  this->ShutdownContainersGeneric( [](Engines::Container_ptr cont)
+  {
+    try
+    {
+      cont->ShutdownNow();
+    }
+    catch(...)
+    {
+    }
+  }
+    );
+}
+
+void SALOME_ContainerManager::SetOverrideEnvForContainers(const Engines::KeyValDict& env)
+{
+  this->_override_env.clear();
+  auto sz = env.length();
+  for(auto i = 0 ; i < sz ; ++i)
+    _override_env.emplace_back(env[i].key.in(), env[i].val.in());
+}
+
+Engines::KeyValDict *SALOME_ContainerManager::GetOverrideEnvForContainers()
+{
+  std::unique_ptr<Engines::KeyValDict> ret( new Engines::KeyValDict );
+  auto sz = _override_env.size();
+  ret->length(sz);
+  for(auto i = 0 ; i < sz ; ++i)
+  {
+    (*ret)[i].key = CORBA::string_dup( _override_env[i].first.c_str() );
+    (*ret)[i].val = CORBA::string_dup( _override_env[i].second.c_str() );
+  }
+  return ret.release();
+}
+
+void SALOME_ContainerManager::SetCodeOnContainerStartUp(const char *code)
+{
+  _code_to_exe_on_startup = code;
+}
+
+char *SALOME_ContainerManager::GetCodeOnContainerStartUp()
+{
+  return CORBA::string_dup( _code_to_exe_on_startup.c_str() );
 }
 
 //=============================================================================
@@ -437,6 +549,37 @@ Engines::Container_ptr SALOME_ContainerManager::GiveContainer(const Engines::Con
       if (!CORBA::is_nil(cont))
       {
         INFOS("[GiveContainer] container " << containerNameInNS << " launched");
+        cont->monitoringtimeresms( this->_delta_time_measure_in_ms );
+        INFOS("[GiveContainer] container " << containerNameInNS << " first CORBA invocation OK");
+        std::ostringstream envInfo;
+        std::for_each( _override_env.begin(), _override_env.end(), [&envInfo](const std::pair<std::string,std::string>& p) { envInfo << p.first << " = " << p.second << " "; } );
+        INFOS("[GiveContainer] container " << containerNameInNS << " override " << envInfo.str());
+        cont->set_big_obj_on_disk_directory( SALOME::GetBigObjOnDiskDirectoryCoarse().c_str() );
+        cont->set_big_obj_on_disk_threshold( SALOME::GetBigObjOnDiskThreshold() );
+        cont->set_directory_for_replay_files( SALOME::GetDirectoryForReplayFiles().c_str() );
+        cont->set_number_of_retry( SALOME::GetNumberOfRetry() );
+        cont->set_timeout_before_retrying( SALOME::GetExecutionTimeOut() );
+        Engines::FieldsDict envCorba;
+        {
+          auto sz = _override_env.size();
+          envCorba.length(sz);
+          for(auto i = 0 ; i < sz ; ++i)
+          {
+            envCorba[i].key = CORBA::string_dup( _override_env[i].first.c_str() );
+            envCorba[i].value <<= CORBA::string_dup( _override_env[i].second.c_str() );
+          }
+        }
+        cont->override_environment_python( envCorba );
+        if( SALOME::GetForwardCurrentDirectoryStatus() )
+          cont->set_current_directory( SALOME::GetCurrentWorkingDirectory().c_str() );
+        if( !_code_to_exe_on_startup.empty() )
+        {
+          INFOS("[GiveContainer] container " << containerNameInNS << " python code executed " << _code_to_exe_on_startup);
+          cont->set_startup_code( _code_to_exe_on_startup.c_str() );
+          cont->execute_python_code( _code_to_exe_on_startup.c_str() );
+        }
+        INFOS("[GiveContainer] container " << containerNameInNS << " verbosity positionning Activation = " << SALOME::VerbosityActivated() << " Verbosity Level = " << SALOME::VerbosityLevelStr());
+        cont->setVerbosity( SALOME::VerbosityActivated(), SALOME::VerbosityLevelStr().c_str() );
         return cont._retn();
       }
       else
@@ -454,9 +597,31 @@ Engines::Container_ptr SALOME_ContainerManager::GiveContainer(const Engines::Con
   return ret;
 }
 
+std::string SALOME_ContainerManager::GetCppBinaryOfKernelSSLContainer() const
+{
+  switch( SALOME::GetPyExecutionMode() )
+  {
+    case SALOME::PyExecutionMode::InProcess:
+      return "SALOME_Container_No_NS_Serv";
+    case SALOME::PyExecutionMode::OutOfProcessNoReplay:
+      return "SALOME_Container_No_NS_Serv_OutProcess";
+    case SALOME::PyExecutionMode::OutOfProcessWithReplay:
+      return "SALOME_Container_No_NS_Serv_OutProcess_Replay";
+    case SALOME::PyExecutionMode::OutOfProcessNoReplayFT:
+      return "SALOME_Container_No_NS_Serv_OutProcess_FT";
+    case SALOME::PyExecutionMode::OutOfProcessWithReplayFT:
+      return "SALOME_Container_No_NS_Serv_OutProcess_Replay_FT";
+    default:
+      {
+        ERROR_MESSAGE("Not manager py execution mode");
+        THROW_SALOME_EXCEPTION("GetCppBinaryOfKernelSSLContainer : Not manager py execution mode");
+      }
+  }
+}
+
 std::string SALOME_ContainerManager::GetCppBinaryOfKernelContainer() const
 {
-  std::string ret = this->_isSSL ? "SALOME_Container_No_NS_Serv" : "SALOME_Container";
+  std::string ret = this->_isSSL ?  GetCppBinaryOfKernelSSLContainer() : "SALOME_Container";
   return ret;
 }
 
@@ -567,13 +732,22 @@ SALOME_ContainerManager::LaunchContainer(const Engines::ContainerParameters& par
     MESSAGE("[GiveContainer] Try to launch a new container on " << resource_selected);
     // if a parallel container is launched in batch job, command is: "mpirun -np nbproc -machinefile nodesfile SALOME_MPIContainer"
     if( GetenvThreadSafe("LIBBATCH_NODEFILE") != NULL && params.isMPI )
+    {
       command = BuildCommandToLaunchLocalContainer(params, machFile, container_exe, tmpFileName);
+      MESSAGE("[LaunchContainer] LIBBATCH_NODEFILE : \"" << command << "\"");
+    }
     // if a container is launched on localhost, command is "SALOME_Container" or "mpirun -np nbproc SALOME_MPIContainer"
     else if(hostname == Kernel_Utils::GetHostname())
+    {
       command = BuildCommandToLaunchLocalContainer(params, machFile, container_exe, tmpFileName);
+      MESSAGE("[LaunchContainer] hostname local : \"" << command << "\"");
+    }
     // if a container is launched in remote mode, command is "ssh resource_selected SALOME_Container" or "ssh resource_selected mpirun -np nbproc SALOME_MPIContainer"
     else
+    {
       command = BuildCommandToLaunchRemoteContainer(resource_selected, params, container_exe);
+      MESSAGE("[LaunchContainer] remote : \"" << command << "\"");
+    }
 
     //redirect stdout and stderr in a file
 #ifdef WIN32
@@ -591,8 +765,10 @@ SALOME_ContainerManager::LaunchContainer(const Engines::ContainerParameters& par
         struct stat file_info;
         stat(val, &file_info);
         bool is_dir = S_ISDIR(file_info.st_mode);
-        if (is_dir)logFilename=val;
-        else std::cerr << "SALOME_TMP_DIR environment variable is not a directory use /tmp instead" << std::endl;
+        if (is_dir)
+          logFilename=val;
+        else
+          MESSAGE( "SALOME_TMP_DIR environment variable is not a directory use /tmp instead" << std::endl );
       }
     logFilename += "/";
 #endif
@@ -603,7 +779,8 @@ SALOME_ContainerManager::LaunchContainer(const Engines::ContainerParameters& par
     logFilename += ".log" ;
     command += " > " + logFilename + " 2>&1";
     MakeTheCommandToBeLaunchedASync(command);
-
+    
+    MESSAGE("[LaunchContainer] SYSTEM COMMAND that will be launched : \"" << command << "\"");
     // launch container with a system call
     status=SystemThreadSafe(command.c_str());
   }//end of critical of section
@@ -623,13 +800,15 @@ SALOME_ContainerManager::LaunchContainer(const Engines::ContainerParameters& par
   else
     {
       // Step 4: Wait for the container
-      int count(GetTimeOutToLoaunchServer());
-      INFOS("[GiveContainer] waiting " << count << " second steps container " << containerNameInNS);
+      double nbTurn = ( (double)this->_time_out_in_second ) * ( 1000.0 / ( (double) this->_delta_time_ns_lookup_in_ms) );
+      int count( (int)nbTurn );
+      INFOS("[GiveContainer] # attempts : " << count << " name in NS : \"" << containerNameInNS << "\"");
+      INFOS("[GiveContainer] # attempts : Time in second before time out : " << this->_time_out_in_second << " Delta time in ms between NS lookup : " << this->_delta_time_ns_lookup_in_ms);
       while (CORBA::is_nil(ret) && count)
         {
-          SleepInSecond(1);
+          std::this_thread::sleep_for(std::chrono::milliseconds(_delta_time_ns_lookup_in_ms));
           count--;
-          MESSAGE("[GiveContainer] step " << count << " Waiting for container on " << resource_selected);
+          MESSAGE("[GiveContainer] step " << count << " Waiting for container on " << resource_selected << " with entry in NS = \"" << containerNameInNS << "\"" );
           CORBA::Object_var obj(_NS->Resolve(containerNameInNS.c_str()));
           ret=Engines::Container::_narrow(obj);
         }
@@ -640,6 +819,7 @@ SALOME_ContainerManager::LaunchContainer(const Engines::ContainerParameters& par
       else
         {
           // Setting log file name
+          ret->locallogfilename( logFilename.c_str() );
           logFilename=":"+logFilename;
           logFilename="@"+Kernel_Utils::GetHostname()+logFilename;//threadsafe
           logFilename=user+logFilename;
@@ -748,14 +928,18 @@ std::string
 SALOME_ContainerManager::BuildCommandToLaunchRemoteContainer(const std::string& resource_name, const Engines::ContainerParameters& params, const std::string& container_exe) const
 {
   std::string command,tmpFileName;
+  const ParserResourcesType resInfo(_resManager->GetResourceDefinition(resource_name));
+  std::string wdir = params.workingdir.in();
   if (!_isAppliSalomeDefined)
-    command = BuildTempFileToLaunchRemoteContainer(resource_name, params, tmpFileName);
+  {
+      MESSAGE("[BuildCommandToLaunchRemoteContainer] NO APPLI MODE : " << " Protocol :" << resInfo.Protocol << " hostname :" << resInfo.HostName << " username : " << resInfo.UserName << " appli : " << resInfo.AppliPath << " wdir : \"" << wdir << "\"");
+      command = getCommandToRunRemoteProcessNoAppli(resInfo.Protocol, resInfo.HostName, 
+                                                    resInfo.UserName, resInfo.AppliPath,
+                                                    wdir);
+  }
   else
   {
-    const ParserResourcesType resInfo(_resManager->GetResourceDefinition(resource_name));
-
-    std::string wdir = params.workingdir.in();
-
+    MESSAGE("[BuildCommandToLaunchRemoteContainer] WITH APPLI MODE : " << " Protocol :" << resInfo.Protocol << " hostname :" << resInfo.HostName << " username : " << resInfo.UserName << " appli : " << resInfo.AppliPath << " wdir : \"" << wdir << "\"");
     // "ssh -l user machine distantPath/runRemote.sh hostNS portNS WORKINGDIR workingdir
     //      SALOME_Container containerName -ORBInitRef NameService=IOR:01000..."
     //  or 
@@ -764,48 +948,160 @@ SALOME_ContainerManager::BuildCommandToLaunchRemoteContainer(const std::string& 
     command = getCommandToRunRemoteProcess(resInfo.Protocol, resInfo.HostName, 
                                            resInfo.UserName, resInfo.AppliPath,
                                            wdir);
-
-    if(params.isMPI)
-    {
-      int nbproc = params.nb_proc <= 0 ? 1 : params.nb_proc;
-      command += " mpirun -np ";
-      std::ostringstream o;
-      o << nbproc << " ";
-      command += o.str();
-#ifdef LAM_MPI
-      command += "-x PATH,LD_LIBRARY_PATH,OMNIORB_CONFIG,SALOME_trace ";
-#elif defined(OPEN_MPI)
-      if( GetenvThreadSafe("OMPI_URI_FILE") == NULL )
-        command += "-x PATH -x LD_LIBRARY_PATH -x OMNIORB_CONFIG -x SALOME_trace";
-      else{
-        command += "-x PATH -x LD_LIBRARY_PATH -x OMNIORB_CONFIG -x SALOME_trace -ompi-server file:";
-        command += GetenvThreadSafeAsString("OMPI_URI_FILE");
-      }
-#elif defined(MPICH)
-      command += "-nameserver " + Kernel_Utils::GetHostname();
-#endif
-      command += " SALOME_MPIContainer ";
-    }
-    else
-      command += " " +container_exe+ " ";
-
-    command += _NS->ContainerName(params) + " ";
-    if(this->_isSSL)
-    {
-      Engines::EmbeddedNamingService_var ns = GetEmbeddedNamingService();
-      CORBA::String_var iorNS = _orb->object_to_string(ns);
-      command += std::string(iorNS);
-    }
-    else //if(!this->_isSSL)
-    {
-      command += " -";
-      AddOmninamesParams(command);
-    }
-    MESSAGE("command =" << command);
   }
+  if(params.isMPI)
+  {
+    int nbproc = params.nb_proc <= 0 ? 1 : params.nb_proc;
+    command += " mpirun -np ";
+    std::ostringstream o;
+    o << nbproc << " ";
+    command += o.str();
+#ifdef LAM_MPI
+    command += "-x PATH,LD_LIBRARY_PATH,OMNIORB_CONFIG,SALOME_trace ";
+#elif defined(OPEN_MPI)
+    if( GetenvThreadSafe("OMPI_URI_FILE") == NULL )
+      command += "-x PATH -x LD_LIBRARY_PATH -x OMNIORB_CONFIG -x SALOME_trace";
+    else{
+      command += "-x PATH -x LD_LIBRARY_PATH -x OMNIORB_CONFIG -x SALOME_trace -ompi-server file:";
+      command += GetenvThreadSafeAsString("OMPI_URI_FILE");
+    }
+#elif defined(MPICH)
+    command += "-nameserver " + Kernel_Utils::GetHostname();
+#endif
+    command += " SALOME_MPIContainer ";
+  }
+  else
+    command += " " +container_exe+ " ";
+
+  command += _NS->ContainerName(params) + " ";
+  if(this->_isSSL)
+  {
+    Engines::EmbeddedNamingService_var ns = GetEmbeddedNamingService();
+    CORBA::String_var iorNS = _orb->object_to_string(ns);
+    command += std::string(iorNS);
+  }
+  else //if(!this->_isSSL)
+  {
+    command += " -";
+    AddOmninamesParams(command);
+  }
+  MESSAGE("command =" << command);
 
   return command;
 }
+
+//=============================================================================
+//! Return a path to the directory with scripts templates
+/*! 
+ *  \return the path pointed by SALOME_KERNEL_SCRIPTS_DIR environment variable, if it is defined,
+ *  ${KERNEL_ROOT_DIR}/share/salome/resources/separator/kernel/ScriptsTemplate - otherwise
+ */
+//=============================================================================
+std::string getScriptTemplateFilePath()
+{
+  auto parseScriptTemplateFilePath = []() -> std::string
+  {
+    std::string scriptTemplateFilePath = SALOME_ContainerManager::GetenvThreadSafeAsString("SALOME_KERNEL_SCRIPTS_DIR");
+    if (!scriptTemplateFilePath.empty())
+    {
+      return scriptTemplateFilePath;
+    }
+    else {
+      return SALOME_ContainerManager::GetenvThreadSafeAsString("KERNEL_ROOT_DIR") +
+             "/share/salome/resources/kernel/ScriptsTemplate";
+    }
+  };
+
+  static const std::string scriptTemplateFilePath = parseScriptTemplateFilePath();
+  return scriptTemplateFilePath;
+}
+
+//=============================================================================
+//! Return a command line constructed based on Python scripts templates
+/*! 
+ *  \param theScriptName        the name of Python script template
+ *  \param theScriptParameters  the queue of parameter values
+ *  \return the command line constructed according to the given parameters
+ */
+//=============================================================================
+std::string GetCommandFromTemplate(const std::string& theScriptName,
+                                   std::queue<std::string>& theScriptParameters)
+{
+  std::string command;
+  MESSAGE("Generating container launch command using python template : \"" << theScriptName << "\" ");
+  AutoGIL agil;
+  // manage GIL
+
+  PyObject* mod(nullptr);
+
+  {
+    PyErrorGuard peg( SALOME::VerbosityActivated() );
+    mod = PyImport_ImportModule(theScriptName.c_str());
+  }
+
+  if (!mod)
+  {
+    MESSAGE( "As template " <<  theScriptName  << " has not been found try with default templates defined in KERNEL install");
+    AutoPyRef sys = PyImport_ImportModule("sys");
+    AutoPyRef sys_path = PyObject_GetAttrString(sys, "path");
+    AutoPyRef folder_path = PyUnicode_FromString(getScriptTemplateFilePath().c_str());
+    PyList_Append(sys_path, folder_path);
+
+    mod = PyImport_ImportModule(theScriptName.c_str());
+
+  }
+
+  if (mod)
+  {
+    PyObject* meth(PyObject_GetAttrString(mod, "command"));
+    if (!meth)
+    {
+      Py_XDECREF(mod);
+    }
+    else
+    {
+      int id = -1;
+      PyObject* tuple(PyTuple_New(theScriptParameters.size()));
+
+      auto insert_parameter = [&tuple, &theScriptParameters, &id]()
+      {
+        if (!theScriptParameters.empty())
+        {
+          PyTuple_SetItem(tuple, ++id, PyUnicode_FromString(theScriptParameters.front().c_str()));
+          theScriptParameters.pop();
+        }
+      };
+
+      while (!theScriptParameters.empty())
+      {
+        insert_parameter();
+      }
+      
+      PyObject *args(PyTuple_New(1));
+      PyTuple_SetItem(args, 0, tuple);
+
+      PyObject *res(PyObject_CallObject(meth, args));
+      if (res)
+      {
+        command = PyUnicode_AsUTF8(res);
+        Py_XDECREF(res);
+      }
+
+      Py_XDECREF(args);
+      Py_XDECREF(tuple);
+      Py_XDECREF(meth);
+      Py_XDECREF(mod);
+    }
+  }
+  else
+  {
+    ERROR_MESSAGE("Can not import the template script \"" << theScriptName << "\" !");
+  }
+
+  MESSAGE("Command from template is ... " << command << std::endl);
+  return command;
+}
+//=============================================================================
 
 //=============================================================================
 /*!
@@ -814,79 +1110,77 @@ SALOME_ContainerManager::BuildCommandToLaunchRemoteContainer(const std::string& 
 //=============================================================================
 std::string SALOME_ContainerManager::BuildCommandToLaunchLocalContainer(const Engines::ContainerParameters& params, const std::string& machinesFile, const std::string& container_exe, std::string& tmpFileName) const
 {
-  tmpFileName = BuildTemporaryFileName();
-  std::string command;
+  // Prepare name of the script to be used
+  std::string script_name = "SALOME_CM_LOCAL_NO_MPI";
+  if (params.isMPI)
+  {
+#ifdef LAM_MPI
+    script_name = "SALOME_CM_LOCAL_MPI_LAN";
+#elif defined(OPEN_MPI)
+    script_name = "SALOME_CM_LOCAL_MPI_OPENMPI";
+#elif defined(MPICH)
+    script_name = "SALOME_CM_LOCAL_MPI_MPICH";
+#endif
+  }
+  
+  // Prepare parameters to use in the Python script:
+  // 1. All parameters are strings.
+  // 2. For some booleans use "1" = True, "0" = False.
+  // 3. If a parameter is NULL, then its value is "NULL".
+
+  std::queue<std::string> script_parameters;
+  
+  // ===== Number of processes (key = "nb_proc")
+  script_parameters.push(params.isMPI ? std::to_string(params.nb_proc <= 0 ? 1 : params.nb_proc) : "NULL");
+
+  // ===== Working directory (key = "workdir") and temporary directory flag (key = "isTmpDir")
+  // A working directory is requested
+  std::string workdir = params.workingdir.in();
+  std::string isTmpDir = std::to_string(0);
+  if (workdir == "$TEMPDIR")
+  {
+    // A new temporary directory is requested
+    isTmpDir = std::to_string(1);
+    workdir = Kernel_Utils::GetTmpDir();
+  }
+  script_parameters.push(workdir);
+  script_parameters.push(isTmpDir);
+  
+  // ===== Server name (key = "name_server")
+  script_parameters.push(Kernel_Utils::GetHostname());
+
+  // ===== Container (key = "container")
+  std::string container;
+  if (params.isMPI)
+  {
+    container = isPythonContainer(params.container_name) ? "pyMPI SALOME_ContainerPy.py" : "SALOME_MPIContainer";
+  }
+  else
+  {
+    container = isPythonContainer(params.container_name) ? "SALOME_ContainerPy.py" : container_exe;
+  }
+  script_parameters.push(container);
+
+  // ===== Container name (key = "container_name")
+  script_parameters.push(_NS->ContainerName(params));
+
+  // ===== LIBBATCH node file (key = "libbatch_nodefile")
+  script_parameters.push(std::to_string(GetenvThreadSafe("LIBBATCH_NODEFILE") != NULL ? 1 : 0));
+
+  // ===== Machine file (key = "machine_file")
+  script_parameters.push(machinesFile.empty() ? "NULL" : machinesFile);
+
+  // ===== OMPI uri file (key = "ompi_uri_file")
+  std::string ompi_uri_file = GetenvThreadSafeAsString("OMPI_URI_FILE");
+  script_parameters.push(ompi_uri_file.empty() ? "NULL" : ompi_uri_file);
+
+  MESSAGE("Retrieving command from template (python module) \"" << script_name << "\"" << std::endl);
+  std::string command_from_template = GetCommandFromTemplate(script_name, script_parameters);
 
   std::ostringstream o;
-
-  if (params.isMPI)
-    {
-      int nbproc = params.nb_proc <= 0 ? 1 : params.nb_proc;
-
-      o << "mpirun -np ";
-
-      o << nbproc << " ";
-
-      if( GetenvThreadSafe("LIBBATCH_NODEFILE") != NULL )
-        o << "-machinefile " << machinesFile << " ";
-
-#ifdef LAM_MPI
-      o << "-x PATH,LD_LIBRARY_PATH,OMNIORB_CONFIG,SALOME_trace ";
-#elif defined(OPEN_MPI)
-      if( GetenvThreadSafe("OMPI_URI_FILE") == NULL )
-        o << "-x PATH -x LD_LIBRARY_PATH -x OMNIORB_CONFIG -x SALOME_trace";
-      else
-        {
-          o << "-x PATH -x LD_LIBRARY_PATH -x OMNIORB_CONFIG -x SALOME_trace -ompi-server file:";
-          o << GetenvThreadSafeAsString("OMPI_URI_FILE");
-        }
-#elif defined(MPICH)
-      o << "-nameserver " + Kernel_Utils::GetHostname();
-#endif
-
-      if (isPythonContainer(params.container_name))
-        o << " pyMPI SALOME_ContainerPy.py ";
-      else
-        o << " SALOME_MPIContainer ";
-    }
-
-  else
-    {
-      std::string wdir=params.workingdir.in();
-      if(wdir != "")
-        {
-          // a working directory is requested
-          if(wdir == "$TEMPDIR")
-            {
-              // a new temporary directory is requested
-              std::string dir = Kernel_Utils::GetTmpDir();
-#ifdef WIN32
-              o << "cd /d " << dir << std::endl;
-#else
-              o << "cd " << dir << ";";
-#endif
-
-            }
-          else
-            {
-              // a permanent directory is requested use it or create it
-#ifdef WIN32
-              o << "mkdir " + wdir << std::endl;
-              o << "cd /D " + wdir << std::endl;
-#else
-              o << "mkdir -p " << wdir << " && cd " << wdir + ";";
-#endif
-            }
-        }
-
-      if (isPythonContainer(params.container_name))
-        o << "SALOME_ContainerPy.py ";
-      else
-        o << container_exe + " ";
-
-    }
+  o << command_from_template << " ";
   
-  o << _NS->ContainerName(params) << " ";
+  //==================================================================================== */
 
   if( this->_isSSL )
   {
@@ -900,6 +1194,7 @@ std::string SALOME_ContainerManager::BuildCommandToLaunchLocalContainer(const En
     AddOmninamesParams(o);
   }
   
+  tmpFileName = BuildTemporaryFileName();
   std::ofstream command_file( tmpFileName.c_str() );
   command_file << o.str();
   command_file.close();
@@ -907,8 +1202,8 @@ std::string SALOME_ContainerManager::BuildCommandToLaunchLocalContainer(const En
 #ifndef WIN32
   chmod(tmpFileName.c_str(), 0x1ED);
 #endif
-  command = tmpFileName;
-
+  
+  std::string command = tmpFileName;
   MESSAGE("Command is file ... " << command);
   MESSAGE("Command is ... " << o.str());
   return command;
@@ -1002,6 +1297,10 @@ void SALOME_ContainerManager::MakeTheCommandToBeLaunchedASync(std::string& comma
 #endif
 }
 
+/*!
+ * Return in second the time out to give chance to server to be launched and
+ * to register into NS
+ */
 int SALOME_ContainerManager::GetTimeOutToLoaunchServer()
 {
   int count(TIME_OUT_TO_LAUNCH_CONT);
@@ -1156,7 +1455,7 @@ std::string SALOME_ContainerManager::BuildTempFileToLaunchRemoteContainer (const
 
   else if (resInfo.Protocol == srun)
     {
-      command = "srun -n 1 -N 1 -s --mem-per-cpu=0 --cpu-bind=none --nodelist=";
+      command = "srun -n 1 -N 1 --overlap --mem-per-cpu=0 --cpu-bind=none --nodelist=";
       std::string commandRcp = "rcp ";
       commandRcp += tmpFileName;
       commandRcp += " ";
@@ -1248,111 +1547,99 @@ std::string SALOME_ContainerManager::machinesFile(const int nbproc)
 
 }
 
-std::string SALOME_ContainerManager::getCommandToRunRemoteProcess(AccessProtocolType protocol,
+std::string SALOME_ContainerManager::getCommandToRunRemoteProcessNoAppli(AccessProtocolType protocol, const std::string & hostname, const std::string & username, const std::string & applipath, const std::string & workdir) const
+{
+  return getCommandToRunRemoteProcessCommon("SALOME_CM_REMOTE","salome shell --",protocol,hostname,username,applipath,workdir);
+}
+
+std::string SALOME_ContainerManager::getCommandToRunRemoteProcess(AccessProtocolType protocol, const std::string & hostname, const std::string & username, const std::string & applipath, const std::string & workdir) const
+{
+  return getCommandToRunRemoteProcessCommon("SALOME_CM_REMOTE_OLD",this->GetRunRemoteExecutableScript(),protocol,hostname,username,applipath,workdir);
+}
+
+std::string SALOME_ContainerManager::getCommandToRunRemoteProcessCommon(const std::string& templateName,
+                                                                  const std::string& remoteScript,
+                                                                  AccessProtocolType protocol,
                                                                   const std::string & hostname,
                                                                   const std::string & username,
                                                                   const std::string & applipath,
                                                                   const std::string & workdir) const
 {
   std::ostringstream command;
-  bool envd = true; // source the environment
+  
+  // Prepare parameters to use in the Python script:
+  // 1. All parameters are strings.
+  // 2. For some booleans use "1" = True, "0" = False.
+  // 3. If a parameter is NULL, then its value is "NULL".
+  
+  std::queue<std::string> script_parameters;
+
+  // ===== Protocol (key = "protocol")
+  std::string strProtocol;
   switch (protocol)
   {
-  case rsh:
-    command << "rsh ";
-    if (username != "")
-    {
-      command << "-l " << username << " ";
-    }
-    command << hostname << " ";
-    break;
-  case ssh:
-    command << "ssh ";
-    if (username != "")
-    {
-      command << "-l " << username << " ";
-    }
-    command << hostname << " ";
-    break;
-  case srun:
-    // no need to redefine the user with srun, the job user is taken by default
-    // (note: for srun, user id can be specified with " --uid=<user>")
-    command << "srun -n 1 -N 1 -s --mem-per-cpu=0 --cpu-bind=none --nodelist=" << hostname << " ";
-    envd = false;
-    break;
-  case pbsdsh:
-    command << "pbsdsh -o -h " << hostname << " ";
-    break;
-  case blaunch:
-    command << "blaunch -no-shell " << hostname << " ";
-    break;
+  case rsh: strProtocol = "rsh"; break;
+  case ssh: strProtocol = "ssh"; break;
+  case srun: strProtocol = "srun"; break;
+  case pbsdsh: strProtocol = "pbsdsh"; break;
+  case blaunch: strProtocol = "blaunch"; break;
   default:
     throw SALOME_Exception("Unknown protocol");
   }
+  script_parameters.push(strProtocol);
 
-  std::string remoteapplipath;
-  if (applipath=="")
-    remoteapplipath = GetenvThreadSafeAsString("APPLI");
-  else
-    remoteapplipath = applipath;
-
+  // ===== User name (key = "user")
+  script_parameters.push(username.empty() ? "NULL" : username);
+  
+  // ===== Host name (key = "host")
+  script_parameters.push(hostname.empty() ? "NULL" : hostname);
+  
+ 
+  // ===== Remote APPLI path (key = "appli")
+  script_parameters.push(applipath.empty() ? GetenvThreadSafeAsString("APPLI") : applipath);
+  
   if(!this->_isSSL)
   {
     ASSERT(GetenvThreadSafe("NSHOST"));
     ASSERT(GetenvThreadSafe("NSPORT"));
   }
+
+  struct stat statbuf;
+  std::string appli_mode = (stat(GetenvThreadSafe("APPLI"), &statbuf) == 0 && S_ISREG(statbuf.st_mode)) ? "launcher" : "dir";
+
+  // ===== Working directory (key = "workdir")
+  script_parameters.push(workdir == "$TEMPDIR" ? "\\$TEMPDIR" : workdir);
+  
+  // ===== SSL (key = "ssl")
+  script_parameters.push(this->_isSSL ? "1" : "0");
+  
+  // ===== Hostname of CORBA name server (key = "nshost")
+  std::string nshost = GetenvThreadSafeAsString("NSHOST");
+  script_parameters.push(nshost.empty() ? "NULL" : nshost);
+
+  // ===== Port of CORBA name server (key = "nsport")
+  std::string nsport = GetenvThreadSafeAsString("NSPORT");
+  script_parameters.push(nsport.empty() ? "NULL" : nsport);
+
+  // ===== Remote script (key = "remote_script")
+  script_parameters.push(remoteScript.empty() ? "NONE" : remoteScript);
+  
+  // ===== Naming service (key = "naming_service")
+  std::string namingService = "NONE";
+  if(this->_isSSL)
+  {
+    Engines::EmbeddedNamingService_var ns = GetEmbeddedNamingService();
+    CORBA::String_var iorNS = _orb->object_to_string(ns);
+    namingService = iorNS;
+  }
+  script_parameters.push(namingService);
+
+  // ===== APPLI mode (key = "appli_mode")
   // $APPLI points either to an application directory, or to a salome launcher file
   // we prepare the remote command according to the case
-  struct stat statbuf;
-  if (stat(GetenvThreadSafe("APPLI"), &statbuf) ==0 &&  S_ISREG(statbuf.st_mode))
-  {
-    // if $APPLI is a regular file, we asume it's a salome Launcher
-    // generate a command with a salome launcher
-    command << remoteapplipath 
-            << " remote" ;
-    if(!this->_isSSL)
-    {
-      command << " -m "
-              <<  GetenvThreadSafeAsString("NSHOST") // hostname of CORBA name server
-              << " -p "
-              <<  GetenvThreadSafeAsString("NSPORT"); // port of CORBA name server
-    }
-    if (workdir != "")
-      command << "-d " << workdir;
-    command <<  " -- " ;
-  }
-  else  // we assume it's a salome application directory
-  {
-    // generate a command with runRemote.sh
-    command <<  remoteapplipath;
-    command <<  "/" << this->GetRunRemoteExecutableScript() << " ";
-    if (!envd)
-      command <<  "--noenvd ";
+  script_parameters.push(appli_mode);
 
-    if(this->_isSSL)
-    {
-      Engines::EmbeddedNamingService_var ns = GetEmbeddedNamingService();
-      CORBA::String_var iorNS = _orb->object_to_string(ns);
-      command << iorNS;
-    }
-    else
-    {
-      command <<  GetenvThreadSafeAsString("NSHOST"); // hostname of CORBA name server
-      command <<  " ";
-      command <<  GetenvThreadSafeAsString("NSPORT"); // port of CORBA name server
-    }
-    
-    if(workdir != "")
-    {
-      command << " WORKINGDIR ";
-      command << " '";
-      if(workdir == "$TEMPDIR")
-          command << "\\$TEMPDIR";
-      else
-        command << workdir; // requested working directory
-      command << "'";
-    }
-  }
+  command << GetCommandFromTemplate(templateName, script_parameters);
 
   return command.str();
 }

@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -118,6 +118,7 @@ int main(int argc, char* argv[])
       threadPol->destroy();
       SALOME_CPythonHelper cPyh;
       cPyh.initializePython(argc,argv);
+      cPyh.allowPythonCallsFromDifferentThread();
       SALOME_Launcher *lServ(new SALOME_Launcher(orb,safePOA));
       lServ->DeclareUsingSalomeSession();
       lServ->_remove_ref();
