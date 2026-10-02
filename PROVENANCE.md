@@ -14,27 +14,45 @@ their prior work making a standalone, Windows-buildable SMESH possible.
 
 All vendored under `extern/`, kept pristine — nothing here is hand-edited. `prepare.py`
 copies the parts we compile into a git-ignored `staged/` tree and applies the patches below
-there.
+there. Every SALOME tree is at the same release, `V9_16_0` (2026-05-20), since SALOME versions
+its modules together.
 
-| Component | Upstream | Version | Local path |
-|---|---|---|---|
-| SALOME SMESH | [SalomePlatform/smesh](https://github.com/SalomePlatform/smesh) | tag `V9_9_0` | `extern/smesh/` |
-| SALOME KERNEL | [SalomePlatform/kernel](https://github.com/SalomePlatform/kernel) | tag `V9_9_0` | `extern/kernel/` |
-| SALOME GEOM (`GEOMUtils` only) | [SalomePlatform/geom](https://github.com/SalomePlatform/geom) | tag `V9_9_0` | `extern/geom/src/GEOMUtils/` |
+| Component | Upstream | Version | Local path | Import |
+|---|---|---|---|---|
+| SALOME SMESH | [SalomePlatform/smesh](https://github.com/SalomePlatform/smesh) | tag `V9_16_0`, `b4e78157e55cf3be47713911f1e6cfa2ba8e9f1c` | `extern/smesh/` | squashed subtree: `d5c62b136` + merge `66014401a` |
+| SALOME KERNEL | [SalomePlatform/kernel](https://github.com/SalomePlatform/kernel) | tag `V9_16_0`, `3de71b3a6d0b73f9dc011c4e0de36012253030c5` | `extern/kernel/` | squashed subtree: `a10077419` + merge `79e3f3671` |
+| SALOME salome_bootstrap | [SalomePlatform/salome_bootstrap](https://github.com/SalomePlatform/salome_bootstrap) | tag `V9_16_0`, `679a7b147192b3e3ac798c6dca59034edec2f78b` | `extern/salome_bootstrap/` | squashed subtree: `cdcd692c3` + merge `4b3c6a672` |
+| SALOME GEOM (`GEOMUtils` only) | [SalomePlatform/geom](https://github.com/SalomePlatform/geom) | tag `V9_16_0`, `7d0a18e1554c25bca2c2d9882e0621ea3f7f9c81` | `extern/geom/src/GEOMUtils/` | sparse copy of one directory: `06bb22494` |
+| MEFISTO (carried forward) | SALOME SMESH | tag `V9_9_0`, `4df9beadff0df879bcabb7c5472188f18cd30b42` | `extern/mefisto2/` | verbatim copy: `0825b092b` (see below) |
 
-SMESH and KERNEL are imported as squashed git subtrees, matched to the same `V9_9_0` release
-since SALOME versions its modules together. GEOM is a sparse copy of one directory, not a
-full subtree — GEOM itself is a large CORBA/GUI module we don't need, and SMESH only reaches
-into it for `GEOMUtils.cxx` (a handful of standalone OCCT geometry helpers used by
-`SMESH_Mesh`, `SMESH_Controls`, and the Cartesian mesher).
+Up to 4.2.2 the SALOME trees were at tag `V9_9_0`. Each subtree tree hash equals the upstream
+tree of its tag, and each copied file equals its upstream blob.
+
+GEOM is a sparse copy of one directory, not a full subtree — GEOM itself is a large CORBA/GUI
+module we don't need, and SMESH only reaches into it for `GEOMUtils.cxx` (a handful of
+standalone OCCT geometry helpers used by `SMESH_Mesh`, the `SMESH_Controls` classifier and the
+Cartesian mesher). Since `V9_16_0`, `GEOMUtils.cxx` calls three functions of the GEOMAlgo
+package, which SALOME moved out of GEOM into
+[SalomePlatform/common_geometry_lib](https://github.com/SalomePlatform/common_geometry_lib)
+(geom commit `f5db6d7cf`). pySMESH does not vendor that repository: the pySMESH patch
+`geom/GEOMUtils_GEOMAlgo.patch` defines the three functions inside `GEOMUtils.cxx`, with bodies
+verbatim from `common_geometry_lib` tag `V9_16_0` (`e7b5227096fef835a448004ee06cf5938850b1c4`,
+`src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx`, LGPL-2.1).
 
 KERNEL is needed because SMESH's data structures (`SMESHDS_Mesh`, `SMESH_ProxyMesh`) depend
 on `smIdType`, a KERNEL-defined typedef that decides whether node/element IDs are 32- or
-64-bit. Only KERNEL's `Basics/`, `SALOMELocalTrace/`, and `Utils/` are actually compiled —
-the CORBA/communication layer is never built and is compiled out via `SALOME_LIGHT`.
+64-bit. Since `V9_16_0` SALOME keeps KERNEL's basics in salome_bootstrap. pySMESH compiles four
+directories: `Basics/`, `SALOMELocalTrace/` and `Exception/` (the `SALOME_Exception` class)
+from `extern/salome_bootstrap/__RUN_SALOME__/`, and `Utils/` from `extern/kernel/src/`. The
+CORBA/communication layer is never built and is compiled out via `SALOME_LIGHT`.
+`smIdType.hxx` is generated from `Basics/smIdType.hxx.in`.
 
 We build for 64-bit Windows, so `SALOME_USE_64BIT_IDS` is on and `smIdType` resolves to
 `int64_t` everywhere.
+
+The SALOME trace macros of `V9_16_0` (`SALOMELocalTrace/utilities.h`) write only when the
+environment variable `SALOME_VERBOSE` is set to a value above 0 (KERNEL commits `5b7bbcc7` and
+`e7d8bf15`). With it unset, SMESH writes no trace to stdout.
 
 ## Small pieces borrowed from looooo/SMESH
 
@@ -70,101 +88,114 @@ The Fortran sources `trte.f` and `areteideale.f` are not carried. `trte.c` (abov
 `patches/smesh/mefisto.patch` gives it the f2c signature. These files are licensed LGPL-2.1,
 same as SMESH itself.
 
+`prepare.py` stages them where `V9_9_0` kept them (`MEFISTO2/` and `StdMeshers/`). They
+compile against the `V9_16_0` API with no change beyond the two that already applied on
+`V9_9_0`: `mefisto.patch` and the `StdMeshers_MEFISTO_2D.cxx` hunk of the OCCT 8.0 pass. So
+`Mefisto2D` meshes exactly as before: the golden probes `2d/mefisto_box` and
+`2d/mefisto_sphere` are unchanged.
+
 ## Patches
 
 `patches/{kernel,geom,smesh,occt8}/*.patch`, applied by `prepare.py` in that order. Most come
-from looooo/SMESH's own patch set (Windows/MSVC fixes, VTK 9.4–9.6 API breaks); the `occt8/`
-pair comes from conda-forge's `smesh-feedstock` recipe, which is the only place we found a
-working OCCT 8.0 compatibility pass for this codebase. NETGEN-related patches are left out —
-we don't build NETGEN.
+from looooo/SMESH's own patch set (Windows/MSVC fixes, the MED strip); the `occt8/` pair comes
+from conda-forge's `smesh-feedstock` recipe, which is the only place we found a working OCCT
+8.0 compatibility pass for this codebase. Two are pySMESH's own, for code that is new in
+`V9_16_0`. NETGEN-related patches are left out — we don't build NETGEN.
 
 `patches/occt801/` is a different kind: it patches OCCT itself, not SMESH, and
 `ci/build_occt.py` applies it, not `prepare.py`. See
 [How OCCT is built](#how-occt-is-built).
 
-One detail worth recording honestly: we vendor SALOME's official `V9_9_0` **tags**, while
-looooo's patches were written against slightly newer commits on the `V9_9_0` **branch**. Most
-patches apply cleanly regardless; a few of looooo's source patches turn out to already be
-satisfied by our tag and are skipped automatically (`prepare.py` uses `patch -N`, so this is
-detected, not silently ignored). A handful of small deltas that looooo's branch already had
-weren't available as clean patches against the tag, so we reproduced the same fix as a plain
-source edit in `prepare.py` instead of forcing a patch to apply — each one is commented at the
-call site with what it does and why (CORBA stripped from KERNEL, a couple of OCCT 8.0
-NCollection/hasher requirements, one renamed OCCT toolkit). Nothing there is a design
-decision of ours; it's the same fix looooo already made, just written by hand because the
-diff didn't line up byte-for-byte.
+Every patch is re-ported to the `V9_16_0` trees, and `prepare.py` applies each one exactly:
+`patch -p1 -N --fuzz=0`, and any hunk that fails, is already applied or targets a file that is
+not staged stops the run. Up to 4.2.2 the patches targeted looooo's `V9_9_0` branch pin, so
+`prepare.py` applied them with `--fuzz=2` and skipped patches that the `V9_9_0` tag already
+carried. On `V9_16_0` fuzz 2 placed two hunks in the wrong place, so the port removed both the
+fuzz and the skip path. A re-ported patch keeps its original header and adds a note on what the
+port changed.
 
 ### Patch index
 
 Source key: **L** = `looooo/SMESH` patch series (the Windows/MSVC standalone-SMESH fork
-conda-forge builds from); **C** = `conda-forge/smesh-feedstock` recipe. `prepare.py` applies
-these with `patch -N --fuzz=2`, so files already satisfied by our `V9_9_0` tag are skipped
-and logged (not silently ignored). MinGW/gcc-only patches are no-ops under our MSVC build.
+conda-forge builds from); **C** = `conda-forge/smesh-feedstock` recipe; **P** = pySMESH.
+MinGW/gcc-only patches are no-ops under our MSVC build.
 
-| Patch | Src | What it fixes |
+| Patch | Src | State at `V9_16_0` | What it fixes |
+|---|---|---|---|
+| `kernel/Kernel.patch` | L | unchanged | KERNEL standalone base (Basics/trace/Utils; CORBA severed). |
+| `kernel/Kernel_mingw_gcc15.patch` | L | unchanged | MinGW/gcc-15 fix (no-op under MSVC). |
+| `kernel/Kernel_msvc_pthread.patch` | L | unchanged | `pthread_self()` comparison against the Win32 pthread shim. |
+| `kernel/Kernel_msvc_set_unexpected.patch` | L | unchanged | `std::set_unexpected`/`set_terminate` removed in C++17 MSVC. |
+| `geom/GEOMUtils_GEOMAlgo.patch` | P | new | `GEOMUtils.cxx` without `common_geometry_lib` (see above). |
+| `smesh/mefisto.patch` | L | unchanged | Wire the f2c `trte.c` into the MEFISTO2 target. |
+| `smesh/SMESH_Mesh.patch` | L | re-ported | MED export made conditional (build without libMED/HDF5); the `WITH_MED` guards now also cover `SMESH_DriverMesh.cxx`, new in `V9_16_0`, whose entry points throw without MED. |
+| `smesh/SMESH_Gen_no_qt.patch` | P | new | `SMESH_Gen.cxx` includes `<QString>`/`<QProcess>` for a function compiled only `#ifndef WIN32` (SMESH `be238b4bb`); the includes take the same guard. |
+| `smesh/SMESH_MeshAlgos.patch` | L | unchanged | `SMESH_MeshAlgos` build fixups. |
+| `smesh/SMESH_Slot.patch` | L | unchanged | `SMESH_Slot` build fixups. |
+| `smesh/SMESH_SMDS.patch` | L | unchanged | SMDS standalone build fixups. |
+| `smesh/SMESH_occt781.patch` | L | re-ported | OCCT 7.8.1 API deltas; at `V9_16_0` only `DriverGMF.cxx` (`boost::filesystem::extension`) and `SMESHDS_DataMapOfShape.hxx` (`::HashCode`) remain. |
+| `smesh/SMESH_File_mingw.patch` | L | unchanged | MinGW file I/O fix (no-op under MSVC). |
+| `smesh/StdMeshers_Quadrangle_2D_msvc.patch` | L | unchanged | `<windows.h>` `#define near` collision in the 2D mesher. |
+| `occt8/0003-boost-regex-str-enum.patch` | C | unchanged | Boost regex `str(ENUM)` → `str(int(ENUM))`. |
+| `occt8/0004-occt-8.0-compat.patch` | C | re-ported | The OCCT-8.0 pass (streams, `::Raise()`→`throw`, NCollection), extended to the code that is new in `V9_16_0`; the NETGEN and MeshVSLink sections, never staged, are dropped. |
+
+### Patches that `V9_16_0` made obsolete
+
+Removed by the port, each with the `V9_16_0` evidence:
+
+| Patch | Src | Why it is gone |
 |---|---|---|
-| `geom/GEOMUtils.patch` | L | Build `GEOMUtils.cxx` standalone (the one GEOM file SMESH needs). |
-| `kernel/Kernel.patch` | L | KERNEL standalone base (Basics/trace/Utils; CORBA severed). |
-| `kernel/Kernel_mingw_gcc15.patch` | L | MinGW/gcc-15 fix (skipped under MSVC). |
-| `kernel/Kernel_msvc_pthread.patch` | L | `pthread_self()` comparison against the Win32 pthread shim. |
-| `kernel/Kernel_msvc_set_unexpected.patch` | L | `std::set_unexpected`/`set_terminate` removed in C++17 MSVC. |
-| `kernel/Kernel_occt781.patch` | L | OCCT 7.8.1 API deltas in KERNEL. |
-| `occt8/0003-boost-regex-str-enum.patch` | C | Boost regex `str(ENUM)` → `str(int(ENUM))`. |
-| `occt8/0004-occt-8.0-compat.patch` | C | The OCCT-8.0 pass (streams, `::Raise()`→`throw`, NCollection). |
-| `smesh/SMDS_UnstructuredGrid_vtk94.patch` | L | VTK ≥9.4 `vtkCellArray`/cell-type accessor changes. |
-| `smesh/SMDS_MeshVolume_vtk96.patch` | L | VTK ≥9.6 `GetFaceStream()` signature (`vtkIdList*`). |
-| `smesh/SMDS_VtkCellIterator_vtk96.patch` | L | VTK ≥9.6 `GetFaceStream()` on the cell-iterator path. |
-| `smesh/SMESH_MeshEditor_vtk96.patch` | L | VTK ≥9.6 `GetCellLinks()`→`GetLinks()` rename. |
-| `smesh/SMESH_Mesh.patch` | L | MED export made conditional (build without libMED/HDF5). |
-| `smesh/SMESH_SMDS.patch` | L | SMDS standalone build fixups. |
-| `smesh/SMESH_MeshAlgos.patch` | L | `SMESH_MeshAlgos` build fixups. |
-| `smesh/SMESH_Controls.patch` | L | `SMESH_Controls` fixups (partly superseded by the tag). |
-| `smesh/SMESH_ControlPnt.patch` | L | `SMESH_ControlPnt` build fixups. |
-| `smesh/SMESH_Slot.patch` | L | `SMESH_Slot` build fixups. |
-| `smesh/SMESH_File_mingw.patch` | L | MinGW file I/O fix (skipped under MSVC). |
-| `smesh/SMESH_MesherHelper_msvc.patch` | L | MSVC `_DEBUG_`-only variable-order warning. |
-| `smesh/SMESH_occt781.patch` | L | OCCT 7.8.1 API deltas in SMESH core. |
-| `smesh/StdMeshers_Quadrangle_2D_msvc.patch` | L | `<windows.h>` `#define near` collision in the 2D mesher. |
-| `smesh/StdMeshers_Adaptive1D.patch` | L | `StdMeshers_Adaptive1D` build fixups. |
-| `smesh/StdMeshers_Projection_2D.patch` | L | `StdMeshers_Projection_2D` build fixups. |
-| `smesh/StdMeshers_ViscousLayers.patch` | L | ViscousLayers build fixups (the payload algorithm). |
-| `smesh/mefisto.patch` | L | Wire the f2c `trte.c` into the MEFISTO2 target. |
+| `geom/GEOMUtils.patch` | L | `V3d_Coordinate` is gone upstream (geom `922cc08ee`, OCCT 7.7 port); `GEOMUtils.cxx:920` uses `Standard_Real`. |
+| `kernel/Kernel_occt781.patch` | L | salome_bootstrap `Basics/smIdType.hxx.in` has `<cstddef>` and the functor `smIdHasher` itself. |
+| `smesh/SMESH_ControlPnt.patch` | L | `SMESH_ControlPnt.cxx:166-174` reads `Poly_Triangulation::Node()`. |
+| `smesh/SMESH_Controls.patch` | L | `SMESH_ControlsClassifier.hxx:70` holds the projector by pointer. |
+| `smesh/SMESH_MesherHelper_msvc.patch` | L | `SMESH_MesherHelper.cxx:5042` declares `nbfaces` unconditionally. |
+| `smesh/StdMeshers_Adaptive1D.patch` | L | Its `TriaTreeData` port read the bounds of a NULL array and crashed `Adaptive1D` on any shape with a face; `StdMeshers_Adaptive1D.cxx:321-323` has a correct port. |
+| `smesh/StdMeshers_Projection_2D.patch` | L | Guarded upstream by `OCC_VERSION_LARGE < 0x07070000` (`:70`, `:1900`). |
+| `smesh/StdMeshers_ViscousLayers.patch` | L | Guarded upstream (`:57`, `:1832`). |
+| `smesh/SMDS_UnstructuredGrid_vtk94.patch` | L | VTK 9.4 to 9.6 port upstream (SMESH `3978cf104`, `aa4ed9bd7`, `8940544ce`). |
+| `smesh/SMDS_MeshVolume_vtk96.patch` | L | `GetFaceStream(id, vtkIdList*)` upstream (`aa4ed9bd7`). |
+| `smesh/SMDS_VtkCellIterator_vtk96.patch` | L | As above (`aa4ed9bd7`). |
+| `smesh/SMESH_MeshEditor_vtk96.patch` | L | `GetLinks()` upstream (`SMESH_MeshEditor.cxx:11763`, `:12121`). |
 
 ### Source edits made by pySMESH itself
 
-Seven deltas are applied by `prepare.py::_apply_tag_fixups` as exact string replacements rather
-than as patch files, because they target our `V9_9_0` **tag** and no upstream patch exists for
-them. They are modifications of already-vendored SALOME source, not new
-vendoring:
+Six deltas are applied by `prepare.py` as exact string replacements rather than as patch
+files, because no upstream patch exists for them (`_apply_source_edits`, and
+`_apply_smds_mesh_vtk_alloc` from looooo's `prepare.py`). They are modifications of
+already-vendored SALOME source, not new vendoring. Each one was re-checked on `V9_16_0`: the
+upstream code it fixes is unchanged there.
 
 | Edit | File | What / why |
 |---|---|---|
 | `gethostname` include | `Kernel/Basics/Basics_Utils.cxx` | Needs `<winsock2.h>` on Windows. |
-| `SMESH_TLink` default ctor + hasher functor | `SMESH/SMESHUtils/SMESH_TypeDefs.hxx` | OCCT 8.0 `NCollection` maps require a default-constructible key and call the hasher as a functor. |
-| **`ElementsOnShape` out-of-line copy ctor / `operator=`** | `SMESH/Controls/SMESH_ControlsDef.hxx` + `SMESH_Controls.cxx` | `ElementsOnShape` holds `std::vector<Classifier>` with `Classifier` only forward-declared in the header. MSVC eagerly instantiates the *implicit* copy operations against the incomplete type (**C2036**) in every TU that copies the predicate. Declaring them in the header and defining them (`= default`) in `SMESH_Controls.cxx`, where `Classifier` is complete, confines the `vector<Classifier>` instantiation to that one TU. |
+| `vtkPoints` pre-allocation | `SMESH/SMDS/SMDS_Mesh.cxx` | `SetNumberOfPoints(chunkSize)` instead of `0` in the constructor and in `Clear()`, so a first `InsertPoint` does not crash on Windows (looooo). |
 | **`CompositeHexa_3D` include guard** | `SMESH/StdMeshers/StdMeshers_CompositeHexa_3D.hxx` | The header carries `StdMeshers_CompositeSegment_1D`'s guard (`_SMESH_CompositeSegment_1D_HXX_`) verbatim, so whichever of the two headers is included second is silenced and its class is never declared. The collision is symmetric, so no include order fixes it, and any translation unit needing both algorithms cannot compile. Renamed to `_SMESH_CompositeHexa_3D_HXX_`. |
-| **`Prism_3D` curve adaptors override `EvalD0`** | `SMESH/StdMeshers/StdMeshers_Prism_3D.hxx` | OCCT 8.0 made `Adaptor3d_Curve::Value` a **non-virtual** inline forwarding to a new virtual `EvalD0`, whose base implementation raises `Standard_NotImplemented`. Prism_3D's `TVerticalEdgeAdaptor` and `THorizontalEdgeAdaptor` still override `Value`, which now only *hides* the base one — so every call through an `Adaptor3d_Curve` reference reached the base `EvalD0` and threw, and **`Prism_3D` failed on every solid**. Each now overrides `EvalD0` to forward to its own `Value`. `Adaptor2d_Curve2d::Value` is still virtual in 8.0, so the pcurve adaptor beside them needs nothing. |
+| **`Prism_3D` adaptors override `EvalD0`** | `SMESH/StdMeshers/StdMeshers_Prism_3D.hxx` | OCCT 8.0 made `Adaptor3d_Curve::Value` and `Adaptor3d_Surface::Value` **non-virtual** inlines forwarding to a new virtual `EvalD0`, whose base implementation raises `Standard_NotImplemented`. Prism_3D's three 3-D adaptors still define `Value`, which now only *hides* the base one. For `TVerticalEdgeAdaptor` and `THorizontalEdgeAdaptor` that failed **`Prism_3D` on every solid**; for `TSideFace` it failed every compute that reaches the block approach (report B1: "Adaptor3d_Surface::EvalD0"). Each now overrides `EvalD0` to forward to its own `Value`. `Adaptor2d_Curve2d::Value` is still virtual in 8.0.1, so the three 2-D adaptors need nothing. |
 | **`Prism_3D` per-generator helper singletons** | `SMESH/StdMeshers/StdMeshers_Prism_3D.cxx` | Three helper algorithms (`TQuadrangleAlgo`, `TProjction1dAlgo`, `TProjction2dAlgo`) are cached in function-local statics built against the **first** `SMESH_Gen` they ever see. SALOME has one process-global generator, so that holds there. pySMESH gives each `Mesher` its own, and `~SMESH_Gen` nullifies the `_gen` of every hypothesis registered with it — these singletons included. A **second** `Prism_3D` compute in one process then runs through a singleton whose generator is gone and **segfaults** (reproduced deterministically). Each site now rebuilds the singleton when the generator differs from the one it was built against; deleting the stale one is safe because `~SMESH_Hypothesis` is guarded on `_gen`. |
 | **`ManifoldPart::process()` out-of-bounds face walk** | `SMESH/Controls/SMESH_Controls.cxx` | The walk starts at the requested face and wraps at the end of its own vector, but it advances the index itself and the wrap statement sits **after** a `continue` that skips an already-treated face. Since `findConnected()` treats a whole connected region at once, the last face is normally already treated when the walk reaches it, the wrap is skipped, and the index runs off the end — an **access violation**, measured on a three-face fixture. With the start element at index 0 the loop also cannot terminate by its own condition. Rewritten as a bounded modulo walk (`fi = (aStartIndx + fj) % aNbFaces`, `fj` from 0 to the face count), which is the documented intent: visit every face exactly once, starting at the requested one. Behaviour is otherwise unchanged; pinned by the `CTLBIND` section of `tests/probe`. |
 
-**The `ElementsOnShape` edit is what un-blocks the five `StdMeshers` translation units** that
-v1 excluded from the build (`Cartesian_3D`, `Import_1D2D`, `MaxElementVolume`,
-`MaxElementArea`, `PolyhedronPerSolid_3D`). The fix was added for `StdMeshers_ViscousLayers`,
-which hit the same C2036; the exclusion list in `cmake/SMESH/CMakeLists.txt` outlived it. As
-of v2 ground-zero work all five compile unmodified, `StdMeshers` is built from a plain
-`file(GLOB)` with no exclusions, and the whole `StdMeshers` family is exercised by the
-`v2_probe` target (`tests/probe`).
+Three `V9_9_0` edits are gone, because `V9_16_0` carries the fix:
+
+| Edit | Why it is gone |
+|---|---|
+| `SMESH_TLink` default ctor + hasher functor (`SMESH_TypeDefs.hxx`) | Upstream moved the hasher into `SMESH_TLinkHasher` (`SMESH_TypeDefs.hxx:172-191`), and OCCT 8.0.1 maps copy-construct their keys, so no default ctor is needed. |
+| `ElementsOnShape` out-of-line copy ctor / `operator=` (`SMESH_ControlsDef.hxx`, `SMESH_Controls.cxx`) | `Classifier` is a complete type in `SMESH_ControlsClassifier.hxx` (SMESH `df79d42e3`), so MSVC no longer meets C2036. |
+| `V3d_Coordinate` removal (`GEOMUtils.cxx`) | Upstream (geom `922cc08ee`). |
 
 **The include-guard edit is what un-blocks the algorithm catalogue.** It surfaced only when a
 single translation unit first needed both composite algorithms, which is why the earlier
 stages did not meet it: each SALOME translation unit includes one of the two headers, never
 both. Nothing in the compiled behaviour changes — the guard is a name.
 
-**Four of the seven are runtime defects rather than build fixups**, and all four surfaced the
-same way: by *driving* a class from a binding rather than linking and constructing it. Two of
-the `Prism_3D` edits and the `ManifoldPart` one make a class that compiles and links perfectly
+**Three of the six are runtime defects rather than build fixups**, and all three surfaced the
+same way: by *driving* a class from a binding rather than linking and constructing it. The two
+`Prism_3D` edits and the `ManifoldPart` one make a class that compiles and links perfectly
 either fail on every input or corrupt memory. Construct-and-link checking cannot see any of
 them, which is why the acceptance gates for each package run the code.
+
+`StdMeshers` is built from a plain `file(GLOB)` with no exclusions, and the whole `StdMeshers`
+family is exercised by the `v2_probe` target (`tests/probe`).
 
 ## OCCT toolkits linked & bundled
 
@@ -176,7 +207,8 @@ toolkit it needs directly or transitively. All come from our own build of OCCT 8
 
 - Modelling / meshing (present since B2–B3): TKernel, TKMath, TKG2d, TKG3d, TKGeomBase,
   TKGeomAlgo, TKBRep, TKTopAlgo, TKPrim, TKBO, TKMesh, TKShHealing, TKOffset, plus the
-  DataExchange STL toolkit **TKDESTL** (the OCCT-8.0 rename of TKSTL — see the patch note above).
+  DataExchange STL toolkit **TKDESTL** (the OCCT-8.0 rename of TKSTL, which
+  `cmake/SMESH/CMakeLists.txt` links for `DriverSTL`).
   TKBool and TKFillet were already bundled transitively (TKOffset pulls `BRepFill_PipeShell`
   from TKBool; TKShHealing/TKTopAlgo pull TKFillet).
 - **v2 Tier-C modelling (added by the ground-zero pass)**: **TKPrim**, **TKBO** and
@@ -190,6 +222,9 @@ toolkit it needs directly or transitively. All come from our own build of OCCT 8
   **TKXCAF**/**TKVCAF** (XDE shape/colour/name tools), **TKLCAF**/**TKCAF**/**TKCDF** (OCAF
   document core), **TKXSBase** (data-exchange base). Explicitly listed in the root
   `CMakeLists.txt` `_core` link block. `ci/check_wheel.py` asserts these are bundled.
+- **SMESH 9.16** adds no toolkit to the bundle. Its new `SMESH_DriverShape.cxx` reads and
+  writes STEP through `STEPControl`, so `cmake/SMESH` links **TKDESTEP** and **TKXSBase**
+  into the SMESH library; `_core` already linked both.
 
 ## How OCCT is built
 

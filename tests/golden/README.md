@@ -84,8 +84,8 @@ Both compare commands exit with 0 on a match, and with 1 on a blocking differenc
 
 ## Recorded at 4.2.2
 
-Build `4e5a4e1b7` (`_build_info.GIT_SHA`), captured on branch head `885d3c2be`: OCCT
-8.0.0, VTK 9.6.2, Boost 1.90.0, Python 3.13.14, NumPy 2.5.0, Windows 11.
+Build `4e5a4e1b7` (`_build_info.GIT_SHA`), captured on branch head `885d3c2be`: SALOME
+`V9_9_0`, OCCT 8.0.0, VTK 9.6.2, Boost 1.90.0, Python 3.13.14, NumPy 2.5.0, Windows 11.
 
 The capture recorded these errors, and they are part of the baseline:
 
@@ -100,3 +100,14 @@ The capture recorded these errors, and they are part of the baseline:
 | `A6/missing_hypothesis_message` | "0 sub-shape(s)" | Report A6. |
 | `O4/bowed_end_section` | "invalid shape" | Report O4 and A7. |
 | `C2/export_handoff_after_common` | not a bijection | Report C2. |
+
+## Explained differences since SALOME V9_16_0
+
+Since the SALOME stack moved from `V9_9_0` to `V9_16_0`, a capture differs from the
+4.2.2 baseline in these probes. Each difference is explained; none is a port error.
+
+| Probe | 4.2.2 | Since `V9_16_0` | Cause |
+|---|---|---|---|
+| `1d/adaptive_circle` | `crash: exit code 0xC0000005` | 28 segments | The crash (report B2) came from a vendored patch, which the upgrade dropped. The values equal SMESH 9.9 with the one-line fix. |
+| `2d/quad_from_medial_axis_strip` | min angle 90 - 8e-13 deg | min angle 90 - 4.5e-6 deg | SMESH `27c8af8c6` discretises straight boundary edges for the medial axis, whose points are rounded to an integer Voronoi grid. |
+| `B1/prism_unequal_edge_counts` (defect) | `Adaptor3d_Surface::EvalD0` | "Composite 'horizontal' edges are not supported" | The OCCT 8 `EvalD0` override of `TSideFace` removes the B1 exception; the case now meets an older SMESH refusal. |
