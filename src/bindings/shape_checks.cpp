@@ -16,10 +16,15 @@
 #include <memory>
 #include <utility>
 
+#include <BOPAlgo_CheckerSI.hxx>
+#include <BOPDS_DS.hxx>
+#include <BOPDS_Pair.hxx>
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
+#include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
@@ -31,6 +36,10 @@
 #include <Bnd_Box.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
 #include <GProp_GProps.hxx>
+#include <IntTools_Curve.hxx>
+#include <IntTools_FaceFace.hxx>
+#include <IntTools_PntOn2Faces.hxx>
+#include <IntTools_PntOnFace.hxx>
 #include <Geom2d_Curve.hxx>
 #include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_IndexedMap.hxx>
@@ -396,6 +405,155 @@ std::string inside_out_reversed(const InsideOutSolid& solid) {
   std::snprintf(volume, sizeof(volume), "%.9g", solid.volume);
   return "solid " + std::to_string(solid.ordinal) + " of the BREP was inside out (volume " +
          volume + "); it is reversed";
+}
+
+namespace {
+
+// A sub-shape of `shape` in words: kind, 1-based ordinal among its kind, and its geometry.
+std::string sub_shape_text(const TopoDS_Shape& shape, const TopoDS_Shape& sub) {
+  ShapeMap all;
+  TopExp::MapShapes(shape, sub.ShapeType(), all);
+  const std::string ordinal = std::to_string(all.FindIndex(sub));
+  if (sub.ShapeType() == TopAbs_FACE) {
+    static const char* const kSurfaces[] = {"Plane",          "Cylinder",        "Cone",
+                                            "Sphere",         "Torus",           "BezierSurface",
+                                            "BSplineSurface", "SurfaceOfRevolution",
+                                            "SurfaceOfExtrusion", "OffsetSurface",
+                                            "OtherSurface"};
+    const int type = BRepAdaptor_Surface(TopoDS::Face(sub)).GetType();
+    return "face " + ordinal + " (" + kSurfaces[std::clamp(type, 0, 10)] + ")";
+  }
+  if (sub.ShapeType() == TopAbs_EDGE) {
+    return "edge " + ordinal + " (" + edge_text(sub) + ")";
+  }
+  if (sub.ShapeType() == TopAbs_VERTEX) {
+    return "vertex " + ordinal + " " + point_text(BRep_Tool::Pnt(TopoDS::Vertex(sub)));
+  }
+  return "sub-shape " + ordinal;
+}
+
+// The distance from `p` to the boundary of `face`: its edges, its seams included.
+double distance_to_boundary(const gp_Pnt& p, const TopoDS_Face& face) {
+  const TopoDS_Vertex v = BRepBuilderAPI_MakeVertex(p).Vertex();
+  double best = RealLast();
+  for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next()) {
+    if (BRep_Tool::Degenerated(TopoDS::Edge(e.Current()))) {
+      continue;
+    }
+    BRepExtrema_DistShapeShape d(v, e.Current());
+    if (d.IsDone()) {
+      best = std::min(best, d.Value());
+    }
+  }
+  return best;
+}
+
+// Where `face` passes through itself away from its own boundary, if anywhere.
+//
+// BOPAlgo_CheckerSI intersects each free-form face with itself (IntTools_FaceFace(F, F)) and
+// reports the face on any intersection. A face whose surface closes on itself through a
+// sharp seam — a loft through a one-edge section with a sharp trailing edge — meets itself
+// along that seam, which is its own boundary edge, and is reported although nothing
+// crosses. So the same intersection is repeated here, and a point of it counts only when it
+// lies farther from every edge of the face than ten times the intersection's tolerance and
+// the face's.
+std::optional<std::pair<gp_Pnt, double>> face_self_crossing(const TopoDS_Face& face) {
+  IntTools_FaceFace ff;
+  ff.Perform(face, face, false);
+  if (!ff.IsDone()) {
+    return std::nullopt;
+  }
+  const double tol_face = BRep_Tool::Tolerance(face);
+  std::optional<std::pair<gp_Pnt, double>> worst;
+  const auto consider = [&](const gp_Pnt& p, double tol) {
+    const double d = distance_to_boundary(p, face);
+    if (d > 10.0 * std::max(tol, tol_face) && (!worst || d > worst->second)) {
+      worst = std::make_pair(p, d);
+    }
+  };
+  for (const IntTools_Curve& c : ff.Lines()) {
+    double first = 0.0, last = 0.0;
+    gp_Pnt a, b;
+    if (!c.Bounds(first, last, a, b)) {
+      continue;
+    }
+    for (int k = 1; k <= 9; ++k) {
+      gp_Pnt p;
+      if (c.D0(first + (last - first) * k / 10.0, p)) {
+        consider(p, c.Tolerance());
+      }
+    }
+  }
+  for (const IntTools_PntOn2Faces& q : ff.Points()) {
+    consider(q.P1().Pnt(), tol_face);
+  }
+  return worst;
+}
+
+}  // namespace
+
+std::string self_interference_refusal(const std::string& op, const TopoDS_Shape& shape) {
+  std::string pairs;
+  int count = 0;
+  const auto add = [&](const std::string& names) {
+    ++count;
+    pairs += "Interference " + std::to_string(count) + ": " + names + ". ";
+  };
+  for (const TopoDS_Shape& solid : solids_of({shape})) {
+    // The pairs: BOPAlgo_CheckerSI up to level 4 (vertex/vertex, vertex/edge, edge/edge,
+    // vertex/face, edge/face). Two faces that cross each other cross along a curve that
+    // reaches their boundaries, so an edge of one meets the other. Level 5 adds face/face
+    // pairs and the face's intersection with itself, which reports every face that closes
+    // through a sharp seam, so that part is done below instead, once, with the seam left
+    // out (face_self_crossing).
+    BOPAlgo_CheckerSI checker;
+    NCollection_List<TopoDS_Shape> args;
+    args.Append(solid);
+    checker.SetArguments(args);
+    checker.SetNonDestructive(true);
+    checker.SetLevelOfCheck(4);
+    checker.Perform();
+    if (!checker.HasErrors()) {
+      const BOPDS_DS& ds = *checker.PDS();
+      for (NCollection_Map<BOPDS_Pair>::Iterator it(ds.Interferences()); it.More();
+           it.Next()) {
+        int n1 = 0, n2 = 0;
+        it.Value().Indices(n1, n2);
+        if (ds.IsNewShape(n1) || ds.IsNewShape(n2)) {
+          continue;
+        }
+        add(sub_shape_text(shape, ds.Shape(n1)) + " with " + sub_shape_text(shape, ds.Shape(n2)));
+      }
+    }
+    // The faces against themselves, for the free-form ones: OCCT's CheckerSI skips the
+    // plane, the cylinder, the cone, the sphere and a torus whose tube clears its axis,
+    // which cannot cross themselves.
+    for (TopExp_Explorer ex(solid, TopAbs_FACE); ex.More(); ex.Next()) {
+      const TopoDS_Face& face = TopoDS::Face(ex.Current());
+      const BRepAdaptor_Surface surface(face, false);
+      const GeomAbs_SurfaceType type = surface.GetType();
+      if (type == GeomAbs_Plane || type == GeomAbs_Cylinder || type == GeomAbs_Cone ||
+          type == GeomAbs_Sphere ||
+          (type == GeomAbs_Torus && surface.Torus().MajorRadius() >
+                                        surface.Torus().MinorRadius() + Precision::Confusion())) {
+        continue;
+      }
+      const std::optional<std::pair<gp_Pnt, double>> crossing = face_self_crossing(face);
+      if (!crossing) {
+        continue;
+      }
+      char away[32];
+      std::snprintf(away, sizeof(away), "%.3g", crossing->second);
+      add(sub_shape_text(shape, face) + " crosses itself at " + point_text(crossing->first) +
+          ", " + away + " from its edges");
+    }
+  }
+  if (count == 0) {
+    return std::string();
+  }
+  return op + ": the solid's boundary interferes with itself in " + std::to_string(count) +
+         " place(s), so the solid has no consistent inside; the session is unchanged.\n" +
+         pairs;
 }
 
 bool reverse_inside_out(const std::string& op, const std::string& policy) {

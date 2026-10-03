@@ -160,6 +160,19 @@ TopoDS_Shape reverse_solids(const TopoDS_Shape& shape, const std::vector<InsideO
 std::string inside_out_refusal(const std::string& op, const std::vector<InsideOutSolid>& solids);
 std::string inside_out_reversed(const InsideOutSolid& solid);
 
+// Why the solids of `shape` are refused for interfering with themselves, or an empty string.
+//
+// Two tests run on each solid. BOPAlgo_CheckerSI, the Boolean Component's own
+// intersection of the pairs of sub-shapes, up to edges against faces; and each free-form
+// face intersected with itself (IntTools_FaceFace), where a crossing counts only away from
+// the face's own edges, so a face that closes through a sharp seam is not reported. A pair
+// that intersects where the topology does not join it, or a face that crosses itself, is a
+// boundary that passes through itself: the solid has no consistent inside, although
+// BRepCheck_Analyzer accepts it. Each finding names the sub-shapes by kind and 1-based
+// ordinal in `shape` (TopExp::MapShapes order per kind), with their geometry. `op` names
+// the operation.
+std::string self_interference_refusal(const std::string& op, const TopoDS_Shape& shape);
+
 // The import policy for inside-out solids, from the caller's string: true for "reverse",
 // false for "raise". Anything else is refused, naming `op`.
 bool reverse_inside_out(const std::string& op, const std::string& policy);

@@ -13,6 +13,11 @@ under test (report ``defect_sweep_4.2.2.md`` §6):
   now raise or give the closed-form volume.
 * **V2, a solid that is not watertight.** A ``cut`` grazing the wing's nose committed a
   solid with an edge on one face only. ``free_boundary_edges`` on the BREP is the oracle.
+* **V3, an inside-out solid on import.** A box whose solid names its shell reversed loaded
+  at volume -1. The oracle is the box's own volume and the point classifier.
+* **V5, a sweep that crosses itself.** A Frenet sweep of a profile tilted from the spine's
+  start tangent committed a surface that passes through itself. With the profile
+  perpendicular to the spine the tube is exact, and its volume is ``pi r^2 L`` (Pappus).
 
 Volumes are integrated adaptively on a fresh session read from the BREP, so that one solid
 carries one id (report §4 C5) and the rule is the adaptive one (report §5 D3).
@@ -20,6 +25,7 @@ carries one id (report §4 C5) and the rule is the adaptive one (report §5 D3).
 
 from __future__ import annotations
 
+import functools
 import math
 import re
 from collections.abc import Callable
@@ -98,35 +104,45 @@ def _new_ids(s: Session, kind: EntityKind, before: set[EntityId]) -> list[Entity
     return [e for e in s.entities(kind) if e not in before]
 
 
-def _wing(s: Session) -> list[EntityId]:
-    """Loft the 1-edge wing into ``s``; return its solid id."""
+@functools.cache
+def _wing_brep(two_edge: bool) -> bytes:
+    """The lofted wing as BREP bytes, lofted once per process.
+
+    1-edge: each section one closed spline. 2-edge: each section an upper and a lower
+    spline joined into a wire.
+    """
+    s = Session()
     sections = []
     for z in np.linspace(0.0, WING_SPAN, WING_SECTIONS):
-        points = _naca(1.0 - 0.1 * float(z))
+        p = np.c_[_naca(1.0 - 0.1 * float(z)), np.full(2 * WING_POINTS - 1, z)]
         before = set(s.entities(EntityKind.EDGE))
-        s.add_spline(np.c_[points, np.full(len(points), z)])
+        if two_edge:
+            half = len(p) // 2
+            s.add_spline(p[: half + 1])
+            s.add_spline(p[half:])
+            s.make_wire(_new_ids(s, EntityKind.EDGE, before))
+        else:
+            s.add_spline(p)
         sections.append(_new_ids(s, EntityKind.EDGE, before))
-    before = set(s.entities(EntityKind.SOLID))
     s.thru_sections(sections, solid=True, ruled=False)
+    return s.brep()
+
+
+def _import(s: Session, brep: bytes) -> list[EntityId]:
+    """Add ``brep`` to ``s``; return the new solid ids."""
+    before = set(s.entities(EntityKind.SOLID))
+    s.add_brep(brep)
     return _new_ids(s, EntityKind.SOLID, before)
+
+
+def _wing(s: Session) -> list[EntityId]:
+    """Add the 1-edge wing to ``s``; return its solid id."""
+    return _import(s, _wing_brep(two_edge=False))
 
 
 def _wing_two_edge(s: Session) -> list[EntityId]:
-    """Loft the 2-edge wing (each section an upper and a lower spline); return its solid."""
-    sections = []
-    for z in np.linspace(0.0, WING_SPAN, WING_SECTIONS):
-        points = _naca(1.0 - 0.1 * float(z))
-        p = np.c_[points, np.full(len(points), z)]
-        half = len(p) // 2
-        before = set(s.entities(EntityKind.EDGE))
-        s.add_spline(p[: half + 1])
-        s.add_spline(p[half:])
-        new = _new_ids(s, EntityKind.EDGE, before)
-        s.make_wire(new)
-        sections.append(_new_ids(s, EntityKind.EDGE, before))
-    before = set(s.entities(EntityKind.SOLID))
-    s.thru_sections(sections, solid=True, ruled=False)
-    return _new_ids(s, EntityKind.SOLID, before)
+    """Add the 2-edge wing to ``s``; return its solid id."""
+    return _import(s, _wing_brep(two_edge=True))
 
 
 def _sphere(s: Session) -> list[EntityId]:
@@ -397,3 +413,68 @@ def test_load_brep_reverses_an_inside_out_solid_on_request() -> None:
     shape = ps.load_brep(_inside_out_box(), inside_out="reverse")
 
     assert shape.solids()[0].volume == pytest.approx(1.0, rel=1e-12)
+
+
+# ---- V5: a sweep that crosses itself ----------------------------------------------------- #
+
+SWEEP_SPINE: list[tuple[float, float, float]] = [
+    (0.0, 0.0, 0.0),
+    (1.0, 0.0, 3.0),
+    (0.0, 2.0, 6.0),
+    (2.0, 2.0, 9.0),
+]
+SWEEP_RADIUS: float = 0.5
+# The profile normal of report V5: the chord to the second spine point, 31.7 degrees from the
+# spline's own start tangent.
+SWEEP_TILTED_NORMAL: tuple[float, float, float] = (1.0 / math.sqrt(10.0), 0.0, 3.0 / math.sqrt(10.0))
+# The swept surface approximates the exact tube: its volume is within 7.5e-8 relative of
+# pi r^2 L when the profile is perpendicular to the spine, so 1e-6 leaves a margin of 13.
+SWEEP_VOLUME_RTOL: float = 1e-6
+
+
+def _sweep(perpendicular: bool, frenet: bool) -> tuple[Session, float]:
+    """Sweep the circle along the spline; return the session and the spine's length.
+
+    The profile is perpendicular to the spine's start tangent, or tilted as in report V5.
+    The sweep is not run here: the caller does it, so that it can expect a raise.
+    """
+    s = Session()
+    s.add_spline(SWEEP_SPINE)
+    spine = list(s.entities(EntityKind.EDGE))
+    length = float(s.mass_properties(spine, precision=1e-9).measure[0])
+    if perpendicular:
+        start = s.edge_parameter_bounds(spine)[0, 0]
+        normal = tuple(float(x) for x in s.curve_at(spine[0], [start]).tangents[0])
+    else:
+        normal = SWEEP_TILTED_NORMAL
+    before = set(s.entities(EntityKind.EDGE))
+    s.add_circle((0.0, 0.0, 0.0), normal, SWEEP_RADIUS)
+    profile = _new_ids(s, EntityKind.EDGE, before)
+    s.pipe_shell(spine, profile, frenet=frenet, solid=True)
+    return s, length
+
+
+def test_a_frenet_sweep_that_crosses_itself_is_refused_naming_the_faces() -> None:
+    """Report V5: the tilted profile's Frenet sweep passed BRepCheck_Analyzer."""
+    with pytest.raises(PysmeshError) as info:
+        _sweep(perpendicular=False, frenet=True)
+
+    assert "interfere" in str(info.value)
+    assert "face" in info.value.details
+
+
+def test_a_frenet_sweep_of_a_perpendicular_profile_is_the_exact_tube() -> None:
+    """Pappus: a circle swept perpendicular to a spine it never folds over: pi r^2 L."""
+    s, length = _sweep(perpendicular=True, frenet=True)
+
+    volume = _volume(s)
+
+    assert volume == pytest.approx(math.pi * SWEEP_RADIUS**2 * length, rel=SWEEP_VOLUME_RTOL)
+
+
+def test_a_corrected_frenet_sweep_of_the_tilted_profile_is_accepted() -> None:
+    """``frenet=False`` builds a consistent solid from the same tilted profile."""
+    s, _ = _sweep(perpendicular=False, frenet=False)
+
+    assert len(list(s.entities(EntityKind.SOLID))) == 1
+    assert _volume(s) > 0.0

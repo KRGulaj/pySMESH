@@ -16,8 +16,32 @@
 
 #include "session/session.hpp"
 
+#include "shape_checks.hpp"
+
 namespace pysmesh {
 namespace session {
+namespace {
+
+// Throw the self-interference refusal of a swept or lofted result, if there is one. The
+// message is the first line of the refusal; the details are the pairs it names and `hint`.
+void refuse_self_interference(const std::string& refusal, const char* hint) {
+  if (refusal.empty()) {
+    return;
+  }
+  const std::size_t cut = refusal.find('\n');
+  throw PysmeshError(refusal.substr(0, cut), refusal.substr(cut + 1) + hint, {});
+}
+
+constexpr const char* kSweepHint =
+    "A Frenet frame turns with the spine's curvature, so a profile that is not perpendicular "
+    "to the spine's start tangent can sweep through itself; use frenet=False, or a "
+    "perpendicular profile. A profile larger than the spine's radius of curvature does the "
+    "same.";
+constexpr const char* kLoftHint =
+    "Sections whose loft has to twist or bend sharply between them make the surface pass "
+    "through itself; space or align the sections, or add sections between them.";
+
+}  // namespace
 
 // ---- construction operations ------------------------------------------------------ //
 
@@ -682,6 +706,7 @@ py::dict Session::pipe(const std::vector<EntityId>& spine_ids,
   ProgressDriver driver("pipe", hooks_of("pipe", progress, cancel));
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
+  std::string interference;
   {
     py::gil_scoped_release release;
     BRepOffsetAPI_MakePipe mk(spine, profile);
@@ -695,6 +720,7 @@ py::dict Session::pipe(const std::vector<EntityId>& spine_ids,
     if (mk.IsDone()) {
       result = mk.Shape();
       hist = history_of(profile, mk);
+      interference = shape_checks::self_interference_refusal("Session.pipe", result);
     }
   }
   driver.finish();
@@ -705,6 +731,7 @@ py::dict Session::pipe(const std::vector<EntityId>& spine_ids,
     throw PysmeshError("Session.pipe: OCCT could not sweep the profile along the spine.",
                        "", ids_as_int(profile_ids));
   }
+  refuse_self_interference(interference, kSweepHint);
   return commit(concat(survivors, result), hist, "pipe", result);
 }
 
@@ -727,6 +754,7 @@ py::dict Session::pipe_shell(const std::vector<EntityId>& spine_ids,
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   std::string detail;
+  std::string interference;
   {
     py::gil_scoped_release release;
     BRepOffsetAPI_MakePipeShell mk(spine);
@@ -749,6 +777,7 @@ py::dict Session::pipe_shell(const std::vector<EntityId>& spine_ids,
         } else {
           result = mk.Shape();
           hist = history_of(profile, mk);
+          interference = shape_checks::self_interference_refusal("Session.pipe_shell", result);
         }
       }
     }
@@ -761,6 +790,7 @@ py::dict Session::pipe_shell(const std::vector<EntityId>& spine_ids,
     throw PysmeshError("Session.pipe_shell: OCCT could not sweep the profile.", detail,
                        ids_as_int(profile_ids));
   }
+  refuse_self_interference(interference, kSweepHint);
   return commit(concat(survivors, result), hist, "pipe_shell", result);
 }
 
@@ -791,6 +821,7 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   std::optional<EnclosedVolume> hollow;
+  std::string interference;
   {
     py::gil_scoped_release release;
     BRepOffsetAPI_ThruSections mk(solid, ruled);
@@ -824,6 +855,9 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
           break;
         }
       }
+      if (solid && !hollow.has_value()) {
+        interference = shape_checks::self_interference_refusal("Session.thru_sections", result);
+      }
     }
   }
   driver.finish();
@@ -849,6 +883,7 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
                        "each other's path.",
                        {});
   }
+  refuse_self_interference(interference, kLoftHint);
   return commit(concat(survivors, result), hist, "thru_sections", result);
 }
 
