@@ -1,0 +1,58 @@
+Defect F2 (chamfer): BRepFilletAPI_MakeChamfer crashes the process at a corner of
+three chamfered edges whose corner plane does not cut the end face in one line.
+
+Defect id: F2 (pySMESH phase 4, finding F2, brief amendment 4).
+
+Symptom: BRepPrimAPI_MakeSphere(1.0, 1.5 * pi), a sphere cut to a wedge of 1.5 pi;
+a chamfer of distance 0.01 on its three edges that are not degenerated: the two
+meridian arcs and the axis line, which meet at each pole. Build() reads address
+0x18 and the process ends with an access violation. The same chamfer builds on a
+wedge of pi / 2, and any two of the three edges build.
+
+Root cause: ChFi3d_ChBuilder::PerformThreeCorner(), planar corner that is not a
+triangle (c1plan and not c1triangle). The curve where the corner plane cuts
+face[pivot], gcface, is set only when GeomInt_IntSS is done and returns exactly
+one line (ChFi3d_ChBuilder_C3.cxx:750-771 at V8_0_1). On the reflex wedge
+face[pivot] is the sphere, and GeomInt_IntSS returns the circle where the corner
+plane cuts it as two arcs, split at the sphere's seam; the corner's two end
+points lie one on each arc (measured, at both poles). gcface stays a null
+handle, and lines 776-778 call ChFiKPart_IndexCurveInDS(gcface, ...) and
+gcface->FirstParameter() through it.
+
+Change: a null gcface after the intersection throws StdFail_NotDone, as the
+other failed intersections of this function do (lines 625-700).
+ChFi3d_Builder::Compute() catches the failure of one vertex and lists the vertex
+as bad (ChFi3d_Builder.cxx:306-318), so the chamfer reports not done: IsDone()
+false, the vertex among the faulty vertices. Kind: a clean failure, not a
+computed corner. Joining the two arcs would need a choice of arc and of
+orientation on a periodic circle that no branch of this function makes, and the
+corner would then run through the sphere's degenerated pole; that result has no
+independent check here. Only an input that dereferenced the null handle reaches
+the throw.
+
+Files and functions changed:
+  src/ModelingAlgorithms/TKFillet/ChFi3d/ChFi3d_ChBuilder_C3.cxx
+    ChFi3d_ChBuilder::PerformThreeCorner(), planar corner branch.
+
+Applies to: OCCT V8_0_1 (b8f597c677811d1f9f4d8a97f5ae2825c0353a42), after 0001.
+
+diff --git a/src/ModelingAlgorithms/TKFillet/ChFi3d/ChFi3d_ChBuilder_C3.cxx b/src/ModelingAlgorithms/TKFillet/ChFi3d/ChFi3d_ChBuilder_C3.cxx
+index e198f8c6..8534d6d5 100644
+--- a/src/ModelingAlgorithms/TKFillet/ChFi3d/ChFi3d_ChBuilder_C3.cxx
++++ b/src/ModelingAlgorithms/TKFillet/ChFi3d/ChFi3d_ChBuilder_C3.cxx
+@@ -732,6 +732,15 @@ void ChFi3d_ChBuilder::PerformThreeCorner(const int Jndex)
+           ChFi3d_ProjectPCurv(gac, gas, facepc2, tolapp3d, tolr);
+         }
+       }
++      // The corner needs the one line where its plane cuts face[pivot]. If the plane cuts
++      // that face in no line, or in several, gcface stays null and the interference on
++      // face[pivot] below cannot be built. Report the corner as not computed; the caller
++      // (ChFi3d_Builder::Compute) lists the vertex as faulty.
++      if (gcface.IsNull())
++      {
++        throw StdFail_NotDone("ChFi3d_ChBuilder::PerformThreeCorner: the corner plane does "
++                              "not cut the face at the end of the pivot in one line");
++      }
+     }
+ 
+     // on remplit les donnees du coin oriente face-pivot
