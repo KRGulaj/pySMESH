@@ -795,9 +795,10 @@ def test_adaptive_1d_keeps_its_three_rules_on_curved_edges(
     kind: str, radius: float, deflection: float
 ) -> None:
     """Spec (SMESH ``1d_meshing_hypo.rst``, "Adaptive hypothesis"), on every edge:
-    each sagitta is at most the deflection, or the segment is min_size long; every chord
-    lies in [min_size, max_size]; two adjacent chords of one edge, the wrap of a closed
-    edge included, differ at most by a factor of 2.
+    each sagitta is at most the deflection, or the segment is at least min_size long
+    (min_size is a hard lower bound, not a target length); every chord lies in
+    [min_size, max_size]; two adjacent chords of one edge, the wrap of a closed edge
+    included, differ at most by a factor of 2.
 
     Shapes: the rims of radius-1.5 and radius-4 cylinders, and the 2 x 1.5 elliptic rims
     of an extruded ellipse, a curved edge that is not a circle. Without the patch the
@@ -810,8 +811,8 @@ def test_adaptive_1d_keeps_its_three_rules_on_curved_edges(
     for chain in _ordered_edges(segments):
         chords = np.linalg.norm(np.diff(chain, axis=0), axis=1)
         sagitta = _sagittas(kind, radius, minor, chain)
-        at_min = np.abs(chords - ADAPTIVE_MIN_SIZE) <= _ROUND_OFF * ADAPTIVE_MIN_SIZE
-        assert np.all((sagitta <= deflection * (1.0 + _ROUND_OFF)) | at_min)
+        at_least_min = chords >= ADAPTIVE_MIN_SIZE * (1.0 - _ROUND_OFF)
+        assert np.all((sagitta <= deflection * (1.0 + _ROUND_OFF)) | at_least_min)
         assert float(chords.min()) >= ADAPTIVE_MIN_SIZE - _ROUND_OFF
         assert float(chords.max()) <= ADAPTIVE_MAX_SIZE + _ROUND_OFF
         closed = bool(np.array_equal(chain[0], chain[-1]))
