@@ -535,7 +535,16 @@ py::dict Session::commit(const std::vector<TopoDS_Shape>& bodies,
     bool valid = true;
     {
       py::gil_scoped_release release;
-      valid = BRepCheck_Analyzer(built).IsValid();
+      // BRepCheck_Analyzer catches the failures of its own checks; this catch is for the
+      // rest of it, so that nothing it throws reaches the caller raw (report A2).
+      try {
+        valid = BRepCheck_Analyzer(built).IsValid();
+      } catch (const std::exception& e) {
+        py::gil_scoped_acquire acquire;
+        throw PysmeshError(std::string("Session.") + op_name +
+                           ": BRepCheck_Analyzer failed on the result: " + e.what() +
+                           ". Nothing is committed; the session is unchanged.");
+      }
     }
     if (!valid && mode == Validation::Strict) {
       refuse_invalid(op_name, built, hist);
@@ -560,7 +569,15 @@ void Session::refuse_invalid(const char* op_name, const TopoDS_Shape& built,
   std::vector<shape_checks::CheckFinding> findings;
   {
     py::gil_scoped_release release;
-    findings = shape_checks::check_findings(built);
+    try {
+      findings = shape_checks::check_findings(built);
+    } catch (const std::exception& e) {
+      py::gil_scoped_acquire acquire;
+      throw PysmeshError(std::string("Session.") + op_name +
+                         ": the operation produced an invalid shape, and reading "
+                         "BRepCheck_Analyzer's statuses failed: " +
+                         e.what() + ". Nothing is committed; the session is unchanged.");
+    }
   }
   // Each result sub-shape that a live id became: the same shape, or an image the history
   // records as modified or generated from one of that id's shapes.

@@ -638,17 +638,20 @@ py::dict Session::extrude(const std::vector<EntityId>& entity_ids, double vx, do
   Handle(BRepTools_History) hist;
   {
     py::gil_scoped_release release;
-    BRepPrimAPI_MakePrism mk(profile, vec, /*Copy=*/false);
+    // Every OCCT call runs inside the try, the history query included: whatever throws
+    // after Build() reaches the caller as PysmeshError too (report A2).
+    const char* stage = "BRepPrimAPI_MakePrism failed";
     try {
+      BRepPrimAPI_MakePrism mk(profile, vec, /*Copy=*/false);
       mk.Build();
+      if (mk.IsDone()) {
+        stage = "reading the history of BRepPrimAPI_MakePrism failed";
+        result = mk.Shape();
+        hist = history_of(profile, mk);
+      }
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
-      throw PysmeshError(std::string("Session.extrude: BRepPrimAPI_MakePrism failed: ") +
-                         e.what());
-    }
-    if (mk.IsDone()) {
-      result = mk.Shape();
-      hist = history_of(profile, mk);
+      throw PysmeshError(std::string("Session.extrude: ") + stage + ": " + e.what());
     }
   }
   if (result.IsNull()) {
@@ -671,17 +674,18 @@ py::dict Session::revolve(const std::vector<EntityId>& entity_ids, double ox, do
   Handle(BRepTools_History) hist;
   {
     py::gil_scoped_release release;
-    BRepPrimAPI_MakeRevol mk(profile, axis, angle_rad, /*Copy=*/false);
+    const char* stage = "BRepPrimAPI_MakeRevol failed";
     try {
+      BRepPrimAPI_MakeRevol mk(profile, axis, angle_rad, /*Copy=*/false);
       mk.Build();
+      if (mk.IsDone()) {
+        stage = "reading the history of BRepPrimAPI_MakeRevol failed";
+        result = mk.Shape();
+        hist = history_of(profile, mk);
+      }
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
-      throw PysmeshError(std::string("Session.revolve: BRepPrimAPI_MakeRevol failed: ") +
-                         e.what());
-    }
-    if (mk.IsDone()) {
-      result = mk.Shape();
-      hist = history_of(profile, mk);
+      throw PysmeshError(std::string("Session.revolve: ") + stage + ": " + e.what());
     }
   }
   if (result.IsNull()) {
@@ -712,18 +716,20 @@ py::dict Session::pipe(const std::vector<EntityId>& spine_ids,
   std::string interference;
   {
     py::gil_scoped_release release;
-    BRepOffsetAPI_MakePipe mk(spine, profile);
+    const char* stage = "BRepOffsetAPI_MakePipe failed";
     try {
+      BRepOffsetAPI_MakePipe mk(spine, profile);
       mk.Build(driver.range());
+      if (mk.IsDone()) {
+        stage = "reading the history of BRepOffsetAPI_MakePipe failed";
+        result = mk.Shape();
+        hist = history_of(profile, mk);
+        stage = "checking the swept shape for self-interference failed";
+        interference = shape_checks::self_interference_refusal("Session.pipe", result);
+      }
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
-      throw PysmeshError(std::string("Session.pipe: BRepOffsetAPI_MakePipe failed: ") +
-                         e.what());
-    }
-    if (mk.IsDone()) {
-      result = mk.Shape();
-      hist = history_of(profile, mk);
-      interference = shape_checks::self_interference_refusal("Session.pipe", result);
+      throw PysmeshError(std::string("Session.pipe: ") + stage + ": " + e.what());
     }
   }
   driver.finish();
@@ -760,29 +766,33 @@ py::dict Session::pipe_shell(const std::vector<EntityId>& spine_ids,
   std::string interference;
   {
     py::gil_scoped_release release;
-    BRepOffsetAPI_MakePipeShell mk(spine);
-    mk.SetMode(frenet);
-    mk.Add(prof);
-    if (!mk.IsReady()) {
-      detail = "BRepOffsetAPI_MakePipeShell::IsReady() is false.";
-    } else {
-      try {
+    const char* stage = "setting up BRepOffsetAPI_MakePipeShell failed";
+    try {
+      BRepOffsetAPI_MakePipeShell mk(spine);
+      mk.SetMode(frenet);
+      mk.Add(prof);
+      if (!mk.IsReady()) {
+        detail = "BRepOffsetAPI_MakePipeShell::IsReady() is false.";
+      } else {
+        stage = "BRepOffsetAPI_MakePipeShell failed";
         mk.Build(driver.range());
-      } catch (const std::exception& e) {
-        py::gil_scoped_acquire acquire;
-        throw PysmeshError(
-            std::string("Session.pipe_shell: BRepOffsetAPI_MakePipeShell failed: ") +
-            e.what());
-      }
-      if (mk.IsDone()) {
-        if (solid && !mk.MakeSolid()) {
-          detail = "MakeSolid() failed: the swept shell is not closed.";
-        } else {
-          result = mk.Shape();
-          hist = history_of(profile, mk);
-          interference = shape_checks::self_interference_refusal("Session.pipe_shell", result);
+        if (mk.IsDone()) {
+          stage = "BRepOffsetAPI_MakePipeShell::MakeSolid failed";
+          if (solid && !mk.MakeSolid()) {
+            detail = "MakeSolid() failed: the swept shell is not closed.";
+          } else {
+            stage = "reading the history of BRepOffsetAPI_MakePipeShell failed";
+            result = mk.Shape();
+            hist = history_of(profile, mk);
+            stage = "checking the swept shape for self-interference failed";
+            interference =
+                shape_checks::self_interference_refusal("Session.pipe_shell", result);
+          }
         }
       }
+    } catch (const std::exception& e) {
+      py::gil_scoped_acquire acquire;
+      throw PysmeshError(std::string("Session.pipe_shell: ") + stage + ": " + e.what());
     }
   }
   driver.finish();
@@ -827,40 +837,46 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
   std::string interference;
   {
     py::gil_scoped_release release;
-    BRepOffsetAPI_ThruSections mk(solid, ruled);
-    for (const TopoDS_Wire& w : wires) {
-      mk.AddWire(w);
-    }
+    // The history query once threw here outside the try (report A2, through O1), and a raw
+    // RuntimeError reached the caller. Every OCCT call now runs inside it.
+    const char* stage = "BRepOffsetAPI_ThruSections failed";
     try {
-      mk.Build(driver.range());
-    } catch (const std::exception& e) {
-      py::gil_scoped_acquire acquire;
-      throw PysmeshError(
-          std::string("Session.thru_sections: BRepOffsetAPI_ThruSections failed: ") +
-          e.what());
-    }
-    if (mk.IsDone()) {
-      result = mk.Shape();
-      NCollection_List<TopoDS_Shape> args;
-      for (const TopoDS_Shape& b : bodies) {
-        args.Append(b);
+      BRepOffsetAPI_ThruSections mk(solid, ruled);
+      for (const TopoDS_Wire& w : wires) {
+        mk.AddWire(w);
       }
-      hist = new BRepTools_History(args, mk);
-      // OCCT orients the lofted solid itself, and on a loft that folds through itself its
-      // answer is arbitrary. Measured over 30 seeded random ruled lofts through three tilted
-      // sections, two came back with volumes -7.85 and -8.51 and BRepCheck_Analyzer
-      // accepted both, so the solid's own volume is checked before it is committed. It is
-      // not re-oriented: reversing a surface that crosses itself does not give it an inside.
-      for (TopExp_Explorer ex(result, TopAbs_SOLID); ex.More() && solid; ex.Next()) {
-        const EnclosedVolume enclosed = enclosed_volume(ex.Current());
-        if (enclosed.volume <= enclosed.tolerance) {
-          hollow = enclosed;
-          break;
+      mk.Build(driver.range());
+      if (mk.IsDone()) {
+        stage = "reading the history of BRepOffsetAPI_ThruSections failed";
+        result = mk.Shape();
+        NCollection_List<TopoDS_Shape> args;
+        for (const TopoDS_Shape& b : bodies) {
+          args.Append(b);
+        }
+        hist = new BRepTools_History(args, mk);
+        // OCCT orients the lofted solid itself, and on a loft that folds through itself its
+        // answer is arbitrary. Measured over 30 seeded random ruled lofts through three
+        // tilted sections, two came back with volumes -7.85 and -8.51 and
+        // BRepCheck_Analyzer accepted both, so the solid's own volume is checked before it
+        // is committed. It is not re-oriented: reversing a surface that crosses itself does
+        // not give it an inside.
+        stage = "measuring the volume of the lofted solid failed";
+        for (TopExp_Explorer ex(result, TopAbs_SOLID); ex.More() && solid; ex.Next()) {
+          const EnclosedVolume enclosed = enclosed_volume(ex.Current());
+          if (enclosed.volume <= enclosed.tolerance) {
+            hollow = enclosed;
+            break;
+          }
+        }
+        if (solid && !hollow.has_value()) {
+          stage = "checking the lofted solid for self-interference failed";
+          interference =
+              shape_checks::self_interference_refusal("Session.thru_sections", result);
         }
       }
-      if (solid && !hollow.has_value()) {
-        interference = shape_checks::self_interference_refusal("Session.thru_sections", result);
-      }
+    } catch (const std::exception& e) {
+      py::gil_scoped_acquire acquire;
+      throw PysmeshError(std::string("Session.thru_sections: ") + stage + ": " + e.what());
     }
   }
   driver.finish();

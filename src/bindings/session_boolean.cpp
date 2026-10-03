@@ -266,27 +266,29 @@ py::dict Session::fillet(const std::vector<EntityId>& edge_ids, double radius,
   std::vector<TopoDS_Shape> faulty;
   {
     py::gil_scoped_release release;
-    BRepFilletAPI_MakeFillet mk(owner);
-    for (const TopoDS_Shape& e : edges) {
-      if (radius_end.has_value()) {
-        mk.Add(radius, *radius_end, TopoDS::Edge(e));
-      } else {
-        mk.Add(radius, TopoDS::Edge(e));
-      }
-    }
+    // Every OCCT call runs inside the try, the history query included (report A2).
+    const char* stage = "BRepFilletAPI_MakeFillet::Add failed";
     try {
+      BRepFilletAPI_MakeFillet mk(owner);
+      for (const TopoDS_Shape& e : edges) {
+        if (radius_end.has_value()) {
+          mk.Add(radius, *radius_end, TopoDS::Edge(e));
+        } else {
+          mk.Add(radius, TopoDS::Edge(e));
+        }
+      }
+      stage = "BRepFilletAPI_MakeFillet::Build failed";
       mk.Build(driver.range());
+      if (mk.IsDone()) {
+        stage = "reading the history of BRepFilletAPI_MakeFillet failed";
+        result = mk.Shape();
+        hist = history_of(owner, mk);
+      } else {
+        faulty = faulty_edges(mk);
+      }
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
-      throw PysmeshError(
-          std::string("Session.fillet: BRepFilletAPI_MakeFillet::Build failed: ") +
-          e.what());
-    }
-    if (mk.IsDone()) {
-      result = mk.Shape();
-      hist = history_of(owner, mk);
-    } else {
-      faulty = faulty_edges(mk);
+      throw PysmeshError(std::string("Session.fillet: ") + stage + ": " + e.what());
     }
   }
   driver.finish();
@@ -352,25 +354,26 @@ py::dict Session::chamfer(const std::vector<EntityId>& edge_ids, double distance
   std::vector<TopoDS_Shape> faulty;
   {
     py::gil_scoped_release release;
-    BRepFilletAPI_MakeChamfer mk(owner);
-    for (const TopoDS_Shape& e : edges) {
-      if (reference.IsNull()) {
-        mk.Add(distance, TopoDS::Edge(e));
-      } else {
-        mk.Add(distance, *distance_end, TopoDS::Edge(e), reference);
-      }
-    }
+    const char* stage = "BRepFilletAPI_MakeChamfer::Add failed";
     try {
+      BRepFilletAPI_MakeChamfer mk(owner);
+      for (const TopoDS_Shape& e : edges) {
+        if (reference.IsNull()) {
+          mk.Add(distance, TopoDS::Edge(e));
+        } else {
+          mk.Add(distance, *distance_end, TopoDS::Edge(e), reference);
+        }
+      }
+      stage = "BRepFilletAPI_MakeChamfer::Build failed";
       mk.Build(driver.range());
+      if (mk.IsDone()) {
+        stage = "reading the history of BRepFilletAPI_MakeChamfer failed";
+        result = mk.Shape();
+        hist = history_of(owner, mk);
+      }
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
-      throw PysmeshError(
-          std::string("Session.chamfer: BRepFilletAPI_MakeChamfer::Build failed: ") +
-          e.what());
-    }
-    if (mk.IsDone()) {
-      result = mk.Shape();
-      hist = history_of(owner, mk);
+      throw PysmeshError(std::string("Session.chamfer: ") + stage + ": " + e.what());
     }
   }
   driver.finish();

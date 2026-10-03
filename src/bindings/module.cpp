@@ -9,6 +9,10 @@
 // installs the typed exception (PysmeshError) with its .details / .face_ids attributes.
 
 #include <exception>
+#include <string>
+
+#include <Standard_Failure.hxx>
+#include <Utils_SALOME_Exception.hxx>
 
 #include "common.hpp"
 
@@ -44,6 +48,11 @@ void raise_as(py::handle type, const PysmeshError& e) {
   PyErr_SetObject(type.ptr(), exc.ptr());
 }
 
+// An exception's message, or a placeholder when it has none.
+std::string text_of(const char* what) {
+  return what != nullptr && what[0] != '\0' ? std::string(what) : std::string("(no message)");
+}
+
 }  // namespace
 
 void register_error_type(py::module_& m) {
@@ -72,6 +81,16 @@ void register_error_type(py::module_& m) {
       raise_as(g_cancelled_type, e);
     } catch (const PysmeshError& e) {
       raise_as(g_error_type, e);
+    } catch (const Standard_Failure& e) {
+      // A safety net, not the contract (report A2): each operation converts what OCCT and
+      // SMESH throw, naming itself. An exception that still arrives here comes from a call
+      // that conversion missed, and it reaches the caller as PysmeshError all the same.
+      raise_as(g_error_type, PysmeshError(std::string("pySMESH: OCCT raised ") +
+                                          e.ExceptionType() + ": " + text_of(e.what())));
+    } catch (const SALOME_Exception& e) {
+      raise_as(g_error_type,
+               PysmeshError(std::string("pySMESH: SMESH raised SALOME_Exception: ") +
+                            text_of(e.what())));
     }
   });
 }
