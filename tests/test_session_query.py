@@ -39,6 +39,7 @@ Fixture sizing follows the project rule: a 3 x 7 x 11 box, never a unit cube.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import numpy as np
 import pytest
@@ -1899,3 +1900,112 @@ def test_a_query_box_left_of_the_leading_edge_does_not_report_the_spline() -> No
     )
 
     assert len(hits) == 0
+
+
+# ------------------------------------------- Aliases: one shape, several ids (C5) --- #
+
+# The oracle is independent of the registry: the distinct shapes of the session's BREP.
+_BREP_COUNT: dict[EntityKind, str] = {
+    EntityKind.SOLID: "solids",
+    EntityKind.FACE: "faces",
+    EntityKind.EDGE: "edges",
+}
+
+
+def _brep_count(s: Session, kind: EntityKind) -> int:
+    """How many distinct shapes of one kind the session's BREP holds."""
+    shape = ps.load_brep(s.brep())
+    return len(getattr(shape, _BREP_COUNT[kind])())
+
+
+def _common_of_cylinder_and_box() -> Session:
+    """A unit cylinder and a 2 x 2 x 1 box at the origin: their common is a quarter."""
+    s = Session()
+    s.add_cylinder(1.0, 1.0)
+    cylinder = ids_of(s, EntityKind.SOLID)
+    s.add_box(2.0, 2.0, 1.0)
+    box = [i for i in ids_of(s, EntityKind.SOLID) if i not in cylinder]
+    s.common(cylinder, box)
+    return s
+
+
+def _fragment_of_four_sectors() -> Session:
+    """Four annular sectors (r 1..2, z 0..1) round the z axis, touching, fragmented."""
+    s = Session()
+    for i in range(4):
+        edges = set(ids_of(s, EntityKind.EDGE))
+        faces = set(ids_of(s, EntityKind.FACE))
+        solids = set(ids_of(s, EntityKind.SOLID))
+        s.add_polyline(
+            [(1.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 0.0, 1.0), (1.0, 0.0, 1.0)],
+            closed=True,
+        )
+        s.make_face([e for e in ids_of(s, EntityKind.EDGE) if e not in edges])
+        face = [f for f in ids_of(s, EntityKind.FACE) if f not in faces]
+        s.revolve(face, (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), math.pi / 2.0)
+        sector = [v for v in ids_of(s, EntityKind.SOLID) if v not in solids]
+        s.rotate((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), i * math.pi / 2.0, sector)
+    s.fragment(ids_of(s, EntityKind.SOLID))
+    return s
+
+
+def _sewn_wrap_around_face() -> Session:
+    """A smooth loft of 13 straight generators round a unit circle, the last a copy of
+    the first, sewn alone: its two coincident generators merge into one edge."""
+    lofted = Session()
+    sections = []
+    for p in np.linspace(0.0, 2.0 * math.pi, 13)[:-1]:
+        before = set(ids_of(lofted, EntityKind.EDGE))
+        c, d = math.cos(float(p)), math.sin(float(p))
+        lofted.add_line((c, d, 0.0), (c, d, 1.0))
+        sections.append([i for i in ids_of(lofted, EntityKind.EDGE) if i not in before])
+    before = set(ids_of(lofted, EntityKind.EDGE))
+    lofted.copy(sections[0])
+    sections.append([i for i in ids_of(lofted, EntityKind.EDGE) if i not in before])
+    lofted.thru_sections(sections, solid=False, ruled=False)
+    s = Session()
+    s.add_brep(lofted.brep())
+    s.sew(ids_of(s, EntityKind.FACE), tolerance=1e-6)
+    return s
+
+
+# Report C5's three cases. Shapes: the common is 1 solid; the 4 sectors have 6 faces
+# each, 4 of them shared by 2 neighbours, so 24 - 4 = 20 faces; the sewn face keeps its
+# 2 circles and 1 seam edge. Merged: the common carries the ids of the cylinder and the
+# box; each of the 4 shared faces carries the ids of its 2 sectors; the seam carries the
+# ids of the 2 coincident generators. Each merged shape has 2 ids.
+@pytest.mark.parametrize(
+    ("build", "kind", "shapes", "merged"),
+    [
+        (_common_of_cylinder_and_box, EntityKind.SOLID, 1, 1),
+        (_fragment_of_four_sectors, EntityKind.FACE, 20, 4),
+        (_sewn_wrap_around_face, EntityKind.EDGE, 3, 1),
+    ],
+    ids=["common_solid", "fragment_faces", "sew_edges"],
+)
+def test_distinct_entities_list_each_shape_once_and_alias_groups_hold_the_rest(
+    build: Callable[[], Session], kind: EntityKind, shapes: int, merged: int
+) -> None:
+    """One id per shape of the BREP; each merged shape is one group of its 2 ids."""
+    s = build()
+    in_brep = _brep_count(s, kind)
+
+    distinct = s.entities(kind, distinct=True)
+    groups = s.alias_groups(kind)
+
+    assert in_brep == shapes
+    assert len(distinct) == in_brep
+    assert [len(g) for g in groups] == [2] * merged
+    assert len(s.entities(kind)) == in_brep + merged
+    assert {int(g[0]) for g in groups} <= set(distinct.tolist())
+
+
+def test_the_distinct_common_of_a_cylinder_and_a_box_has_the_quarter_volume() -> None:
+    """Summed over distinct ids the common is pi / 4; over all ids, pi / 2 (C5)."""
+    s = _common_of_cylinder_and_box()
+
+    solids = s.entities(EntityKind.SOLID, distinct=True)
+
+    volume = float(s.mass_properties(solids).measure.sum())
+
+    assert volume == pytest.approx(math.pi / 4.0, rel=DEFAULT_PRECISION)

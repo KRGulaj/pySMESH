@@ -85,19 +85,44 @@ class _StateOps(_SessionBase):
 
     # ---- queries --------------------------------------------------------------------- #
 
-    def entities(self, kind: EntityKind) -> NDArray[np.int64]:
+    def entities(
+        self, kind: EntityKind, *, distinct: bool = False
+    ) -> NDArray[np.int64]:
         """Live entity ids of one kind.
+
+        An operation that merges shapes, such as ``common``, ``fragment`` or ``sew``,
+        carries every input id onto the merged shape, so one shape can have several live
+        ids (aliases; :meth:`alias_groups` lists them). By default each alias is listed,
+        and counting or summing over the list counts that shape once per id.
 
         Args:
             kind: The entity kind to list.
+            distinct: List one id per shape instead: its label, the lowest live id that
+                denotes it. A split entity, one id on several shapes, is listed once.
 
         Returns:
             (N,) int64, ascending.
         """
-        return self._s.entities(str(kind))
+        return self._s.entities(str(kind), distinct)
+
+    def alias_groups(self, kind: EntityKind) -> tuple[NDArray[np.int64], ...]:
+        """The shapes of one kind that more than one live id denotes.
+
+        Args:
+            kind: The entity kind to look at.
+
+        Returns:
+            One (M,) int64 array per such shape, M >= 2: its ids ascending, the label
+            first. The arrays in ascending order of their labels. Empty when no shape
+            of that kind has an alias.
+        """
+        return tuple(self._s.alias_groups(str(kind)))
 
     def entity_table(self, kind: EntityKind) -> EntityTable:
         """Bulk geometry of every live entity of one kind.
+
+        One row per live id: a shape with several ids (see :meth:`entities`) has one row
+        per id, so a sum over ``measure`` counts it once per id.
 
         Args:
             kind: The entity kind to tabulate.
@@ -255,7 +280,11 @@ class _StateOps(_SessionBase):
 
     @property
     def entity_count(self) -> int:
-        """How many entities are live in the current state."""
+        """How many entity ids are live in the current state.
+
+        Ids, not shapes: a merged shape with several ids counts once per id. See
+        :meth:`entities` with ``distinct=True`` and :meth:`alias_groups`.
+        """
         return self._s.entity_count()
 
     def _debug_tear_next_history(self) -> None:

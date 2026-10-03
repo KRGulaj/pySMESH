@@ -898,7 +898,15 @@ class Session {
 
   // ---- queries ---------------------------------------------------------------------- //
 
-  py::array_t<std::int64_t> entities(const std::string& kind) const;
+  // Live ids of one kind, ascending. With `distinct`, one id per shape of that kind in the
+  // root: its label, the lowest live id that denotes it (label_of), each label once. An
+  // operation that merges shapes carries every input id onto the merged one (report C5),
+  // so without `distinct` such a shape is listed once per id.
+  py::array_t<std::int64_t> entities(const std::string& kind, bool distinct) const;
+
+  // Every shape of one kind that more than one live id denotes, as the ascending list of
+  // those ids, label first; the lists in ascending order of their labels.
+  py::list alias_groups(const std::string& kind) const;
 
   std::string entity_kind(EntityId id) const;
 

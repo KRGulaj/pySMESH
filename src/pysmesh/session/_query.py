@@ -158,6 +158,10 @@ class _QueryOps(_SessionBase):
         largest solid of the production assembly, 436 faces, 5.0 times at 1e-6 and 8.5 times
         at 1e-9. Edges cost less than with the fixed rule.
 
+        Each id is measured: two ids of one merged shape (aliases, see
+        :meth:`entities`) give that shape's measure twice. Name each shape once, for
+        example from ``entities(kind, distinct=True)``, before summing.
+
         Args:
             entities: Entity ids, of any kinds.
             precision: The relative precision of the adaptive rule, in ``(0, 1e-3]``.

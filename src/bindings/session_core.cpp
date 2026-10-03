@@ -69,8 +69,40 @@ std::int64_t Session::snapshot_count() const {
 
 // ---- queries ---------------------------------------------------------------------- //
 
-py::array_t<std::int64_t> Session::entities(const std::string& kind) const {
-  return ids_array(ids_of_kind(kind_from_name(kind)));
+py::array_t<std::int64_t> Session::entities(const std::string& kind, bool distinct) const {
+  const TopAbs_ShapeEnum k = kind_from_name(kind);
+  if (!distinct) {
+    return ids_array(ids_of_kind(k));
+  }
+  ShapeSet shapes;
+  TopExp::MapShapes(state_.root, k, shapes);
+  std::vector<EntityId> labels;
+  labels.reserve(static_cast<std::size_t>(shapes.Extent()));
+  for (int i = 1; i <= shapes.Extent(); ++i) {
+    labels.push_back(label_of("entities", shapes.FindKey(i)));
+  }
+  std::sort(labels.begin(), labels.end());
+  labels.erase(std::unique(labels.begin(), labels.end()), labels.end());
+  return ids_array(labels);
+}
+
+py::list Session::alias_groups(const std::string& kind) const {
+  ShapeSet shapes;
+  TopExp::MapShapes(state_.root, kind_from_name(kind), shapes);
+  std::vector<std::vector<EntityId>> groups;
+  for (int i = 1; i <= shapes.Extent(); ++i) {
+    const auto it = state_.registry->by_shape.find(shapes.FindKey(i));
+    // by_shape's id lists are sorted ascending when the registry is published.
+    if (it != state_.registry->by_shape.end() && it->second.size() > 1) {
+      groups.push_back(it->second);
+    }
+  }
+  std::sort(groups.begin(), groups.end());
+  py::list out;
+  for (const std::vector<EntityId>& g : groups) {
+    out.append(ids_array(g));
+  }
+  return out;
 }
 
 std::string Session::entity_kind(EntityId id) const {
