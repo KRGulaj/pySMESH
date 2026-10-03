@@ -732,7 +732,10 @@ class _ConstructOps(_SessionBase):
 
         Args:
             sections: One entity-id group per section, in sweep order. Each group must
-                resolve to one wire or single-edge body, and no body may appear twice.
+                resolve to one wire or single-edge body, and no body may appear twice,
+                with one exception: the first section named again as the last closes
+                the loft round onto itself, a ring with no caps. A closed loft needs
+                two other sections at least.
             solid: Cap the ends and return a solid rather than a shell.
             ruled: Join consecutive sections with ruled surfaces. ``False`` fits one smooth
                 surface through all of them.
@@ -746,13 +749,14 @@ class _ConstructOps(_SessionBase):
             The delta for this operation.
 
         Raises:
-            PysmeshError: On fewer than two sections, a repeated body, a section that is
-                not a wire or edge, or a loft OCCT cannot build. Also, with ``solid``,
-                if OCCT's planar cap on the first or the last section is missing or
-                invalid: the section is not planar to its edge tolerance (1e-7). The
-                message names the section and how far its points spread across the plane
-                that fits them best. A bow in a middle section needs no cap. Also, with
-                ``solid``, if the lofted solid encloses no more than
+            PysmeshError: On fewer than two sections, a repeated body other than the
+                first named again as the last (the message names both positions), a
+                section that is not a wire or edge, or a loft OCCT cannot build. Also,
+                with ``solid``, if OCCT's planar cap on the first or the last section is
+                missing or invalid: the section is not planar to its edge tolerance
+                (1e-7). The message names the section and how far its points spread
+                across the plane that fits them best. A bow in a middle section needs no
+                cap. Also, with ``solid``, if the lofted solid encloses no more than
                 ``Precision::Confusion()`` times its area. A loft whose surface folds
                 through itself comes back that way, and OCCT's validity check accepts
                 it: a ruled loft through sections tilted towards each other is the

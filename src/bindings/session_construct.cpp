@@ -904,18 +904,32 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
     throw PysmeshError("Session.thru_sections: at least two sections are required (got " +
                        std::to_string(sections.size()) + ").");
   }
+  // The first section named again as the last closes the loft round onto itself (report
+  // C3). OCCT takes its closed path only when the first and the last wire are the same
+  // shape (BRepOffsetAPI_ThruSections.cxx: myWires(1).IsSame(myWires(nbSects))), and
+  // wire_of_body builds a new wire on each call, so the last section reuses the first wire.
+  // A closed loft needs two other sections at least; any other repeat is refused.
   std::vector<TopoDS_Shape> bodies;
   std::vector<TopoDS_Wire> wires;
-  for (const std::vector<EntityId>& ids : sections) {
-    const TopoDS_Shape body = sole_body("thru_sections", ids);
-    for (const TopoDS_Shape& seen : bodies) {
-      if (seen.IsSame(body)) {
-        throw PysmeshError(
-            "Session.thru_sections: the same body was named as two different sections.");
+  bool closed = false;
+  for (std::size_t k = 0; k < sections.size(); ++k) {
+    const TopoDS_Shape body = sole_body("thru_sections", sections[k]);
+    for (std::size_t j = 0; j < bodies.size(); ++j) {
+      if (!bodies[j].IsSame(body)) {
+        continue;
       }
+      if (j == 0 && k + 1 == sections.size() && k >= 3) {
+        closed = true;
+        continue;
+      }
+      throw PysmeshError("Session.thru_sections: the same body was named as two different "
+                         "sections (" +
+                         std::to_string(j + 1) + " and " + std::to_string(k + 1) +
+                         "). Only the first section may be named again, as the last, to "
+                         "close the loft through two other sections at least.");
     }
     bodies.push_back(body);
-    wires.push_back(wire_of_body("thru_sections", "sections", body));
+    wires.push_back(closed ? wires.front() : wire_of_body("thru_sections", "sections", body));
   }
   const std::vector<TopoDS_Shape> survivors = bodies_excluding(bodies);
 
@@ -940,8 +954,10 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
       TopoDS_Compound originals;
       BRep_Builder builder;
       builder.MakeCompound(originals);
-      for (const TopoDS_Wire& w : wires) {
-        builder.Add(originals, w);
+      for (std::size_t k = 0; k < wires.size(); ++k) {
+        if (!(closed && k + 1 == wires.size())) {
+          builder.Add(originals, wires[k]);
+        }
       }
       BRepBuilderAPI_Copy copier(originals, /*copyGeom=*/true, /*copyMesh=*/false);
       NCollection_List<TopoDS_Shape> copies;
@@ -964,8 +980,8 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
         hist = new BRepTools_History(args, copier);
         hist->Merge(BRepTools_History(copies, mk));
         // The caps first: a solid whose cap is missing has an open shell, and its volume
-        // means nothing.
-        if (solid) {
+        // means nothing. A closed loft has no caps: OCCT closes it round onto itself.
+        if (solid && !closed) {
           stage = "checking the end caps of the lofted solid failed";
           cap_refusal = loft_cap_refusal(result, mk.FirstShape(), mk.LastShape(), wires);
         }

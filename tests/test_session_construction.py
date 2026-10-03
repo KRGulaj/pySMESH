@@ -31,7 +31,14 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from pysmesh import EntityKind, PysmeshError, Session
+from pysmesh import (
+    EntityId,
+    EntityKind,
+    PysmeshError,
+    Session,
+    free_boundary_edges,
+    load_brep,
+)
 
 
 def _state(s: Session) -> tuple[int, int, bytes]:
@@ -288,3 +295,133 @@ def test_a_loft_whose_end_sections_need_no_planar_cap_is_committed(
 
     assert delta.valid is True
     assert len(s.entities(EntityKind.SOLID)) == (1 if solid else 0)
+
+
+# ---- C3: a closed loft ------------------------------------------------------------- #
+
+RING_R: float = 1.0
+RING_TUBE: float = 0.2
+RING_STATIONS: int = 8
+# 2 pi^2 R r^2, the torus the ring of circles samples.
+TORUS_VOLUME: float = 2.0 * math.pi**2 * RING_R * RING_TUBE**2
+# Parameter grid per face for the distance of the smooth loft from the torus. The
+# largest distance found changes by 0.1 % from 65 to 257 points a side.
+TORUS_GRID: int = 129
+
+
+def _ring_station(s: Session, phi: float) -> list[int]:
+    """A tube-radius circle round the ring at angle ``phi``, normal along the ring."""
+    centre = (RING_R * math.cos(phi), RING_R * math.sin(phi), 0.0)
+    normal = (-math.sin(phi), math.cos(phi), 0.0)
+    return [int(i) for i in s.add_circle(centre, normal, RING_TUBE).created]
+
+
+def _ring(s: Session) -> list[list[int]]:
+    """The stations of the ring, with the first named again as the last."""
+    stations = [
+        _ring_station(s, 2.0 * math.pi * k / RING_STATIONS)
+        for k in range(RING_STATIONS)
+    ]
+    return [*stations, stations[0]]
+
+
+def _volume(s: Session) -> float:
+    """The volume of the session's solids, integrated adaptively."""
+    solids = sorted(int(i) for i in s.entities(EntityKind.SOLID))
+    return float(s.mass_properties(solids, precision=1e-12).measure.sum())
+
+
+def _copy_of(s: Session, section: list[int]) -> list[int]:
+    """The edges of a copy of one section."""
+    before = {int(i) for i in s.entities(EntityKind.EDGE)}
+    s.copy(section)
+    return [int(i) for i in s.entities(EntityKind.EDGE) if int(i) not in before]
+
+
+@pytest.mark.parametrize("ruled", [True, False], ids=["ruled", "smooth"])
+def test_a_closed_loft_has_no_free_edge_no_planar_face_and_is_solid_at_the_seam(
+    ruled: bool,
+) -> None:
+    """The ring closes onto itself: no cap, no slit, solid where the caps would be.
+
+    Points of the old cap plane (y = 0, x > 0) up to 0.95 r from the tube axis must
+    classify inside: a slit there would put them on the boundary.
+    """
+    s = Session()
+
+    s.thru_sections(_ring(s), solid=True, ruled=ruled)
+
+    shape = load_brep(s.brep())
+    assert [f.surface_type for f in shape.faces() if f.surface_type == "Plane"] == []
+    assert len(free_boundary_edges(s.brep())) == 0
+    rho = np.linspace(0.0, 0.95 * RING_TUBE, 6)
+    theta = np.linspace(0.0, 2.0 * math.pi, 12, endpoint=False)
+    points = np.array(
+        [(RING_R + q * math.cos(t), 0.0, q * math.sin(t)) for q in rho for t in theta]
+    )
+    solids = sorted(int(i) for i in s.entities(EntityKind.SOLID))
+    assert bool(np.all(s.contains(solids, points)))
+
+
+def test_a_closed_ruled_loft_has_the_volume_of_two_sewn_half_lofts() -> None:
+    """The oracle is built without the closed path: two half lofts, sewn into one solid.
+
+    Each half runs through copies of stations 0 and 4, as the report's workaround does,
+    so that its strips are the closed loft's strips.
+    """
+    s = Session()
+    s.thru_sections(_ring(s), solid=True, ruled=True)
+    closed = _volume(s)
+    halves = Session()
+    stations = _ring(halves)[:-1]
+    last = _copy_of(halves, stations[0])
+    middle = _copy_of(halves, stations[4])
+    halves.thru_sections(stations[:5], solid=False, ruled=True)
+    halves.thru_sections([middle, *stations[5:], last], solid=False, ruled=True)
+    faces = sorted(int(i) for i in halves.entities(EntityKind.FACE))
+
+    halves.sew(faces, tolerance=1e-6, make_solid=True)
+
+    assert closed == pytest.approx(_volume(halves), rel=1e-9)
+    assert closed == pytest.approx(0.710861, rel=1e-6)
+
+
+def test_a_closed_smooth_loft_is_within_its_distance_bound_of_the_torus() -> None:
+    """|V - 2 pi^2 R r^2| <= eps A + 2 pi^2 R eps^2, eps the distance from the torus.
+
+    If the loft surface lies within eps of the torus surface, the solid lies between the
+    tori of tube radius r - eps and r + eps, whose volumes are 2 pi^2 R (r -+ eps)^2.
+    That gives the bound, with A = 4 pi^2 R r the torus area. eps is the largest
+    distance of a 129 x 129 parameter grid on each face from the torus, taken 5 %
+    larger for the points between the grid points.
+    """
+    s = Session()
+    s.thru_sections(_ring(s), solid=True, ruled=False)
+    gap = 0.0
+    for face in sorted(int(i) for i in s.entities(EntityKind.FACE)):
+        u0, u1, v0, v1 = s.face_parameter_bounds([EntityId(face)])[0]
+        u, v = np.meshgrid(
+            np.linspace(u0, u1, TORUS_GRID), np.linspace(v0, v1, TORUS_GRID)
+        )
+        p = s.surface_at(EntityId(face), np.c_[u.ravel(), v.ravel()]).points
+        d = np.abs(np.hypot(np.hypot(p[:, 0], p[:, 1]) - RING_R, p[:, 2]) - RING_TUBE)
+        gap = max(gap, float(d.max()))
+    eps = 1.05 * gap
+    bound = (
+        eps * 4.0 * math.pi**2 * RING_R * RING_TUBE + 2.0 * math.pi**2 * RING_R * eps**2
+    )
+
+    volume = _volume(s)
+
+    assert abs(volume - TORUS_VOLUME) <= bound
+
+
+@pytest.mark.parametrize("repeat", [1, 2], ids=["second", "third"])
+def test_a_section_named_again_other_than_first_as_last_is_refused(repeat: int) -> None:
+    """Only the first section may come back, as the last; the message names both."""
+    s = Session()
+    stations = _ring(s)[:-1]
+    sections = [*stations[:4], stations[repeat]]
+
+    with pytest.raises(PysmeshError, match=rf"sections \({repeat + 1} and 5\)"):
+        s.thru_sections(sections, solid=True, ruled=True)
