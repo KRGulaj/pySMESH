@@ -11,6 +11,8 @@ under test (report ``defect_sweep_4.2.2.md`` §6):
 * **V1, an empty boolean result.** ``common`` and ``cut`` near a coincident face could
   return nothing for operands that overlap. Each cell of the near-coincident grids must
   now raise or give the closed-form volume.
+* **V2, a solid that is not watertight.** A ``cut`` grazing the wing's nose committed a
+  solid with an edge on one face only. ``free_boundary_edges`` on the BREP is the oracle.
 
 Volumes are integrated adaptively on a fresh session read from the BREP, so that one solid
 carries one id (report §4 C5) and the rule is the adaptive one (report §5 D3).
@@ -19,6 +21,7 @@ carries one id (report §4 C5) and the rule is the adaptive one (report §5 D3).
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable
 
 import numpy as np
@@ -101,6 +104,24 @@ def _wing(s: Session) -> list[EntityId]:
         points = _naca(1.0 - 0.1 * float(z))
         before = set(s.entities(EntityKind.EDGE))
         s.add_spline(np.c_[points, np.full(len(points), z)])
+        sections.append(_new_ids(s, EntityKind.EDGE, before))
+    before = set(s.entities(EntityKind.SOLID))
+    s.thru_sections(sections, solid=True, ruled=False)
+    return _new_ids(s, EntityKind.SOLID, before)
+
+
+def _wing_two_edge(s: Session) -> list[EntityId]:
+    """Loft the 2-edge wing (each section an upper and a lower spline); return its solid."""
+    sections = []
+    for z in np.linspace(0.0, WING_SPAN, WING_SECTIONS):
+        points = _naca(1.0 - 0.1 * float(z))
+        p = np.c_[points, np.full(len(points), z)]
+        half = len(p) // 2
+        before = set(s.entities(EntityKind.EDGE))
+        s.add_spline(p[: half + 1])
+        s.add_spline(p[half:])
+        new = _new_ids(s, EntityKind.EDGE, before)
+        s.make_wire(new)
         sections.append(_new_ids(s, EntityKind.EDGE, before))
     before = set(s.entities(EntityKind.SOLID))
     s.thru_sections(sections, solid=True, ruled=False)
@@ -295,3 +316,28 @@ def test_the_empty_cut_of_a_solid_inside_its_tool_is_accepted() -> None:
     s.cut(a, b)
 
     assert list(s.entities(EntityKind.SOLID)) == []
+
+
+@pytest.mark.parametrize(
+    ("body", "free_edges"), [(_wing, 2), (_wing_two_edge, 1)], ids=["1-edge", "2-edge"]
+)
+def test_a_cut_that_leaves_a_free_boundary_edge_is_refused_naming_the_edges(
+    body: Callable[[Session], list[EntityId]], free_edges: int
+) -> None:
+    """The wing cut by the box y > 1e-4 at fuzzy 1e-4 left 2 (1-edge) or 1 free edges."""
+    s = Session()
+    a = body(s)
+    before = set(s.entities(EntityKind.SOLID))
+    s.add_box(3.0, 3.0, 3.0, origin=(-1.5, 1e-4, -1.5))
+    b = _new_ids(s, EntityKind.SOLID, before)
+    brep = s.brep()
+
+    with pytest.raises(PysmeshError) as info:
+        s.cut(a, b, fuzzy=1e-4)
+
+    number = r"[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?"
+    lengths = [float(x) for x in re.findall(rf"length ({number})", info.value.details)]
+    assert f"{free_edges} free boundary edge" in str(info.value)
+    assert len(lengths) == free_edges
+    assert all(length > 0.0 for length in lengths)
+    assert s.brep() == brep

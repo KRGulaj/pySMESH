@@ -91,6 +91,51 @@ std::string empty_result_refusal(const std::string& op, BRepAlgoAPI_BuilderAlgo&
   return std::string();
 }
 
+// Why a result solid that is not watertight is refused, with the details that name its
+// free edges; an empty message when every solid of the result is closed.
+//
+// Each solid is checked on its own, so an edge shared by two solids of one result (two
+// fragments meeting along it) still needs two faces in each. If the operands already had
+// free edges, the details say so: then the leak may have come in with the input.
+std::pair<std::string, std::string> leaky_solid_refusal(const std::string& op,
+                                                        BRepAlgoAPI_BuilderAlgo& builder,
+                                                        const TopoDS_Shape& result) {
+  std::vector<TopoDS_Shape> leaks;
+  for (const TopoDS_Shape& solid : shape_checks::solids_of({result})) {
+    for (const TopoDS_Shape& e : shape_checks::free_boundary_edges(solid)) {
+      leaks.push_back(e);
+    }
+  }
+  if (leaks.empty()) {
+    return {};
+  }
+  std::string message = "Session." + op + ": the result has " +
+                        std::to_string(leaks.size()) +
+                        " free boundary edge(s), each bordered by one face only, so a solid "
+                        "of it is not watertight. The session is unchanged.";
+  std::string details;
+  for (std::size_t i = 0; i < leaks.size(); ++i) {
+    details += "Free edge " + std::to_string(i + 1) + ": " + shape_checks::edge_text(leaks[i]) +
+               ". ";
+  }
+  std::vector<TopoDS_Shape> operands;
+  for (const TopoDS_Shape& s : builder.Arguments()) {
+    operands.push_back(s);
+  }
+  for (const TopoDS_Shape& s : tools_of(builder)) {
+    operands.push_back(s);
+  }
+  std::size_t inherited = 0;
+  for (const TopoDS_Shape& solid : shape_checks::solids_of(operands)) {
+    inherited += shape_checks::free_boundary_edges(solid).size();
+  }
+  details += inherited == 0
+                 ? std::string("Every operand solid was watertight, so OCCT made the leak.")
+                 : "The operand solids already had " + std::to_string(inherited) +
+                       " free boundary edge(s); heal or sew them first.";
+  return {message, details};
+}
+
 // The non-empty lines of OCCT's warning dump.
 std::vector<std::string> warning_lines(const std::string& dump) {
   std::vector<std::string> out;
@@ -411,6 +456,7 @@ py::dict Session::run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
   std::string errors;
   std::string warnings;
   std::string refusal;
+  std::pair<std::string, std::string> leak;
   {
     py::gil_scoped_release release;
     // The history IS the naming substrate, not a diagnostic: without it every id in the
@@ -446,6 +492,7 @@ py::dict Session::run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
       warnings = w.str();
       try {
         refusal = empty_result_refusal(op_name, op, result, fuzzy);
+        leak = leaky_solid_refusal(op_name, op, result);
       } catch (const std::exception& e) {
         py::gil_scoped_acquire acquire;
         throw PysmeshError(std::string("Session.") + op_name +
@@ -481,6 +528,9 @@ py::dict Session::run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
       details += " " + w;
     }
     throw PysmeshError(refusal + " The session is unchanged.", details, {});
+  }
+  if (!leak.first.empty()) {
+    throw PysmeshError(leak.first, leak.second, {});
   }
   return commit(concat(survivors, result), hist, op_name, result, Validation::Strict,
                 warning_list);

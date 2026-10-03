@@ -32,18 +32,14 @@
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
-#include <BRep_Tool.hxx>
 #include <TopAbs_ShapeEnum.hxx>
 #include <TopExp.hxx>
-#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
-#include <TopTools_ListOfShape.hxx>
-#include <TopoDS.hxx>
-#include <TopoDS_Edge.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Pnt.hxx>
 
 #include "common.hpp"
+#include "shape_checks.hpp"
 
 namespace pysmesh {
 namespace {
@@ -117,33 +113,14 @@ py::dict shape_distance(const py::bytes& brep_a, const py::bytes& brep_b) {
 py::array_t<std::int32_t> free_boundary_edges(const py::bytes& brep) {
   const TopoDS_Shape shape = read_brep(brep);
 
-  // Edge id source of truth: edges-only 1-based ordinals, identical to Shape.edges().
+  // Edge id source of truth: edges-only 1-based ordinals, identical to Shape.edges(). The
+  // criterion itself is shared with the session, which refuses a boolean result that has a
+  // free edge (shape_checks::free_boundary_edges).
   TopTools_IndexedMapOfShape edges;
   TopExp::MapShapes(shape, TopAbs_EDGE, edges);
-
-  // Ancestor multiplicity: MapShapesAndAncestors (NON-unique) appends the parent face once
-  // per occurrence, so a periodic seam edge (same face on both sides) counts 2 and is NOT
-  // flagged, while a manifold shared edge counts 2 (two distinct faces) and a naked boundary
-  // edge counts 1. This is exactly the free-boundary criterion.
-  TopTools_IndexedDataMapOfShapeListOfShape edge_faces;
-  TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edge_faces);
-
   std::vector<std::int32_t> free_ids;
-  const int n = edges.Extent();
-  for (int i = 1; i <= n; ++i) {
-    const TopoDS_Edge& e = TopoDS::Edge(edges.FindKey(i));
-    // Degenerate edges (sphere poles, cone apices) collapse to a point and carry no real
-    // boundary — never a leak.
-    if (BRep_Tool::Degenerated(e)) {
-      continue;
-    }
-    // Edges with no face parent (bare wires / wireframe input) are not surface boundaries.
-    if (!edge_faces.Contains(e)) {
-      continue;
-    }
-    if (edge_faces.FindFromKey(e).Extent() == 1) {
-      free_ids.push_back(static_cast<std::int32_t>(i));
-    }
+  for (const TopoDS_Shape& e : shape_checks::free_boundary_edges(shape)) {
+    free_ids.push_back(static_cast<std::int32_t>(edges.FindIndex(e)));
   }
 
   py::array_t<std::int32_t> out(static_cast<py::ssize_t>(free_ids.size()));

@@ -57,5 +57,15 @@ std::optional<gp_Pnt> point_inside_first_outside_second(const std::vector<TopoDS
 // "(x, y, z)" at 9 significant digits.
 std::string point_text(const gp_Pnt& p);
 
+// The edges of `shape` bordered by exactly one face, in TopExp::MapShapes order: the naked
+// boundary of an open shell, and the leak in a solid that is not watertight. The face count
+// is taken with repetition (TopExp::MapShapesAndAncestors), so a periodic seam, listed twice
+// by its one face, counts two and is not free. A degenerated edge (a pole, an apex) bounds
+// nothing and is skipped, and so is an edge with no face, which is not a surface boundary.
+std::vector<TopoDS_Shape> free_boundary_edges(const TopoDS_Shape& shape);
+
+// One edge in words: "from (x, y, z) to (x, y, z), length L".
+std::string edge_text(const TopoDS_Shape& edge);
+
 }  // namespace shape_checks
 }  // namespace pysmesh

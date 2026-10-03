@@ -13,13 +13,17 @@
 #include <cstdio>
 #include <memory>
 
+#include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepTools.hxx>
 #include <BRepTopAdaptor_FClass2d.hxx>
 #include <BRep_Tool.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
 #include <Geom2d_Curve.hxx>
+#include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_IndexedMap.hxx>
+#include <NCollection_List.hxx>
 #include <Precision.hxx>
 #include <Standard_Failure.hxx>
 #include <TopAbs_State.hxx>
@@ -219,6 +223,36 @@ std::string point_text(const gp_Pnt& p) {
   char buf[96];
   std::snprintf(buf, sizeof(buf), "(%.9g, %.9g, %.9g)", p.X(), p.Y(), p.Z());
   return buf;
+}
+
+std::vector<TopoDS_Shape> free_boundary_edges(const TopoDS_Shape& shape) {
+  ShapeMap edges;
+  TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+  NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
+                             TopTools_ShapeMapHasher>
+      edge_faces;
+  TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edge_faces);
+  std::vector<TopoDS_Shape> out;
+  for (int i = 1; i <= edges.Extent(); ++i) {
+    const TopoDS_Edge& e = TopoDS::Edge(edges.FindKey(i));
+    if (BRep_Tool::Degenerated(e) || !edge_faces.Contains(e)) {
+      continue;
+    }
+    if (edge_faces.FindFromKey(e).Extent() == 1) {
+      out.push_back(e);
+    }
+  }
+  return out;
+}
+
+std::string edge_text(const TopoDS_Shape& edge) {
+  const TopoDS_Edge& e = TopoDS::Edge(edge);
+  const gp_Pnt a = BRep_Tool::Pnt(TopExp::FirstVertex(e));
+  const gp_Pnt b = BRep_Tool::Pnt(TopExp::LastVertex(e));
+  const BRepAdaptor_Curve curve(e);
+  char length[32];
+  std::snprintf(length, sizeof(length), "%.9g", GCPnts_AbscissaPoint::Length(curve));
+  return "from " + point_text(a) + " to " + point_text(b) + ", length " + length;
 }
 
 }  // namespace shape_checks

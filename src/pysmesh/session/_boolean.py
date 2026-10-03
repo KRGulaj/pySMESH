@@ -28,7 +28,14 @@ from ._types import (
 
 
 class _BooleanOps(_SessionBase):
-    """The boolean family, fillet and chamfer."""
+    """The boolean family, fillet and chamfer.
+
+    Every boolean but :meth:`section` checks OCCT's answer before it commits it. A result
+    that holds no solid where one must exist is refused (see each method), and so is a
+    result solid with a free boundary edge, an edge that borders one face only: such a
+    solid is not watertight, and the error names each free edge by its end points and
+    length. OCCT's warnings on a committed result are on :attr:`HistoryDelta.warnings`.
+    """
 
     __slots__ = ()
 
