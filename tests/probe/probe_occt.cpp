@@ -64,6 +64,7 @@
 #include <GC_MakeArcOfCircle.hxx>
 #include <GProp_GProps.hxx>
 #include <GeomAPI_PointsToBSpline.hxx>
+#include <Geom_BezierCurve.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_Curve.hxx>
@@ -439,6 +440,65 @@ void probe_r3_fillet_chamfer() {
   chamfer.Build();
   check(chamfer.IsDone() && is_valid(chamfer.Shape()), "FILLET BRepFilletAPI_MakeChamfer builds");
   check(!chamfer.Generated(e1).IsEmpty(), "FILLET chamfer reports Generated() for its edge");
+}
+
+// ------------------------------------------------------------------- F2 (occt801) ------ //
+// The two faults patches/occt801/0002 and 0003 fix: each ended the process with an access
+// violation in OCCT 8.0.1. Each must now fail detectably and leave the process running.
+void probe_f2_patched_faults() {
+  section("F2", "a chamfer corner and a pipe that crashed OCCT 8.0.1 fail cleanly");
+
+  // 0002: a sphere wedge of 1.5 pi, its three edges that are not degenerated chamfered at
+  // 0.01. They meet at each pole, where the corner plane cuts the sphere in two arcs.
+  const TopoDS_Shape wedge = BRepPrimAPI_MakeSphere(1.0, 1.5 * M_PI).Shape();
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> wedge_edges;
+  TopExp::MapShapes(wedge, TopAbs_EDGE, wedge_edges);
+  BRepFilletAPI_MakeChamfer corner(wedge);
+  int corner_edges = 0;
+  for (int i = 1; i <= wedge_edges.Extent(); ++i) {
+    const TopoDS_Edge& e = TopoDS::Edge(wedge_edges.FindKey(i));
+    if (!BRep_Tool::Degenerated(e)) {
+      corner.Add(0.01, e);
+      ++corner_edges;
+    }
+  }
+  bool corner_refused = false;
+  try {
+    corner.Build();
+    corner_refused = !corner.IsDone();
+  } catch (const Standard_Failure&) {
+    corner_refused = true;
+  }
+  check(corner_edges == 3 && corner_refused,
+        "F2 a chamfer whose pole corner has no single plane line reports not done (0002)");
+
+  // 0003: a face swept along a curling degree-4 Bezier spine; the sweep is not done.
+  NCollection_Array1<gp_Pnt> poles(1, 5);
+  poles(1) = gp_Pnt(-0.84501703553824292, -0.98449385706555237, -0.65185904018048646);
+  poles(2) = gp_Pnt(-3.2515263527851879, -3.0496673373214493, 1.3819077936053965);
+  poles(3) = gp_Pnt(1.7809213729915174, 0.093318749109243093, -7.2566461916885121);
+  poles(4) = gp_Pnt(-2.4386162136083618, -2.658161184123812, 0.31256119711836267);
+  poles(5) = gp_Pnt(-1.1401038992079939, -0.68851968026646393, -1.0994067020720528);
+  const TopoDS_Wire curl = BRepBuilderAPI_MakeWire(
+      BRepBuilderAPI_MakeEdge(occ::handle<Geom_Curve>(new Geom_BezierCurve(poles))).Edge());
+  const gp_Vec u(0.79233452414440841, 0.6100868805742784, 0.0);
+  const gp_Vec v(-0.075803112140684803, 0.09844732725627299, -0.99225098233555975);
+  const gp_Pnt p0(0.0, 0.0, 0.0);
+  BRepBuilderAPI_MakePolygon slab;
+  slab.Add(p0);
+  slab.Add(p0.Translated(0.076960509191542015 * u));
+  slab.Add(p0.Translated(0.076960509191542015 * u + v));
+  slab.Add(p0.Translated(v));
+  slab.Close();
+  const TopoDS_Face slab_face = BRepBuilderAPI_MakeFace(slab.Wire(), /*OnlyPlane=*/true).Face();
+  bool pipe_refused = false;
+  try {
+    BRepOffsetAPI_MakePipe curl_pipe(curl, slab_face);
+    pipe_refused = !curl_pipe.IsDone();
+  } catch (const Standard_Failure&) {
+    pipe_refused = true;
+  }
+  check(pipe_refused, "F2 a pipe whose sweep builds no face fails detectably (0003)");
 }
 
 // ---------------------------------------------------------------------------- XFORM ------ //
@@ -1000,6 +1060,7 @@ void run_occt_probe() {
   probe_r1_primitives_and_construction();
   probe_r2_booleans();
   probe_r3_fillet_chamfer();
+  probe_f2_patched_faults();
   probe_r4_transforms();
   probe_r5_heal_defeature_imprint();
   probe_r6_queries();

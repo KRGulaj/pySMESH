@@ -533,3 +533,101 @@ def test_make_face_on_near_coincident_ends_is_the_same_in_every_process(
     assert len({sha for sha, _, _ in runs}) == 1
     assert {count for _, _, count in runs} == {1}
     assert runs[0][1] == pytest.approx(kept_y, abs=1e-24)
+
+
+# ---- F2: two OCCT faults that crashed the process ---------------------------------- #
+
+F2_CHILD_TIMEOUT_S: float = 180.0
+# The pipe's spine: a degree-4 Bezier curve through five poles, from the seeded search.
+F2_SPINE_POLES: tuple[tuple[float, float, float], ...] = (
+    (-0.84501703553824292, -0.98449385706555237, -0.65185904018048646),
+    (-3.2515263527851879, -3.0496673373214493, 1.3819077936053965),
+    (1.7809213729915174, 0.093318749109243093, -7.2566461916885121),
+    (-2.4386162136083618, -2.658161184123812, 0.31256119711836267),
+    (-1.1401038992079939, -0.68851968026646393, -1.0994067020720528),
+)
+F2_PROFILE_NORMAL: tuple[float, float, float] = (
+    -0.60535930655986503,
+    0.78619470992066753,
+    0.12424970041862052,
+)
+_F2_CHILD: str = """
+import math, os, sys
+for d in (os.environ.get("PYSMESH_OCCT_BIN"),
+          os.path.join(sys.prefix, "Library", "bin")):
+    if d and os.path.isdir(d):
+        os.add_dll_directory(d)
+sys.path.insert(0, sys.argv[1])
+import pysmesh as ps
+from pysmesh import EntityKind as K
+
+s = ps.Session()
+if sys.argv[2] == "chamfer":
+    s.add_sphere(1.0, angle_rad=1.5 * math.pi)
+    t = s.entity_types(K.EDGE)
+    edges = [int(i) for i, k in zip(t.ids, t.types) if k != "Other"]
+    call = lambda: s.chamfer(edges, 0.01)
+else:
+    s.add_bspline(eval(sys.argv[3]), degree=4)
+    spine = [int(i) for i in s.entities(K.EDGE)]
+    s.add_rectangle((0.0, 0.0, 0.0), eval(sys.argv[4]), 0.0769605, 1.0)
+    profile = [int(i) for i in s.entities(K.EDGE) if int(i) not in spine]
+    call = lambda: s.pipe(spine, profile)
+before = (s.op_count, s.issued_id_count, s.brep())
+try:
+    call()
+    print("F2-RESULT built")
+except ps.PysmeshError as e:
+    same = (s.op_count, s.issued_id_count, s.brep()) == before
+    print("F2-RESULT refused", "same" if same else "changed", "|", str(e)[:300])
+"""
+
+
+def _f2_child(case: str) -> str:
+    """Run one F2 case in a child process; its result line, or the crash's exit code."""
+    package_root = str(Path(ps.__file__).resolve().parent.parent)
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _F2_CHILD,
+            package_root,
+            case,
+            repr(F2_SPINE_POLES),
+            repr(F2_PROFILE_NORMAL),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=F2_CHILD_TIMEOUT_S,
+        env=dict(os.environ),
+        check=False,
+    )
+    lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("F2-RESULT ")]
+    return lines[0] if lines else f"crash 0x{proc.returncode & 0xFFFFFFFF:08X}"
+
+
+def test_a_chamfer_at_a_reflex_pole_corner_is_refused_and_does_not_crash() -> None:
+    """A 1.5 pi sphere wedge, its three edges chamfered at 0.01.
+
+    OCCT read through a null curve handle at the pole corner
+    (ChFi3d_ChBuilder::PerformThreeCorner) and the process died.
+    patches/occt801/0002 makes the corner fail cleanly; the chamfer is refused naming
+    the operation, and the session is unchanged.
+    """
+    result = _f2_child("chamfer")
+
+    assert result.startswith("F2-RESULT refused same"), result
+    assert "Session.chamfer" in result
+
+
+def test_a_pipe_whose_sweep_builds_no_face_is_refused_and_does_not_crash() -> None:
+    """A face swept along a curling Bezier spine.
+
+    The sweep built no face for part of the profile, and BRepFill_Pipe::MakeShape read
+    a null shape. patches/occt801/0003 makes the pipe fail at the missing face; it is
+    refused naming the operation, and the session is unchanged.
+    """
+    result = _f2_child("pipe")
+
+    assert result.startswith("F2-RESULT refused same"), result
+    assert "Session.pipe" in result
