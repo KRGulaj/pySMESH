@@ -160,6 +160,9 @@ class Params {
   // Raise unless every key has been consumed.
   void done() const;
 
+  // The key read last, or empty: the parameter a setter that throws was given.
+  std::string last() const { return consumed_.empty() ? std::string() : consumed_.back(); }
+
  private:
   py::object take(const char* key);
 

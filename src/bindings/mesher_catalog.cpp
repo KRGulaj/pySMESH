@@ -94,19 +94,38 @@ namespace pysmesh {
 namespace mesher {
 namespace {
 
-// Allocates every algorithm and hypothesis with an id drawn from the generator.
+// Allocates every algorithm and hypothesis with an id drawn from the generator, and hands it
+// to the Mesher's ownership at once: a setter called next may throw (report N1), and an
+// object owned only by a local pointer would then leak. A hypothesis whose setters fail stays
+// owned, unassigned, until the Mesher closes, as a refused assignment does.
 class Factory {
  public:
-  explicit Factory(SMESH_Gen& gen) : gen_(gen) {}
+  Factory(SMESH_Gen& gen, std::vector<std::unique_ptr<SMESH_Hypothesis>>& owned)
+      : gen_(gen), owned_(owned) {}
 
   template <class T>
   T* make() {
-    return new T(gen_.GetANewId(), &gen_);
+    T* hyp = new T(gen_.GetANewId(), &gen_);
+    owned_.emplace_back(hyp);
+    return hyp;
   }
 
  private:
   SMESH_Gen& gen_;
+  std::vector<std::unique_ptr<SMESH_Hypothesis>>& owned_;
 };
+
+// The text of an upstream exception without SALOME_Exception's "Salome Exception : " lead
+// (Utils_SALOME_Exception.cxx, makeText).
+std::string upstream_text(const char* what) {
+  std::string text = what != nullptr ? what : "";
+  const std::string lead = "Salome Exception";
+  if (text.compare(0, lead.size(), lead) == 0) {
+    const std::size_t colon = text.find(": ");
+    text = colon == std::string::npos ? text.substr(lead.size()) : text.substr(colon + 2);
+  }
+  return text;
+}
 
 // The algorithms. All of them are configured entirely through their hypotheses, so none
 // takes a parameter of its own — which is why they are a separate, flat table.
@@ -230,7 +249,14 @@ SMESH_Hypothesis* make_1d_hypothesis(const std::string& name, Params& p, Factory
   if (name == "LocalLength") {
     StdMeshers_LocalLength* h = f.make<StdMeshers_LocalLength>();
     h->SetLength(p.number("length"));
-    h->SetPrecision(p.number("precision"));
+    // Upstream SetPrecision tests the old value, not the new one, so it accepts a negative
+    // precision (StdMeshers_LocalLength.cxx: `if (_precision < 0)`). Checked here instead.
+    const double precision = p.number("precision");
+    if (!(precision >= 0.0)) {
+      throw PysmeshError("LocalLength: precision cannot be negative (got " +
+                         std::to_string(precision) + ").");
+    }
+    h->SetPrecision(precision);
     return h;
   }
   if (name == "MaxLength") {
@@ -404,43 +430,62 @@ SMESH_Hypothesis* make_referring_hypothesis(const std::string& name, Params& p, 
 
 SMESH_Hypothesis* Mesher::build(const std::string& name, const py::dict& values) {
   ensure_open();
-  Factory factory(*gen_);
+  Factory factory(*gen_, owned_);
   Params p(name.c_str(), values);
-
-  SMESH_Hypothesis* hyp = make_algorithm(name, factory);
-  if (hyp == nullptr) {
-    hyp = make_1d_hypothesis(name, p, factory);
-  }
-  if (hyp == nullptr) {
-    hyp = make_area_hypothesis(name, p, factory, *this);
-  }
-  if (hyp == nullptr) {
-    hyp = make_referring_hypothesis(name, p, factory, *this);
-  }
-  if (hyp == nullptr) {
-    // A layer distribution carries a 1-D hypothesis of its own, so it is built through the
-    // same factory recursively rather than through a second, parallel one. The 2-D form,
-    // for RadialQuadrangle_1D2D, is the same class under its own name.
-    if (name == "LayerDistribution" || name == "LayerDistribution2D") {
-      const py::dict spec = p.nested("distribution");
-      SMESH_Hypothesis* inner =
-          build(spec["name"].cast<std::string>(), spec["params"].cast<py::dict>());
-      StdMeshers_LayerDistribution* h =
-          name == "LayerDistribution"
-              ? factory.make<StdMeshers_LayerDistribution>()
-              : factory.make<StdMeshers_LayerDistribution2D>();
-      h->SetLayerDistribution(inner);
-      hyp = h;
+  // An upstream setter refuses a bad value with SALOME_Exception, and OCCT with
+  // Standard_Failure; both are std::exception. Either reaches the caller as PysmeshError,
+  // naming the hypothesis and the parameter read last, which is the one being set. A Python
+  // exception raised while a value is read passes through unchanged.
+  try {
+    SMESH_Hypothesis* hyp = make_algorithm(name, factory);
+    if (hyp == nullptr) {
+      hyp = make_1d_hypothesis(name, p, factory);
     }
+    if (hyp == nullptr) {
+      hyp = make_area_hypothesis(name, p, factory, *this);
+    }
+    if (hyp == nullptr) {
+      hyp = make_referring_hypothesis(name, p, factory, *this);
+    }
+    if (hyp == nullptr) {
+      // A layer distribution carries a 1-D hypothesis of its own, so it is built through
+      // the same factory recursively rather than through a second, parallel one. The 2-D
+      // form, for RadialQuadrangle_1D2D, is the same class under its own name.
+      if (name == "LayerDistribution" || name == "LayerDistribution2D") {
+        const py::dict spec = p.nested("distribution");
+        SMESH_Hypothesis* inner = nullptr;
+        try {
+          inner = build(spec["name"].cast<std::string>(), spec["params"].cast<py::dict>());
+        } catch (const PysmeshError& e) {
+          throw PysmeshError(name + ": its distribution is refused. " + e.what(), e.details,
+                             e.face_ids);
+        }
+        StdMeshers_LayerDistribution* h =
+            name == "LayerDistribution"
+                ? factory.make<StdMeshers_LayerDistribution>()
+                : factory.make<StdMeshers_LayerDistribution2D>();
+        h->SetLayerDistribution(inner);
+        hyp = h;
+      }
+    }
+    if (hyp == nullptr) {
+      throw PysmeshError("Mesher: unknown algorithm or hypothesis '" + name + "'.");
+    }
+    // Refuses any field the branch above did not read, so a dataclass and its factory
+    // branch cannot drift apart silently.
+    p.done();
+    return hyp;
+  } catch (const PysmeshError&) {
+    throw;
+  } catch (const py::error_already_set&) {
+    throw;
+  } catch (const std::exception& e) {
+    const std::string key = p.last();
+    throw PysmeshError("Mesher: " + name + " refused its parameters" +
+                           (key.empty() ? std::string() : " at '" + key + "'") + ": " +
+                           upstream_text(e.what()) + ".",
+                       "The hypothesis is not assigned.");
   }
-  if (hyp == nullptr) {
-    throw PysmeshError("Mesher: unknown algorithm or hypothesis '" + name + "'.");
-  }
-  // Refuses any field the branch above did not read, so a dataclass and its factory branch
-  // cannot drift apart silently.
-  p.done();
-  owned_.emplace_back(hyp);
-  return hyp;
 }
 
 }  // namespace mesher

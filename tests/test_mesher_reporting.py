@@ -17,6 +17,9 @@ Each claim is asserted against an oracle the report itself does not produce (rep
   state. The oracle is the assignment the test made.
 * **M1, a raising hook leaves no partial mesh.** The hook's exception must reach the
   caller with its own type, and the mesh must be empty afterwards, as for a cancel.
+* **N1, a refused value is a PysmeshError.** An upstream setter refuses a bad value with
+  ``SALOME_Exception``, which reached Python as a raw ``RuntimeError``. The oracle is the
+  upstream throw site, cited beside each case.
 """
 
 from __future__ import annotations
@@ -26,16 +29,31 @@ import pytest
 
 import pysmesh as ps
 from pysmesh import (
+    Adaptive1D,
+    Arithmetic1D,
+    AutomaticLength,
+    CartesianParameters3D,
+    Deflection1D,
+    Distribution,
+    Geometric1D,
     Hexa3D,
+    LayerDistribution,
+    LocalLength,
     MaxElementArea,
+    MaxElementVolume,
+    MaxLength,
     Mefisto2D,
     Mesher,
+    NumberOfLayers,
+    NumberOfLayers2D,
     NumberOfSegments,
     Quadrangle2D,
     QuadrangleParams,
     QuadType,
     Regular1D,
+    SegmentLengthAroundVertex,
     Session,
+    StartEndLength,
     SubShape,
     SubShapeKind,
 )
@@ -213,3 +231,76 @@ def test_a_progress_hook_that_raises_half_way_leaves_no_mesh() -> None:
 
         assert len(calls) == 2
         assert m.mesh().element_count == 0
+
+
+# ---- N1: an upstream setter that refuses a value raises PysmeshError -------------------- #
+
+# One invalid value per catalogue hypothesis whose upstream setter refuses it, each with the
+# StdMeshers source line that throws (SMESH V9_16_0), and LocalLength's negative precision,
+# which upstream accepts (its SetPrecision tests the old value) and the binding refuses.
+REFUSED_VALUES: dict[str, ps.Hypothesis] = {
+    # StdMeshers_NumberOfSegments.cxx:116 "number of segments must be positive"
+    "NumberOfSegments-count-0": NumberOfSegments(count=0),
+    # :184 "scale factor must be positive"
+    "NumberOfSegments-scale-0": NumberOfSegments(
+        count=5, distribution=Distribution.SCALE, scale_factor=0.0
+    ),
+    # :262 "odd size of vector of table function"
+    "NumberOfSegments-table-odd": NumberOfSegments(
+        count=5, distribution=Distribution.TABLE, table=(0.0, 1.0, 1.0)
+    ),
+    # :459 "invalid expression syntax"
+    "NumberOfSegments-expression": NumberOfSegments(
+        count=5, distribution=Distribution.EXPRESSION, expression="t*"
+    ),
+    # StdMeshers_Arithmetic1D.cxx:80 "length must be positive"
+    "Arithmetic1D-start-negative": Arithmetic1D(start_length=-1.0, end_length=1.0),
+    # StdMeshers_StartEndLength.cxx:79
+    "StartEndLength-start-0": StartEndLength(start_length=0.0, end_length=1.0),
+    # StdMeshers_Geometric1D.cxx:64 and :81 "Zero factor is not allowed"
+    "Geometric1D-start-negative": Geometric1D(start_length=-1.0, common_ratio=1.1),
+    "Geometric1D-ratio-0": Geometric1D(start_length=1.0, common_ratio=0.0),
+    # StdMeshers_Adaptive1D.cxx:958 and :945
+    "Adaptive1D-min-0": Adaptive1D(min_size=0.0, max_size=1.0, deflection=0.1),
+    "Adaptive1D-deflection-0": Adaptive1D(min_size=0.1, max_size=1.0, deflection=0.0),
+    # StdMeshers_AutomaticLength.cxx:89 "theFineness is out of range [0.0-1.0]"
+    "AutomaticLength-fineness-2": AutomaticLength(fineness=2.0),
+    # StdMeshers_Deflection1D.cxx:81 "Value must be positive"
+    "Deflection1D-0": Deflection1D(deflection=0.0),
+    # StdMeshers_LocalLength.cxx:84 "length must be positive"
+    "LocalLength-length-0": LocalLength(length=0.0),
+    "LocalLength-length-negative": LocalLength(length=-1.0),
+    # Accepted upstream (StdMeshers_LocalLength.cxx:110 tests _precision, the old value)
+    "LocalLength-precision-negative": LocalLength(length=1.0, precision=-1.0),
+    # StdMeshers_MaxLength.cxx:79
+    "MaxLength-0": MaxLength(length=0.0),
+    # StdMeshers_SegmentLengthAroundVertex.cxx:81
+    "SegmentLengthAroundVertex-0": SegmentLengthAroundVertex(length=0.0),
+    # StdMeshers_MaxElementArea.cxx:79 and StdMeshers_MaxElementVolume.cxx:79
+    "MaxElementArea-0": MaxElementArea(max_area=0.0),
+    "MaxElementVolume-negative": MaxElementVolume(max_volume=-1.0),
+    # StdMeshers_NumberOfLayers.cxx:78, shared by NumberOfLayers2D
+    "NumberOfLayers-0": NumberOfLayers(count=0),
+    "NumberOfLayers2D-0": NumberOfLayers2D(count=0),
+    # StdMeshers_CartesianParameters3D.cxx:256 "threshold must be > 1.0"
+    "CartesianParameters3D-threshold-1": CartesianParameters3D(
+        spacing_x="1.0", spacing_y="1.0", spacing_z="1.0", size_threshold=1.0
+    ),
+    # The nested 1-D hypothesis of a layer distribution refuses its count (:116)
+    "LayerDistribution-count-0": LayerDistribution(
+        distribution=NumberOfSegments(count=0)
+    ),
+}
+
+
+@pytest.mark.parametrize("hypothesis", REFUSED_VALUES.values(), ids=REFUSED_VALUES.keys())
+def test_an_invalid_hypothesis_value_raises_pysmesh_error(
+    hypothesis: ps.Hypothesis,
+) -> None:
+    """Every refused value reaches Python as PysmeshError naming the hypothesis (N1)."""
+    with Mesher(_box()) as m:
+        with pytest.raises(ps.PysmeshError) as info:
+            m.assign(hypothesis)
+
+        assert hypothesis.native_name in str(info.value)
+        assert m.assignments() == ()
