@@ -504,9 +504,9 @@ class _ConstructOps(_SessionBase):
         :meth:`add_polyline` or from :meth:`section`, keep their ids.
 
         Ends that coincide within their tolerances but not exactly, such as an arc that
-        ends at ``r sin(pi)`` = 1.8e-16 beside a line that starts at 0, are joined at the
-        end of the edge named first (each edge's first vertex before its last), with a
-        tolerance that covers both. The result depends only on the input.
+        ends at ``r sin(pi)`` = 1.8e-16 beside a line that starts at 0, are joined at
+        the end of the edge named first (each edge's first vertex before its last), with
+        a tolerance that covers both. The result depends only on the input.
 
         Args:
             edge_ids: Edges to join. Each must belong to a loose-edge or wire body, never to
@@ -556,10 +556,10 @@ class _ConstructOps(_SessionBase):
     def make_face(self, edge_ids: Sequence[EntityId]) -> HistoryDelta:
         """Build a planar face bounded by the named edges, consuming them.
 
-        A non-planar boundary raises rather than being approximated; :meth:`make_filling`
-        is the operation for that case. Ends that coincide within their tolerances but not
-        exactly are joined as :meth:`make_wire` joins them: at the end of the edge named
-        first.
+        A non-planar boundary raises rather than being approximated;
+        :meth:`make_filling` is the operation for that case. Ends that coincide within
+        their tolerances but not exactly are joined as :meth:`make_wire` joins them: at
+        the end of the edge named first.
 
         Args:
             edge_ids: Edges bounding the face, forming one closed planar loop.
