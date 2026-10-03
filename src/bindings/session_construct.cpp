@@ -39,9 +39,10 @@ constexpr const char* kSweepHint =
     "same.";
 constexpr const char* kLoftHint =
     "Sections that meet each other, such as circles through one common point, pinch the "
-    "boundary there; sections whose loft has to twist or bend sharply between them make the "
-    "surface pass through itself. Space or align the sections, or add sections between "
-    "them.";
+    "boundary there: keep them apart where they would meet (a wedge of 0.1-radius circles "
+    "lofts and cuts cleanly with the circles 1e-4 from the common point). Sections whose loft "
+    "has to twist or bend sharply between them make the surface pass through itself: space "
+    "or align them, or add sections between them.";
 
 }  // namespace
 

@@ -520,3 +520,55 @@ def test_an_invalid_boolean_result_names_the_brepcheck_status_and_the_faces(
     assert re.search(r"BRepCheck_\w+", info.value.details)
     assert info.value.face_ids
     assert set(info.value.face_ids) <= faces
+
+
+# ---- V5 on a loft whose sections meet at one point (amendment 2, report O3) ------- #
+
+# The wedge of report O3: 5 circles of radius 0.1 in planes rotated about the y axis by
+# -30 to +30 degrees, each passing rho from the origin.
+POLE_RADIUS: float = 0.1
+POLE_SECTIONS: int = 5
+POLE_HALF_ANGLE: float = math.radians(30.0)
+# The adaptive volume (1e-9) of the rho = 1e-4 wedge, measured on the reference package
+# (main at 7d22a1db9), which committed it before the self-interference check existed.
+# The test builds its circles with math, the measurement with numpy, whose sine and
+# cosine may differ in the last bit, so the two volumes agree to rounding only.
+POLE_WEDGE_VOLUME_1E_4: float = 0.003293179662682907
+POLE_WEDGE_RTOL: float = 1e-12
+
+
+def _pole_wedge(s: Session, rho: float) -> list[EntityId]:
+    """Loft the O3 wedge with its circles ``rho`` from the origin; return its solid."""
+    sections = []
+    for th in np.linspace(-POLE_HALF_ANGLE, POLE_HALF_ANGLE, POLE_SECTIONS):
+        radial = np.array([math.cos(th), 0.0, -math.sin(th)])
+        normal = (math.sin(th), 0.0, math.cos(th))
+        centre = tuple(float(x) for x in (POLE_RADIUS + rho) * radial)
+        before = set(s.entities(EntityKind.EDGE))
+        s.add_circle(centre, normal, POLE_RADIUS)
+        sections.append(_new_ids(s, EntityKind.EDGE, before))
+    before = set(s.entities(EntityKind.SOLID))
+    s.thru_sections(sections, solid=True, ruled=False)
+    return _new_ids(s, EntityKind.SOLID, before)
+
+
+def test_a_loft_through_circles_that_meet_at_one_point_is_refused() -> None:
+    """rho = 0: the first and last circles meet at the origin, pinching the boundary."""
+    s = Session()
+
+    with pytest.raises(PysmeshError, match="interferes with itself") as info:
+        _pole_wedge(s, 0.0)
+
+    assert info.value.details.count("edge ") >= 2
+    assert "apart" in info.value.details
+    assert list(s.entities(EntityKind.SOLID)) == []
+
+
+def test_a_loft_through_circles_kept_apart_is_accepted_with_its_volume() -> None:
+    """rho = 1e-4: accepted, and its volume is the reference package's (to rounding)."""
+    s = Session()
+    _pole_wedge(s, 1e-4)
+
+    volume = _volume(s)
+
+    assert volume == pytest.approx(POLE_WEDGE_VOLUME_1E_4, rel=POLE_WEDGE_RTOL, abs=0.0)
