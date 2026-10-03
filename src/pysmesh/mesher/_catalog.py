@@ -56,6 +56,12 @@ class Distribution(IntEnum):
 
     The integer values are persisted by SMESH; do not reorder.
 
+    TABLE and EXPRESSION place node ``k`` of ``N`` where the integral of the density, taken
+    from the start of the edge in the normalised parameter ``t``, reaches ``k / N`` of its
+    total. A table is interpolated linearly between its points. An expression is integrated
+    adaptively to a relative tolerance of 1e-12; a density that cannot be integrated, such
+    as one with a pole inside ``(0, 1)``, fails the edge with a compute error.
+
     Attributes:
         REGULAR: Equal segments.
         SCALE: Lengths in geometric progression, set by ``scale_factor``.

@@ -128,3 +128,22 @@ documented deflection. One probe changes:
 `patches/smesh/StdMeshers_Adaptive1D_bounds.patch` (the size bounds and the factor 2 on every
 edge) and `patches/smesh/StdMeshers_Cartesian_VL_cancel.patch` (a cancel during the viscous
 layer steps of `Cartesian_3D`) change no probe value.
+
+## Explained differences since the distribution patches (Phase 4)
+
+`patches/smesh/StdMeshers_Distribution_table.patch` (report S1) and
+`patches/smesh/StdMeshers_Distribution_expression.patch` (report S2) make the TABLE and
+EXPRESSION distributions place node k of N where the integral of the density, from the start of
+the edge, reaches k/N of its total. Two mesh probes change. Both edges are 11 long, with N = 5.
+
+| Probe | Before the patches | With the patches | Closed form |
+|---|---|---|---|
+| `1d/table_5` | first 3.368683, last 1.538424 | first 3.368484, last 1.538382 | density 1 + 2t, F(t) = t + t^2; t_k = (-1 + sqrt(1 + 8k/5)) / 2 |
+| `1d/expression_5` | first 2.868500, last 1.573664 | first 2.868324, last 1.573894 | density 1 + t^2, F(t) = t + t^3/3; t_k is the real root of t^3 + 3t - 4k/5 = 0 |
+
+The new values equal the closed forms to 3.8e-14. The old values missed them by up to 2.3e-4,
+because the bisection stopped at an absolute 1e-4 of the edge (S1) and the expression was
+integrated by one 20-point Gauss rule (S2). The `defect` probes `S1/table_15m_first_cell_*` and
+`S2/expression_15m_1_over_0.0003_plus_t` now give the exact wall cells (3.1085 um, 306.56 um,
+380.26 um) instead of "no message" and cells up to 50 % off. No other probe changes, and no
+Cartesian grid changes: Cartesian spacing functions call `FunctionExpr::value` only.
