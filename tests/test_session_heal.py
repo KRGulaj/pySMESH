@@ -276,15 +276,21 @@ def test_sewing_a_closed_shell_can_close_it_into_a_solid() -> None:
     assert model_counts(s)[0] == 1
 
 
-def test_sewing_leaves_an_open_shell_open_rather_than_faking_a_solid() -> None:
-    """An open shell bounds no volume, so ``make_solid`` must decline rather than invent one."""
+def test_sewing_refuses_to_fake_a_solid_from_an_open_shell() -> None:
+    """An open shell bounds no volume, so ``make_solid`` raises rather than invent one.
+
+    Two abutting rectangles sew into one open shell with 6 free edges. Before report A8 the
+    shell was committed with no signal; the caller asked for a solid and got none.
+    """
     s = Session()
     s.add_rectangle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), BOX_DX, BOX_DY)
     s.add_rectangle((BOX_DX, 0.0, 0.0), (0.0, 0.0, 1.0), BOX_DX, BOX_DY)
+    brep = s.brep()
 
-    s.sew(ids_of(s, EntityKind.FACE), make_solid=True)
+    with pytest.raises(ps.PysmeshError, match="6 free boundary edge"):
+        s.sew(ids_of(s, EntityKind.FACE), make_solid=True)
 
-    assert model_counts(s)[0] == 0
+    assert s.brep() == brep
 
 
 def test_sewing_rejects_a_non_positive_tolerance() -> None:
@@ -1258,3 +1264,57 @@ def test_closing_a_sewn_shell_leaves_no_triangulation_on_the_model_or_a_snapshot
 
     assert b"Triangulations 0" in after
     assert b"Triangulations 0" in before
+
+
+# ======================================== make_solid that cannot make a solid (report A8) ==
+
+
+def _wrap_around_face_with_circle_caps(s: Session) -> list[EntityId]:
+    """A lateral face lofted round a circle and two exact-circle caps; return the faces.
+
+    The loft interpolates 13 straight generators round a unit circle, the last a copy of
+    the first, so its rims are B-spline interpolants of the circle. The caps are exact
+    circles. Rims and caps differ by more than 1e-6, so at that tolerance the sew joins the
+    two generators of the lateral face and nothing else (report A8: 4 free edges).
+    """
+    sections = []
+    for p in np.linspace(0.0, 2.0 * np.pi, 13)[:-1]:
+        before = set(ids_of(s, EntityKind.EDGE))
+        x, y = float(np.cos(p)), float(np.sin(p))
+        s.add_line((x, y, 0.0), (x, y, 1.0))
+        sections.append([e for e in ids_of(s, EntityKind.EDGE) if e not in before])
+    before = set(ids_of(s, EntityKind.EDGE))
+    s.copy(sections[0])
+    sections.append([e for e in ids_of(s, EntityKind.EDGE) if e not in before])
+    s.thru_sections(sections, solid=False, ruled=False)
+    for z in (0.0, 1.0):
+        before = set(ids_of(s, EntityKind.EDGE))
+        s.add_circle((0.0, 0.0, z), (0.0, 0.0, 1.0), 1.0)
+        s.make_face([e for e in ids_of(s, EntityKind.EDGE) if e not in before])
+    return ids_of(s, EntityKind.FACE)
+
+
+def test_make_solid_refuses_a_sew_that_leaves_a_shell_open_naming_its_free_edges() -> None:
+    """The capped wrap-around face sews into an open shell: 4 free edges, no solid."""
+    s = Session()
+    faces = _wrap_around_face_with_circle_caps(s)
+    brep = s.brep()
+
+    with pytest.raises(ps.PysmeshError) as info:
+        s.sew(faces, tolerance=SEW_TOL, make_solid=True)
+
+    assert "4 free boundary edge" in str(info.value)
+    assert info.value.details.count("Free edge") == 4
+    assert s.brep() == brep
+
+
+def test_sewing_without_make_solid_still_commits_the_open_shell() -> None:
+    """``make_solid=False`` is unchanged: the open shell is committed, valid."""
+    s = Session()
+    faces = _wrap_around_face_with_circle_caps(s)
+
+    delta = s.sew(faces, tolerance=SEW_TOL)
+
+    assert delta.valid is True
+    assert model_counts(s)[0] == 0
+    assert len(ps.free_boundary_edges(s.brep())) == 4

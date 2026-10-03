@@ -139,8 +139,9 @@ class _HealOps(_SessionBase):
                 Deliberately tight by default: sewing across a real gap invents topology
                 rather than repairing it.
             make_solid: Close the result into solids, as described above. Only a watertight
-                shell bounds a volume. If any shell of the result is open, every shell is
-                left a shell, and ``valid`` reports on them.
+                shell bounds a volume, so if a shell of the result is open, or no face sewed
+                into a shell, the operation raises and names the free edges, and nothing is
+                committed. Sew with ``make_solid=False`` to keep open shells.
             non_manifold: Allow more than two faces to meet at one edge. Off by default,
                 because a non-manifold result is rarely what a CAD repair wants and is
                 accepted by very little downstream.
@@ -157,11 +158,14 @@ class _HealOps(_SessionBase):
         Raises:
             PysmeshError: On a non-positive tolerance, an empty selection, a dead id, or a
                 selection that shares sub-shapes with bodies left out of the scope. Also,
-                with ``make_solid``, if a closed shell cannot be committed as a solid: it
-                encloses no volume, the classifier cannot place it, or it touches another
-                shell from inside. ``.face_ids`` then carries the ids of that shell's faces,
-                and the message names the reason, with the other shell's faces when there
-                is one. Nothing is committed, and the session is left exactly as it was.
+                with ``make_solid``, if a shell of the result is open, or no face sewed into
+                a shell: the message counts the free edges and ``.details`` names each by
+                its end points and length. And with ``make_solid``, if a closed shell
+                cannot be committed as a solid: it encloses no volume, the classifier cannot
+                place it, or it touches another shell from inside. ``.face_ids`` then carries
+                the ids of that shell's faces, and the message names the reason, with the
+                other shell's faces when there is one. Nothing is committed, and the session
+                is left exactly as it was.
         """
         return _delta(
             self._s.sew(
