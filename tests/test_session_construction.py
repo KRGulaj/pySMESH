@@ -15,14 +15,21 @@ Each claim is asserted against an oracle the operation under test does not produ
   section edges, and OCCT wrote pcurves, surfaces and continuity onto them, also when
   the loft was then refused. The oracle is the BREP of the session, and of a snapshot
   taken before the loft, byte for byte.
+* **O4, a bowed end section.** OCCT closes a solid loft with a planar face on each end
+  section, and a section bowed out of its plane gave an invalid cap and a message that
+  named nothing. The oracle is the bow itself: ``w sin(pi x)`` spreads the section's
+  points exactly ``w`` across its best-fit plane.
 """
 
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable
 
+import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from pysmesh import EntityKind, PysmeshError, Session
 
@@ -191,3 +198,93 @@ def test_a_ruled_loft_carries_the_ids_of_its_section_edges_and_vertices() -> Non
     assert vertices <= {int(i) for i in s.entities(EntityKind.VERTEX)}
     assert len(edges) == 12
     assert len(vertices) == 12
+
+
+# ---- O4: a solid loft whose end section is not planar ------------------------------ #
+
+NACA_POINTS: int = 60
+NACA_THICKNESS: float = 0.12
+# A bow of w sin(pi x) out of the section plane, over the chord x in [0, 1]. It is 0 at
+# both ends of the chord and w at mid-chord, so the section's points spread exactly w
+# across the plane z = const, the best-fit plane of the bow.
+BOWS: tuple[float, ...] = (1e-7, 1e-5, 1e-2)
+NUMBER: str = r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?"
+
+
+def _naca() -> NDArray[np.float64]:
+    """NACA 0012, chord 1, sharp trailing edge: closed loop TE, upper, LE, lower, TE."""
+    b = np.linspace(0.0, np.pi, NACA_POINTS)
+    x = 0.5 * (1.0 - np.cos(b))
+    yt = (
+        5.0
+        * NACA_THICKNESS
+        * (
+            0.2969 * np.sqrt(x)
+            - 0.1260 * x
+            - 0.3516 * x**2
+            + 0.2843 * x**3
+            - 0.1036 * x**4
+        )
+    )
+    upper = np.c_[x[::-1], yt[::-1]]
+    lower = np.c_[x[1:], -yt[1:]]
+    return np.asarray(np.vstack([upper, lower]), dtype=np.float64)
+
+
+def _bowed_wing(s: Session, bows: tuple[float, float, float]) -> list[list[int]]:
+    """NACA sections at z = 0, 1, 2, each two splines; section k is bowed by bows[k]."""
+    sections = []
+    for z, bow in zip((0.0, 1.0, 2.0), bows, strict=True):
+        p2 = _naca()
+        p = np.c_[p2, z + bow * np.sin(np.pi * p2[:, 0])]
+        before = {int(i) for i in s.entities(EntityKind.EDGE)}
+        half = len(p) // 2
+        s.add_spline(p[: half + 1])
+        s.add_spline(p[half:])
+        new = [int(i) for i in s.entities(EntityKind.EDGE) if int(i) not in before]
+        s.make_wire(new)
+        sections.append(
+            [int(i) for i in s.entities(EntityKind.EDGE) if int(i) not in before]
+        )
+    return sections
+
+
+@pytest.mark.parametrize("bow", BOWS)
+@pytest.mark.parametrize(("which", "index"), [("first", 0), ("last", 2)])
+def test_a_solid_loft_with_a_bowed_end_section_names_it_and_its_deviation(
+    which: str, index: int, bow: float
+) -> None:
+    """The refusal names the end section and gives a deviation within 10 % of w."""
+    s = Session()
+    bows = [0.0, 0.0, 0.0]
+    bows[index] = bow
+    sections = _bowed_wing(s, (bows[0], bows[1], bows[2]))
+    before = _state(s)
+
+    with pytest.raises(PysmeshError) as info:
+        s.thru_sections(sections, solid=True, ruled=False)
+
+    message = str(info.value)
+    assert f"section {index + 1} of 3 ({which})" in message
+    found = re.search(rf"spread ({NUMBER}) across", message)
+    assert found is not None, message
+    assert float(found.group(1)) == pytest.approx(bow, rel=0.1)
+    assert _state(s) == before
+
+
+@pytest.mark.parametrize(
+    ("bows", "solid"),
+    [((0.0, 1e-2, 0.0), True), ((0.0, 0.0, 0.0), True), ((1e-2, 0.0, 1e-2), False)],
+    ids=["middle_bowed", "planar", "shell"],
+)
+def test_a_loft_whose_end_sections_need_no_planar_cap_is_committed(
+    bows: tuple[float, float, float], solid: bool
+) -> None:
+    """A bowed middle section, a planar loft and a shell need no cap on a bow."""
+    s = Session()
+    sections = _bowed_wing(s, bows)
+
+    delta = s.thru_sections(sections, solid=solid, ruled=False)
+
+    assert delta.valid is True
+    assert len(s.entities(EntityKind.SOLID)) == (1 if solid else 0)

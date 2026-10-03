@@ -748,14 +748,18 @@ class _ConstructOps(_SessionBase):
         Raises:
             PysmeshError: On fewer than two sections, a repeated body, a section that is
                 not a wire or edge, or a loft OCCT cannot build. Also, with ``solid``,
-                if the lofted solid encloses no more than ``Precision::Confusion()``
-                times its area. A loft whose surface folds through itself comes back
-                that way, and OCCT's validity check accepts it: a ruled loft through
-                sections tilted towards each other is the measured case. And, with
-                ``solid``, if the lofted solid's boundary crosses itself, naming the
-                faces and where; a face that closes through a sharp seam, as a one-edge
-                airfoil section gives, is not a crossing. Nothing is committed, and the
-                session is left exactly as it was.
+                if OCCT's planar cap on the first or the last section is missing or
+                invalid: the section is not planar to its edge tolerance (1e-7). The
+                message names the section and how far its points spread across the plane
+                that fits them best. A bow in a middle section needs no cap. Also, with
+                ``solid``, if the lofted solid encloses no more than
+                ``Precision::Confusion()`` times its area. A loft whose surface folds
+                through itself comes back that way, and OCCT's validity check accepts
+                it: a ruled loft through sections tilted towards each other is the
+                measured case. And, with ``solid``, if the lofted solid's boundary
+                crosses itself, naming the faces and where; a face that closes through a
+                sharp seam, as a one-edge airfoil section gives, is not a crossing.
+                Nothing is committed, and the session is left exactly as it was.
         """
         return _delta(
             self._s.thru_sections(

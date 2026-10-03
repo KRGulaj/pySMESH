@@ -197,5 +197,11 @@ const char* kind_text(const TopoDS_Shape& shape);
 // false for "raise". Anything else is refused, naming `op`.
 bool reverse_inside_out(const std::string& op, const std::string& policy);
 
+// How far a wire is from planar: the spread of its points across the plane that fits them
+// best (BRepLib_FindSurface, OnlyPlane: a least-squares plane), as the largest minus the
+// smallest signed distance of 65 points per edge. A wire bowed by w sin(pi x) over a chord
+// x in [0, 1] spreads w. Empty when the points define no plane (they lie on one line).
+std::optional<double> out_of_plane_spread(const TopoDS_Shape& wire);
+
 }  // namespace shape_checks
 }  // namespace pysmesh

@@ -31,6 +31,7 @@
 #include <BRepCheck_Status.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
+#include <BRepLib_FindSurface.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepTools.hxx>
@@ -46,6 +47,7 @@
 #include <IntTools_PntOn2Faces.hxx>
 #include <IntTools_PntOnFace.hxx>
 #include <Geom2d_Curve.hxx>
+#include <Geom_Plane.hxx>
 #include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_IndexedMap.hxx>
 #include <NCollection_List.hxx>
@@ -66,6 +68,8 @@
 #include <TopoDS_Solid.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <gp.hxx>
+#include <gp_Dir.hxx>
+#include <gp_Pln.hxx>
 #include <gp_Pnt2d.hxx>
 #include <gp_Vec.hxx>
 
@@ -687,6 +691,53 @@ bool reverse_inside_out(const std::string& op, const std::string& policy) {
   }
   throw PysmeshError(op + ": inside_out must be \"raise\" or \"reverse\" (got \"" + policy +
                      "\").");
+}
+
+std::optional<double> out_of_plane_spread(const TopoDS_Shape& wire) {
+  // Any tolerance: the plane is wanted, not a verdict. The largest box side bounds every
+  // distance from it.
+  Bnd_Box box;
+  BRepBndLib::Add(wire, box);
+  if (box.IsVoid()) {
+    return std::nullopt;
+  }
+  double x0, y0, z0, x1, y1, z1;
+  box.Get(x0, y0, z0, x1, y1, z1);
+  const double reach = std::max({x1 - x0, y1 - y0, z1 - z0, Precision::Confusion()});
+  BRepLib_FindSurface finder(wire, reach, /*OnlyPlane=*/true);
+  if (!finder.Found()) {
+    return std::nullopt;
+  }
+  const Handle(Geom_Plane) plane = Handle(Geom_Plane)::DownCast(finder.Surface());
+  if (plane.IsNull()) {
+    return std::nullopt;
+  }
+  const gp_Pln pln = plane->Pln().Transformed(finder.Location().Transformation());
+  const gp_Dir normal = pln.Axis().Direction();
+  const gp_Pnt origin = pln.Location();
+  constexpr int kSamples = 65;
+  double lo = 0.0;
+  double hi = 0.0;
+  bool first = true;
+  for (TopExp_Explorer ex(wire, TopAbs_EDGE); ex.More(); ex.Next()) {
+    const TopoDS_Edge& edge = TopoDS::Edge(ex.Current());
+    if (BRep_Tool::Degenerated(edge)) {
+      continue;
+    }
+    const BRepAdaptor_Curve curve(edge);
+    for (int i = 0; i < kSamples; ++i) {
+      const double t = curve.FirstParameter() + (curve.LastParameter() - curve.FirstParameter()) *
+                                                    i / (kSamples - 1);
+      const double d = gp_Vec(origin, curve.Value(t)).Dot(gp_Vec(normal));
+      lo = first ? d : std::min(lo, d);
+      hi = first ? d : std::max(hi, d);
+      first = false;
+    }
+  }
+  if (first) {
+    return std::nullopt;
+  }
+  return hi - lo;
 }
 
 std::string edge_text(const TopoDS_Shape& edge) {

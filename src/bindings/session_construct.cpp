@@ -16,6 +16,8 @@
 
 #include "session/session.hpp"
 
+#include <BRepBuilderAPI_FindPlane.hxx>
+
 #include "shape_checks.hpp"
 
 namespace pysmesh {
@@ -43,6 +45,93 @@ constexpr const char* kLoftHint =
     "lofts and cuts cleanly with the circles 1e-4 from the common point). Sections whose loft "
     "has to twist or bend sharply between them make the surface pass through itself: space "
     "or align them, or add sections between them.";
+
+// BRepOffsetAPI_ThruSections' default pres3d, the tolerance its end caps are planed at.
+constexpr double kLoftPres3d = 1.0e-6;
+
+constexpr const char* kCapHint =
+    "Make each end section planar, every point within its edge tolerance of one plane. A bow "
+    "in a middle section needs no cap and is accepted. Or loft with solid=False and close the "
+    "ends yourself.";
+
+// Whether OCCT's end cap on `wire` fails: the face PerformPlan (BRepOffsetAPI_ThruSections.cxx)
+// builds on it, a plane found at kLoftPres3d or else any face MakeFace finds, is missing or
+// rejected by BRepCheck_Analyzer. Built on a copy, so that the section keeps no pcurve.
+bool planar_cap_fails(const TopoDS_Wire& wire) {
+  const TopoDS_Wire copy = TopoDS::Wire(BRepBuilderAPI_Copy(wire).Shape());
+  TopoDS_Face face;
+  BRepBuilderAPI_FindPlane finder(copy, kLoftPres3d);
+  if (finder.Found()) {
+    face = BRepBuilderAPI_MakeFace(finder.Plane(), copy);
+  } else {
+    BRepBuilderAPI_MakeFace any(copy);
+    if (any.IsDone()) {
+      face = any.Face();
+    }
+  }
+  return face.IsNull() || !BRepCheck_Analyzer(face).IsValid();
+}
+
+// One end section of a solid loft whose cap fails, in words: its index, how far it is from
+// planar, and what became of its cap.
+std::string cap_fault_text(std::size_t index, std::size_t count, const TopoDS_Wire& wire,
+                           const std::string& what) {
+  std::ostringstream s;
+  s << "section " << index + 1 << " of " << count << " (" << (index == 0 ? "first" : "last")
+    << ") is not planar: ";
+  const std::optional<double> spread = shape_checks::out_of_plane_spread(wire);
+  if (spread.has_value()) {
+    s << "its points spread " << *spread << " across the plane that fits them best";
+  } else {
+    s << "its points define no plane";
+  }
+  s << ", and " << what << ".";
+  return s.str();
+}
+
+// The refusal of a solid loft whose end cap is missing or invalid (report O4), or empty.
+//
+// OCCT closes a solid loft with a planar face on the first and on the last section. If a
+// section is not planar within its edge tolerance (1e-7), the face it gets is invalid; if it
+// is not planar within kLoftPres3d, it gets none, and the solid keeps an open shell. Each
+// cap OCCT built is checked as it is. A missing cap counts only while the shell is open (a
+// closed loft needs none). OCCT stops at the first section it cannot cap, so when the first
+// cap is missing, the last section is judged by building its cap the same way on a copy.
+std::string loft_cap_refusal(const TopoDS_Shape& result, const TopoDS_Shape& first_cap,
+                             const TopoDS_Shape& last_cap, const std::vector<TopoDS_Wire>& wires) {
+  bool open = true;
+  for (TopExp_Explorer ex(result, TopAbs_SHELL); ex.More(); ex.Next()) {
+    open = !ex.Current().Closed();
+  }
+  const std::size_t count = wires.size();
+  std::vector<std::string> faults;
+  const auto judge = [&](std::size_t index, const TopoDS_Shape& cap, bool missing_counts) {
+    const TopoDS_Wire& wire = wires[index];
+    if (!cap.IsNull()) {
+      const std::vector<shape_checks::CheckFinding> findings = shape_checks::check_findings(cap);
+      if (!findings.empty()) {
+        faults.push_back(cap_fault_text(index, count, wire,
+                                        "the planar face OCCT closed the solid with on it is "
+                                        "invalid (" +
+                                            findings.front().status + ")"));
+      }
+    } else if (open && missing_counts) {
+      faults.push_back(cap_fault_text(index, count, wire,
+                                      "OCCT could not close the solid with a planar face on it"));
+    }
+  };
+  judge(0, first_cap, true);
+  const bool first_missing = first_cap.IsNull() && open;
+  judge(count - 1, last_cap, !first_missing || planar_cap_fails(wires[count - 1]));
+  if (faults.empty()) {
+    return std::string();
+  }
+  std::string text = "Session.thru_sections: the solid loft has no valid cap: ";
+  for (std::size_t i = 0; i < faults.size(); ++i) {
+    text += (i == 0 ? "" : " Also ") + faults[i];
+  }
+  return text + " Nothing is committed; the session is unchanged.";
+}
 
 }  // namespace
 
@@ -834,6 +923,7 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   std::optional<EnclosedVolume> hollow;
+  std::string cap_refusal;
   std::string interference;
   {
     py::gil_scoped_release release;
@@ -873,6 +963,12 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
         // Each section's own sub-shapes -> their copies -> what the loft made of them.
         hist = new BRepTools_History(args, copier);
         hist->Merge(BRepTools_History(copies, mk));
+        // The caps first: a solid whose cap is missing has an open shell, and its volume
+        // means nothing.
+        if (solid) {
+          stage = "checking the end caps of the lofted solid failed";
+          cap_refusal = loft_cap_refusal(result, mk.FirstShape(), mk.LastShape(), wires);
+        }
         // OCCT orients the lofted solid itself, and on a loft that folds through itself its
         // answer is arbitrary. Measured over 30 seeded random ruled lofts through three
         // tilted sections, two came back with volumes -7.85 and -8.51 and
@@ -880,14 +976,15 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
         // is committed. It is not re-oriented: reversing a surface that crosses itself does
         // not give it an inside.
         stage = "measuring the volume of the lofted solid failed";
-        for (TopExp_Explorer ex(result, TopAbs_SOLID); ex.More() && solid; ex.Next()) {
+        for (TopExp_Explorer ex(result, TopAbs_SOLID); ex.More() && solid && cap_refusal.empty();
+             ex.Next()) {
           const EnclosedVolume enclosed = enclosed_volume(ex.Current());
           if (enclosed.volume <= enclosed.tolerance) {
             hollow = enclosed;
             break;
           }
         }
-        if (solid && !hollow.has_value()) {
+        if (solid && cap_refusal.empty() && !hollow.has_value()) {
           stage = "checking the lofted solid for self-interference failed";
           interference =
               shape_checks::self_interference_refusal("Session.thru_sections", result);
@@ -907,6 +1004,9 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
                        "Sections must all be closed or all be open, and must not "
                        "self-intersect when joined.",
                        {});
+  }
+  if (!cap_refusal.empty()) {
+    throw PysmeshError(cap_refusal, kCapHint, {});
   }
   if (hollow.has_value()) {
     std::ostringstream s;
