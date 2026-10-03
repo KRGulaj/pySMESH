@@ -1455,6 +1455,12 @@ class Session {
                   const TopoDS_Shape& built, Validation mode = Validation::Strict,
                   const std::vector<std::string>& warnings = {});
 
+  // The refusal of a result BRepCheck_Analyzer rejects (report A7): each status it reports,
+  // on which sub-shape, and the live ids that sub-shape comes from through `hist`. The faces
+  // go on face_ids: the rejected faces, and the faces holding a rejected wire, edge or vertex.
+  [[noreturn]] void refuse_invalid(const char* op_name, const TopoDS_Shape& built,
+                                   const Handle(BRepTools_History) & hist) const;
+
   Delta carry_registry(const TopoDS_Shape& new_root, const Handle(BRepTools_History) & hist,
                        std::int64_t op_index);
 

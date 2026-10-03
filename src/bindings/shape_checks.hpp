@@ -173,6 +173,25 @@ std::string inside_out_reversed(const InsideOutSolid& solid);
 // the operation.
 std::string self_interference_refusal(const std::string& op, const TopoDS_Shape& shape);
 
+// One status BRepCheck_Analyzer reports on a sub-shape of a shape it rejects. `context` is
+// the shape the status holds in (an edge's status on one face), or null.
+struct CheckFinding {
+  TopoDS_Shape shape;
+  std::string status;  // the BRepCheck_Status name, e.g. "BRepCheck_NotClosed"
+  TopoDS_Shape context;
+};
+
+// Every status other than BRepCheck_NoError that BRepCheck_Analyzer reports on `shape` and
+// its sub-shapes, solids first and vertices last, each kind in TopExp::MapShapes order, each
+// (sub-shape, status, context) once.
+std::vector<CheckFinding> check_findings(const TopoDS_Shape& shape);
+
+// The faces of `shape` that BRepCheck_Analyzer rejects on their own, geometric controls on.
+std::vector<TopoDS_Shape> invalid_faces(const TopoDS_Shape& shape);
+
+// The kind of a shape in capitals: "SOLID", "SHELL", "FACE", "WIRE", "EDGE", "VERTEX".
+const char* kind_text(const TopoDS_Shape& shape);
+
 // The import policy for inside-out solids, from the caller's string: true for "reverse",
 // false for "raise". Anything else is refused, naming `op`.
 bool reverse_inside_out(const std::string& op, const std::string& policy);

@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <sstream>
 #include <utility>
 
 #include <BOPAlgo_CheckerSI.hxx>
@@ -24,6 +25,10 @@
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepCheck.hxx>
+#include <BRepCheck_Analyzer.hxx>
+#include <BRepCheck_Result.hxx>
+#include <BRepCheck_Status.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
@@ -554,6 +559,93 @@ std::string self_interference_refusal(const std::string& op, const TopoDS_Shape&
   return op + ": the solid's boundary interferes with itself in " + std::to_string(count) +
          " place(s), so the solid has no consistent inside; the session is unchanged.\n" +
          pairs;
+}
+
+std::vector<CheckFinding> check_findings(const TopoDS_Shape& shape) {
+  std::vector<CheckFinding> out;
+  const BRepCheck_Analyzer analyzer(shape);
+  const auto name_of = [](BRepCheck_Status status) {
+    std::ostringstream s;
+    BRepCheck::Print(status, s);
+    std::string text = s.str();
+    while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) {
+      text.pop_back();
+    }
+    return text;
+  };
+  const auto add = [&](const TopoDS_Shape& sub, BRepCheck_Status status,
+                       const TopoDS_Shape& context) {
+    if (status == BRepCheck_NoError) {
+      return;
+    }
+    const std::string name = name_of(status);
+    for (const CheckFinding& f : out) {
+      if (f.shape.IsSame(sub) && f.status == name && f.context.IsSame(context)) {
+        return;
+      }
+    }
+    out.push_back({sub, name, context});
+  };
+  for (const TopAbs_ShapeEnum kind : {TopAbs_SOLID, TopAbs_SHELL, TopAbs_FACE, TopAbs_WIRE,
+                                      TopAbs_EDGE, TopAbs_VERTEX}) {
+    ShapeMap subs;
+    TopExp::MapShapes(shape, kind, subs);
+    for (int i = 1; i <= subs.Extent(); ++i) {
+      const TopoDS_Shape& sub = subs.FindKey(i);
+      Handle(BRepCheck_Result) result;
+      try {
+        result = analyzer.Result(sub);
+      } catch (const Standard_Failure&) {
+        continue;  // a sub-shape the analyzer did not record has no status to report
+      }
+      if (result.IsNull()) {
+        continue;
+      }
+      for (const BRepCheck_Status status : result->Status()) {
+        add(sub, status, TopoDS_Shape());
+      }
+      for (result->InitContextIterator(); result->MoreShapeInContext();
+           result->NextShapeInContext()) {
+        for (const BRepCheck_Status status : result->StatusOnShape()) {
+          add(sub, status, result->ContextualShape());
+        }
+      }
+    }
+  }
+  return out;
+}
+
+std::vector<TopoDS_Shape> invalid_faces(const TopoDS_Shape& shape) {
+  std::vector<TopoDS_Shape> out;
+  for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next()) {
+    if (!BRepCheck_Analyzer(ex.Current()).IsValid()) {
+      out.push_back(ex.Current());
+    }
+  }
+  return out;
+}
+
+const char* kind_text(const TopoDS_Shape& shape) {
+  switch (shape.ShapeType()) {
+    case TopAbs_COMPOUND:
+      return "COMPOUND";
+    case TopAbs_COMPSOLID:
+      return "COMPSOLID";
+    case TopAbs_SOLID:
+      return "SOLID";
+    case TopAbs_SHELL:
+      return "SHELL";
+    case TopAbs_FACE:
+      return "FACE";
+    case TopAbs_WIRE:
+      return "WIRE";
+    case TopAbs_EDGE:
+      return "EDGE";
+    case TopAbs_VERTEX:
+      return "VERTEX";
+    default:
+      return "SHAPE";
+  }
 }
 
 bool reverse_inside_out(const std::string& op, const std::string& policy) {

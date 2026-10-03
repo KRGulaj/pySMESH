@@ -38,8 +38,10 @@ constexpr const char* kSweepHint =
     "perpendicular profile. A profile larger than the spine's radius of curvature does the "
     "same.";
 constexpr const char* kLoftHint =
-    "Sections whose loft has to twist or bend sharply between them make the surface pass "
-    "through itself; space or align the sections, or add sections between them.";
+    "Sections that meet each other, such as circles through one common point, pinch the "
+    "boundary there; sections whose loft has to twist or bend sharply between them make the "
+    "surface pass through itself. Space or align the sections, or add sections between "
+    "them.";
 
 }  // namespace
 

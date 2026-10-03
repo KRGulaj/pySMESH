@@ -154,20 +154,12 @@ Handle(BRepTools_History) offset_history(const TopoDS_Shape& argument,
   return hist;
 }
 
-// Faces of the result that BRepCheck_Analyzer rejects on their own.
-//
-// Reached only when the whole-shape check has already failed, so the per-face pass costs
-// nothing on a healthy result. Geometric controls stay on — the same setting commit() uses —
-// so the two verdicts cannot disagree about what "invalid" means.
-std::vector<TopoDS_Shape> invalid_faces(const TopoDS_Shape& result) {
-  std::vector<TopoDS_Shape> out;
-  for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next()) {
-    if (!BRepCheck_Analyzer(ex.Current()).IsValid()) {
-      out.push_back(ex.Current());
-    }
-  }
-  return out;
-}
+// Faces of the result that BRepCheck_Analyzer rejects on their own: shared with commit()
+// (shape_checks::invalid_faces). Reached only when the whole-shape check has already failed,
+// so the per-face pass costs nothing on a healthy result. Geometric controls stay on — the
+// same setting commit() uses — so the two verdicts cannot disagree about what "invalid"
+// means.
+using shape_checks::invalid_faces;
 
 
 // A body of the algorithm's own, so that a refusal cannot reach the caller's.

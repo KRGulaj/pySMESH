@@ -538,9 +538,7 @@ py::dict Session::commit(const std::vector<TopoDS_Shape>& bodies,
       valid = BRepCheck_Analyzer(built).IsValid();
     }
     if (!valid && mode == Validation::Strict) {
-      throw PysmeshError(std::string("Session.") + op_name +
-                         ": the operation produced an invalid shape "
-                         "(BRepCheck_Analyzer reported errors); the session is unchanged.");
+      refuse_invalid(op_name, built, hist);
     }
     verdict = valid;
   }
@@ -555,6 +553,107 @@ py::dict Session::commit(const std::vector<TopoDS_Shape>& bodies,
   state_.op_index = op_index;
   ++next_op_;
   return delta_dict(delta, op_index, op_name);
+}
+
+void Session::refuse_invalid(const char* op_name, const TopoDS_Shape& built,
+                             const Handle(BRepTools_History) & hist) const {
+  std::vector<shape_checks::CheckFinding> findings;
+  {
+    py::gil_scoped_release release;
+    findings = shape_checks::check_findings(built);
+  }
+  // Each result sub-shape that a live id became: the same shape, or an image the history
+  // records as modified or generated from one of that id's shapes.
+  ShapeKeyed<std::vector<EntityId>> sources;
+  for (const auto& [id, rec] : state_.registry->alive) {
+    for (const TopoDS_Shape& s : rec.shapes) {
+      sources[s].push_back(id);
+      if (hist.IsNull()) {
+        continue;
+      }
+      for (const TopoDS_Shape& m : hist->Modified(s)) {
+        sources[m].push_back(id);
+      }
+      for (const TopoDS_Shape& g : hist->Generated(s)) {
+        sources[g].push_back(id);
+      }
+    }
+  }
+  const auto ids_from = [&](const TopoDS_Shape& sub) {
+    std::vector<EntityId> ids;
+    const auto it = sources.find(sub);
+    if (it != sources.end()) {
+      ids = it->second;
+    }
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    return ids;
+  };
+  const auto ordinal = [&](const TopoDS_Shape& sub) {
+    ShapeSet all;
+    TopExp::MapShapes(built, sub.ShapeType(), all);
+    return std::to_string(all.FindIndex(sub));
+  };
+  std::vector<int> faces;
+  const auto add_faces_of = [&](const TopoDS_Shape& sub) {
+    if (sub.ShapeType() == TopAbs_FACE) {
+      for (EntityId id : ids_from(sub)) {
+        faces.push_back(static_cast<int>(id));
+      }
+      return;
+    }
+    for (TopExp_Explorer f(built, TopAbs_FACE); f.More(); f.Next()) {
+      for (TopExp_Explorer s(f.Current(), sub.ShapeType()); s.More(); s.Next()) {
+        if (s.Current().IsSame(sub)) {
+          for (EntityId id : ids_from(f.Current())) {
+            faces.push_back(static_cast<int>(id));
+          }
+          break;
+        }
+      }
+    }
+  };
+  constexpr std::size_t kListed = 20;
+  std::string details;
+  for (std::size_t i = 0; i < findings.size(); ++i) {
+    const shape_checks::CheckFinding& f = findings[i];
+    add_faces_of(f.shape);
+    if (i >= kListed) {
+      continue;
+    }
+    details += std::string(shape_checks::kind_text(f.shape)) + " " + ordinal(f.shape) +
+               " of the result";
+    const std::vector<EntityId> ids = ids_from(f.shape);
+    if (!ids.empty()) {
+      details += " (from id";
+      for (std::size_t k = 0; k < ids.size(); ++k) {
+        details += (k == 0 ? " " : ", ") + std::to_string(ids[k]);
+      }
+      details += ")";
+    }
+    details += ": " + f.status;
+    if (!f.context.IsNull()) {
+      details += " on " + std::string(shape_checks::kind_text(f.context)) + " " +
+                 ordinal(f.context);
+    }
+    details += ". ";
+  }
+  if (findings.size() > kListed) {
+    details += "And " + std::to_string(findings.size() - kListed) + " more. ";
+  }
+  if (findings.empty()) {
+    details += "BRepCheck_Analyzer reported no status on any sub-shape. ";
+  }
+  details += "Ordinals count each kind in TopExp::MapShapes order of the shape the operation "
+             "built.";
+  std::sort(faces.begin(), faces.end());
+  faces.erase(std::unique(faces.begin(), faces.end()), faces.end());
+  throw PysmeshError(std::string("Session.") + op_name +
+                         ": the operation produced an invalid shape (BRepCheck_Analyzer "
+                         "reported " +
+                         std::to_string(findings.size()) + " status(es)); the session is "
+                         "unchanged.",
+                     details, faces);
 }
 
 // Carry every id of one body onto a copy of it, and swap the copy into the model.

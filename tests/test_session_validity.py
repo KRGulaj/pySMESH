@@ -478,3 +478,33 @@ def test_a_corrected_frenet_sweep_of_the_tilted_profile_is_accepted() -> None:
 
     assert len(list(s.entities(EntityKind.SOLID))) == 1
     assert _volume(s) > 0.0
+
+
+# ---- A7: "invalid shape" names the reason and the faces --------------------------------- #
+
+
+@pytest.mark.parametrize(
+    ("body", "origin", "fuzzy"),
+    [
+        (lambda s: s.add_torus(1.0, 0.3), (-1.5, -1e-6, -1.5), 3e-7),
+        (lambda s: s.add_sphere(1.0), (-3e-7, -1.5, -1.5), 0.0),
+    ],
+    ids=["torus-y-1e-6-fuzzy-3e-7", "sphere-x-3e-7"],
+)
+def test_an_invalid_boolean_result_names_the_brepcheck_status_and_the_faces(
+    body: Callable[[Session], object], origin: tuple[float, float, float], fuzzy: float
+) -> None:
+    """Report A7: the near-coincident commons raised "invalid shape" with nothing named."""
+    s = Session()
+    body(s)
+    a = list(s.entities(EntityKind.SOLID))
+    s.add_box(3.0, 3.0, 3.0, origin=origin)
+    b = _new_ids(s, EntityKind.SOLID, set(a))
+    faces = {int(f) for f in s.entities(EntityKind.FACE)}
+
+    with pytest.raises(PysmeshError, match="invalid shape") as info:
+        s.common(a, b, fuzzy=fuzzy)
+
+    assert re.search(r"BRepCheck_\w+", info.value.details)
+    assert info.value.face_ids
+    assert set(info.value.face_ids) <= faces
