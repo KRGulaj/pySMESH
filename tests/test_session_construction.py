@@ -12,9 +12,9 @@ Each claim is asserted against an oracle the operation under test does not produ
   ``RuntimeError``. The oracle is the public contract: ``PysmeshError`` naming the
   operation, and a session that is byte for byte as it was.
 * **A3, a loft writes onto its inputs.** ``thru_sections`` gave OCCT the session's own
-  section edges, and OCCT wrote pcurves, surfaces and continuity onto them, also when the
-  loft was then refused. The oracle is the BREP of the session, and of a snapshot taken
-  before the loft, byte for byte.
+  section edges, and OCCT wrote pcurves, surfaces and continuity onto them, also when
+  the loft was then refused. The oracle is the BREP of the session, and of a snapshot
+  taken before the loft, byte for byte.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ def _faces(s: Session) -> list[int]:
     return sorted(int(i) for i in s.entities(EntityKind.FACE))
 
 
-# ---- A2: an OCCT exception outside the try ------------------------------------------- #
+# ---- A2: an OCCT exception outside the try ----------------------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -86,7 +86,7 @@ def test_a_revolve_origin_occt_refuses_raises_pysmesh_error_and_changes_nothing(
     assert _state(s) == before
 
 
-# ---- A3: a loft writes onto the session's section edges ------------------------------ #
+# ---- A3: a loft writes onto the session's section edges ---------------------------- #
 
 # Two unit triangles, the second shifted across and tilted back, so that the loft folds
 # through itself: the solid encloses a volume of -0.2876 and is refused.
@@ -140,7 +140,7 @@ def _squares(s: Session, count: int) -> list[list[int]]:
 
 @pytest.mark.parametrize("ruled", [False, True], ids=["smooth", "ruled"])
 def test_a_refused_loft_leaves_the_session_byte_identical(ruled: bool) -> None:
-    """The loft is refused for its negative volume, and the session's BREP is unchanged."""
+    """The loft is refused for its negative volume; the session's BREP is unchanged."""
     s = Session()
     sections = [
         [int(i) for i in s.add_polyline(_triangle(*t), closed=True).created]
@@ -175,7 +175,7 @@ def test_a_ruled_loft_leaves_a_snapshot_taken_before_it_byte_identical(
 
 
 def test_a_ruled_loft_carries_the_ids_of_its_section_edges_and_vertices() -> None:
-    """Every section edge and vertex id of a ruled loft stays alive, on the loft's edges.
+    """Every section edge and vertex id of a ruled loft stays alive on the loft's edges.
 
     The ruled loft keeps each section as a row of its edges, so each id must denote a
     shape of the result: 12 edges and 12 vertices for three squares.
