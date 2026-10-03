@@ -1155,6 +1155,60 @@ def test_adaptive_1d_keeps_its_three_rules_where_upstream_broke_the_bounds(
         assert float(ratio.max(initial=1.0)) <= 2.0 * (1.0 + _ROUND_OFF)
 
 
+def _vertex_ratios(segments: dict[int, NDArray[np.float64]]) -> list[float]:
+    """Per vertex where two or more meshed edges end: longest over shortest end chord.
+
+    Each edge's two end chords sit at its end vertices; a closed edge ends twice at one
+    vertex. The vertices are matched by their coordinates, which are written once per
+    segment and identical.
+    """
+    at_vertex: dict[tuple[float, ...], list[float]] = {}
+    for seg in segments.values():
+        chain = _ordered_chain(seg)
+        chords = np.linalg.norm(np.diff(chain, axis=0), axis=1)
+        for point, chord in ((chain[0], chords[0]), (chain[-1], chords[-1])):
+            at_vertex.setdefault(tuple(point.tolist()), []).append(float(chord))
+    return [max(c) / min(c) for c in at_vertex.values() if len(c) >= 2]
+
+
+@pytest.mark.parametrize(
+    ("kind", "deflection"),
+    [
+        ("bspline_prism", 0.003),
+        ("bspline_prism", 0.01),
+        ("bspline_prism", 0.03),
+        ("bump", 0.003),
+        ("bump", 0.01),
+        ("bump", 0.03),
+        ("arc", 0.003),
+        ("arc", 0.01),
+        ("arc", 0.03),
+        ("cone", 0.01),
+        ("ellipse", 0.03),
+    ],
+)
+def test_adaptive_1d_keeps_the_factor_2_across_every_vertex(
+    kind: str, deflection: float, tmp_path: Path
+) -> None:
+    """Spec (``1d_meshing_hypo.rst``): two adjacent segments differ at most twice.
+
+    Upstream grades the size field in space, so the rule also holds where two edges meet
+    at a vertex (report §18.1; Phase 3 measured at most 1.60 there). The end chords of
+    every pair of meshed edges that share a vertex differ at most by a factor of 2.
+    Tolerance 1e-9: round-off.
+    """
+    session = _rules_session(kind)
+    path = tmp_path / f"{kind}.brep"
+    path.write_bytes(session.brep())
+
+    ratios = _vertex_ratios(
+        _adaptive_brep_segments(path, ADAPTIVE_MIN_SIZE, deflection)
+    )
+
+    assert ratios
+    assert max(ratios) <= 2.0 * (1.0 + _ROUND_OFF), max(ratios)
+
+
 # ---- Families with a fixture of their own ------------------------------------------ #
 
 

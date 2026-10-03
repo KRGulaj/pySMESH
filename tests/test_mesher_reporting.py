@@ -18,8 +18,11 @@ Each claim is asserted against an oracle the report itself does not produce (rep
 * **M1, a raising hook leaves no partial mesh.** The hook's exception must reach the
   caller with its own type, and the mesh must be empty afterwards, as for a cancel.
 * **N1, a refused value is a PysmeshError.** An upstream setter refuses a bad value with
-  ``SALOME_Exception``, which reached Python as a raw ``RuntimeError``. The oracle is the
-  upstream throw site, cited beside each case.
+  ``SALOME_Exception``, which reached Python as a raw ``RuntimeError``. The oracle is
+  the upstream throw site, cited beside each case.
+* **R1, an edge too short for Adaptive1D is reported.** An edge shorter than the min
+  size keeps one segment shorter than the min size, against the hypothesis's bounds.
+  The compute must report it as a warning on that edge. The oracle is the edge length.
 """
 
 from __future__ import annotations
@@ -86,7 +89,7 @@ def _quad_mesh(quad_type: QuadType) -> tuple[ps.ComputeReport, ps.MeshData]:
 
 
 def test_a_reduced_transition_that_falls_back_is_a_warning_not_a_failure() -> None:
-    """REDUCED falls back to STANDARD: the same mesh, and one warning naming the face."""
+    """REDUCED falls back to STANDARD: the same mesh, one warning naming the face."""
     _, standard = _quad_mesh(QuadType.STANDARD)
 
     report, reduced = _quad_mesh(QuadType.REDUCED)
@@ -107,7 +110,7 @@ def test_a_clean_compute_reports_no_warning() -> None:
     assert report.warnings == ()
 
 
-# ---- A6: a missing algorithm or hypothesis is named --------------------------------- #
+# ---- A6: a missing algorithm or hypothesis is named -------------------------------- #
 
 
 def _box() -> ps.Shape:
@@ -123,7 +126,7 @@ def _missing_lines(error: ps.PysmeshError) -> list[str]:
 
 
 def test_an_edge_without_a_1d_hypothesis_is_named_missing_its_hypothesis() -> None:
-    """Regular1D everywhere, NumberOfSegments on 11 of the 12 edges: edge 12 lacks one."""
+    """Regular1D everywhere, NumberOfSegments on 11 of 12 edges: edge 12 lacks one."""
     box = _box()
     with Mesher(box) as m:
         m.assign(Regular1D())
@@ -136,7 +139,10 @@ def test_an_edge_without_a_1d_hypothesis_is_named_missing_its_hypothesis() -> No
             m.compute()
 
     assert _missing_lines(info.value) == [
-        "EDGE 12: Regular_1D is missing a hypothesis it needs (algorithm state MISSING_HYP)"
+        (
+            "EDGE 12: Regular_1D is missing a hypothesis it needs "
+            "(algorithm state MISSING_HYP)"
+        )
     ]
     assert "meshing failed on 1 sub-shape(s)" in str(info.value)
 
@@ -198,10 +204,11 @@ def test_the_degenerate_pole_edges_of_a_sphere_are_named_missing_a_hypothesis() 
     assert named == ["EDGE 1", "EDGE 3"]
 
 
-# ---- M1: a hook that raises leaves no mesh ----------------------------------------------- #
+# ---- M1: a hook that raises leaves no mesh ----------------------------------------- #
 
-# A structured box of 50 segments a side takes long enough (about 0.2 s) for the progress
-# hook to run several times. It is not a Cartesian mesh, whose own cancel path clears it.
+# A structured box of 50 segments a side takes long enough (about 0.2 s) for the
+# progress hook to run several times. It is not a Cartesian mesh, whose own cancel path
+# clears it.
 HOOKED_SEGMENTS: int = 50
 
 
@@ -210,7 +217,7 @@ class _HookStop(RuntimeError):
 
 
 def test_a_progress_hook_that_raises_half_way_leaves_no_mesh() -> None:
-    """The hook's own exception reaches the caller, and the mesh is cleared (report M1)."""
+    """The hook's exception reaches the caller, and the mesh is cleared (report M1)."""
     calls: list[float] = []
 
     def hook(fraction: float) -> None:
@@ -233,11 +240,12 @@ def test_a_progress_hook_that_raises_half_way_leaves_no_mesh() -> None:
         assert m.mesh().element_count == 0
 
 
-# ---- N1: an upstream setter that refuses a value raises PysmeshError -------------------- #
+# ---- N1: an upstream setter that refuses a value raises PysmeshError --------------- #
 
-# One invalid value per catalogue hypothesis whose upstream setter refuses it, each with the
-# StdMeshers source line that throws (SMESH V9_16_0), and LocalLength's negative precision,
-# which upstream accepts (its SetPrecision tests the old value) and the binding refuses.
+# One invalid value per catalogue hypothesis whose upstream setter refuses it, each with
+# the StdMeshers source line that throws (SMESH V9_16_0), and LocalLength's negative
+# precision, which upstream accepts (its SetPrecision tests the old value) and the
+# binding refuses.
 REFUSED_VALUES: dict[str, ps.Hypothesis] = {
     # StdMeshers_NumberOfSegments.cxx:116 "number of segments must be positive"
     "NumberOfSegments-count-0": NumberOfSegments(count=0),
@@ -293,7 +301,9 @@ REFUSED_VALUES: dict[str, ps.Hypothesis] = {
 }
 
 
-@pytest.mark.parametrize("hypothesis", REFUSED_VALUES.values(), ids=REFUSED_VALUES.keys())
+@pytest.mark.parametrize(
+    "hypothesis", REFUSED_VALUES.values(), ids=REFUSED_VALUES.keys()
+)
 def test_an_invalid_hypothesis_value_raises_pysmesh_error(
     hypothesis: ps.Hypothesis,
 ) -> None:
@@ -304,3 +314,46 @@ def test_an_invalid_hypothesis_value_raises_pysmesh_error(
 
         assert hypothesis.native_name in str(info.value)
         assert m.assignments() == ()
+
+
+# ---- R1: an edge too short for Adaptive1D's min size is reported ------------------- #
+
+ADAPTIVE_MIN: float = 0.05
+# A 3 x 7 rectangle with one corner cut off by an edge 0.02 sqrt(2) = 0.028284 long.
+CUT: float = 0.02
+SHORT_EDGE: float = CUT * 2.0**0.5
+
+
+def _cut_rectangle() -> ps.Shape:
+    """A 3 x 7 rectangle with one corner cut off: one edge shorter than min size."""
+    s = Session()
+    s.add_polyline(
+        [
+            (0.0, 0.0, 0.0),
+            (3.0, 0.0, 0.0),
+            (3.0, 7.0, 0.0),
+            (CUT, 7.0, 0.0),
+            (0.0, 7.0 - CUT, 0.0),
+        ],
+        closed=True,
+    )
+    s.make_face(list(s.entities(ps.EntityKind.EDGE)))
+    return ps.load_brep(s.brep())
+
+
+def test_an_edge_shorter_than_adaptive_min_size_is_reported_as_a_warning() -> None:
+    """The short edge keeps one segment; the report names it with its length (R1)."""
+    shape = _cut_rectangle()
+    short = [e.id for e in shape.edges() if e.length < ADAPTIVE_MIN]
+    with Mesher(shape) as m:
+        m.assign(Regular1D())
+        m.assign(ps.Adaptive1D(min_size=ADAPTIVE_MIN, max_size=1.0, deflection=0.01))
+
+        report = m.compute()
+
+    assert len(short) == 1
+    assert [(w.kind, w.ordinal) for w in report.warnings] == [
+        (SubShapeKind.EDGE, short[0])
+    ]
+    assert f"{SHORT_EDGE:.6g}" in report.warnings[0].text
+    assert "min size" in report.warnings[0].text

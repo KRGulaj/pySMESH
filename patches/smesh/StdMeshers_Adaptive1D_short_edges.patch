@@ -1,0 +1,61 @@
+pySMESH: make StdMeshers_Adaptive1D report an EDGE too short for its min size as a warning
+(SMESH V9_16_0; applies after StdMeshers_Adaptive1D_bounds.patch).
+
+Defect: the Adaptive hypothesis limits every segment to [Min Size, Max Size]
+(doc/gui/input/1d_meshing_hypo.rst). An EDGE shorter than Min Size, or a closed EDGE shorter
+than three Min Sizes, cannot meet that bound: the bounds patch keeps the count the bounds
+allow (one segment, or three on a closed EDGE), and the segments are shorter than Min Size.
+Nothing says so.
+
+Symptom (min 0.05, max 1, deflection 0.01): a 3 x 7 rectangle with one corner cut off by an
+EDGE 0.0282843 long. That EDGE gets one segment of 0.0282843, and the compute reports no error
+and no warning; the caller cannot tell that the bound is broken.
+
+Root cause: AdaptiveAlgo::holdRules() (StdMeshers_Adaptive1D_bounds.patch) leaves such an EDGE
+with the segments the bounds allow, by design, and AdaptiveAlgo::Compute() reports nothing on
+it. SMESH has the channel for this state: COMPERR_WARNING, "algo reports error but sub-mesh is
+computed anyway" (SMESH_ComputeError.hxx:55); SMESH_subMesh marks such a sub-mesh computed.
+
+Change, in AdaptiveAlgo::Compute() only: after holdRules() places an EDGE, if the EDGE is
+shorter than Min Size (closed: three times Min Size), relative tolerance 1e-9, the EDGE's own
+sub-mesh gets a COMPERR_WARNING with the EDGE length, the Min Size and the number of segments
+it keeps, attributed to the EDGE's algorithm. The warning is set on that sub-mesh, not
+returned as the algorithm's error: SMESH computes the EDGEs of one hypothesis together
+(SMESH_subMesh::getCollection), and the algorithm's error goes to the first EDGE of the
+group. The compute goes on.
+
+Not changed: the segments, on every EDGE (the warning is text only); every EDGE long enough
+for the bounds; Evaluate().
+
+diff --git a/src/StdMeshers/StdMeshers_Adaptive1D.cxx b/src/StdMeshers/StdMeshers_Adaptive1D.cxx
+--- a/src/StdMeshers/StdMeshers_Adaptive1D.cxx
++++ b/src/StdMeshers/StdMeshers_Adaptive1D.cxx
+@@ -1561,6 +1561,28 @@
+     if ( !holdRules( eData, params ))
+       return false;
+ 
++    // pySMESH: an EDGE shorter than min size, or a closed EDGE shorter than three min
++    // sizes, cannot meet the bounds: it keeps the segments they allow (holdRules). Its own
++    // sub-mesh says so with a warning: the EDGEs of one hypothesis are computed together,
++    // so an error of this algorithm would land on the first EDGE of the batch, and a
++    // warning keeps the sub-mesh computed.
++    {
++      const bool   isClosed = SMESH_MesherHelper::IsClosedEdge( eData.Edge() );
++      const double minSize  = myHyp->GetMinSize();
++      const double needed   = isClosed ? 3. * minSize : minSize;
++      if ( eData.myLength < needed * ( 1. - 1e-9 ))
++      {
++        SMESH_subMesh* edgeSM = myMesh->GetSubMesh( eData.Edge() );
++        edgeSM->GetComputeError() = SMESH_ComputeError::New
++          ( COMPERR_WARNING,
++            SMESH_Comment( "Adaptive1D: the " ) << ( isClosed ? "closed " : "" )
++            << "EDGE is " << eData.myLength << " long, shorter than "
++            << ( isClosed ? "three times the min size " : "the min size " ) << minSize
++            << ", so it keeps " << params.size() + 1 << " segment(s) shorter than min size",
++            edgeSM->GetAlgo() );
++      }
++    }
++
+     // get nodes on VERTEXes
+     TopoDS_Vertex vf = helper.IthVertex( 0, eData.Edge(), false );
+     TopoDS_Vertex vl = helper.IthVertex( 1, eData.Edge(), false );
