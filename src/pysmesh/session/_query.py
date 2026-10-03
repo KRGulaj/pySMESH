@@ -110,10 +110,13 @@ class _QueryOps(_SessionBase):
     def bounding_boxes(self, kind: EntityKind) -> BoundsTable:
         """Bounding box of every live entity of one kind.
 
-        The cheap bulk query. :meth:`entity_table` also returns boxes, but pays for mass
-        properties to do it — on a large assembly that is seconds rather than milliseconds.
-        Use this one for culling, spatial indexing and picking. Each box is the box of the
-        geometry, as :class:`BoundsTable` states.
+        The cheaper bulk query. :meth:`entity_table` also returns boxes, but pays
+        for mass properties to do it. Use this one for culling, spatial indexing and
+        picking. Each box is the box of the geometry, as :class:`BoundsTable` states.
+        To bound a B-spline surface by its own points takes an optimisation per face,
+        computed in parallel. On a model of 117 solids and 5 606 faces, the boxes of
+        every face or every solid take about 1 s; :meth:`entity_table` takes 3 to 5
+        times as long.
 
         Args:
             kind: The entity kind to bound.
@@ -468,9 +471,9 @@ class _QueryOps(_SessionBase):
 
         A bounding-box test, so it over-selects: an entity whose box overlaps but whose
         geometry does not is returned. That is the useful contract for a broad phase — narrow
-        it with an exact test on the far smaller result. The entity's box is the box of its
-        geometry, as :class:`BoundsTable` states: under ``strict``, an entity that fits the
-        query box exactly is inside it.
+        it with an exact test on the far smaller result. The entity's box is the box
+        of its geometry, as :class:`BoundsTable` states: under ``strict``, an entity
+        that fits the query box exactly is inside it.
 
         Args:
             kind: The entity kind to search.

@@ -426,10 +426,10 @@ class BoundsTable:
     Deliberately separate from :class:`EntityTable`: a bounding box costs a fraction of a
     mass property, and a caller culling or spatially indexing a model needs only the box.
 
-    Each box is the box of the geometry, not padded by the shape tolerance: a straight
-    edge's box is the box of its two end points. A B-spline or Bezier curve or surface is
-    bounded by its own points, not by its control polygon, and OCCT pads that box by 1e-7
-    (``Precision::Confusion()``).
+    Each box is the box of the geometry, not padded by the shape tolerance: a
+    straight edge's box is the box of its two end points. A B-spline or Bezier curve or
+    surface is bounded by its own points, not by its control polygon, and OCCT pads
+    that box by 1e-7 (``Precision::Confusion()``).
 
     Attributes:
         kind: The entity kind this table covers.
