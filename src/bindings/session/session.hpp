@@ -325,6 +325,10 @@ struct Delta {
   // The BRepCheck_Analyzer verdict on the shape this operation built, when one was taken.
   // Empty means the operation built nothing to check, or the session runs unvalidated.
   std::optional<bool> valid;
+
+  // What the operation reported without failing: OCCT's warning keys for a boolean, one per
+  // line of BOPAlgo_Options::DumpWarnings. Empty when there is nothing to report.
+  std::vector<std::string> warnings;
 };
 
 // ---- Small helpers ------------------------------------------------------------------ //
@@ -1498,7 +1502,8 @@ class Session {
   // information.
   py::dict commit(const std::vector<TopoDS_Shape>& bodies,
                   const Handle(BRepTools_History) & history, const char* op_name,
-                  const TopoDS_Shape& built, Validation mode = Validation::Strict);
+                  const TopoDS_Shape& built, Validation mode = Validation::Strict,
+                  const std::vector<std::string>& warnings = {});
 
   Delta carry_registry(const TopoDS_Shape& new_root, const Handle(BRepTools_History) & hist,
                        std::int64_t op_index);

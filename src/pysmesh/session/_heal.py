@@ -353,7 +353,8 @@ class _HealOps(_SessionBase):
 
         Raises:
             PysmeshError: On an empty operand list, a dead id, a body named on both sides, a
-                negative ``fuzzy``, or an operation OCCT reports as failed.
+                negative ``fuzzy``, an operation OCCT reports as failed, or a result with no
+                solid for targets that hold one.
         """
         return _delta(
             self._s.imprint(

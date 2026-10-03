@@ -287,6 +287,10 @@ class HistoryDelta:
             refusing to commit a shape that is less invalid than before would make those
             operations useless on exactly the shapes they exist for. There, ``False`` is the
             answer to act on, not an error.
+        warnings: What the operation reported without failing, one entry per warning.
+            For a boolean these are OCCT's warning keys (``BOPAlgo_Options::DumpWarnings``),
+            for example ``BOPAlgo_AlertAcquiredSelfIntersection``. Empty when there is
+            nothing to report.
     """
 
     op_index: int
@@ -297,6 +301,7 @@ class HistoryDelta:
     split: NDArray[np.int64]
     merged: NDArray[np.int64]
     valid: bool | None
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -788,6 +793,7 @@ def _delta(raw: dict[str, object]) -> HistoryDelta:
         split=cast("NDArray[np.int64]", raw["split"]),
         merged=cast("NDArray[np.int64]", raw["merged"]),
         valid=cast("bool | None", raw["valid"]),
+        warnings=tuple(cast("list[str]", raw["warnings"])),
     )
 
 

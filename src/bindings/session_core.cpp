@@ -519,7 +519,8 @@ py::dict Session::add_bodies(const TopoDS_Shape& added, const char* op_name) {
 // information.
 py::dict Session::commit(const std::vector<TopoDS_Shape>& bodies,
                   const Handle(BRepTools_History) & history, const char* op_name,
-                  const TopoDS_Shape& built, Validation mode) {
+                  const TopoDS_Shape& built, Validation mode,
+                  const std::vector<std::string>& warnings) {
   Handle(BRepTools_History) hist = history;
   if (tear_next_history_) {
     hist.Nullify();
@@ -548,6 +549,7 @@ py::dict Session::commit(const std::vector<TopoDS_Shape>& bodies,
   const std::int64_t op_index = next_op_;
   Delta delta = carry_registry(new_root, hist, op_index);
   delta.valid = verdict;
+  delta.warnings = warnings;
 
   state_.root = new_root;
   state_.op_index = op_index;
@@ -790,6 +792,11 @@ py::dict Session::delta_dict(const Delta& d, std::int64_t op_index, const char* 
   out["split"] = ids_array(d.split);
   out["merged"] = ids_array(d.merged);
   out["valid"] = d.valid.has_value() ? py::cast(*d.valid) : py::none();
+  py::list warnings;
+  for (const std::string& w : d.warnings) {
+    warnings.append(py::str(w));
+  }
+  out["warnings"] = warnings;
   return out;
 }
 
