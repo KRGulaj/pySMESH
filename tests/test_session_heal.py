@@ -1007,7 +1007,14 @@ def test_defeaturing_one_piece_of_an_imprinted_face_is_refused(piece_area: float
     s = Session()
     s.add_brep(source.brep())
     faces = ids_of(s, EntityKind.FACE)
-    piece = [f for f, a in zip(faces, s.mass_properties(faces).measure) if a == piece_area]
+    # Within 1e-9, not equal: the default rule is adaptive and reads a planar area a few
+    # units in the last place off the integer the fixed rule gave (report D3).
+    areas = s.mass_properties(faces).measure
+    piece = [
+        f
+        for f, a in zip(faces, areas, strict=True)
+        if a == pytest.approx(piece_area, rel=1e-9)
+    ]
     assert len(piece) == 1
     before = unchanged_state(s)
 

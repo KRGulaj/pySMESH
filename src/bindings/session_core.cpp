@@ -106,9 +106,26 @@ py::dict Session::entity_table(const std::string& kind) const {
   double* bp = bbox.mutable_data();
   std::int64_t* sp = shapes.mutable_data();
 
+  // Every shape of the kind, integrated adaptively at the default precision (report D3),
+  // in parallel with the GIL released: one task per shape, so the result does not depend
+  // on the threads. GProp's fixed rule read a lofted wing 20 % low.
+  std::vector<TopoDS_Shape> all;
+  std::vector<std::size_t> first(ids.size() + 1, 0);
+  for (std::size_t k = 0; k < ids.size(); ++k) {
+    const EntityRecord& rec = state_.registry->alive.at(ids[k]);
+    first[k] = all.size();
+    all.insert(all.end(), rec.shapes.begin(), rec.shapes.end());
+  }
+  first[ids.size()] = all.size();
+  std::vector<shape_checks::Measure> measures;
+  {
+    py::gil_scoped_release release;
+    measures = shape_checks::measures(all, shape_checks::kDefaultMassPrecision);
+  }
+
   for (py::ssize_t i = 0; i < n; ++i) {
-    const EntityRecord& rec = state_.registry->alive.at(ids[static_cast<std::size_t>(i)]);
-    sp[i] = static_cast<std::int64_t>(rec.shapes.size());
+    const auto k = static_cast<std::size_t>(i);
+    sp[i] = static_cast<std::int64_t>(first[k + 1] - first[k]);
     // A split entity is measured over all of its shapes; its centroid and bounding box
     // cover them all. That keeps a split honest in the ground-truth sense: the entity is
     // everything it now denotes, not an arbitrary one of the pieces.
@@ -116,18 +133,17 @@ py::dict Session::entity_table(const std::string& kind) const {
     double wsum = 0.0;
     Bnd_Box box;
     double cx = 0.0, cy = 0.0, cz = 0.0;
-    for (const TopoDS_Shape& s : rec.shapes) {
-      const double m = measure_of(s);
-      const std::array<double, 3> c = centroid_of(s);
+    for (std::size_t j = first[k]; j < first[k + 1]; ++j) {
+      const shape_checks::Measure& m = measures[j];
       // A vertex (and a degenerate edge) has zero measure, so weight it as one instead:
       // an unweighted mean of the pieces is the only meaningful centroid there.
-      const double w = (m > 0.0) ? m : 1.0;
-      total += m;
+      const double w = (m.mass > 0.0) ? m.mass : 1.0;
+      total += m.mass;
       wsum += w;
-      cx += w * c[0];
-      cy += w * c[1];
-      cz += w * c[2];
-      BRepBndLib::Add(s, box);
+      cx += w * m.centroid.X();
+      cy += w * m.centroid.Y();
+      cz += w * m.centroid.Z();
+      BRepBndLib::Add(all[j], box);
     }
     mp[i] = total;
     cp[3 * i + 0] = cx / wsum;

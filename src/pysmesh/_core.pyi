@@ -35,7 +35,7 @@ class PysmeshCancelled(PysmeshError):
 
 class FaceInfo:
     id: int
-    area: float
+    area: float  # adaptive, relative precision 1e-6, as Session.mass_properties
     surface_type: str  # Plane/Cylinder/Cone/Sphere/Torus/BSpline/...
     @property
     def centroid(self) -> NDArray[np.float64]: ...  # (3,)
@@ -46,7 +46,7 @@ class FaceInfo:
 
 class SolidInfo:
     id: int
-    volume: float
+    volume: float  # adaptive, relative precision 1e-6, as Session.mass_properties
     @property
     def centroid(self) -> NDArray[np.float64]: ...  # (3,)
     @property
@@ -54,7 +54,7 @@ class SolidInfo:
 
 class EdgeInfo:
     id: int
-    length: float
+    length: float  # adaptive, relative precision 1e-6, as Session.mass_properties
     @property
     def bbox(self) -> NDArray[np.float64]: ...  # (6,)
     @property

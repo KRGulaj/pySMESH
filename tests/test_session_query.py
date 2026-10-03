@@ -343,6 +343,9 @@ def test_mass_properties_rejects_a_dead_id(box: Session) -> None:
 
 # ------------------------------------------------ Mass properties at a precision --- #
 
+# The default relative precision of every measure without an explicit one (report D3).
+DEFAULT_PRECISION: float = 1e-6
+
 # A pipe tee: a branch of radius R2 rising from the axis of a main cylinder of radius R1.
 TEE_R1: float = 1.7
 TEE_L1: float = 11.0
@@ -440,21 +443,24 @@ def test_the_tee_at_a_precision_matches_its_closed_form(tee: Session) -> None:
     assert table.error[0] <= 1e-9
 
 
-def test_the_tee_without_a_precision_reads_the_fixed_rule_as_before(
+def test_the_tee_without_a_precision_reads_its_closed_form_at_the_default_precision(
     tee: Session,
 ) -> None:
-    """``precision=None`` is 4.2.1's answer to the last digit, fixed-rule error and all."""
+    """``precision=None`` is the adaptive rule at 1e-6, not the fixed rule (report D3).
+
+    The fixed rule read the tee 1.39e-6 high (TEE_FIXED_RULE_VOLUME); the default now
+    meets the closed form within its precision and reports a finite error.
+    """
     solid = ids_of(tee, EntityKind.SOLID)
 
     default = tee.mass_properties(solid)
     explicit = tee.mass_properties(solid, precision=None)
 
-    assert default.measure[0] == pytest.approx(
-        TEE_FIXED_RULE_VOLUME, rel=0.0, abs=5e-13
-    )
+    assert default.measure[0] == pytest.approx(tee_closed_form(), rel=DEFAULT_PRECISION)
+    assert abs(default.measure[0] - TEE_FIXED_RULE_VOLUME) > 1e-4
     assert np.array_equal(default.measure, explicit.measure)
     assert np.array_equal(default.centroid, explicit.centroid)
-    assert np.isnan(default.error).all()
+    assert 0.0 <= float(default.error[0]) <= DEFAULT_PRECISION
 
 
 @pytest.mark.parametrize("precision", [None, 1e-3, 1e-6, 1e-12])
@@ -473,16 +479,17 @@ def test_a_cylinder_matches_its_closed_form_at_every_setting(
     )
 
 
-def test_an_edge_at_a_precision_measures_the_length_the_fixed_rule_misses() -> None:
+def test_an_edge_at_a_precision_measures_the_length_the_fixed_rule_missed() -> None:
     """BRepGProp has no adaptive rule for a curve; the edge rule is Gauss-Kronrod on its own.
 
-    On this parabolic arc the fixed rule reads 12.0355 against a closed form of 12.0302.
+    On this parabolic arc the fixed rule read 12.0355 against a closed form of 12.0302.
+    Without a precision the default, 1e-6, meets it too (report D3).
     """
     s = Session()
     s.add_bspline(BENT_PARABOLA, degree=2)
     edge = ids_of(s, EntityKind.EDGE)
 
-    fixed = s.mass_properties(edge)
+    default = s.mass_properties(edge)
     table = s.mass_properties(edge, precision=1e-12)
 
     expected = parabola_length(BENT_PARABOLA)
@@ -490,7 +497,7 @@ def test_an_edge_at_a_precision_measures_the_length_the_fixed_rule_misses() -> N
     assert table.centroid[0] == pytest.approx(
         parabola_centroid(BENT_PARABOLA), rel=1e-12, abs=1e-12
     )
-    assert fixed.measure[0] != pytest.approx(expected, rel=1e-4)
+    assert default.measure[0] == pytest.approx(expected, rel=DEFAULT_PRECISION)
 
 
 @settings(max_examples=25, deadline=None, derandomize=True)
@@ -1694,3 +1701,119 @@ def test_no_query_advances_the_session(box: Session) -> None:
     assert box.op_count == ops_before
     assert box.issued_id_count == ids_before
     assert box.state_op_index == 1
+
+
+# ----------------------------------------- The default rule on a lofted wing (D3) --- #
+
+# The report's wing: NACA 0012, three sections at z = 0, 1, 2, chord 1 - 0.1 z, span 2,
+# lofted smooth. Each section is the chord-1 section scaled, so the volume is the
+# chord-1 section area times the integral of the squared chord,
+# int_0^2 (1 - 0.1 z)^2 dz.
+WING_POINTS: int = 60
+WING_SPAN: float = 2.0
+CHORD_SQUARED_INTEGRAL: float = (
+    WING_SPAN - 0.1 * WING_SPAN**2 + 0.01 * WING_SPAN**3 / 3.0
+)
+# Curve samples for the section area by Green's theorem; the error of the polygon rule
+# is below 1e-11 of the area at this density.
+SECTION_SAMPLES: int = 200_001
+
+
+def _naca(chord: float) -> np.ndarray:
+    """NACA 0012 with a sharp trailing edge: closed loop TE, upper, LE, lower, TE."""
+    b = np.linspace(0.0, np.pi, WING_POINTS)
+    x = 0.5 * (1.0 - np.cos(b))
+    yt = 0.6 * (
+        0.2969 * np.sqrt(x) - 0.1260 * x - 0.3516 * x**2 + 0.2843 * x**3 - 0.1036 * x**4
+    )
+    upper = np.c_[x[::-1], yt[::-1]]
+    lower = np.c_[x[1:], -yt[1:]]
+    return np.vstack([upper, lower]) * chord
+
+
+def _add_section(s: Session, z: float, chord: float, two_edge: bool) -> list[int]:
+    """One section at height z: one closed spline, or an upper and a lower spline."""
+    p = np.c_[_naca(chord), np.full(2 * WING_POINTS - 1, z)]
+    before = set(ids_of(s, EntityKind.EDGE))
+    if two_edge:
+        half = len(p) // 2
+        s.add_spline(p[: half + 1])
+        s.add_spline(p[half:])
+        s.make_wire([i for i in ids_of(s, EntityKind.EDGE) if i not in before])
+    else:
+        s.add_spline(p)
+    return [i for i in ids_of(s, EntityKind.EDGE) if i not in before]
+
+
+def _section_area(two_edge: bool) -> float:
+    """The area inside the chord-1 section, by Green's theorem on curve samples."""
+    s = Session()
+    edges = _add_section(s, 0.0, 1.0, two_edge)
+    xy: list[np.ndarray] = []
+    for edge in edges:
+        t0, t1 = s.edge_parameter_bounds([edge])[0]
+        xy.append(s.curve_at(edge, np.linspace(t0, t1, SECTION_SAMPLES)).points[:, :2])
+    loop = np.vstack(xy)
+    x, y = loop[:, 0], loop[:, 1]
+    return abs(0.5 * float(np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y)))
+
+
+def _wing(two_edge: bool) -> Session:
+    """The report's wing, lofted smooth through its three sections."""
+    s = Session()
+    sections = [
+        _add_section(s, z, 1.0 - 0.1 * z, two_edge) for z in (0.0, 1.0, WING_SPAN)
+    ]
+    s.thru_sections(sections, solid=True, ruled=False)
+    return s
+
+
+@pytest.mark.parametrize("two_edge", [False, True], ids=["one_edge", "two_edge"])
+def test_every_default_volume_of_a_wing_equals_its_section_integral(
+    two_edge: bool,
+) -> None:
+    """mass_properties, entity_table and Shape.solids, all without a precision.
+
+    The fixed rule read the one-edge wing 20.2 % low (0.106101 for 0.132909). The stated
+    bound is the default precision, 1e-6 relative; the brief's own bound is 1e-5.
+    """
+    s = _wing(two_edge)
+    expected = _section_area(two_edge) * CHORD_SQUARED_INTEGRAL
+    solids = ids_of(s, EntityKind.SOLID)
+
+    by_mass = float(s.mass_properties(solids).measure[0])
+    by_table = float(s.entity_table(EntityKind.SOLID).measure[0])
+    by_shape = ps.load_brep(s.brep()).solids()[0].volume
+
+    for volume in (by_mass, by_table, by_shape):
+        assert volume == pytest.approx(expected, rel=DEFAULT_PRECISION)
+        assert volume == pytest.approx(expected, rel=1e-5)
+
+
+@pytest.mark.parametrize(
+    ("build", "volume"),
+    [
+        (lambda s: s.add_box(BOX_DX, BOX_DY, BOX_DZ), BOX_VOLUME),
+        (lambda s: s.add_cylinder(1.3, 4.1), math.pi * 1.3**2 * 4.1),
+        (lambda s: s.add_sphere(2.2), 4.0 / 3.0 * math.pi * 2.2**3),
+    ],
+    ids=["box", "cylinder", "sphere"],
+)
+def test_every_default_volume_of_a_primitive_equals_its_closed_form(
+    build: object, volume: float
+) -> None:
+    """The box, the cylinder and the sphere, within the default precision."""
+    s = Session()
+    build(s)  # type: ignore[operator]
+    solids = ids_of(s, EntityKind.SOLID)
+
+    table = s.mass_properties(solids)
+
+    assert float(table.measure[0]) == pytest.approx(volume, rel=DEFAULT_PRECISION)
+    assert float(s.entity_table(EntityKind.SOLID).measure[0]) == pytest.approx(
+        volume, rel=DEFAULT_PRECISION
+    )
+    assert ps.load_brep(s.brep()).solids()[0].volume == pytest.approx(
+        volume, rel=DEFAULT_PRECISION
+    )
+    assert 0.0 <= float(table.error[0]) <= DEFAULT_PRECISION

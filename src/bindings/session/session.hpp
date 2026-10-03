@@ -406,53 +406,6 @@ inline void append_unique(std::vector<TopoDS_Shape>& dst, const TopoDS_Shape& s)
 // which the stateless module shares.
 using shape_checks::kAdaptiveEpsCap;
 
-// The measure of one shape by its own kind, with GProp's fixed Gauss rule. Exact on analytic
-// geometry; on a face trimmed by an intersection curve, or on a free-form edge, it is not.
-// Session.mass_properties integrates adaptively instead when the caller names a precision.
-inline double measure_of(const TopoDS_Shape& s) {
-  GProp_GProps props;
-  switch (s.ShapeType()) {
-    case TopAbs_SOLID:
-      BRepGProp::VolumeProperties(s, props);
-      return props.Mass();
-    case TopAbs_FACE:
-      BRepGProp::SurfaceProperties(s, props);
-      return props.Mass();
-    case TopAbs_EDGE:
-      BRepGProp::LinearProperties(s, props);
-      return props.Mass();
-    default:
-      return 0.0;
-  }
-}
-
-// Centroid of a shape. For a vertex this is the point itself; GProp's centre of mass is
-// undefined for a zero-measure shape, so the vertex case is handled from the bounding box,
-// which is exact for a point.
-inline std::array<double, 3> centroid_of(const TopoDS_Shape& s) {
-  if (s.ShapeType() == TopAbs_VERTEX) {
-    Bnd_Box box;
-    BRepBndLib::Add(s, box);
-    double a = 0, b = 0, c = 0, d = 0, e = 0, f = 0;
-    box.Get(a, b, c, d, e, f);
-    return {0.5 * (a + d), 0.5 * (b + e), 0.5 * (c + f)};
-  }
-  GProp_GProps props;
-  switch (s.ShapeType()) {
-    case TopAbs_SOLID:
-      BRepGProp::VolumeProperties(s, props);
-      break;
-    case TopAbs_FACE:
-      BRepGProp::SurfaceProperties(s, props);
-      break;
-    default:
-      BRepGProp::LinearProperties(s, props);
-      break;
-  }
-  const gp_Pnt p = props.CentreOfMass();
-  return {p.X(), p.Y(), p.Z()};
-}
-
 using shape_checks::EnclosedVolume;
 using shape_checks::enclosed_volume;
 using shape_checks::kSignDeflection;

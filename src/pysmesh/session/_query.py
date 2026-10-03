@@ -137,14 +137,12 @@ class _QueryOps(_SessionBase):
         properties of a *solid* visit every edge once per owning face, so a total edge length
         taken that way comes out doubled.
 
-        **The rule.** Without ``precision``, OCCT's fixed Gauss rule integrates, exactly as
-        before 4.2.2. It is exact on analytic geometry. It is not exact on a face trimmed by
-        an intersection curve, or on a free-form face or edge. It reads a fused pipe tee
-        1.39e-6 high and a parabolic edge 4.4e-4 long. On a production STEP assembly it read
-        one face 26 % off and one solid 8.5 % off.
-
-        With ``precision``, every measure is integrated adaptively to that relative
-        precision, and its centroid follows the same rule:
+        **The rule.** Every measure is integrated adaptively, to ``precision`` or,
+        without one, to the default relative precision 1e-6, and its centroid follows
+        the same rule. OCCT's fixed Gauss rule, which earlier releases used by default,
+        is not used: it read a wing lofted through one-edge sections 20 % low, a fused
+        pipe tee 1.39e-6 high, a parabolic edge 4.4e-4 long, and one face of a
+        production STEP assembly 26 % off. The rule is:
 
         * a solid's volume and a face's area by GProp's adaptive rule, which refines each face
           until two steps agree to ``precision``;
@@ -162,7 +160,7 @@ class _QueryOps(_SessionBase):
         Args:
             entities: Entity ids, of any kinds.
             precision: The relative precision of the adaptive rule, in ``(0, 1e-3]``.
-                ``None`` keeps the fixed rule. Above 1e-3 GProp's rule is no longer
+                ``None`` is the default, 1e-6. Above 1e-3 GProp's rule is no longer
                 adaptive, so such a value is refused rather than answered by the fixed rule.
 
         Returns:

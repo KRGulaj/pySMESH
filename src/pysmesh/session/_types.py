@@ -316,8 +316,10 @@ class EntityTable:
     Attributes:
         kind: The entity kind this table covers.
         ids: (N,) int64, ascending.
-        measure: (N,) float64 — volume for solids, area for faces, length for edges, 0.0 for
-            vertices. Summed over every shape a split entity denotes.
+        measure: (N,) float64 — volume for solids, area for faces, length for edges, 0.0
+            for vertices. Summed over every shape a split entity denotes. Integrated
+            adaptively to the default relative precision 1e-6, as
+            :meth:`Session.mass_properties` does without a precision.
         centroid: (N, 3) float64, measure-weighted over a split entity's shapes.
         bbox: (N, 6) float64 — xmin, ymin, zmin, xmax, ymax, zmax, covering every shape.
         shape_count: (N,) int64 — how many shapes each entity denotes; greater than one
@@ -453,8 +455,8 @@ class MassTable:
             a spline GProp reported 9e-9 on the area while the area still moved 1e-6 as
             the precision tightened. A value above the precision means the rule stopped
             before it reached it. Summed over a split entity's shapes, weighted by their
-            measures. 0.0 for a vertex. NaN without a precision: the fixed rule reports no
-            estimate.
+            measures. 0.0 for a vertex. Always finite: the rule is adaptive with or
+            without an explicit precision.
     """
 
     ids: NDArray[np.int64]

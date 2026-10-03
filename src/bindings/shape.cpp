@@ -110,6 +110,17 @@ std::array<double, 6> bbox_of(const TopoDS_Shape& s) {
   return b;
 }
 
+// The measures of every shape of one indexed map, in its order, with the GIL released.
+std::vector<shape_checks::Measure> measures_of(const TopTools_IndexedMapOfShape& map) {
+  std::vector<TopoDS_Shape> shapes;
+  shapes.reserve(static_cast<std::size_t>(map.Extent()));
+  for (int i = 1; i <= map.Extent(); ++i) {
+    shapes.push_back(map.FindKey(i));
+  }
+  py::gil_scoped_release release;
+  return shape_checks::measures(shapes, shape_checks::kDefaultMassPrecision);
+}
+
 // ---- Shape -------------------------------------------------------------------------//
 class Shape {
  public:
@@ -117,49 +128,52 @@ class Shape {
 
   std::shared_ptr<ShapeData> data() const { return data_; }
 
+  // Areas, volumes and lengths are integrated adaptively at the library's default
+  // precision, in parallel (shape_checks::measures). GProp's fixed rule read a lofted wing
+  // 20 % low (report D3).
   std::vector<FaceInfo> faces() const {
+    const std::vector<shape_checks::Measure> m = measures_of(data_->faces);
     std::vector<FaceInfo> out;
     const int n = data_->faces.Extent();
     out.reserve(n);
     for (int i = 1; i <= n; ++i) {
       const TopoDS_Face& f = TopoDS::Face(data_->faces.FindKey(i));
-      GProp_GProps props;
-      BRepGProp::SurfaceProperties(f, props);
-      const gp_Pnt c = props.CentreOfMass();
+      const gp_XYZ& c = m[static_cast<std::size_t>(i - 1)].centroid;
       std::array<double, 4> uv{};
       BRepTools::UVBounds(f, uv[0], uv[1], uv[2], uv[3]);
       const BRepAdaptor_Surface surf(f);
-      out.push_back(FaceInfo{i, props.Mass(), {c.X(), c.Y(), c.Z()}, bbox_of(f), uv,
+      out.push_back(FaceInfo{i, m[static_cast<std::size_t>(i - 1)].mass,
+                             {c.X(), c.Y(), c.Z()}, bbox_of(f), uv,
                              surface_type_name(surf.GetType())});
     }
     return out;
   }
 
   std::vector<SolidInfo> solids() const {
+    const std::vector<shape_checks::Measure> m = measures_of(data_->solids);
     std::vector<SolidInfo> out;
     const int n = data_->solids.Extent();
     out.reserve(n);
     for (int i = 1; i <= n; ++i) {
       const TopoDS_Solid& s = TopoDS::Solid(data_->solids.FindKey(i));
-      GProp_GProps props;
-      BRepGProp::VolumeProperties(s, props);
-      const gp_Pnt c = props.CentreOfMass();
-      out.push_back(SolidInfo{i, props.Mass(), {c.X(), c.Y(), c.Z()}, bbox_of(s)});
+      const gp_XYZ& c = m[static_cast<std::size_t>(i - 1)].centroid;
+      out.push_back(SolidInfo{i, m[static_cast<std::size_t>(i - 1)].mass,
+                              {c.X(), c.Y(), c.Z()}, bbox_of(s)});
     }
     return out;
   }
 
   std::vector<EdgeInfo> edges() const {
+    const std::vector<shape_checks::Measure> m = measures_of(data_->edges);
     std::vector<EdgeInfo> out;
     const int n = data_->edges.Extent();
     out.reserve(n);
     for (int i = 1; i <= n; ++i) {
       const TopoDS_Edge& e = TopoDS::Edge(data_->edges.FindKey(i));
-      GProp_GProps props;
-      BRepGProp::LinearProperties(e, props);
       double first = 0.0, last = 0.0;
       BRep_Tool::Range(e, first, last);
-      out.push_back(EdgeInfo{i, props.Mass(), bbox_of(e), {first, last}});
+      out.push_back(
+          EdgeInfo{i, m[static_cast<std::size_t>(i - 1)].mass, bbox_of(e), {first, last}});
     }
     return out;
   }

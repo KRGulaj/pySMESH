@@ -22,6 +22,7 @@
 
 #include <TopoDS_Shape.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_XYZ.hxx>
 
 namespace pysmesh {
 namespace shape_checks {
@@ -196,6 +197,29 @@ const char* kind_text(const TopoDS_Shape& shape);
 // The import policy for inside-out solids, from the caller's string: true for "reverse",
 // false for "raise". Anything else is refused, naming `op`.
 bool reverse_inside_out(const std::string& op, const std::string& policy);
+
+// One shape's measure by its own kind (volume of a solid, area of a face, length of an edge,
+// 0 for a vertex), its centre of mass, and the relative error the rule reports reaching.
+//
+// A solid and a face go to GProp's adaptive rule, which refines each face until two steps
+// agree to `precision` relative and returns its estimate of the relative error reached
+// (BRepGProp.hxx). An edge goes to an adaptive Gauss-Kronrod rule along its curve, because
+// GProp has no adaptive rule for a curve. A vertex, and an edge with no curve, is a point.
+struct Measure {
+  double mass = 0.0;
+  gp_XYZ centroid;
+  double error = 0.0;
+};
+
+// The default relative precision of every measure the library reports (report D3). GProp's
+// fixed rule read a wing lofted through one-edge sections 20 % low; at 1e-6 the adaptive
+// rule reads it within 3.6e-10 of the integral of its section area along the span.
+constexpr double kDefaultMassPrecision = 1e-6;
+
+Measure measure(const TopoDS_Shape& s, double precision);
+
+// The measures of many shapes, integrated in parallel, one shape per task.
+std::vector<Measure> measures(const std::vector<TopoDS_Shape>& shapes, double precision);
 
 // How far a wire is from planar: the spread of its points across the plane that fits them
 // best (BRepLib_FindSurface, OnlyPlane: a least-squares plane), as the largest minus the
