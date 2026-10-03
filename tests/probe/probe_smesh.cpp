@@ -2413,6 +2413,142 @@ void probe_cat916_3d_additions() {
   }
 }
 
+
+// ------------------------------------------------------------------------------ P4DIST ---- //
+// The TABLE and EXPRESSION distributions of NumberOfSegments, after the pySMESH patches
+// StdMeshers_Distribution_table.patch and StdMeshers_Distribution_expression.patch. Node k of
+// N sits where the integral of the density from the start of the edge reaches k/N of its
+// total; each check computes that position in closed form. tests/test_mesher_distribution.py
+// holds the full grid through the Python API.
+
+// Normalised nodes of n segments in geometric progression on a 15-long edge, first segment h0.
+std::vector<double> geometric_target(double h0, int n, double length) {
+  double lo = 1.0 + 1e-12, hi = 3.0;
+  for (int it = 0; it < 200; ++it) {
+    const double mid = 0.5 * (lo + hi);
+    (h0 * (std::pow(mid, n) - 1.0) / (mid - 1.0) < length ? lo : hi) = mid;
+  }
+  const double ratio = 0.5 * (lo + hi);
+  std::vector<double> x(1, 0.0);
+  double sum = 0.0;
+  for (int i = 0; i < n; ++i) {
+    sum += h0 * std::pow(ratio, i);
+    x.push_back(sum / length);
+  }
+  x.back() = 1.0;
+  return x;
+}
+
+// Node positions of the linearly interpolated density table (x, d): on each interval the
+// integral is quadratic, and node k is the root s = 2r / (d_i + sqrt(d_i^2 + 2 a r)).
+std::vector<double> table_closed_form(const std::vector<double>& x, const std::vector<double>& d,
+                                      int n) {
+  std::vector<double> integral(1, 0.0);
+  for (std::size_t i = 1; i < x.size(); ++i) {
+    integral.push_back(integral.back() + 0.5 * (d[i] + d[i - 1]) * (x[i] - x[i - 1]));
+  }
+  std::vector<double> t(1, 0.0);
+  std::size_t i = 0;
+  for (int k = 1; k < n; ++k) {
+    const double target = integral.back() * k / n;
+    while (i + 2 < x.size() && integral[i + 1] <= target) ++i;
+    const double slope = (d[i + 1] - d[i]) / (x[i + 1] - x[i]);
+    const double rest = target - integral[i];
+    t.push_back(x[i] + 2.0 * rest / (d[i] + std::sqrt(d[i] * d[i] + 2.0 * slope * rest)));
+  }
+  t.push_back(1.0);
+  return t;
+}
+
+void probe_p4_distributions() {
+  section("P4DIST", "TABLE and EXPRESSION node distributions against their closed forms");
+  const double length = 15.0;
+
+  // TABLE: the density 1/h at every node of a geometric target with a 3e-6 wall segment.
+  {
+    const int n = 100;
+    const std::vector<double> x = geometric_target(3e-6, n, length);
+    std::vector<double> d;
+    for (std::size_t i = 0; i < x.size(); ++i) {
+      const double h = i == 0              ? x[1] - x[0]
+                       : i + 1 == x.size() ? x[i] - x[i - 1]
+                                           : 0.5 * (x[i + 1] - x[i - 1]);
+      d.push_back(1.0 / h);
+    }
+    std::vector<double> table;
+    for (std::size_t i = 0; i < x.size(); ++i) {
+      table.push_back(x[i]);
+      table.push_back(d[i]);
+    }
+    Session s(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(length, 0, 0)).Edge());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* h = s.make<StdMeshers_NumberOfSegments>();
+    h->SetNumberOfSegments(n);
+    h->SetDistrType(StdMeshers_NumberOfSegments::DT_TabFunc);
+    h->SetConversionMode(1);
+    h->SetTableFunction(table);
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), h);
+    check(ok && s.compute(), "P4DIST TABLE with a 3e-6 wall segment computes (was 'no message')");
+    const std::vector<double> got = sorted_node_x(s.meshDS());
+    const std::vector<double> want = table_closed_form(x, d, n);
+    double worst = got.size() == want.size() ? 0.0 : 1e300;
+    for (std::size_t i = 0; got.size() == want.size() && i < got.size(); ++i) {
+      worst = std::max(worst, std::fabs(got[i] - length * want[i]));
+    }
+    char msg[200];
+    std::snprintf(msg, sizeof(msg),
+                  "P4DIST TABLE: 101 nodes within 1e-10 L of the closed form (max error %.2e)",
+                  worst);
+    check(worst <= 1e-10 * length, msg);
+  }
+
+  // EXPRESSION: the density 1/(a+t), node k at a(((1+a)/a)^(k/N) - 1).
+  {
+    const int n = 100;
+    const double a = 3e-5;
+    Session s(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(length, 0, 0)).Edge());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* h = s.make<StdMeshers_NumberOfSegments>();
+    h->SetNumberOfSegments(n);
+    h->SetDistrType(StdMeshers_NumberOfSegments::DT_ExprFunc);
+    h->SetConversionMode(1);
+    h->SetExpressionFunction("1/(3e-05+t)");
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), h);
+    check(ok && s.compute(), "P4DIST EXPRESSION 1/(3e-5+t) computes");
+    const std::vector<double> got = sorted_node_x(s.meshDS());
+    double worst = got.size() == static_cast<std::size_t>(n + 1) ? 0.0 : 1e300;
+    for (int k = 0; got.size() == static_cast<std::size_t>(n + 1) && k <= n; ++k) {
+      const double want = length * a * (std::pow((1.0 + a) / a, double(k) / n) - 1.0);
+      worst = std::max(worst, std::fabs(got[k] - want));
+    }
+    char msg[200];
+    std::snprintf(msg, sizeof(msg),
+                  "P4DIST EXPRESSION: 101 nodes within 1e-10 L of the closed form (max error "
+                  "%.2e; 11.1 m before the patch)",
+                  worst);
+    check(worst <= 1e-10 * length, msg);
+  }
+
+  // EXPRESSION with no finite integral: a pole between the points the setter samples. The
+  // edge fails with a compute error that says the integral did not converge.
+  {
+    Session s(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(length, 0, 0)).Edge());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* h = s.make<StdMeshers_NumberOfSegments>();
+    h->SetNumberOfSegments(10);
+    h->SetDistrType(StdMeshers_NumberOfSegments::DT_ExprFunc);
+    h->SetConversionMode(1);
+    h->SetExpressionFunction("1/(t-0.3001)^2");
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), h);
+    const bool computed = ok && s.compute();
+    TopExp_Explorer edge(s.shape(), TopAbs_EDGE);
+    const SMESH_ComputeErrorPtr err = s.mesh().GetSubMesh(edge.Current())->GetComputeError();
+    const bool says = err && err->myComment.find("did not converge") != std::string::npos;
+    check(ok && !computed && says,
+          "P4DIST EXPRESSION 1/(t-0.3001)^2 fails the edge: the integral did not converge");
+  }
+}
+
 }  // namespace
 
 void run_smesh_probe() {
@@ -2430,4 +2566,5 @@ void run_smesh_probe() {
   probe_cat916_1d_additions();
   probe_cat916_2d_additions();
   probe_cat916_3d_additions();
+  probe_p4_distributions();
 }
