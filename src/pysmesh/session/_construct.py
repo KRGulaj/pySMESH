@@ -669,7 +669,8 @@ class _ConstructOps(_SessionBase):
 
         Raises:
             PysmeshError: If either selection spans two bodies, if they name the same body,
-                if the spine is not a wire or edge, or if OCCT cannot sweep.
+                if the spine is not a wire or edge, if OCCT cannot sweep, or if a swept
+                solid's boundary crosses itself: the message names the faces and where.
         """
         return _delta(self._s.pipe(_ids(spine), _ids(profile), progress, cancel))
 
@@ -708,7 +709,9 @@ class _ConstructOps(_SessionBase):
         Raises:
             PysmeshError: If either selection spans two bodies, if they name the same body,
                 if either body is not a wire or edge, if ``solid`` is asked for on a shell
-                that does not close, or if OCCT cannot sweep.
+                that does not close, if OCCT cannot sweep, or if the swept solid's boundary
+                crosses itself. A Frenet sweep of a profile that is not perpendicular to the
+                spine's start tangent can do that; the message names the faces and where.
         """
         return _delta(
             self._s.pipe_shell(_ids(spine), _ids(profile), frenet, solid, progress, cancel)
@@ -746,8 +749,10 @@ class _ConstructOps(_SessionBase):
                 the lofted solid encloses no more than ``Precision::Confusion()`` times its
                 area. A loft whose surface folds through itself comes back that way, and
                 OCCT's validity check accepts it: a ruled loft through sections tilted
-                towards each other is the measured case. Nothing is committed, and the
-                session is left exactly as it was.
+                towards each other is the measured case. And, with ``solid``, if the lofted
+                solid's boundary crosses itself, naming the faces and where; a face that
+                closes through a sharp seam, as a one-edge airfoil section gives, is not a
+                crossing. Nothing is committed, and the session is left exactly as it was.
         """
         return _delta(
             self._s.thru_sections(
