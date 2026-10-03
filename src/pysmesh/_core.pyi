@@ -40,7 +40,7 @@ class FaceInfo:
     @property
     def centroid(self) -> NDArray[np.float64]: ...  # (3,)
     @property
-    def bbox(self) -> NDArray[np.float64]: ...  # (6,) xmin,ymin,zmin,xmax,ymax,zmax
+    def bbox(self) -> NDArray[np.float64]: ...  # (6,) xmin..zmax, as BoundsTable
     @property
     def uv_bounds(self) -> NDArray[np.float64]: ...  # (4,) umin,umax,vmin,vmax
 
@@ -50,13 +50,13 @@ class SolidInfo:
     @property
     def centroid(self) -> NDArray[np.float64]: ...  # (3,)
     @property
-    def bbox(self) -> NDArray[np.float64]: ...  # (6,) xmin,ymin,zmin,xmax,ymax,zmax
+    def bbox(self) -> NDArray[np.float64]: ...  # (6,) xmin..zmax, as BoundsTable
 
 class EdgeInfo:
     id: int
     length: float  # adaptive, relative precision 1e-6, as Session.mass_properties
     @property
-    def bbox(self) -> NDArray[np.float64]: ...  # (6,)
+    def bbox(self) -> NDArray[np.float64]: ...  # (6,) xmin..zmax, as BoundsTable
     @property
     def t_bounds(self) -> NDArray[np.float64]: ...  # (2,) first,last
 

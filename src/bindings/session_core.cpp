@@ -118,9 +118,12 @@ py::dict Session::entity_table(const std::string& kind) const {
   }
   first[ids.size()] = all.size();
   std::vector<shape_checks::Measure> measures;
+  std::vector<Bnd_Box> boxes;
   {
     py::gil_scoped_release release;
     measures = shape_checks::measures(all, shape_checks::kDefaultMassPrecision);
+    // The box of the geometry, not padded by the tolerance (reports D1, D2).
+    boxes = shape_checks::exact_boxes(all);
   }
 
   for (py::ssize_t i = 0; i < n; ++i) {
@@ -143,7 +146,7 @@ py::dict Session::entity_table(const std::string& kind) const {
       cx += w * m.centroid.X();
       cy += w * m.centroid.Y();
       cz += w * m.centroid.Z();
-      BRepBndLib::Add(all[j], box);
+      box.Add(boxes[j]);
     }
     mp[i] = total;
     cp[3 * i + 0] = cx / wsum;

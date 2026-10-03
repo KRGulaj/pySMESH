@@ -1817,3 +1817,85 @@ def test_every_default_volume_of_a_primitive_equals_its_closed_form(
         volume, rel=DEFAULT_PRECISION
     )
     assert 0.0 <= float(table.error[0]) <= DEFAULT_PRECISION
+
+
+# ------------------------------------------------- Boxes of the geometry (D1, D2) --- #
+
+# The pad OCCT's optimal box adds to a B-spline or Bezier curve whatever the tolerance:
+# Precision::Confusion() (GeomBndLib_SplineHelpers.pxx, CurveBoxOptimal). 1e-9 more
+# covers the optimiser's parameter tolerance (Precision::PConfusion() along the curve)
+# and the gap between 200 001 samples and the true extremum.
+SPLINE_PAD: float = 1e-7
+SPLINE_SLACK: float = 1e-9
+# The repro's NACA 0012 spline: chord 2 m, its leading edge at x = 5.
+NACA_CHORD: float = 2.0
+NACA_SHIFT: float = 5.0
+
+
+def _naca_spline(s: Session) -> EntityId:
+    """The repro's spline: NACA 0012, chord 2, leading edge at (5, 0, 0)."""
+    p = _naca(NACA_CHORD)
+    s.add_spline(np.c_[p[:, 0] + NACA_SHIFT, p[:, 1], np.zeros(len(p))])
+    return ids_of(s, EntityKind.EDGE)[-1]
+
+
+def test_a_line_has_the_box_of_its_end_points_in_every_reader() -> None:
+    """(0, 0, 0)-(1, 0, 0) has the box [0, 0, 0, 1, 0, 0]: no tolerance pad (D1)."""
+    s = Session()
+    s.add_line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    expected = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+
+    boxes = [
+        s.entity_table(EntityKind.EDGE).bbox[0],
+        s.bounding_boxes(EntityKind.EDGE).bbox[0],
+        ps.load_brep(s.brep()).edges()[0].bbox,
+    ]
+
+    for box in boxes:
+        assert np.asarray(box) == pytest.approx(expected, abs=1e-12)
+
+
+def test_a_box_that_fits_the_query_exactly_is_found_under_strict() -> None:
+    """A unit box at x = 5..6: strict finds its solid and its six faces (D1)."""
+    s = Session()
+    s.add_box(1.0, 1.0, 1.0, origin=(5.0, 0.0, 0.0))
+    low, high = (5.0, 0.0, 0.0), (6.0, 1.0, 1.0)
+
+    solids = s.entities_in_box(EntityKind.SOLID, low, high, strict=True)
+    faces = s.entities_in_box(EntityKind.FACE, low, high, strict=True)
+
+    assert len(solids) == 1
+    assert len(faces) == 6
+
+
+def test_a_spline_box_bounds_the_curve_not_its_poles() -> None:
+    """The box lies within OCCT's pad of the extent of 200 001 curve samples (D2).
+
+    BRepBndLib::Add bounded the control polygon, 2.72 mm below the leading edge.
+    """
+    s = Session()
+    edge = _naca_spline(s)
+    t0, t1 = s.edge_parameter_bounds([edge])[0]
+    points = s.curve_at(edge, np.linspace(t0, t1, 200_001)).points
+    low, high = points.min(axis=0), points.max(axis=0)
+
+    box = s.bounding_boxes(EntityKind.EDGE).bbox[0]
+
+    assert np.all(box[:3] <= low + SPLINE_SLACK)
+    assert np.all(box[:3] >= low - SPLINE_PAD - SPLINE_SLACK)
+    assert np.all(box[3:] >= high - SPLINE_SLACK)
+    assert np.all(box[3:] <= high + SPLINE_PAD + SPLINE_SLACK)
+
+
+def test_a_query_box_left_of_the_leading_edge_does_not_report_the_spline() -> None:
+    """x in [-2 mm, -0.5 mm] of the leading edge holds no point of the spline (D2)."""
+    s = Session()
+    _naca_spline(s)
+
+    hits = s.entities_in_box(
+        EntityKind.EDGE,
+        (NACA_SHIFT - 0.002, -1.0, -1.0),
+        (NACA_SHIFT - 0.0005, 1.0, 1.0),
+    )
+
+    assert len(hits) == 0

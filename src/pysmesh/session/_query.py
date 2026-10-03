@@ -112,7 +112,8 @@ class _QueryOps(_SessionBase):
 
         The cheap bulk query. :meth:`entity_table` also returns boxes, but pays for mass
         properties to do it — on a large assembly that is seconds rather than milliseconds.
-        Use this one for culling, spatial indexing and picking.
+        Use this one for culling, spatial indexing and picking. Each box is the box of the
+        geometry, as :class:`BoundsTable` states.
 
         Args:
             kind: The entity kind to bound.
@@ -463,7 +464,9 @@ class _QueryOps(_SessionBase):
 
         A bounding-box test, so it over-selects: an entity whose box overlaps but whose
         geometry does not is returned. That is the useful contract for a broad phase — narrow
-        it with an exact test on the far smaller result.
+        it with an exact test on the far smaller result. The entity's box is the box of its
+        geometry, as :class:`BoundsTable` states: under ``strict``, an entity that fits the
+        query box exactly is inside it.
 
         Args:
             kind: The entity kind to search.

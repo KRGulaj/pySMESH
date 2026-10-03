@@ -20,6 +20,7 @@
 #include <string>
 #include <vector>
 
+#include <Bnd_Box.hxx>
 #include <TopoDS_Shape.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_XYZ.hxx>
@@ -220,6 +221,18 @@ Measure measure(const TopoDS_Shape& s, double precision);
 
 // The measures of many shapes, integrated in parallel, one shape per task.
 std::vector<Measure> measures(const std::vector<TopoDS_Shape>& shapes, double precision);
+
+// The box of a shape's geometry (reports D1, D2): BRepBndLib::AddOptimal without the
+// triangulation and without the shape's tolerance, so a line's box is its two end points.
+// A B-spline or Bezier curve or surface is bounded by its own points, found by
+// optimisation, and OCCT pads that box by Precision::Confusion() = 1e-7
+// (GeomBndLib_SplineHelpers.pxx, CurveBoxOptimal: aBox.Enlarge(anEps)). BRepBndLib::Add
+// bounded the control polygon, 2.72 mm outside a NACA spline of 2 m chord, and padded
+// every box by the shape tolerance.
+Bnd_Box exact_box(const TopoDS_Shape& s);
+
+// The boxes of many shapes, computed in parallel, one shape per task.
+std::vector<Bnd_Box> exact_boxes(const std::vector<TopoDS_Shape>& shapes);
 
 // How far a wire is from planar: the spread of its points across the plane that fits them
 // best (BRepLib_FindSurface, OnlyPlane: a least-squares plane), as the largest minus the

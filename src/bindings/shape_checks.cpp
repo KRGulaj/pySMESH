@@ -876,6 +876,20 @@ std::vector<Measure> measures(const std::vector<TopoDS_Shape>& shapes, double pr
   return out;
 }
 
+Bnd_Box exact_box(const TopoDS_Shape& s) {
+  Bnd_Box box;
+  BRepBndLib::AddOptimal(s, box, /*useTriangulation=*/false, /*useShapeTolerance=*/false);
+  return box;
+}
+
+std::vector<Bnd_Box> exact_boxes(const std::vector<TopoDS_Shape>& shapes) {
+  std::vector<Bnd_Box> out(shapes.size());
+  OSD_Parallel::For(0, static_cast<int>(shapes.size()), [&](const int i) {
+    out[static_cast<std::size_t>(i)] = exact_box(shapes[static_cast<std::size_t>(i)]);
+  });
+  return out;
+}
+
 std::optional<double> out_of_plane_spread(const TopoDS_Shape& wire) {
   // Any tolerance: the plane is wanted, not a verdict. The largest box side bounds every
   // distance from it.

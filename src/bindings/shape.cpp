@@ -17,7 +17,6 @@
 #include <vector>
 
 #include <BRepAdaptor_Surface.hxx>
-#include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
@@ -102,12 +101,23 @@ struct VertexInfo {
   std::array<double, 3> xyz;
 };
 
-std::array<double, 6> bbox_of(const TopoDS_Shape& s) {
-  Bnd_Box box;
-  BRepBndLib::Add(s, box);
+// The six numbers of one box.
+std::array<double, 6> bbox_of(const Bnd_Box& box) {
   std::array<double, 6> b{};
   box.Get(b[0], b[1], b[2], b[3], b[4], b[5]);
   return b;
+}
+
+// The boxes of the geometry of every shape of one indexed map, in its order, computed in
+// parallel with the GIL released: not padded by the tolerance (reports D1, D2).
+std::vector<Bnd_Box> boxes_of(const TopTools_IndexedMapOfShape& map) {
+  std::vector<TopoDS_Shape> shapes;
+  shapes.reserve(static_cast<std::size_t>(map.Extent()));
+  for (int i = 1; i <= map.Extent(); ++i) {
+    shapes.push_back(map.FindKey(i));
+  }
+  py::gil_scoped_release release;
+  return shape_checks::exact_boxes(shapes);
 }
 
 // The measures of every shape of one indexed map, in its order, with the GIL released.
@@ -133,6 +143,7 @@ class Shape {
   // 20 % low (report D3).
   std::vector<FaceInfo> faces() const {
     const std::vector<shape_checks::Measure> m = measures_of(data_->faces);
+    const std::vector<Bnd_Box> boxes = boxes_of(data_->faces);
     std::vector<FaceInfo> out;
     const int n = data_->faces.Extent();
     out.reserve(n);
@@ -143,7 +154,8 @@ class Shape {
       BRepTools::UVBounds(f, uv[0], uv[1], uv[2], uv[3]);
       const BRepAdaptor_Surface surf(f);
       out.push_back(FaceInfo{i, m[static_cast<std::size_t>(i - 1)].mass,
-                             {c.X(), c.Y(), c.Z()}, bbox_of(f), uv,
+                             {c.X(), c.Y(), c.Z()},
+                             bbox_of(boxes[static_cast<std::size_t>(i - 1)]), uv,
                              surface_type_name(surf.GetType())});
     }
     return out;
@@ -151,20 +163,22 @@ class Shape {
 
   std::vector<SolidInfo> solids() const {
     const std::vector<shape_checks::Measure> m = measures_of(data_->solids);
+    const std::vector<Bnd_Box> boxes = boxes_of(data_->solids);
     std::vector<SolidInfo> out;
     const int n = data_->solids.Extent();
     out.reserve(n);
     for (int i = 1; i <= n; ++i) {
-      const TopoDS_Solid& s = TopoDS::Solid(data_->solids.FindKey(i));
       const gp_XYZ& c = m[static_cast<std::size_t>(i - 1)].centroid;
       out.push_back(SolidInfo{i, m[static_cast<std::size_t>(i - 1)].mass,
-                              {c.X(), c.Y(), c.Z()}, bbox_of(s)});
+                              {c.X(), c.Y(), c.Z()},
+                              bbox_of(boxes[static_cast<std::size_t>(i - 1)])});
     }
     return out;
   }
 
   std::vector<EdgeInfo> edges() const {
     const std::vector<shape_checks::Measure> m = measures_of(data_->edges);
+    const std::vector<Bnd_Box> boxes = boxes_of(data_->edges);
     std::vector<EdgeInfo> out;
     const int n = data_->edges.Extent();
     out.reserve(n);
@@ -172,8 +186,8 @@ class Shape {
       const TopoDS_Edge& e = TopoDS::Edge(data_->edges.FindKey(i));
       double first = 0.0, last = 0.0;
       BRep_Tool::Range(e, first, last);
-      out.push_back(
-          EdgeInfo{i, m[static_cast<std::size_t>(i - 1)].mass, bbox_of(e), {first, last}});
+      out.push_back(EdgeInfo{i, m[static_cast<std::size_t>(i - 1)].mass,
+                             bbox_of(boxes[static_cast<std::size_t>(i - 1)]), {first, last}});
     }
     return out;
   }

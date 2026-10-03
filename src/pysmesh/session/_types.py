@@ -322,6 +322,7 @@ class EntityTable:
             :meth:`Session.mass_properties` does without a precision.
         centroid: (N, 3) float64, measure-weighted over a split entity's shapes.
         bbox: (N, 6) float64 — xmin, ymin, zmin, xmax, ymax, zmax, covering every shape.
+            The box of the geometry, as in :class:`BoundsTable`.
         shape_count: (N,) int64 — how many shapes each entity denotes; greater than one
             after a split.
     """
@@ -424,6 +425,11 @@ class BoundsTable:
 
     Deliberately separate from :class:`EntityTable`: a bounding box costs a fraction of a
     mass property, and a caller culling or spatially indexing a model needs only the box.
+
+    Each box is the box of the geometry, not padded by the shape tolerance: a straight
+    edge's box is the box of its two end points. A B-spline or Bezier curve or surface is
+    bounded by its own points, not by its control polygon, and OCCT pads that box by 1e-7
+    (``Precision::Confusion()``).
 
     Attributes:
         kind: The entity kind this table covers.

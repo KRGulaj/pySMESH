@@ -244,11 +244,26 @@ py::dict Session::bounding_boxes(const std::string& kind) const {
   py::array_t<double> bbox({n, static_cast<py::ssize_t>(6)});
   double* bp = bbox.mutable_data();
 
+  // The box of the geometry, not padded by the tolerance (reports D1, D2), each shape
+  // in parallel with the GIL released.
+  std::vector<TopoDS_Shape> all;
+  std::vector<std::size_t> first(ids.size() + 1, 0);
+  for (std::size_t k = 0; k < ids.size(); ++k) {
+    const EntityRecord& rec = state_.registry->alive.at(ids[k]);
+    first[k] = all.size();
+    all.insert(all.end(), rec.shapes.begin(), rec.shapes.end());
+  }
+  first[ids.size()] = all.size();
+  std::vector<Bnd_Box> boxes;
+  {
+    py::gil_scoped_release release;
+    boxes = shape_checks::exact_boxes(all);
+  }
   for (py::ssize_t i = 0; i < n; ++i) {
-    const EntityRecord& rec = state_.registry->alive.at(ids[static_cast<std::size_t>(i)]);
+    const auto k = static_cast<std::size_t>(i);
     Bnd_Box box;
-    for (const TopoDS_Shape& s : rec.shapes) {
-      BRepBndLib::Add(s, box);
+    for (std::size_t j = first[k]; j < first[k + 1]; ++j) {
+      box.Add(boxes[j]);
     }
     box.Get(bp[6 * i + 0], bp[6 * i + 1], bp[6 * i + 2], bp[6 * i + 3], bp[6 * i + 4],
             bp[6 * i + 5]);
@@ -994,12 +1009,29 @@ py::array_t<std::int64_t> Session::entities_in_box(const std::string& kind, doub
   Bnd_Box query;
   query.Update(xmin, ymin, zmin, xmax, ymax, zmax);
 
+  // The box of the geometry, not padded by the tolerance (reports D1, D2): an entity
+  // that fits the query box exactly is inside it under strict.
+  const std::vector<EntityId> ids = ids_of_kind(kind_from_name(kind));
+  std::vector<TopoDS_Shape> all;
+  std::vector<std::size_t> first(ids.size() + 1, 0);
+  for (std::size_t k = 0; k < ids.size(); ++k) {
+    const EntityRecord& rec = state_.registry->alive.at(ids[k]);
+    first[k] = all.size();
+    all.insert(all.end(), rec.shapes.begin(), rec.shapes.end());
+  }
+  first[ids.size()] = all.size();
+  std::vector<Bnd_Box> boxes;
+  {
+    py::gil_scoped_release release;
+    boxes = shape_checks::exact_boxes(all);
+  }
+
   std::vector<EntityId> hits;
-  for (EntityId id : ids_of_kind(kind_from_name(kind))) {
-    const EntityRecord& rec = state_.registry->alive.at(id);
+  for (std::size_t k = 0; k < ids.size(); ++k) {
+    const EntityId id = ids[k];
     Bnd_Box box;
-    for (const TopoDS_Shape& s : rec.shapes) {
-      BRepBndLib::Add(s, box);
+    for (std::size_t j = first[k]; j < first[k + 1]; ++j) {
+      box.Add(boxes[j]);
     }
     if (box.IsVoid()) {
       continue;
