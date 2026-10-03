@@ -33,6 +33,7 @@
 #include <gp_Pnt.hxx>
 
 #include "common.hpp"
+#include "shape_checks.hpp"
 
 namespace pysmesh {
 namespace {
@@ -296,18 +297,31 @@ class Shape {
 };
 
 // ---- load_brep ---------------------------------------------------------------------//
-Shape load_brep(const py::bytes& data) {
+// Every solid is checked for its inside, as Session.add_brep does (report V3); with
+// inside_out="reverse" an inside-out solid is reversed instead of refused.
+Shape load_brep(const py::bytes& data, const std::string& inside_out) {
+  const bool reverse = shape_checks::reverse_inside_out("load_brep", inside_out);
   const std::string buffer = data;  // copy the bytes into a std::string
   std::istringstream stream(buffer);
   TopoDS_Shape shape;
   BRep_Builder builder;
+  std::vector<shape_checks::InsideOutSolid> wrong;
   try {
     BRepTools::Read(shape, stream, builder);
+    if (!shape.IsNull()) {
+      wrong = shape_checks::inside_out_solids(shape);
+    }
   } catch (const std::exception& e) {
     throw PysmeshError(std::string("BREP read failed: ") + e.what());
   }
   if (shape.IsNull()) {
     throw PysmeshError("BREP read produced a null shape (empty or malformed data)");
+  }
+  if (!wrong.empty()) {
+    if (!reverse) {
+      throw PysmeshError(shape_checks::inside_out_refusal("load_brep", wrong));
+    }
+    shape = shape_checks::reverse_solids(shape, wrong);
   }
   return Shape(std::make_shared<ShapeData>(shape));
 }
@@ -385,8 +399,10 @@ void bind_shape(py::module_& m) {
            "Nearest face by centroid for each of Q query points (Q,3): (Q,) int32 1-based face "
            "ids, -1 where the nearest face centroid is farther than tol. tol must be > 0.");
 
-  m.def("load_brep", &load_brep, py::arg("data"),
-        "Read a BREP shape from in-memory bytes. Raises on parse failure or null shape.");
+  m.def("load_brep", &load_brep, py::arg("data"), py::arg("inside_out") = "raise",
+        "Read a BREP shape from in-memory bytes. Raises on parse failure, a null shape, or "
+        "an inside-out solid (the point at infinity inside it and a negative volume); with "
+        "inside_out=\"reverse\" such a solid is reversed instead.");
 }
 
 }  // namespace pysmesh

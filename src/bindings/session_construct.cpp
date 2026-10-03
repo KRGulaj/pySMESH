@@ -21,18 +21,27 @@ namespace session {
 
 // ---- construction operations ------------------------------------------------------ //
 
-py::dict Session::add_brep(const py::bytes& data, const py::object& progress,
-                           const py::object& cancel) {
+// An imported solid is checked for its inside (report V3): BRepCheck_Analyzer accepts a
+// solid whose shell bounds its complement, so the import used to commit a unit box at
+// volume -1 with every point test inverted. `inside_out` decides what happens to one:
+// "raise" refuses the import, "reverse" reverses it and says so on the delta.
+py::dict Session::add_brep(const py::bytes& data, const std::string& inside_out,
+                           const py::object& progress, const py::object& cancel) {
   OpGuard guard(in_op_);
+  const bool reverse = shape_checks::reverse_inside_out("Session.add_brep", inside_out);
   const std::string buffer = data;
   ProgressDriver driver("add_brep", hooks_of("add_brep", progress, cancel));
   TopoDS_Shape imported;
+  std::vector<shape_checks::InsideOutSolid> wrong;
   {
     py::gil_scoped_release release;
     std::istringstream stream(buffer);
     BRep_Builder builder;
     try {
       BRepTools::Read(imported, stream, builder, driver.range());
+      if (!imported.IsNull()) {
+        wrong = shape_checks::inside_out_solids(imported);
+      }
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(std::string("Session.add_brep: BREP read failed: ") + e.what());
@@ -48,7 +57,19 @@ py::dict Session::add_brep(const py::bytes& data, const py::object& progress,
     throw PysmeshError(
         "Session.add_brep: BREP read produced a null shape (empty or malformed data).");
   }
-  return add_bodies(imported, "add_brep");
+  if (wrong.empty()) {
+    return add_bodies(imported, "add_brep");
+  }
+  if (!reverse) {
+    throw PysmeshError(shape_checks::inside_out_refusal("Session.add_brep", wrong));
+  }
+  std::vector<std::string> warnings;
+  for (const shape_checks::InsideOutSolid& s : wrong) {
+    warnings.push_back(shape_checks::inside_out_reversed(s));
+  }
+  const TopoDS_Shape fixed = shape_checks::reverse_solids(imported, wrong);
+  return commit(concat(root_bodies(state_.root), fixed), Handle(BRepTools_History)(),
+                "add_brep", fixed, Validation::Strict, warnings);
 }
 
 py::dict Session::add_box(double dx, double dy, double dz, double ox, double oy, double oz) {

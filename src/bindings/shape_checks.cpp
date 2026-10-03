@@ -8,6 +8,8 @@
 
 #include "shape_checks.hpp"
 
+#include "common.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -16,17 +18,24 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
+#include <BRepGProp.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepTools.hxx>
 #include <BRepTopAdaptor_FClass2d.hxx>
+#include <BRepTools_ReShape.hxx>
+#include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
 #include <GCPnts_AbscissaPoint.hxx>
+#include <GProp_GProps.hxx>
 #include <Geom2d_Curve.hxx>
 #include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_IndexedMap.hxx>
 #include <NCollection_List.hxx>
+#include <OSD_Parallel.hxx>
 #include <Poly_Triangle.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Precision.hxx>
@@ -39,6 +48,8 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
+#include <TopoDS_Iterator.hxx>
+#include <TopoDS_Solid.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <gp.hxx>
 #include <gp_Pnt2d.hxx>
@@ -283,6 +294,119 @@ TessellatedVolume tessellated_volume(const TopoDS_Shape& solid, double deflectio
   }
   out.complete = true;
   return out;
+}
+
+EnclosedVolume enclosed_volume(const TopoDS_Shape& solid, bool precise) {
+  const double eps = Precision::Confusion();
+  EnclosedVolume out;
+  Bnd_Box box;
+  BRepBndLib::Add(solid, box);
+  const double diagonal = std::max(std::sqrt(box.SquareExtent()), eps);
+  if (!precise) {
+    const double deflection = kSignDeflection * diagonal;
+    const TessellatedVolume tess = tessellated_volume(solid, deflection);
+    if (tess.complete && tess.volume > (deflection + eps) * tess.area) {
+      out.volume = tess.volume;
+      out.area = tess.area;
+      out.tolerance = eps * tess.area;
+      out.exact = false;
+      return out;
+    }
+  }
+  GProp_GProps surface;
+  BRepGProp::SurfaceProperties(solid, surface);
+  out.area = surface.Mass();
+  out.tolerance = eps * out.area;
+  // The most the faces' contributions can add up to, whatever cancels between them.
+  const double lever = diagonal * out.area / 3.0;
+  const double tight = std::min(0.3 * eps / diagonal, kAdaptiveEpsCap);
+  for (const double precision : {kAdaptiveEpsCap, tight}) {
+    GProp_GProps volume;
+    const double reached = BRepGProp::VolumeProperties(solid, volume, precision);
+    out.volume = volume.Mass();
+    if (std::abs(out.volume) > out.tolerance + std::max(precision, reached) * lever ||
+        precision <= tight) {
+      break;
+    }
+  }
+  return out;
+}
+
+
+std::vector<InsideOutSolid> inside_out_solids(const TopoDS_Shape& shape) {
+  std::vector<InsideOutSolid> out;
+  const std::vector<TopoDS_Shape> solids = solids_of({shape});
+  // One classification per solid, the solids side by side: each classifier reads its own
+  // solid only, and the states land in their own slots, so the answer does not depend on
+  // the order the threads finish in. On the production assembly (117 solids) this check
+  // cost 0.40 s in one thread.
+  std::vector<TopAbs_State> states(solids.size(), TopAbs_UNKNOWN);
+  OSD_Parallel::For(0, static_cast<int>(solids.size()), [&](const int i) {
+    BRepClass3d_SolidClassifier where(solids[static_cast<std::size_t>(i)]);
+    where.PerformInfinitePoint(Precision::Confusion());
+    states[static_cast<std::size_t>(i)] = where.State();
+  });
+  for (std::size_t i = 0; i < solids.size(); ++i) {
+    if (states[i] != TopAbs_IN) {
+      continue;
+    }
+    const EnclosedVolume enclosed = enclosed_volume(solids[i]);
+    if (enclosed.volume < -enclosed.tolerance) {
+      out.push_back({static_cast<int>(i) + 1, enclosed.volume});
+    }
+  }
+  return out;
+}
+
+TopoDS_Shape reverse_solids(const TopoDS_Shape& shape, const std::vector<InsideOutSolid>& solids) {
+  const std::vector<TopoDS_Shape> all = solids_of({shape});
+  const Handle(BRepTools_ReShape) reshape = new BRepTools_ReShape;
+  BRep_Builder builder;
+  for (const InsideOutSolid& s : solids) {
+    const TopoDS_Shape& old = all[static_cast<std::size_t>(s.ordinal - 1)];
+    TopoDS_Solid fixed;
+    builder.MakeSolid(fixed);
+    for (TopoDS_Iterator it(old); it.More(); it.Next()) {
+      builder.Add(fixed, it.Value().Reversed());
+    }
+    if (shape.IsSame(old)) {
+      return fixed;
+    }
+    reshape->Replace(old, fixed);
+  }
+  return reshape->Apply(shape);
+}
+
+std::string inside_out_refusal(const std::string& op, const std::vector<InsideOutSolid>& solids) {
+  std::string names;
+  for (std::size_t i = 0; i < solids.size(); ++i) {
+    char volume[32];
+    std::snprintf(volume, sizeof(volume), "%.9g", solids[i].volume);
+    names += (i == 0 ? "" : ", ") + std::string("solid ") +
+             std::to_string(solids[i].ordinal) + " (volume " + volume + ")";
+  }
+  return op + ": the BREP holds " + std::to_string(solids.size()) +
+         " solid(s) that are inside out: " + names +
+         ". The point at infinity classifies inside each, and its volume is negative. Pass "
+         "inside_out=\"reverse\" to reverse them; nothing is imported.";
+}
+
+std::string inside_out_reversed(const InsideOutSolid& solid) {
+  char volume[32];
+  std::snprintf(volume, sizeof(volume), "%.9g", solid.volume);
+  return "solid " + std::to_string(solid.ordinal) + " of the BREP was inside out (volume " +
+         volume + "); it is reversed";
+}
+
+bool reverse_inside_out(const std::string& op, const std::string& policy) {
+  if (policy == "reverse") {
+    return true;
+  }
+  if (policy == "raise") {
+    return false;
+  }
+  throw PysmeshError(op + ": inside_out must be \"raise\" or \"reverse\" (got \"" + policy +
+                     "\").");
 }
 
 std::string edge_text(const TopoDS_Shape& edge) {

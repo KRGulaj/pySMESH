@@ -87,5 +87,82 @@ struct TessellatedVolume {
 
 TessellatedVolume tessellated_volume(const TopoDS_Shape& solid, double deflection);
 
+// GProp's adaptive rule falls back to its fixed rule for any Eps above 1e-3
+// (BRepGProp.hxx: "if Eps > 0.001 algorithm performs non-adaptive integration").
+constexpr double kAdaptiveEpsCap = 1e-3;
+
+// The volume a solid encloses, integrated precisely enough to trust its sign, and the least
+// volume it must enclose to have an inside at all.
+struct EnclosedVolume {
+  double volume = 0.0;
+  double area = 0.0;
+  // eps x area, eps = Precision::Confusion(). A solid enclosing no more than this has, on
+  // average, two sides closer than the distance at which OCCT treats two points as one.
+  double tolerance = 0.0;
+  // False when the volume and the area are a tessellation's (see enclosed_volume): then the
+  // volume is certainly above the tolerance, but it is only within kSignDeflection x the
+  // bounding-box diagonal x the area of the true one.
+  bool exact = true;
+};
+
+// The deflection of the sign check in enclosed_volume, relative to the bounding-box diagonal.
+constexpr double kSignDeflection = 1e-3;
+
+// What a solid-making operation checks before it commits a solid: BRepCheck_Analyzer accepts
+// a solid whose shell bounds its complement, so it cannot be the check.
+//
+// The volume is integrated with GProp's adaptive rule, because the fixed rule can get its
+// sign wrong. It integrates each face about a point near the shape, so a face contributes up
+// to D x its area / 3, D the bounding-box diagonal, and the contributions cancel down to the
+// volume. A relative error e on them moves the volume by up to e x D x A / 3, while a sheet
+// of thickness t encloses t x A / 2, so the sign can go when t < 2 e D / 3. The fixed rule's
+// area error on one face of the production assembly was 26 %.
+//
+// The integral is taken in two stages, because only the verdict against the tolerance
+// matters, and a tight precision costs: on the assembly's 436-face solid, 6.6 s at the
+// precision below against 1.2 s at kAdaptiveEpsCap.
+//
+//   * First at kAdaptiveEpsCap. With e the larger of that and the error GProp reports, the
+//     volume is settled when it clears the tolerance by more than e x D x A / 3. Over the
+//     assembly's 117 solids, the real error at this stage was at most 1/60 of that bound, and
+//     116 of them settle here.
+//   * Otherwise at the precision the defeature check derives: e x D x A / 3 set to a tenth of
+//     eps x A gives e = 0.3 x eps / D, so the verdict at the tolerance is the volume's own.
+//
+// Most solids enclose far more than the tolerance, and for them the integral is the whole
+// cost: 1.2 s of a 1.4 s sew on the assembly's 436-face solid. So, unless `precise` is set,
+// a sign check runs first (shape_checks::tessellated_volume): a tessellated copy at the
+// absolute deflection d = kSignDeflection x D has a volume V_t within d x A_t of the true
+// one, A_t its area. When V_t > (d + eps) x A_t the true volume is above eps x A_t, the
+// verdict is settled, and the integral is skipped; `exact` is then false. Otherwise the
+// integral runs as above, so every refusal reports the integrated volume.
+EnclosedVolume enclosed_volume(const TopoDS_Shape& solid, bool precise = false);
+
+// A solid of a shape whose matter is outside its boundary: the point at infinity classifies
+// inside it, and the volume it encloses is negative beyond the tolerance.
+struct InsideOutSolid {
+  int ordinal = 0;  // 1-based, in TopExp::MapShapes(shape, TopAbs_SOLID) order
+  double volume = 0.0;
+};
+
+// Every inside-out solid of `shape`. The classifier decides alone for a solid it finds
+// outside of the point at infinity, which is every solid of a valid model, so a valid model
+// pays one classification per solid. A solid it finds inside is integrated
+// (enclosed_volume), and counts only when the volume agrees.
+std::vector<InsideOutSolid> inside_out_solids(const TopoDS_Shape& shape);
+
+// `shape` with each named solid replaced by a solid whose shells are reversed, so its matter
+// is inside. The faces are kept; only the solid and its shells are new.
+TopoDS_Shape reverse_solids(const TopoDS_Shape& shape, const std::vector<InsideOutSolid>& solids);
+
+// The refusal of an import that holds inside-out solids, and the line that reports one
+// reversed solid. `op` names the operation, e.g. "Session.add_brep".
+std::string inside_out_refusal(const std::string& op, const std::vector<InsideOutSolid>& solids);
+std::string inside_out_reversed(const InsideOutSolid& solid);
+
+// The import policy for inside-out solids, from the caller's string: true for "reverse",
+// false for "raise". Anything else is refused, naming `op`.
+bool reverse_inside_out(const std::string& op, const std::string& policy);
+
 }  // namespace shape_checks
 }  // namespace pysmesh

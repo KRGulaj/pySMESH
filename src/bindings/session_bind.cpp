@@ -19,7 +19,8 @@ using session::Session;
 void bind_session(py::module_& m) {
   py::class_<Session>(m, "Session")
       .def(py::init<bool>(), py::arg("validate"))
-      .def("add_brep", &Session::add_brep, py::arg("data"), py::arg("progress"),
+      .def("add_brep", &Session::add_brep, py::arg("data"), py::arg("inside_out"),
+           py::arg("progress"),
            py::arg("cancel"))
       .def("add_box", &Session::add_box, py::arg("dx"), py::arg("dy"), py::arg("dz"),
            py::arg("ox"), py::arg("oy"), py::arg("oz"))

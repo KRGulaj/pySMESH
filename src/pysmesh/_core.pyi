@@ -10,6 +10,7 @@ The host application runs ``mypy --strict`` against these; keep signatures exact
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -82,7 +83,7 @@ class Session:
 
     def __init__(self, validate: bool) -> None: ...
     def add_brep(
-        self, data: bytes, progress: object, cancel: object
+        self, data: bytes, inside_out: str, progress: object, cancel: object
     ) -> dict[str, object]: ...
     def add_box(
         self, dx: float, dy: float, dz: float, ox: float, oy: float, oz: float
@@ -529,7 +530,20 @@ class Mesh:
     def __enter__(self) -> Mesh: ...
     def __exit__(self, *args: object) -> None: ...
 
-def load_brep(data: bytes) -> Shape: ...
+def load_brep(
+    data: bytes, inside_out: Literal["raise", "reverse"] = "raise"
+) -> Shape:
+    """Read a BREP shape from in-memory bytes.
+
+    Every solid is checked for its inside: one whose matter is outside its boundary (the
+    point at infinity classifies inside it, and its volume is negative) is refused with
+    ``inside_out="raise"``, naming its 1-based ordinal, and reversed with
+    ``inside_out="reverse"``.
+
+    Raises:
+        PysmeshError: On a parse failure, a null shape, an unknown ``inside_out``, or an
+            inside-out solid under ``"raise"``.
+    """
 def make_thick_solid(
     brep: bytes,
     remove_face_ids: list[int],

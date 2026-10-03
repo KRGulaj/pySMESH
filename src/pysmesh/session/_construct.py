@@ -12,6 +12,7 @@ across per-area translation units; see the package docstring for the whole surfa
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Literal
 
 from .._core import PysmeshError
 from ._base import _SessionBase
@@ -44,13 +45,23 @@ class _ConstructOps(_SessionBase):
         self,
         data: bytes,
         *,
+        inside_out: Literal["raise", "reverse"] = "raise",
         progress: ProgressCallback | None = None,
         cancel: CancelPredicate | None = None,
     ) -> HistoryDelta:
         """Import BREP bytes as one or more new bodies.
 
+        Every solid is checked for its inside. A solid is inside out when the point at
+        infinity classifies inside it and the volume it encloses is negative: its shell
+        bounds the complement, so every point test on it is inverted. OCCT's validity
+        check accepts such a solid, so the import has to look for it.
+
         Args:
             data: A shape as BREP bytes (any OCCT ``BRepTools::Write`` output).
+            inside_out: What to do with an inside-out solid. ``"raise"`` refuses the import
+                and names the solids by their 1-based ordinal in the BREP. ``"reverse"``
+                reverses each one, so its matter is inside, and lists it on the delta's
+                ``warnings``.
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the read runs. ``None`` reports nothing.
             cancel: Called with no arguments; return ``True`` to stop the read. It then
@@ -60,9 +71,10 @@ class _ConstructOps(_SessionBase):
             The delta; every entity of the imported shape is newly issued.
 
         Raises:
-            PysmeshError: On a malformed BREP or a null shape.
+            PysmeshError: On a malformed BREP, a null shape, an unknown ``inside_out``, or,
+                with ``inside_out="raise"``, an inside-out solid. The session is unchanged.
         """
-        return _delta(self._s.add_brep(data, progress, cancel))
+        return _delta(self._s.add_brep(data, inside_out, progress, cancel))
 
     def add_box(
         self,

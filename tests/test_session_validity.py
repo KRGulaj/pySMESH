@@ -28,6 +28,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+import pysmesh as ps
 from pysmesh import EntityId, EntityKind, PysmeshError, Session
 
 FUZZY_VALUES: tuple[float, ...] = (0.0, 1e-7, 3e-7, 1e-6, 3e-6, 1e-5, 3e-5, 1e-4, 3e-4)
@@ -341,3 +342,58 @@ def test_a_cut_that_leaves_a_free_boundary_edge_is_refused_naming_the_edges(
     assert len(lengths) == free_edges
     assert all(length > 0.0 for length in lengths)
     assert s.brep() == brep
+
+
+# ---- V3: an inside-out solid on import ------------------------------------------------- #
+
+
+def _inside_out_box() -> bytes:
+    """A unit box whose solid record names its shell reversed (``+`` to ``-``, report V3)."""
+    s = Session()
+    s.add_box(1.0, 1.0, 1.0)
+    text = s.brep().decode()
+    k = text.rindex("So\n\n0100000\n+")
+    return (text[:k] + text[k:].replace("\n+", "\n-", 1)).encode()
+
+
+INSIDE_AND_FAR: list[list[float]] = [[0.5, 0.5, 0.5], [1000.0, 1000.0, 1000.0]]
+
+
+def test_add_brep_refuses_an_inside_out_solid_naming_it() -> None:
+    """The reversed box is refused by default; the session stays empty."""
+    s = Session()
+
+    with pytest.raises(PysmeshError) as info:
+        s.add_brep(_inside_out_box())
+
+    assert "inside out" in str(info.value)
+    assert "solid 1" in str(info.value)
+    assert list(s.entities(EntityKind.SOLID)) == []
+
+
+def test_load_brep_refuses_an_inside_out_solid_naming_it() -> None:
+    """The stateless reader refuses the reversed box the same way."""
+    with pytest.raises(PysmeshError) as info:
+        ps.load_brep(_inside_out_box())
+
+    assert "inside out" in str(info.value)
+    assert "solid 1" in str(info.value)
+
+
+def test_add_brep_reverses_an_inside_out_solid_on_request() -> None:
+    """``inside_out="reverse"``: volume +1, inside is inside, and the delta says so."""
+    s = Session()
+
+    delta = s.add_brep(_inside_out_box(), inside_out="reverse")
+
+    solids = list(s.entities(EntityKind.SOLID))
+    assert _volume(s) == pytest.approx(1.0, rel=1e-12)
+    assert s.contains(solids, INSIDE_AND_FAR).tolist() == [[True, False]]
+    assert any("solid 1" in w and "reversed" in w for w in delta.warnings)
+
+
+def test_load_brep_reverses_an_inside_out_solid_on_request() -> None:
+    """The stateless reader reverses the box on request: its volume is +1."""
+    shape = ps.load_brep(_inside_out_box(), inside_out="reverse")
+
+    assert shape.solids()[0].volume == pytest.approx(1.0, rel=1e-12)
