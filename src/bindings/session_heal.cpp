@@ -57,6 +57,7 @@ struct ClosedShell {
   TopoDS_Solid solid;
   double volume = 0.0;
   double area = 0.0;
+  bool exact = true;  // false: volume and area are the sign check's (enclosed_volume)
   Bnd_Box box;
 };
 
@@ -120,6 +121,7 @@ std::optional<std::string> orient_and_measure(ClosedShell& c) {
   const EnclosedVolume enclosed = enclosed_volume(c.solid);
   c.volume = enclosed.volume;
   c.area = enclosed.area;
+  c.exact = enclosed.exact;
   const double tol = enclosed.tolerance;
   if (c.volume > tol) {
     return std::nullopt;
@@ -133,6 +135,17 @@ std::optional<std::string> orient_and_measure(ClosedShell& c) {
          six_digits(c.volume) +
          ": the classifier and the volume disagree about its inside. A shell that crosses "
          "itself does this";
+}
+
+// Replace the sign check's volume and area of a closed shell by the integrated ones.
+void make_exact(ClosedShell& c) {
+  if (c.exact) {
+    return;
+  }
+  const EnclosedVolume enclosed = enclosed_volume(c.solid, /*precise=*/true);
+  c.volume = enclosed.volume;
+  c.area = enclosed.area;
+  c.exact = true;
 }
 
 // Keep every shape of a sewing result that is not a shell: a face that sewed to nothing,
@@ -276,6 +289,14 @@ Closure close_into_solids(const TopoDS_Shape& sewn, const std::vector<TopoDS_She
   for (std::size_t i = 0; i < n; ++i) {
     if (containers[i].size() % 2 != 0) {
       continue;
+    }
+    // A solid with cavities is decided on its volume less theirs, which the sign check
+    // cannot bound, so those shells are integrated.
+    if (!cavities[i].empty()) {
+      for (std::size_t k : cavities[i]) {
+        make_exact(closed[k]);
+      }
+      make_exact(closed[i]);
     }
     BRepBuilderAPI_MakeSolid mk(closed[i].shell);
     double volume = closed[i].volume;

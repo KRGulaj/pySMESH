@@ -67,5 +67,25 @@ std::vector<TopoDS_Shape> free_boundary_edges(const TopoDS_Shape& shape);
 // One edge in words: "from (x, y, z) to (x, y, z), length L".
 std::string edge_text(const TopoDS_Shape& edge);
 
+// The signed volume and the area of a tessellation of `solid` at the absolute deflection
+// `deflection`.
+//
+// The volume is the sum of p0 . (p1 x p2) / 6 over the triangles, each oriented by its face,
+// so a solid whose faces point out gets a positive volume. Every triangle lies within the
+// deflection of its face, so the true volume differs from this one by at most
+// `deflection` x the area. `complete` is false when a face got no triangles; the numbers
+// then mean nothing.
+//
+// The tessellation is made on a copy of the solid's topology (BRepBuilderAPI_Copy), so no
+// face of the caller's shape, of a session or of a retained snapshot, is left holding a
+// triangulation. The copy shares the geometry, so it costs little.
+struct TessellatedVolume {
+  double volume = 0.0;
+  double area = 0.0;
+  bool complete = false;
+};
+
+TessellatedVolume tessellated_volume(const TopoDS_Shape& solid, double deflection);
+
 }  // namespace shape_checks
 }  // namespace pysmesh

@@ -31,6 +31,7 @@ Fixture sizing follows the project rule: a 3 x 7 x 11 box, never a unit cube.
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Callable
 
 import numpy as np
@@ -1200,3 +1201,60 @@ def test_a_repair_reports_its_verdict_even_in_an_unvalidated_session() -> None:
 
     assert s.heal().valid is True
     assert s.add_box(1.0, 2.0, 3.0, origin=(30.0, 0.0, 0.0)).valid is None
+
+
+# ============================================ The cost of closing a sewn shell (report P2) ==
+
+
+def _production_solid_25(industrial_step_brep: bytes) -> bytes:
+    """Solid 25 of the production assembly (436 faces) alone, as BREP bytes."""
+    s = Session()
+    s.add_brep(industrial_step_brep)
+    solids = sorted({int(x) for x in s.entities(EntityKind.SOLID)})
+    s.remove([i for i in solids if i != 25])
+    return s.brep()
+
+
+def _best_sew_seconds(body: bytes, make_solid: bool) -> float:
+    """The fastest of three sews of every solid of ``body``, in seconds."""
+    best = math.inf
+    for _ in range(3):
+        s = Session()
+        s.add_brep(body)
+        named = sorted({int(x) for x in s.entities(EntityKind.SOLID)})
+        start = time.perf_counter()
+        s.sew(named, tolerance=SEW_TOL, make_solid=make_solid)
+        best = min(best, time.perf_counter() - start)
+    return best
+
+
+def test_closing_the_production_solid_costs_less_than_three_sews(
+    industrial_step_brep: bytes,
+) -> None:
+    """Report P2: ``make_solid=True`` cost 7.3 times the sew on this solid (1 509 ms).
+
+    The volume integral that settles the shell's inside was the whole extra cost. A
+    tessellated copy settles the sign of a volume this far above its tolerance, so the
+    integral is skipped and closing the shell costs about 1.7 sews.
+    """
+    body = _production_solid_25(industrial_step_brep)
+
+    shell = _best_sew_seconds(body, make_solid=False)
+    solid = _best_sew_seconds(body, make_solid=True)
+
+    assert solid < 3.0 * shell, (solid, shell)
+
+
+def test_closing_a_sewn_shell_leaves_no_triangulation_on_the_model_or_a_snapshot() -> None:
+    """The sign check tessellates a copy, so no face of the session carries triangles."""
+    s = Session()
+    faces = loose_box_faces(s, (BOX_DX, BOX_DY, BOX_DZ), (0.0, 0.0, 0.0))
+    mark = s.snapshot()
+
+    s.sew(faces, tolerance=SEW_TOL, make_solid=True)
+    after = s.brep()
+    s.restore(mark)
+    before = s.brep()
+
+    assert b"Triangulations 0" in after
+    assert b"Triangulations 0" in before

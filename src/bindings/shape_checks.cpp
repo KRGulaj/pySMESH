@@ -12,9 +12,12 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <utility>
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
+#include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepTools.hxx>
 #include <BRepTopAdaptor_FClass2d.hxx>
@@ -24,11 +27,14 @@
 #include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_IndexedMap.hxx>
 #include <NCollection_List.hxx>
+#include <Poly_Triangle.hxx>
+#include <Poly_Triangulation.hxx>
 #include <Precision.hxx>
 #include <Standard_Failure.hxx>
 #include <TopAbs_State.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopLoc_Location.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
@@ -242,6 +248,40 @@ std::vector<TopoDS_Shape> free_boundary_edges(const TopoDS_Shape& shape) {
       out.push_back(e);
     }
   }
+  return out;
+}
+
+TessellatedVolume tessellated_volume(const TopoDS_Shape& solid, double deflection) {
+  TessellatedVolume out;
+  const TopoDS_Shape copy =
+      BRepBuilderAPI_Copy(solid, /*copyGeom=*/false, /*copyMesh=*/false).Shape();
+  // Only the linear deflection bounds the volume, so the angular one is left coarse: it
+  // would refine curved faces for no gain in the bound.
+  BRepMesh_IncrementalMesh mesher(copy, deflection, /*isRelative=*/false, /*angDeflection=*/1.5,
+                                  /*isInParallel=*/true);
+  for (TopExp_Explorer ex(copy, TopAbs_FACE); ex.More(); ex.Next()) {
+    const TopoDS_Face& face = TopoDS::Face(ex.Current());
+    TopLoc_Location location;
+    const Handle(Poly_Triangulation) tri = BRep_Tool::Triangulation(face, location);
+    if (tri.IsNull() || tri->NbTriangles() == 0) {
+      return TessellatedVolume();
+    }
+    const gp_Trsf trsf = location.Transformation();
+    const bool reversed = face.Orientation() == TopAbs_REVERSED;
+    for (int i = 1; i <= tri->NbTriangles(); ++i) {
+      int n1 = 0, n2 = 0, n3 = 0;
+      tri->Triangle(i).Get(n1, n2, n3);
+      if (reversed) {
+        std::swap(n2, n3);
+      }
+      const gp_XYZ p1 = tri->Node(n1).Transformed(trsf).XYZ();
+      const gp_XYZ p2 = tri->Node(n2).Transformed(trsf).XYZ();
+      const gp_XYZ p3 = tri->Node(n3).Transformed(trsf).XYZ();
+      out.volume += p1.Dot(p2.Crossed(p3)) / 6.0;
+      out.area += 0.5 * (p2 - p1).Crossed(p3 - p1).Modulus();
+    }
+  }
+  out.complete = true;
   return out;
 }
 

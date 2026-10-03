@@ -189,6 +189,7 @@
 
 #include "common.hpp"
 #include "progress.hpp"
+#include "shape_checks.hpp"
 
 namespace pysmesh {
 namespace session {
@@ -460,7 +461,14 @@ struct EnclosedVolume {
   // eps x area, eps = Precision::Confusion(). A solid enclosing no more than this has, on
   // average, two sides closer than the distance at which OCCT treats two points as one.
   double tolerance = 0.0;
+  // False when the volume and the area are a tessellation's (see enclosed_volume): then the
+  // volume is certainly above the tolerance, but it is only within kSignDeflection x the
+  // bounding-box diagonal x the area of the true one.
+  bool exact = true;
 };
+
+// The deflection of the sign check in enclosed_volume, relative to the bounding-box diagonal.
+constexpr double kSignDeflection = 1e-3;
 
 // What a solid-making operation checks before it commits a solid: BRepCheck_Analyzer accepts
 // a solid whose shell bounds its complement, so it cannot be the check.
@@ -482,16 +490,36 @@ struct EnclosedVolume {
 //     116 of them settle here.
 //   * Otherwise at the precision the defeature check derives: e x D x A / 3 set to a tenth of
 //     eps x A gives e = 0.3 x eps / D, so the verdict at the tolerance is the volume's own.
-inline EnclosedVolume enclosed_volume(const TopoDS_Shape& solid) {
+//
+// Most solids enclose far more than the tolerance, and for them the integral is the whole
+// cost: 1.2 s of a 1.4 s sew on the assembly's 436-face solid. So, unless `precise` is set,
+// a sign check runs first (shape_checks::tessellated_volume): a tessellated copy at the
+// absolute deflection d = kSignDeflection x D has a volume V_t within d x A_t of the true
+// one, A_t its area. When V_t > (d + eps) x A_t the true volume is above eps x A_t, the
+// verdict is settled, and the integral is skipped; `exact` is then false. Otherwise the
+// integral runs as above, so every refusal reports the integrated volume.
+inline EnclosedVolume enclosed_volume(const TopoDS_Shape& solid, bool precise = false) {
   const double eps = Precision::Confusion();
   EnclosedVolume out;
+  Bnd_Box box;
+  BRepBndLib::Add(solid, box);
+  const double diagonal = std::max(std::sqrt(box.SquareExtent()), eps);
+  if (!precise) {
+    const double deflection = kSignDeflection * diagonal;
+    const shape_checks::TessellatedVolume tess =
+        shape_checks::tessellated_volume(solid, deflection);
+    if (tess.complete && tess.volume > (deflection + eps) * tess.area) {
+      out.volume = tess.volume;
+      out.area = tess.area;
+      out.tolerance = eps * tess.area;
+      out.exact = false;
+      return out;
+    }
+  }
   GProp_GProps surface;
   BRepGProp::SurfaceProperties(solid, surface);
   out.area = surface.Mass();
   out.tolerance = eps * out.area;
-  Bnd_Box box;
-  BRepBndLib::Add(solid, box);
-  const double diagonal = std::max(std::sqrt(box.SquareExtent()), eps);
   // The most the faces' contributions can add up to, whatever cancels between them.
   const double lever = diagonal * out.area / 3.0;
   const double tight = std::min(0.3 * eps / diagonal, kAdaptiveEpsCap);
