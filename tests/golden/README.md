@@ -178,3 +178,17 @@ STANDARD mesh, with one limit. Two builds of this four-spline NACA face in one p
 differ by 4.2e-17 in node coordinates, for STANDARD alone too (report §18.1, M2), so the
 equality is bit for bit only between meshes of one build of the face
 (`docs/reports/agents/phase4_fixes/g3/a1_golden_oracle.txt`, gitignored).
+
+## Explained differences since the construction fixes (Phase 4, group 4)
+
+The construction fixes of report §2 (A2, A3), §4 (C3), §6 (V4), §9 (O4) and §18.1 (M2) change
+no `geometry` or `mesh` probe. A loft now runs on copies of its sections, and its results are
+byte for byte those of the reference. One `defect` probe changes:
+
+| Probe | Before | Now | Issue |
+|---|---|---|---|
+| `O4/bowed_end_section` | "invalid shape", details "SHELL 1 of the result: BRepCheck_NotClosed on SOLID 1" | "the solid loft has no valid cap: section 1 of 3 (first) is not planar: its points spread 1.02355e-05 across the plane that fits them best, and OCCT could not close the solid with a planar face on it" | O4 |
+
+The probe bows the first section by w sin(pi x) with w = 1e-5. That bow spreads the section's
+points exactly w across the plane z = const, so the reported 1.02355e-05 is w within 2.4 %:
+the least-squares plane of the samples tilts a little from z = const.
