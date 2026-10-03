@@ -1,4 +1,4 @@
-// Copyright (C) 2015-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2015-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -20,6 +20,10 @@
 #ifndef _GEOMUtils_HTrsfCurve2d_HXX_
 #define _GEOMUtils_HTrsfCurve2d_HXX_
 
+
+#include <Basics_OCCTVersion.hxx>
+
+#if OCC_VERSION_LARGE < 0x07070000
 
 #include <GEOMUtils_TrsfCurve2d.hxx>
 
@@ -76,5 +80,7 @@ namespace GEOMUtils
   DEFINE_STANDARD_RTTIEXT(HTrsfCurve2d,Adaptor2d_HCurve2d)
   };
 }
+
+#endif
 
 #endif

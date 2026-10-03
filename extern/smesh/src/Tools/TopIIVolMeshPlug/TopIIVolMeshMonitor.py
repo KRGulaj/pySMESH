@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2013-2022  EDF R&D
+# Copyright (C) 2013-2026 CEA/DES, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -26,7 +26,10 @@ import tempfile
 import traceback
 import pprint as PP #pretty print
 
-from qtsalome import *
+if 'SALOME_USE_PYSIDE' in os.environ:
+  from PySide2.QtWidgets import QDialog, QMessageBox
+else:
+  from PyQt5.Qt import QDialog, QMessageBox, QProcess, QSize
 
 # Import des panels
 

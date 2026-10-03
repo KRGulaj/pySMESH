@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -106,6 +106,14 @@ protected:
                                 double              theLastU,
                                 std::list<double> & theParameters );
 
+  bool computeBetaLaw(Adaptor3d_Curve& theC3d,
+                      std::list<double>& theParams,
+                      double f,
+                      double theLength,
+                      double beta,
+                      int nbSegments,
+                      bool theReverse);
+
   /*!
    * \brief Return StdMeshers_SegmentLengthAroundVertex assigned to vertex
    */
@@ -117,6 +125,7 @@ protected:
 
   enum ValueIndex {
     SCALE_FACTOR_IND = 0,
+    BETA_IND = 0,
     BEG_LENGTH_IND   = 0,
     END_LENGTH_IND   = 1,
     DEFLECTION_IND   = 0,

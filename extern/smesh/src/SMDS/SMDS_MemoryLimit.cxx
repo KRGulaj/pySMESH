@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -29,9 +29,7 @@
 #include <sys/sysinfo.h>
 #endif
 
-#ifdef _DEBUG_
 #include <iostream>
-#endif
 
 int main ()
 {
@@ -59,9 +57,9 @@ int main ()
     }
   } catch (...) {}
 
-// #ifdef _DEBUG_
-//   std::cout << freeRamKb / 1024 << std::endl;
-// #endif
+// if (SALOME::VerbosityActivated())
+//  std::cout << freeRamKb / 1024 << std::endl;
+
   return freeRamKb / 1024;
 
 #endif

@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -26,7 +26,6 @@
 //
 #include "DSC_i.hxx"
 
-//#define MYDEBUG
 
 Engines_DSC_i::
 Engines_DSC_i(CORBA::ORB_ptr orb,
@@ -43,9 +42,8 @@ Engines_DSC_i(CORBA::ORB_ptr orb,
                                                               false
                                                          )
 {
-#ifdef MYDEBUG
-  std::cerr << "--Engines_DSC_i: MARK 1 --" << instanceName << "----" << std::endl;
-#endif
+  if (SALOME::VerbosityActivated())
+    std::cerr << "--Engines_DSC_i: MARK 1 --" << instanceName << "----" << std::endl;
 }
 
 Engines_DSC_i::
@@ -58,9 +56,8 @@ Engines_DSC_i(CORBA::ORB_ptr orb,
               bool regist) : 
     Engines_Component_i(orb, poa, container, instanceName, interfaceName,notif,regist) 
 {
-#ifdef MYDEBUG
-  std::cerr << "--Engines_DSC_i: MARK 1 --" << instanceName << "----" << std::endl;
-#endif
+  if (SALOME::VerbosityActivated())
+    std::cerr << "--Engines_DSC_i: MARK 1 --" << instanceName << "----" << std::endl;
 }
 
 Engines_DSC_i::~Engines_DSC_i() {}

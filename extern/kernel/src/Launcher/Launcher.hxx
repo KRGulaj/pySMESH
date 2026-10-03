@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -59,6 +59,7 @@ struct LAUNCHER_EXPORT JobParameters_cpp
   resourceParams resource_required;
   std::string queue;
   std::string partition;
+  std::string verbose_py_log_level;
   bool exclusive;
   unsigned int mem_per_cpu;
   std::string wckey;
@@ -85,6 +86,7 @@ public:
   void         clearJobWorkingDir(int job_id);
   bool         getJobDumpState(int job_id, std::string directory);
   bool         getJobWorkFile(int job_id, std::string work_file, std::string directory);
+  long         getMaximumDurationInSecond(int job_id);
   void         stopJob(int job_id);
   void         removeJob(int job_id);
   std::string  dumpJob(int job_id);

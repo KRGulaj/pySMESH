@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -46,11 +46,9 @@
 #include <TopoDS_Vertex.hxx>
 #include <TopoDS_Wire.hxx>
 
-#ifdef _DEBUG_
-//#define _MYDEBUG_
 #include "SMESH_File.hxx"
 #include "SMESH_Comment.hxx"
-#endif
+#include "utilities.h"
 
 using namespace std;
 using boost::polygon::x;
@@ -155,12 +153,13 @@ namespace
   // }
 
   // -------------------------------------------------------------------------------------
-#ifdef _MYDEBUG_
+
   // writes segments into a txt file readable by voronoi_visualizer
   void inSegmentsToFile( vector< InSegment>& inSegments)
   {
-    if ( inSegments.size() > 1000 )
+    if (inSegments.size() > 1000 || !SALOME::VerbosityActivated())
       return;
+      
     const char* fileName = "/misc/dn25/salome/eap/salome/misc/Code/C++/MAdebug.txt";
     const char*     user = getenv("USER");
     if ( !user || strcmp( user, "eap" )) return;
@@ -219,11 +218,6 @@ namespace
       } while (edge != cell->incident_edge());
     }
   }
-#else
-  #define inSegmentsToFile(arg) {}
-  //void dumpEdge( const TVDEdge* edge ) {}
-  //void dumpCell( const TVDCell* cell ) {}
-#endif
 }
 // -------------------------------------------------------------------------------------
 
@@ -420,9 +414,9 @@ namespace
 
   void bndSegsToMesh( const vector< vector< BndSeg > >& bndSegsPerEdge )
   {
-    if ( bndSegsPerEdge.empty() )
+    if (bndSegsPerEdge.empty() || !SALOME::VerbosityActivated())
       return;
-#ifdef _MYDEBUG_
+
     if ( !getenv("bndSegsToMesh")) return;
     map< const TVDVertex *, int > v2Node;
     map< const TVDVertex *, int >::iterator v2n;
@@ -472,7 +466,6 @@ namespace
     text << "\n";
     file.write( text.c_str(), text.size() );
     cout << fileName << endl;
-#endif
   }
 
   //================================================================================
@@ -564,7 +557,7 @@ namespace
       double curDeflect = 0.3; //0.01;  //Curvature deflection
       double angDeflect = 0.2; // 0.09; //Angular deflection
 
-      GCPnts_TangentialDeflection discret(c2dAdaptor, angDeflect, curDeflect);
+      GCPnts_TangentialDeflection discret(c2dAdaptor, angDeflect, curDeflect, 10 /*bos [#41122] minimum 10 points of discretization!*/);
       // if ( discret.NbPoints() > 2 )
       // {
       //   cout << endl;
@@ -837,7 +830,8 @@ namespace
       const TVDEdge* edge = inSeg._cell->incident_edge();
       do {
         edge = edge->next(); // Returns the CCW next edge within the cell.
-        if ( edge->is_primary() && !inSeg.isExternal( edge ) )
+        // Check for valid vertexes to avoid crash (bos#44752)
+        if ( edge->is_primary() && edge->vertex0() && edge->vertex1() && !inSeg.isExternal( edge ) )
           inSeg._edges.push_back( edge ); // edge equidistant from two InSegments
         else
           hasSecondary = true;

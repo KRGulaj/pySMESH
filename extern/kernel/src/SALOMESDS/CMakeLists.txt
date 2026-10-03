@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -33,7 +33,6 @@ INCLUDE_DIRECTORIES(
   ${CMAKE_CURRENT_SOURCE_DIR}/../Container
   ${CMAKE_CURRENT_SOURCE_DIR}/../ResourcesManager
   ${CMAKE_CURRENT_SOURCE_DIR}/../KernelHelpers
-  ${CMAKE_CURRENT_SOURCE_DIR}/../Basics
   ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
@@ -91,8 +90,3 @@ SWIG_LINK_LIBRARIES(KernelSDS ${PYTHON_LIBRARIES} ${PLATFORM_LIBS} SalomeSDS)
 install(TARGETS _KernelSDS DESTINATION ${SALOME_INSTALL_LIBS})
 install(FILES ${KernelSDS_HEADERS} DESTINATION ${SALOME_INSTALL_HEADERS})
 SALOME_INSTALL_SCRIPTS("${_swig_SCRIPTS}"  ${SALOME_INSTALL_BINS} EXTRA_DPYS "${SWIG_MODULE_KernelSDS_REAL_NAME}")
-
-# tests part
-SET(LOCAL_TEST_DIR ${KERNEL_TEST_DIR}/SALOMESDS)
-INSTALL(FILES TestSalomeSDS.py TestSalomeSDSHelper0.py DESTINATION ${LOCAL_TEST_DIR})
-INSTALL(FILES CTestTestfileInstall.cmake DESTINATION ${LOCAL_TEST_DIR} RENAME CTestTestfile.cmake)

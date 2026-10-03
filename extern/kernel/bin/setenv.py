@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #  -*- coding: iso-8859-1 -*-
-# Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 #
 # Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 # CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -23,7 +23,6 @@
 #
 
 import sys, os, string, glob, time, pickle
-import orbmodule
 from launchConfigureParser import verbose
 
 # this file is extraction of set_env from runSalome.py
@@ -207,7 +206,8 @@ def set_env(args, modules_list, modules_root_dir, silent=False, keepEnvironment=
                 # set environment by modules from the list
                 if port:
                     try:
-                        mod=__import__(module.lower()+"_setenv")
+                        import importlib
+                        mod=importlib.import_module(module.lower()+"_setenv")
                         mod.set_env(args)
                         pass
                     except Exception:

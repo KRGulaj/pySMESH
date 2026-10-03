@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -261,7 +261,7 @@ SMESHGUI_SmoothingDlg::SMESHGUI_SmoothingDlg( SMESHGUI* theModule )
 
   mySMESHGUI->SetActiveDialogBox(this);
 
-  // Costruction of the logical filter for the elements: mesh/sub-mesh/group
+  // Construction of the logical filter for the elements: mesh/sub-mesh/group
   QList<SUIT_SelectionFilter*> aListOfFilters;
   aListOfFilters << new SMESH_TypeFilter(SMESH::MESHorSUBMESH) << new SMESH_TypeFilter(SMESH::GROUP);
 

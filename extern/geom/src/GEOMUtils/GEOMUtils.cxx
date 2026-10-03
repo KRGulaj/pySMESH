@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -24,11 +24,13 @@
 
 #include <GEOMUtils.hxx>
 
+#include <GEOMAlgo_AlgoTools.hxx>
+
 #include <Utils_ExceptHandlers.hxx>
 
-// OCCT Includes
-#include <BRepMesh_IncrementalMesh.hxx>
+#include <Basics_OCCTVersion.hxx>
 
+// OCCT Includes
 #include <BRepExtrema_DistShapeShape.hxx>
 
 #include <BRep_Builder.hxx>
@@ -37,6 +39,7 @@
 #include <BRepGProp.hxx>
 #include <BRepTools.hxx>
 
+#include <BRepClass_FaceClassifier.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 
 #include <BRepBuilderAPI_MakeFace.hxx>
@@ -64,6 +67,8 @@
 #include <TopTools_ListIteratorOfListOfShape.hxx>
 #include <TopTools_Array1OfShape.hxx>
 
+#include <GeomAPI_ProjectPointOnSurf.hxx>
+
 #include <Geom_Circle.hxx>
 #include <Geom_Surface.hxx>
 #include <Geom_Plane.hxx>
@@ -82,7 +87,6 @@
 #include <gp_Pln.hxx>
 #include <gp_Lin.hxx>
 
-#include <ShapeAnalysis.hxx>
 #include <ShapeFix_Shape.hxx>
 #include <ShapeFix_ShapeTolerance.hxx>
 
@@ -92,8 +96,6 @@
 #include <vector>
 #include <sstream>
 #include <algorithm>
-
-#include <V3d_Coordinate.hxx>
 
 #include <Standard_Failure.hxx>
 #include <Standard_NullObject.hxx>
@@ -115,114 +117,6 @@
 
 namespace
 {
-  /**
-   * This function constructs and returns modified shape from the original one
-   * for singular cases. It is used for the method GetMinDistanceSingular.
-   *
-   * \param theShape the original shape
-   * \param theModifiedShape output parameter. The modified shape.
-   * \param theAddDist output parameter. The added distance for modified shape.
-   * \retval true if the shape is modified; false otherwise.
-   *
-   * \internal
-   */
-  Standard_Boolean ModifyShape(const TopoDS_Shape  &theShape,
-                               TopoDS_Shape  &theModifiedShape,
-                               Standard_Real &theAddDist)
-  {
-    TopExp_Explorer anExp;
-    int nbf = 0;
-
-    theAddDist = 0.;
-    theModifiedShape.Nullify();
-
-    for ( anExp.Init( theShape, TopAbs_FACE ); anExp.More(); anExp.Next() ) {
-      nbf++;
-      theModifiedShape = anExp.Current();
-    }
-    if(nbf==1) {
-      TopoDS_Shape sh = theShape;
-      while(sh.ShapeType()==TopAbs_COMPOUND) {
-        TopoDS_Iterator it(sh);
-        sh = it.Value();
-      }
-      Handle(Geom_Surface) S = BRep_Tool::Surface(TopoDS::Face(theModifiedShape));
-      if( S->IsKind(STANDARD_TYPE(Geom_SphericalSurface)) ||
-          S->IsKind(STANDARD_TYPE(Geom_ToroidalSurface)) ||
-          S->IsUPeriodic()) {
-        const Standard_Boolean isShell =
-          (sh.ShapeType()==TopAbs_SHELL || sh.ShapeType()==TopAbs_FACE);
-
-        if ( !isShell && S->IsKind(STANDARD_TYPE(Geom_SphericalSurface)) ) {
-          Handle(Geom_SphericalSurface) SS = Handle(Geom_SphericalSurface)::DownCast(S);
-          gp_Pnt PC = SS->Location();
-          BRep_Builder B;
-          TopoDS_Vertex V;
-          B.MakeVertex(V,PC,1.e-7);
-          theModifiedShape = V;
-          theAddDist = SS->Radius();
-          return Standard_True;
-        }
-        if ( !isShell && S->IsKind(STANDARD_TYPE(Geom_ToroidalSurface)) ) {
-          Handle(Geom_ToroidalSurface) TS = Handle(Geom_ToroidalSurface)::DownCast(S);
-          gp_Ax3 ax3 = TS->Position();
-          Handle(Geom_Circle) C = new Geom_Circle(ax3.Ax2(),TS->MajorRadius());
-          BRep_Builder B;
-          TopoDS_Edge E;
-          B.MakeEdge(E,C,1.e-7);
-          theModifiedShape = E;
-          theAddDist = TS->MinorRadius();
-          return Standard_True;
-        }
-
-        // non solid case or any periodic surface (Mantis 22454).
-        double U1,U2,V1,V2;
-        // changes for 0020677: EDF 1219 GEOM: MinDistance gives 0 instead of 20.88
-        //S->Bounds(U1,U2,V1,V2); changed by
-        ShapeAnalysis::GetFaceUVBounds(TopoDS::Face(theModifiedShape),U1,U2,V1,V2);
-        // end of changes for 020677 (dmv)
-        Handle(Geom_RectangularTrimmedSurface) TrS1 =
-          new Geom_RectangularTrimmedSurface(S,U1,(U1+U2)/2.,V1,V2);
-        Handle(Geom_RectangularTrimmedSurface) TrS2 =
-          new Geom_RectangularTrimmedSurface(S,(U1+U2)/2.,U2,V1,V2);
-        TopoDS_Shape aMShape;
-        
-        TopoDS_Face F1 = BRepBuilderAPI_MakeFace(TrS1, Precision::Confusion());
-        TopoDS_Face F2 = BRepBuilderAPI_MakeFace(TrS2, Precision::Confusion());
-        
-        if (isShell) {
-          BRep_Builder B;
-          B.MakeCompound(TopoDS::Compound(aMShape));
-          B.Add(aMShape, F1);
-          B.Add(aMShape, F2);
-        } else {
-          // The original shape is a solid.
-          BRepBuilderAPI_Sewing aSewing (Precision::Confusion()*10.0);
-          aSewing.Add(F1);
-          aSewing.Add(F2);
-          aSewing.Perform();
-          aMShape = aSewing.SewedShape();
-          BRep_Builder B;
-          TopoDS_Solid aSolid;
-          B.MakeSolid(aSolid);
-          B.Add(aSolid, aMShape);
-          aMShape = aSolid;
-        }
-        
-        Handle(ShapeFix_Shape) sfs = new ShapeFix_Shape;
-        sfs->Init(aMShape);
-        sfs->SetPrecision(1.e-6);
-        sfs->SetMaxTolerance(1.0);
-        sfs->Perform();
-        theModifiedShape = sfs->Shape();
-        return Standard_True;
-      }
-    }
-    
-    theModifiedShape = theShape;
-    return Standard_False;
-  }
-
   void parseWard( const GEOMUtils::LevelsList &theLevelList, std::string &treeStr )
   {
     treeStr.append( "{" );
@@ -678,56 +572,6 @@ void GEOMUtils::AddSimpleShapes (const TopoDS_Shape& theShape, TopTools_ListOfSh
 }
 
 //=======================================================================
-//function : CheckTriangulation
-//purpose  :
-//=======================================================================
-bool GEOMUtils::CheckTriangulation (const TopoDS_Shape& aShape)
-{
-  bool isTriangulation = true;
-
-  TopExp_Explorer exp (aShape, TopAbs_FACE);
-  if (exp.More())
-  {
-    TopLoc_Location aTopLoc;
-    Handle(Poly_Triangulation) aTRF;
-    aTRF = BRep_Tool::Triangulation(TopoDS::Face(exp.Current()), aTopLoc);
-    if (aTRF.IsNull()) {
-      isTriangulation = false;
-    }
-  }
-  else // no faces, try edges
-  {
-    TopExp_Explorer expe (aShape, TopAbs_EDGE);
-    if (!expe.More()) {
-      return false;
-    }
-    TopLoc_Location aLoc;
-    Handle(Poly_Polygon3D) aPE = BRep_Tool::Polygon3D(TopoDS::Edge(expe.Current()), aLoc);
-    if (aPE.IsNull()) {
-      isTriangulation = false;
-    }
-  }
-
-  if (!isTriangulation) {
-    // calculate deflection
-    Standard_Real aDeviationCoefficient = 0.001;
-
-    Bnd_Box B;
-    BRepBndLib::Add(aShape, B);
-    Standard_Real aXmin, aYmin, aZmin, aXmax, aYmax, aZmax;
-    B.Get(aXmin, aYmin, aZmin, aXmax, aYmax, aZmax);
-
-    Standard_Real dx = aXmax - aXmin, dy = aYmax - aYmin, dz = aZmax - aZmin;
-    Standard_Real aDeflection = Max(Max(dx, dy), dz) * aDeviationCoefficient * 4;
-    Standard_Real aHLRAngle = 0.349066;
-
-    BRepMesh_IncrementalMesh Inc (aShape, aDeflection, Standard_False, aHLRAngle);
-  }
-
-  return true;
-}
-
-//=======================================================================
 //function : GetTypeOfSimplePart
 //purpose  :
 //=======================================================================
@@ -746,6 +590,34 @@ TopAbs_ShapeEnum GEOMUtils::GetTypeOfSimplePart (const TopoDS_Shape& theShape)
     }
   }
   return TopAbs_SHAPE;
+}
+
+//=======================================================================
+//function : GetCommonShapeType
+//purpose  :
+//=======================================================================
+TopAbs_ShapeEnum GEOMUtils::GetCommonShapeType (const TopoDS_Shape& theShape)
+{
+  if (theShape.IsNull()) {
+    return TopAbs_SHAPE;
+  }
+  TopAbs_ShapeEnum aType = theShape.ShapeType();
+  if (aType != TopAbs_COMPOUND) {
+    return aType;
+  }
+
+  TopAbs_ShapeEnum aCommonType = TopAbs_SHAPE;
+  TopoDS_Iterator It (theShape, Standard_False, Standard_False);
+  for (; It.More(); It.Next()) {
+    TopAbs_ShapeEnum aSubType = GetCommonShapeType(It.Value());
+    if (aCommonType == TopAbs_SHAPE) {
+      aCommonType = aSubType;
+    }
+    else if (aCommonType != aSubType) {
+      return TopAbs_SHAPE;
+    }
+  }
+  return aCommonType;
 }
 
 //=======================================================================
@@ -885,75 +757,6 @@ Standard_Boolean GEOMUtils::PreciseBoundingBox
 }
 
 //=======================================================================
-//function : GetMinDistanceSingular
-//purpose  : 
-//=======================================================================
-double GEOMUtils::GetMinDistanceSingular(const TopoDS_Shape& aSh1,
-                                         const TopoDS_Shape& aSh2,
-                                         gp_Pnt& Ptmp1, gp_Pnt& Ptmp2)
-{
-  TopoDS_Shape     tmpSh1;
-  TopoDS_Shape     tmpSh2;
-  Standard_Real    AddDist1 = 0.;
-  Standard_Real    AddDist2 = 0.;
-  Standard_Boolean IsChange1 = ModifyShape(aSh1, tmpSh1, AddDist1);
-  Standard_Boolean IsChange2 = ModifyShape(aSh2, tmpSh2, AddDist2);
-
-  if( !IsChange1 && !IsChange2 )
-    return -2.0;
-
-  BRepExtrema_DistShapeShape dst(tmpSh1,tmpSh2);
-  if (dst.IsDone()) {
-    double MinDist = 1.e9;
-    gp_Pnt PMin1, PMin2, P1, P2;
-    for (int i = 1; i <= dst.NbSolution(); i++) {
-      P1 = dst.PointOnShape1(i);
-      P2 = dst.PointOnShape2(i);
-      Standard_Real Dist = P1.Distance(P2);
-      if (MinDist > Dist) {
-        MinDist = Dist;
-        PMin1 = P1;
-        PMin2 = P2;
-      }
-    }
-    if(MinDist<1.e-7) {
-      Ptmp1 = PMin1;
-      Ptmp2 = PMin2;
-    }
-    else {
-      gp_Dir aDir(gp_Vec(PMin1,PMin2));
-      if( MinDist > (AddDist1+AddDist2) ) {
-        Ptmp1 = gp_Pnt( PMin1.X() + aDir.X()*AddDist1,
-                        PMin1.Y() + aDir.Y()*AddDist1,
-                        PMin1.Z() + aDir.Z()*AddDist1 );
-        Ptmp2 = gp_Pnt( PMin2.X() - aDir.X()*AddDist2,
-                        PMin2.Y() - aDir.Y()*AddDist2,
-                        PMin2.Z() - aDir.Z()*AddDist2 );
-        return (MinDist - AddDist1 - AddDist2);
-      }
-      else {
-        if( AddDist1 > 0 ) {
-          Ptmp1 = gp_Pnt( PMin1.X() + aDir.X()*AddDist1,
-                          PMin1.Y() + aDir.Y()*AddDist1,
-                          PMin1.Z() + aDir.Z()*AddDist1 );
-          Ptmp2 = Ptmp1;
-        }
-        else {
-          Ptmp2 = gp_Pnt( PMin2.X() - aDir.X()*AddDist2,
-                          PMin2.Y() - aDir.Y()*AddDist2,
-                          PMin2.Z() - aDir.Z()*AddDist2 );
-          Ptmp1 = Ptmp2;
-        }
-      }
-    }
-    double res = MinDist - AddDist1 - AddDist2;
-    if(res<0.) res = 0.0;
-    return res;
-  }
-  return -2.0;
-}
-
-//=======================================================================
 //function : GetMinDistance
 //purpose  : 
 //=======================================================================
@@ -962,44 +765,7 @@ Standard_Real GEOMUtils::GetMinDistance
                                 const TopoDS_Shape& theShape2,
                                 gp_Pnt& thePnt1, gp_Pnt& thePnt2)
 {
-  Standard_Real aResult = 1.e9;
-
-  // Issue 0020231: A min distance bug with torus and vertex.
-  // Make GetMinDistance() return zero if a sole VERTEX is inside any of SOLIDs
-
-  // which of shapes consists of only one vertex?
-  TopExp_Explorer exp1(theShape1,TopAbs_VERTEX), exp2(theShape2,TopAbs_VERTEX);
-  TopoDS_Shape V1 = exp1.More() ? exp1.Current() : TopoDS_Shape();
-  TopoDS_Shape V2 = exp2.More() ? exp2.Current() : TopoDS_Shape();
-  exp1.Next(); exp2.Next();
-  if ( exp1.More() ) V1.Nullify();
-  if ( exp2.More() ) V2.Nullify();
-  // vertex and container of solids
-  TopoDS_Shape V = V1.IsNull() ? V2 : V1;
-  TopoDS_Shape S = V1.IsNull() ? theShape1 : theShape2;
-  if ( !V.IsNull() ) {
-    // classify vertex against solids
-    gp_Pnt p = BRep_Tool::Pnt( TopoDS::Vertex( V ) );
-    for ( exp1.Init( S, TopAbs_SOLID ); exp1.More(); exp1.Next() ) {
-      BRepClass3d_SolidClassifier classifier( exp1.Current(), p, 1e-6);
-      if ( classifier.State() == TopAbs_IN ) {
-        thePnt1 = p;
-        thePnt2 = p;
-        return 0.0;
-      }
-    }
-  }
-  // End Issue 0020231
-
-  // skl 30.06.2008
-  // additional workaround for bugs 19899, 19908 and 19910 from Mantis
-  aResult = GEOMUtils::GetMinDistanceSingular(theShape1, theShape2, thePnt1, thePnt2);
-
-  /*
-  if (dist > -1.0) {
-    return dist;
-  }
-  */
+  Standard_Real aResult = -1.0;
 
   BRepExtrema_DistShapeShape dst (theShape1, theShape2);
   if (dst.IsDone()) {
@@ -1010,7 +776,7 @@ Standard_Real GEOMUtils::GetMinDistance
       P2 = dst.PointOnShape2(i);
 
       Standard_Real Dist = P1.Distance(P2);
-      if (aResult < 0 || aResult > Dist) {
+      if (aResult < 0 || Dist < aResult ) {
         aResult = Dist;
         thePnt1 = P1;
         thePnt2 = P2;
@@ -1022,22 +788,141 @@ Standard_Real GEOMUtils::GetMinDistance
 }
 
 //=======================================================================
+// function : ProjectPointOnFace()
+// purpose  : Returns the projection (3d point) if found, throws an exception otherwise
+//=======================================================================
+gp_Pnt GEOMUtils::ProjectPointOnFace(const gp_Pnt& thePoint,
+                                     const TopoDS_Shape& theFace,
+                                     double& theU, double& theV,
+                                     const double theTol)
+{
+  if (theFace.IsNull() || theFace.ShapeType() != TopAbs_FACE)
+    Standard_TypeMismatch::Raise
+      ("Projection aborted : the target shape is not a face");
+
+  TopoDS_Face aFace = TopoDS::Face(theFace);
+  Handle(Geom_Surface) surface = BRep_Tool::Surface(aFace);
+  double U1, U2, V1, V2;
+  BRepTools::UVBounds(aFace, U1, U2, V1, V2);
+
+  // projector
+  GeomAPI_ProjectPointOnSurf proj;
+  proj.Init(surface, U1, U2, V1, V2);
+  proj.Perform(thePoint);
+  if (!proj.IsDone())
+    StdFail_NotDone::Raise("Projection aborted : the algorithm failed");
+  int nbPoints = proj.NbPoints();
+  if (nbPoints < 1)
+    Standard_ConstructionError::Raise("Projection aborted : No solution found");
+  proj.LowerDistanceParameters(theU, theV);
+  gp_Pnt2d aProjPnt (theU, theV);
+
+  // classifier
+  Standard_Real tol = Max(theTol, 1.e-4);
+  BRepClass_FaceClassifier aClsf (aFace, aProjPnt, tol);
+  if (aClsf.State() != TopAbs_IN && aClsf.State() != TopAbs_ON) {
+    bool isSol = false;
+    double minDist = RealLast();
+    for (int i = 1; i <= nbPoints; i++) {
+      Standard_Real Ui, Vi;
+      proj.Parameters(i, Ui, Vi);
+      aProjPnt = gp_Pnt2d(Ui, Vi);
+      aClsf.Perform(aFace, aProjPnt, tol);
+      if (aClsf.State() == TopAbs_IN || aClsf.State() == TopAbs_ON) {
+        isSol = true;
+        double dist = proj.Distance(i);
+        if (dist < minDist) {
+          minDist = dist;
+          theU = Ui;
+          theV = Vi;
+        }
+      }
+    }
+    if (!isSol) {
+      Standard_ConstructionError::Raise("Projection aborted : No solution found");
+    }
+  }
+
+  gp_Pnt surfPnt = surface->Value(theU, theV);
+  return surfPnt;
+}
+
+//=======================================================================
+// function : DistanceToProjectionOnFace()
+// purpose  : Returns distance from thePoint to theFace
+//            -1 if projection of thePoint lays outside of theFace
+//=======================================================================
+Standard_Real GEOMUtils::DistanceToProjectionOnFace(const gp_Pnt& thePoint,
+                                                    const TopoDS_Shape& theFace,
+                                                    const double theTol)
+{
+  Standard_Real aMinDist = -1;
+
+  if (theFace.IsNull() || theFace.ShapeType() != TopAbs_FACE)
+    Standard_TypeMismatch::Raise
+      ("Projection aborted : the target shape is not a face");
+
+  TopoDS_Face aFace = TopoDS::Face(theFace);
+  Handle(Geom_Surface) surface = BRep_Tool::Surface(aFace);
+  double U1, U2, V1, V2;
+  BRepTools::UVBounds(aFace, U1, U2, V1, V2);
+
+  // projector
+  GeomAPI_ProjectPointOnSurf proj;
+  proj.Init(surface, U1, U2, V1, V2);
+  proj.Perform(thePoint);
+  if (!proj.IsDone())
+    return aMinDist;
+
+  int nbPoints = proj.NbPoints();
+  if (nbPoints < 1)
+    return aMinDist;
+
+  Standard_Real Ui, Vi;
+  proj.LowerDistanceParameters(Ui, Vi);
+  gp_Pnt2d aProjPnt (Ui, Vi);
+
+  // classifier
+  Standard_Real tol = Max(theTol, 1.e-4);
+  BRepClass_FaceClassifier aClsf (aFace, aProjPnt, tol);
+  if (aClsf.State() == TopAbs_IN || aClsf.State() == TopAbs_ON) {
+    aMinDist = proj.LowerDistance();
+  }
+  else {
+    for (int i = 1; i <= nbPoints; i++) {
+      Standard_Real Ui, Vi;
+      proj.Parameters(i, Ui, Vi);
+      aProjPnt = gp_Pnt2d(Ui, Vi);
+      aClsf.Perform(aFace, aProjPnt, tol);
+      if (aClsf.State() == TopAbs_IN || aClsf.State() == TopAbs_ON) {
+        double dist = proj.Distance(i);
+        if (dist < aMinDist || aMinDist == -1.0) {
+          aMinDist = dist;
+        }
+      }
+    }
+  }
+
+  return aMinDist;
+}
+
+//=======================================================================
 // function : ConvertClickToPoint()
 // purpose  : Returns the point clicked in 3D view
 //=======================================================================
 gp_Pnt GEOMUtils::ConvertClickToPoint( int x, int y, Handle(V3d_View) aView )
 {
-  V3d_Coordinate XEye, YEye, ZEye, XAt, YAt, ZAt;
-  aView->Eye( XEye, YEye, ZEye );
+  // We can't rely on Eye and At points to get EyeDir, because they collapse
+  // for views with flat bounding boxes. For example if you create a circle and
+  // switch to the top view, then both camera's Eye and At points will fall to zero
+  // inside V3d_View::FitMinMax() method. It's by occt design.
+  // So, we should use camera direction instead.
 
-  aView->At( XAt, YAt, ZAt );
-  gp_Pnt EyePoint( XEye, YEye, ZEye );
-  gp_Pnt AtPoint( XAt, YAt, ZAt );
+  Standard_Real XAt, YAt, ZAt;
+  aView->At(XAt, YAt, ZAt);
+  gp_Pnt AtPoint(XAt, YAt, ZAt);
 
-  gp_Vec EyeVector( EyePoint, AtPoint );
-  gp_Dir EyeDir( EyeVector );
-
-  gp_Pln PlaneOfTheView = gp_Pln( AtPoint, EyeDir );
+  gp_Pln PlaneOfTheView = gp_Pln( AtPoint, aView->Camera()->Direction() );
   Standard_Real X, Y, Z;
   aView->Convert( x, y, X, Y, Z );
   gp_Pnt ConvertedPoint( X, Y, Z );
@@ -1093,9 +978,13 @@ void GEOMUtils::ConvertStringToTree( const std::string& dependencyStr,
 }
 
 bool GEOMUtils::CheckShape( TopoDS_Shape& shape,
-                            bool checkGeometry )
+                            bool checkGeometry,
+                            bool isExact )
 {
-  BRepCheck_Analyzer analyzer( shape, checkGeometry );
+  // Exact checking works only with enabled geometry checking
+  Standard_Boolean isCheckGeom = checkGeometry || isExact;
+
+  BRepCheck_Analyzer analyzer( shape, isCheckGeom, Standard_False, isExact );
   return analyzer.IsValid();
 }
 
@@ -1125,27 +1014,17 @@ bool GEOMUtils::CheckBOPArguments(const TopoDS_Shape &theShape)
 bool GEOMUtils::FixShapeTolerance( TopoDS_Shape& shape,
                                    TopAbs_ShapeEnum type,
                                    Standard_Real tolerance,
-                                   bool checkGeometry )
+                                   bool checkGeometry,
+                                   bool isExactAdjust )
 {
   ShapeFix_ShapeTolerance aSft;
   aSft.LimitTolerance( shape, tolerance, tolerance, type );
+  if (isExactAdjust)
+    GEOMAlgo_AlgoTools::FixCurveOnSurfaceTolerances( shape );
   Handle(ShapeFix_Shape) aSfs = new ShapeFix_Shape( shape );
   aSfs->Perform();
   shape = aSfs->Shape();
-  return CheckShape( shape, checkGeometry );
-}
-
-bool GEOMUtils::FixShapeTolerance( TopoDS_Shape& shape,
-                                   Standard_Real tolerance,
-                                   bool checkGeometry )
-{
-  return FixShapeTolerance( shape, TopAbs_SHAPE, tolerance, checkGeometry );
-}
-
-bool GEOMUtils::FixShapeTolerance( TopoDS_Shape& shape,
-                                   bool checkGeometry )
-{
-  return FixShapeTolerance( shape, Precision::Confusion(), checkGeometry );
+  return CheckShape( shape, checkGeometry, isExactAdjust );
 }
 
 bool GEOMUtils::FixShapeCurves( TopoDS_Shape& shape )
@@ -1224,44 +1103,38 @@ TopoDS_Shape GEOMUtils::ReduceCompound( const TopoDS_Shape& shape )
   return result;
 }
 
-void GEOMUtils::MeshShape( const TopoDS_Shape shape,
-                           double deflection, bool theForced )
-{
-  Standard_Real aDeflection = ( deflection <= 0 ) ? DefaultDeflection() : deflection;
-  
-  // Is shape triangulated?
-  Standard_Boolean alreadyMeshed = true;
-  TopExp_Explorer ex;
-  TopLoc_Location aLoc;
-  for ( ex.Init( shape, TopAbs_FACE ); ex.More() && alreadyMeshed; ex.Next() ) {
-    const TopoDS_Face& aFace = TopoDS::Face( ex.Current() );
-    Handle(Poly_Triangulation) aPoly = BRep_Tool::Triangulation( aFace, aLoc );
-    alreadyMeshed = !aPoly.IsNull(); 
-  }
-  
-  if ( !alreadyMeshed || theForced ) {
-    // Compute bounding box
-    Bnd_Box B;
-    BRepBndLib::Add( shape, B );
-    if ( B.IsVoid() )
-      return; // NPAL15983 (Bug when displaying empty groups) 
-    Standard_Real aXmin, aYmin, aZmin, aXmax, aYmax, aZmax;
-    B.Get( aXmin, aYmin, aZmin, aXmax, aYmax, aZmax );
-    
-    // This magic line comes from Prs3d_ShadedShape.gxx in OCCT
-    aDeflection = MAX3(aXmax-aXmin, aYmax-aYmin, aZmax-aZmin) * aDeflection * 4;
-    
-    // Clean triangulation before compute incremental mesh
-    BRepTools::Clean( shape );
-    
-    // Compute triangulation
-    BRepMesh_IncrementalMesh mesh( shape, aDeflection ); 
-  }
-}
-
+//=======================================================================
+//function : DefaultDeflection
+//purpose  :
+//=======================================================================
 double GEOMUtils::DefaultDeflection()
 {
-  return 0.001;
+  return GEOMAlgo_AlgoTools::DefaultDeflection();
+}
+
+//=======================================================================
+//function : MeshShape
+//purpose  :
+//=======================================================================
+bool GEOMUtils::MeshShape( const TopoDS_Shape theShape,
+                           const double theDeflection,
+                           const bool theForced,
+                           const double theAngleDeflection,
+                           const bool isRelative,
+                           const bool doPostCheck)
+{
+  return GEOMAlgo_AlgoTools::MeshShape(theShape, theDeflection, theForced,
+                                       theAngleDeflection, isRelative, doPostCheck);
+}
+
+//=======================================================================
+//function : CheckTriangulation
+//purpose  :
+//=======================================================================
+bool GEOMUtils::CheckTriangulation (const TopoDS_Shape& theShape)
+{
+  Standard_Real aHLRAngle = 0.349066;
+  return GEOMAlgo_AlgoTools::MeshShape(theShape, DefaultDeflection(), false, aHLRAngle);
 }
 
 //=======================================================================

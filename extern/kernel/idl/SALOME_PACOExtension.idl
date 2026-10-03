@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -18,7 +18,7 @@
 //
 
 //  File   : SALOME_PACOExtension.idl
-//  Author : André RIBES, EDF
+//  Author : AndrÃ© RIBES, EDF
 
 #ifndef _SALOME_PACOExtension_IDL_
 #define _SALOME_PACOExtension_IDL_

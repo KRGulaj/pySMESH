@@ -92,6 +92,28 @@
 #include <StdMeshers_RadialPrism_3D.hxx>
 #include <StdMeshers_Regular_1D.hxx>
 #include <StdMeshers_ViscousLayers2D.hxx>
+#include <StdMeshers_BlockRenumber.hxx>
+#include <StdMeshers_NotConformAllowed.hxx>
+#include <StdMeshers_ViscousLayers.hxx>
+#include <BRepPrimAPI_MakeSphere.hxx>
+#include <StdMeshers_LayerDistribution2D.hxx>
+#include <StdMeshers_LengthFromEdges.hxx>
+#include <StdMeshers_RadialQuadrangle_1D2D.hxx>
+#include <StdMeshers_UseExisting_1D2D.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <TopoDS_Wire.hxx>
+#include <gp_Ax2.hxx>
+#include <gp_Circ.hxx>
+#include <gp_Dir.hxx>
+#include <StdMeshers_Arithmetic1D.hxx>
+#include <StdMeshers_Propagation.hxx>
+#include <StdMeshers_SegmentAroundVertex_0D.hxx>
+#include <StdMeshers_SegmentLengthAroundVertex.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRep_Tool.hxx>
+#include <TopoDS_Edge.hxx>
+#include <TopoDS_Vertex.hxx>
 
 namespace {
 
@@ -1248,13 +1270,17 @@ void probe_meshing_binding_behaviour() {
     stop.store(true);
     canceller.join();
 
+    // Compute() returning false proves only that SMESH_Gen saw the cancel; it also does so
+    // after a complete Cartesian_3D run that ignored it. Cartesian_3D polls the flag only in
+    // its grid step, before it builds a single volume, so a cancel that stopped the
+    // algorithm leaves no volume. A run without a cancel builds 872 320 volumes here.
+    const int volumes = static_cast<int>(s.meshDS()->NbVolumes());
     char msg[260];
     std::snprintf(msg, sizeof(msg),
                   "MESHBIND Cartesian_3D honours a cancel mid-algorithm (returned %s after "
                   "%.0f ms with %d volumes) — it is one of the three that poll the flag",
-                  ok ? "true" : "false", elapsed_ms,
-                  static_cast<int>(s.meshDS()->NbVolumes()));
-    check(!ok && elapsed_ms < 1500.0, msg);
+                  ok ? "true" : "false", elapsed_ms, volumes);
+    check(!ok && volumes == 0 && elapsed_ms < 1500.0, msg);
   }
 
   // ---- Two 3-D algorithms on one model, and whether they meet ----------------------- //
@@ -1871,6 +1897,441 @@ void probe_r18_gmf_driver() {
        "as fixtures");
 }
 
+
+// --------------------------------------------------------------------------- CAT916 ----- //
+// The native catalogue entries added with SMESH 9.16 (src/bindings/mesher_catalog.cpp). Each
+// case builds the entry the way the catalogue's Factory does, new T(GetANewId(), &gen), and
+// computes on the smallest shape the entry supports. The pytest counterparts, against the
+// geometry and the upstream spec, are in tests/test_mesher_native.py.
+
+// The x coordinates of every node of the mesh, ascending. The cases below mesh one straight
+// edge along x, so this is the node distribution.
+std::vector<double> sorted_node_x(SMESHDS_Mesh* meshDS) {
+  std::vector<double> xs;
+  for (SMDS_NodeIteratorPtr it = meshDS->nodesIterator(); it->more();) {
+    xs.push_back(it->next()->X());
+  }
+  std::sort(xs.begin(), xs.end());
+  return xs;
+}
+
+// The positions of the nodes on one edge, as fractions of its length, measured from `from`.
+std::vector<double> edge_fractions(SMESHDS_Mesh* meshDS, const TopoDS_Edge& edge,
+                                   const gp_Pnt& from, double length) {
+  std::vector<double> out;
+  TopoDS_Vertex v0, v1;
+  TopExp::Vertices(edge, v0, v1);
+  std::set<const SMDS_MeshNode*> nodes;
+  if (SMESHDS_SubMesh* sm = meshDS->MeshElements(edge)) {
+    for (SMDS_NodeIteratorPtr it = sm->GetNodes(); it->more();) nodes.insert(it->next());
+  }
+  for (const TopoDS_Vertex& v : {v0, v1}) {
+    if (SMESHDS_SubMesh* sm = meshDS->MeshElements(v)) {
+      for (SMDS_NodeIteratorPtr it = sm->GetNodes(); it->more();) nodes.insert(it->next());
+    }
+  }
+  for (const SMDS_MeshNode* n : nodes) {
+    out.push_back(from.Distance(gp_Pnt(n->X(), n->Y(), n->Z())) / length);
+  }
+  std::sort(out.begin(), out.end());
+  return out;
+}
+
+// The edge of `shape` whose midpoint is closest to `p`.
+TopoDS_Edge edge_near(const TopoDS_Shape& shape, const gp_Pnt& p) {
+  TopoDS_Edge best;
+  double best_d = 1e300;
+  for (TopExp_Explorer ex(shape, TopAbs_EDGE); ex.More(); ex.Next()) {
+    const TopoDS_Edge& e = TopoDS::Edge(ex.Current());
+    TopoDS_Vertex v0, v1;
+    TopExp::Vertices(e, v0, v1);
+    const gp_Pnt a = BRep_Tool::Pnt(v0), b = BRep_Tool::Pnt(v1);
+    const double d = p.Distance(gp_Pnt(0.5 * (a.XYZ() + b.XYZ())));
+    if (d < best_d) {
+      best_d = d;
+      best = e;
+    }
+  }
+  return best;
+}
+
+// The vertex of `shape` closest to `p`.
+TopoDS_Vertex vertex_near(const TopoDS_Shape& shape, const gp_Pnt& p) {
+  TopoDS_Vertex best;
+  double best_d = 1e300;
+  for (TopExp_Explorer ex(shape, TopAbs_VERTEX); ex.More(); ex.Next()) {
+    const TopoDS_Vertex& v = TopoDS::Vertex(ex.Current());
+    const double d = p.Distance(BRep_Tool::Pnt(v));
+    if (d < best_d) {
+      best_d = d;
+      best = v;
+    }
+  }
+  return best;
+}
+
+// The closed form of StdMeshers_Regular_1D::computeBetaLaw on a straight edge of length L.
+std::vector<double> beta_law_positions(double beta, int n, double length) {
+  std::vector<double> xs(1, 0.0);
+  const double r = (1.0 + std::fabs(beta)) / (std::fabs(beta) - 1.0);
+  std::vector<double> t;
+  for (int i = 1; i < n; ++i) {
+    const double power = std::pow(r, 1.0 - static_cast<double>(i) / n);
+    t.push_back(1.0 + std::fabs(beta) * (1.0 - power) / (1.0 + power));
+  }
+  if (beta < 0) {  // the reversed law: mirror the positions
+    for (double& v : t) v = 1.0 - v;
+    std::sort(t.begin(), t.end());
+  }
+  for (double v : t) xs.push_back(v * length);
+  xs.push_back(length);
+  return xs;
+}
+
+void probe_cat916_1d_additions() {
+  section("CAT916", "native catalogue entries added with SMESH 9.16: 1-D family");
+
+  // SegmentAroundVertex_0D + SegmentLengthAroundVertex: the segment next to the vertex takes
+  // the length the hypothesis names; the rest of the edge keeps its own 1-D hypothesis.
+  {
+    Session s(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(10, 0, 0)).Edge());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+    n->SetNumberOfSegments(5);
+    StdMeshers_SegmentAroundVertex_0D* a0 = s.make<StdMeshers_SegmentAroundVertex_0D>();
+    StdMeshers_SegmentLengthAroundVertex* around = s.make<StdMeshers_SegmentLengthAroundVertex>();
+    around->SetLength(0.5);
+    const TopoDS_Vertex origin = vertex_near(s.shape(), gp_Pnt(0, 0, 0));
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), n) && s.assign(origin, a0) &&
+                    s.assign(origin, around);
+    check(ok, "CAT916 SegmentAroundVertex_0D + SegmentLengthAroundVertex assign on a vertex");
+    check(s.compute(), "CAT916 SegmentAroundVertex_0D computes with Regular_1D");
+    const std::vector<double> xs = sorted_node_x(s.meshDS());
+    check(xs.size() >= 3, "CAT916 SegmentAroundVertex_0D leaves a discretised edge");
+    if (xs.size() >= 3) {
+      check_close(xs[1] - xs[0], 0.5, 1e-9,
+                  "CAT916 SegmentAroundVertex_0D: the segment at the vertex is 0.5 long");
+    }
+  }
+
+  // PropagOfDistribution on the long side of a trapezoid: the opposite, shorter side gets the
+  // same number of nodes at the same fractions of its length.
+  {
+    BRepBuilderAPI_MakePolygon poly(gp_Pnt(0, 0, 0), gp_Pnt(4, 0, 0), gp_Pnt(3, 2, 0),
+                                    gp_Pnt(1, 2, 0), /*Close=*/true);
+    Session s(BRepBuilderAPI_MakeFace(poly.Wire()).Face());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+    n->SetNumberOfSegments(2);
+    StdMeshers_Arithmetic1D* arith = s.make<StdMeshers_Arithmetic1D>();
+    arith->SetLength(0.5, true);
+    arith->SetLength(1.5, false);
+    StdMeshers_PropagOfDistribution* prop = s.make<StdMeshers_PropagOfDistribution>();
+    const TopoDS_Edge bottom = edge_near(s.shape(), gp_Pnt(2, 0, 0));
+    const TopoDS_Edge top = edge_near(s.shape(), gp_Pnt(2, 2, 0));
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), n) &&
+                    s.assign(bottom, arith) && s.assign(bottom, prop);
+    check(ok, "CAT916 PropagOfDistribution assigns beside a local 1-D hypothesis");
+    check(s.compute(), "CAT916 PropagOfDistribution computes");
+    const std::vector<double> fb = edge_fractions(s.meshDS(), bottom, gp_Pnt(0, 0, 0), 4.0);
+    const std::vector<double> ft = edge_fractions(s.meshDS(), top, gp_Pnt(1, 2, 0), 2.0);
+    std::vector<double> ft_rev;
+    for (double v : ft) ft_rev.push_back(1.0 - v);
+    std::sort(ft_rev.begin(), ft_rev.end());
+    double worst = 0.0, worst_rev = 0.0;
+    const bool same_count = fb.size() == ft.size() && fb.size() > 3;
+    for (std::size_t i = 0; same_count && i < fb.size(); ++i) {
+      worst = std::max(worst, std::fabs(fb[i] - ft[i]));
+      worst_rev = std::max(worst_rev, std::fabs(fb[i] - ft_rev[i]));
+    }
+    char msg[200];
+    std::snprintf(msg, sizeof(msg),
+                  "CAT916 PropagOfDistribution: the 2-long top edge repeats the 4-long bottom "
+                  "edge's %zu node fractions (max deviation %.2e)",
+                  fb.size(), std::min(worst, worst_rev));
+    check(same_count && std::min(worst, worst_rev) < 1e-9, msg);
+  }
+
+  // NumberOfSegments with DT_BetaLaw (new in 9.16): the nodes sit at the closed form of the
+  // law, on a straight 10-long edge, for both signs of beta.
+  for (const double beta : {1.01, -1.05}) {
+    Session s(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(10, 0, 0)).Edge());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+    n->SetNumberOfSegments(10);
+    n->SetDistrType(StdMeshers_NumberOfSegments::DT_BetaLaw);
+    n->SetBeta(beta);
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), n);
+    check(ok && s.compute(), "CAT916 NumberOfSegments DT_BetaLaw computes");
+    const std::vector<double> got = sorted_node_x(s.meshDS());
+    const std::vector<double> want = beta_law_positions(beta, 10, 10.0);
+    double worst = got.size() == want.size() ? 0.0 : 1e300;
+    for (std::size_t i = 0; got.size() == want.size() && i < got.size(); ++i) {
+      worst = std::max(worst, std::fabs(got[i] - want[i]));
+    }
+    char msg[200];
+    std::snprintf(msg, sizeof(msg),
+                  "CAT916 DT_BetaLaw beta=%.2f: 11 nodes at the closed form (max error %.2e)",
+                  beta, worst);
+    check(worst < 1e-9, msg);
+  }
+}
+
+
+// Sum of the areas of the triangles and quadrangles of the mesh, by the cross product.
+double face_area_sum(SMESHDS_Mesh* meshDS) {
+  double area = 0.0;
+  for (SMDS_FaceIteratorPtr it = meshDS->facesIterator(); it->more();) {
+    const SMDS_MeshElement* f = it->next();
+    const int nb = f->NbCornerNodes();
+    const gp_Pnt p0(f->GetNode(0)->X(), f->GetNode(0)->Y(), f->GetNode(0)->Z());
+    for (int i = 1; i + 1 < nb; ++i) {
+      const gp_Pnt p1(f->GetNode(i)->X(), f->GetNode(i)->Y(), f->GetNode(i)->Z());
+      const gp_Pnt p2(f->GetNode(i + 1)->X(), f->GetNode(i + 1)->Y(), f->GetNode(i + 1)->Z());
+      area += 0.5 * gp_Vec(p0, p1).Crossed(gp_Vec(p0, p2)).Magnitude();
+    }
+  }
+  return area;
+}
+
+void probe_cat916_2d_additions() {
+  section("CAT916", "native catalogue entries added with SMESH 9.16: 2-D family");
+
+  // LengthFromEdges with MEFISTO_2D on a 4 x 4 square, 8 segments a side: the triangles fill
+  // the square, and their size follows the mean boundary segment, 0.5.
+  {
+    Session s(BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 0, 4, 0, 4)
+                  .Face());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+    n->SetNumberOfSegments(8);
+    StdMeshers_MEFISTO_2D* a2 = s.make<StdMeshers_MEFISTO_2D>();
+    StdMeshers_LengthFromEdges* lfe = s.make<StdMeshers_LengthFromEdges>();
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), n) &&
+                    s.assign(s.shape(), a2) && s.assign(s.shape(), lfe);
+    check(ok, "CAT916 MEFISTO_2D + LengthFromEdges assign");
+    check(s.compute() && s.meshDS()->NbFaces() > 0, "CAT916 MEFISTO_2D + LengthFromEdges computes");
+    check_close(face_area_sum(s.meshDS()), 16.0, 1e-9,
+                "CAT916 LengthFromEdges: the triangles cover the 4 x 4 square exactly");
+    // MEFISTO uses the length as an ideal edge length (areteideale), not as a bound, so the
+    // mean triangle edge is what follows it.
+    double sum = 0.0;
+    int count = 0;
+    for (SMDS_FaceIteratorPtr it = s.meshDS()->facesIterator(); it->more();) {
+      const SMDS_MeshElement* f = it->next();
+      for (int i = 0; i < 3; ++i) {
+        const SMDS_MeshNode* a = f->GetNode(i);
+        const SMDS_MeshNode* b = f->GetNode((i + 1) % 3);
+        sum += gp_Pnt(a->X(), a->Y(), a->Z()).Distance(gp_Pnt(b->X(), b->Y(), b->Z()));
+        ++count;
+      }
+    }
+    const double mean = count ? sum / count : 0.0;
+    char msg[200];
+    std::snprintf(msg, sizeof(msg),
+                  "CAT916 LengthFromEdges: the mean triangle edge, %.4f, is within a factor "
+                  "1.5 of the mean boundary segment 0.5",
+                  mean);
+    check(mean > 0.5 / 1.5 && mean < 0.5 * 1.5, msg);
+  }
+
+  // LayerDistribution2D with RadialQuadrangle_1D2D on a disk of radius 2.5: the rings follow
+  // the inner 1-D hypothesis, here 4 equal layers, so every node radius is a multiple of
+  // 2.5 / 4.
+  {
+    gp_Circ circ(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 2.5);
+    const TopoDS_Wire wire = BRepBuilderAPI_MakeWire(BRepBuilderAPI_MakeEdge(circ).Edge()).Wire();
+    Session s(BRepBuilderAPI_MakeFace(wire).Face());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+    n->SetNumberOfSegments(8);
+    StdMeshers_RadialQuadrangle_1D2D* a2 = s.make<StdMeshers_RadialQuadrangle_1D2D>();
+    StdMeshers_NumberOfSegments* radial = s.make<StdMeshers_NumberOfSegments>();
+    radial->SetNumberOfSegments(4);
+    StdMeshers_LayerDistribution2D* layers = s.make<StdMeshers_LayerDistribution2D>();
+    layers->SetLayerDistribution(radial);
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), n) &&
+                    s.assign(s.shape(), a2) && s.assign(s.shape(), layers);
+    check(ok, "CAT916 RadialQuadrangle_1D2D + LayerDistribution2D assign");
+    check(s.compute() && s.meshDS()->NbFaces() > 0,
+          "CAT916 RadialQuadrangle_1D2D + LayerDistribution2D computes");
+    double worst = 0.0;
+    for (SMDS_NodeIteratorPtr it = s.meshDS()->nodesIterator(); it->more();) {
+      const SMDS_MeshNode* node = it->next();
+      const double layer = std::hypot(node->X(), node->Y()) / (2.5 / 4.0);
+      worst = std::max(worst, std::fabs(layer - std::round(layer)));
+    }
+    char msg[200];
+    std::snprintf(msg, sizeof(msg),
+                  "CAT916 LayerDistribution2D: every node radius is k * 2.5 / 4 (worst %.2e "
+                  "of a layer)",
+                  worst);
+    check(worst < 1e-9, msg);
+  }
+
+  // UseExisting_2D on one face of a box: that face gets no element and its sub-mesh counts as
+  // computed; the five other faces are meshed as usual.
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+    n->SetNumberOfSegments(3);
+    StdMeshers_Quadrangle_2D* a2 = s.make<StdMeshers_Quadrangle_2D>();
+    StdMeshers_UseExisting_2D* manual = s.make<StdMeshers_UseExisting_2D>();
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+    TopExp::MapShapes(s.shape(), TopAbs_FACE, faces);
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), n) &&
+                    s.assign(s.shape(), a2) && s.assign(faces.FindKey(1), manual);
+    check(ok, "CAT916 UseExisting_2D assigns on one face beside a global Quadrangle_2D");
+    check(s.compute(), "CAT916 UseExisting_2D: the compute succeeds");
+    SMESHDS_SubMesh* sm1 = s.meshDS()->MeshElements(faces.FindKey(1));
+    check(!sm1 || sm1->NbElements() == 0, "CAT916 UseExisting_2D: its face has no element");
+    check(s.mesh().GetSubMesh(faces.FindKey(1))->IsMeshComputed(),
+          "CAT916 UseExisting_2D: its face counts as computed");
+    check(s.meshDS()->NbFaces() == 5 * 9, "CAT916 UseExisting_2D: the 5 other faces get 9 quads each");
+  }
+
+  // UseExisting_1D on a lone edge: no segment is made, and the compute succeeds.
+  {
+    Session s(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(10, 0, 0)).Edge());
+    StdMeshers_UseExisting_1D* manual = s.make<StdMeshers_UseExisting_1D>();
+    check(s.assign(s.shape(), manual), "CAT916 UseExisting_1D assigns on an edge");
+    check(s.compute(), "CAT916 UseExisting_1D: the compute succeeds");
+    check(s.meshDS()->NbEdges() == 0, "CAT916 UseExisting_1D: no segment is made");
+  }
+}
+
+
+// Count the volumes of one entity type.
+int count_volumes(SMESHDS_Mesh* meshDS, SMDSAbs_EntityType type) {
+  int n = 0;
+  for (SMDS_VolumeIteratorPtr it = meshDS->volumesIterator(); it->more();) {
+    if (it->next()->GetEntityType() == type) ++n;
+  }
+  return n;
+}
+
+// Cartesian_3D on a radius-2 sphere at spacing 0.5, optionally with quanta.
+void cartesian_sphere(Session& s, bool use_quanta, double quanta) {
+  StdMeshers_Cartesian_3D* a3 = s.make<StdMeshers_Cartesian_3D>();
+  StdMeshers_CartesianParameters3D* grid = s.make<StdMeshers_CartesianParameters3D>();
+  for (int axis = 0; axis < 3; ++axis) {
+    std::vector<std::string> spacing(1, "0.5");
+    std::vector<double> internal;
+    grid->SetGridSpacing(spacing, internal, axis);
+  }
+  if (use_quanta) {
+    grid->SetToUseQuanta(true);
+    grid->SetQuanta(quanta);
+  }
+  s.assign(s.shape(), a3);
+  s.assign(s.shape(), grid);
+}
+
+void probe_cat916_3d_additions() {
+  section("CAT916", "native catalogue entries added with SMESH 9.16: 3-D family and global");
+
+  // BlockRenumber (parameter-free) with Hexa_3D on an axis-aligned box: hexahedra and nodes
+  // come in structured i, j, k order, i fastest, from the corner at the origin.
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    StdMeshers_BlockRenumber* renumber = s.make<StdMeshers_BlockRenumber>();
+    const bool ok = s.assign(s.shape(), renumber);
+    check(ok && build_hexa_mesh(s, 3), "CAT916 BlockRenumber + Hexa_3D computes");
+    std::vector<std::pair<smIdType, int>> cells;
+    for (SMDS_VolumeIteratorPtr it = s.meshDS()->volumesIterator(); it->more();) {
+      const SMDS_MeshElement* v = it->next();
+      double c[3] = {0, 0, 0};
+      for (int i = 0; i < v->NbCornerNodes(); ++i) {
+        c[0] += v->GetNode(i)->X() / v->NbCornerNodes();
+        c[1] += v->GetNode(i)->Y() / v->NbCornerNodes();
+        c[2] += v->GetNode(i)->Z() / v->NbCornerNodes();
+      }
+      const int i = static_cast<int>(c[0] / (BX / 3)), j = static_cast<int>(c[1] / (BY / 3)),
+                k = static_cast<int>(c[2] / (BZ / 3));
+      cells.emplace_back(v->GetID(), i + 3 * (j + 3 * k));
+    }
+    std::sort(cells.begin(), cells.end());
+    bool structured = cells.size() == 27;
+    for (std::size_t n = 0; structured && n < cells.size(); ++n) {
+      structured = cells[n].second == static_cast<int>(n);
+    }
+    check(structured, "CAT916 BlockRenumber: the 27 hexahedra are numbered in i, j, k order");
+  }
+
+  // NotConformAllowed is global only (SMESH_Mesh.cxx:658-668).
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    StdMeshers_NotConformAllowed* global = s.make<StdMeshers_NotConformAllowed>();
+    StdMeshers_NotConformAllowed* local = s.make<StdMeshers_NotConformAllowed>();
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+    TopExp::MapShapes(s.shape(), TopAbs_FACE, faces);
+    check(s.assign(s.shape(), global), "CAT916 NotConformAllowed assigns on the whole shape");
+    check(s.assign_status(faces.FindKey(1), local) == SMESH_Hypothesis::HYP_INCOMPATIBLE,
+          "CAT916 NotConformAllowed is refused on a sub-shape (HYP_INCOMPATIBLE)");
+    check(build_hexa_mesh(s, 2) && s.meshDS()->NbVolumes() == 8,
+          "CAT916 NotConformAllowed leaves a conformal hexahedral mesh unchanged");
+  }
+
+  // CartesianParameters3D quanta (new in 9.16): at the smallest quanta every cut cell of the
+  // boundary becomes one hexahedron, so the polyhedra disappear one for one.
+  {
+    Session plain(BRepPrimAPI_MakeSphere(2.0).Shape());
+    cartesian_sphere(plain, false, 0.0);
+    Session quanta(BRepPrimAPI_MakeSphere(2.0).Shape());
+    cartesian_sphere(quanta, true, 1e-6);
+    check(plain.compute() && quanta.compute(), "CAT916 Cartesian_3D with and without quanta computes");
+    const int poly = count_volumes(plain.meshDS(), SMDSEntity_Polyhedra);
+    const int hexa = count_volumes(plain.meshDS(), SMDSEntity_Hexa);
+    char msg[200];
+    std::snprintf(msg, sizeof(msg),
+                  "CAT916 quanta 1e-6: %d polyhedra + %d hexahedra become %d hexahedra and "
+                  "%d polyhedra",
+                  poly, hexa, count_volumes(quanta.meshDS(), SMDSEntity_Hexa),
+                  count_volumes(quanta.meshDS(), SMDSEntity_Polyhedra));
+    check(poly > 0 && count_volumes(quanta.meshDS(), SMDSEntity_Polyhedra) == 0 &&
+              count_volumes(quanta.meshDS(), SMDSEntity_Hexa) == poly + hexa,
+          msg);
+  }
+
+  // Cartesian_3D with ViscousLayers (body fitting with viscous layers, 9.16): three layers of
+  // total thickness 0.3 and stretch 1.2 off the x = 0 wall sit at the geometric closed form.
+  {
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    StdMeshers_Cartesian_3D* a3 = s.make<StdMeshers_Cartesian_3D>();
+    StdMeshers_CartesianParameters3D* grid = s.make<StdMeshers_CartesianParameters3D>();
+    for (int axis = 0; axis < 3; ++axis) {
+      std::vector<std::string> spacing(1, "1.0");
+      std::vector<double> internal;
+      grid->SetGridSpacing(spacing, internal, axis);
+    }
+    StdMeshers_ViscousLayers* vl = s.make<StdMeshers_ViscousLayers>();
+    vl->SetTotalThickness(0.3);
+    vl->SetNumberLayers(3);
+    vl->SetStretchFactor(1.2);
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+    TopExp::MapShapes(s.shape(), TopAbs_FACE, faces);
+    std::vector<int> wall(1, s.meshDS()->ShapeToIndex(faces.FindKey(1)));  // the x = 0 face
+    vl->SetBndShapes(wall, /*toIgnore=*/false);
+    const bool ok = s.assign(s.shape(), a3) && s.assign(s.shape(), grid) &&
+                    s.assign(s.shape(), vl);
+    check(ok && s.compute(), "CAT916 Cartesian_3D + ViscousLayers computes");
+    std::set<double> planes;
+    for (SMDS_NodeIteratorPtr it = s.meshDS()->nodesIterator(); it->more();) {
+      const double x = it->next()->X();
+      if (x < 0.31) planes.insert(std::round(x * 1e9) / 1e9);
+    }
+    const double t1 = 0.3 * (1.2 - 1.0) / (std::pow(1.2, 3) - 1.0);
+    const std::vector<double> want = {0.0, t1, t1 + 1.2 * t1, 0.3};
+    bool match = planes.size() == want.size();
+    std::size_t n = 0;
+    for (const double x : planes) {
+      match = match && std::fabs(x - want[n++]) < 1e-9;
+    }
+    check(match, "CAT916 Cartesian_3D + ViscousLayers: layer planes at x = 0, 0.0824, 0.1813, 0.3");
+  }
+}
+
 }  // namespace
 
 void run_smesh_probe() {
@@ -1885,4 +2346,7 @@ void run_smesh_probe() {
   probe_controls_and_groups_binding_behaviour();
   probe_editor_and_search_binding_behaviour();
   probe_r18_gmf_driver();
+  probe_cat916_1d_additions();
+  probe_cat916_2d_additions();
+  probe_cat916_3d_additions();
 }

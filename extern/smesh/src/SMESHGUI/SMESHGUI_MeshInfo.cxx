@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -66,24 +66,24 @@
 #include <QVBoxLayout>
 
 ////////////////////////////////////////////////////////////////////////////////
-/// \class Field
-/// \brief Field widget.
+/// \class FieldInfo
+/// \brief FieldInfo widget.
 /// \internal
 ////////////////////////////////////////////////////////////////////////////////
 
-class Field : public QLabel
+class FieldInfo : public QLabel
 {
 public:
-  Field( QWidget*, const QString& = QString() );
+  FieldInfo( QWidget*, const QString& = QString() );
   bool event( QEvent* );
 };
 
 /*!
   \brief Constructor.
   \param parent Parent widget.
-  \param name Field name. Defaults to null string.
+  \param name FieldInfo name. Defaults to null string.
 */
-Field::Field( QWidget* parent, const QString& name ): QLabel( parent )
+FieldInfo::FieldInfo( QWidget* parent, const QString& name ): QLabel( parent )
 {
   setFrameStyle( QLabel::StyledPanel | QLabel::Sunken );
   setAlignment( Qt::AlignCenter );
@@ -100,7 +100,7 @@ Field::Field( QWidget* parent, const QString& name ): QLabel( parent )
 /*!
   \brief Event handler. Redefined from QLabel.
 */
-bool Field::event( QEvent* e )
+bool FieldInfo::event( QEvent* e )
 {
   if ( e->type() == QEvent::DynamicPropertyChange )
   {
@@ -332,12 +332,12 @@ namespace
   /*!
     \brief Create information field.
     \param parent Parent widget.
-    \param name Field's object. Default to null string.
-    \return New field.
+    \param name FieldInfo's object. Default to null string.
+    \return New FieldInfo.
   */
   QLabel* createField( QWidget* parent, const QString& name = QString() )
   {
-    return new Field( parent, name );
+    return new FieldInfo( parent, name );
   }
 
   /*!
@@ -1674,6 +1674,8 @@ QString SMESHGUI_ElemInfo::ctrl2str( int control )
     title = tr( "ASPECTRATIO_3D_ELEMENTS" ); break;
   case SMESH::FT_Warping:
     title = tr( "WARP_ELEMENTS" ); break;
+  case SMESH::FT_Warping3D:
+    title = tr( "WARP_3D_ELEMENTS" ); break;
   case SMESH::FT_MinimumAngle:
     title = tr( "MINIMUMANGLE_ELEMENTS" ); break;
   case SMESH::FT_Taper:
@@ -1684,6 +1686,8 @@ QString SMESHGUI_ElemInfo::ctrl2str( int control )
     title = tr( "AREA_ELEMENTS" ); break;
   case SMESH::FT_Volume3D:
     title = tr( "VOLUME_3D_ELEMENTS" ); break;
+  case SMESH::FT_ScaledJacobian:
+    title = tr( "SCALED_JACOBIAN" ); break;  
   case SMESH::FT_MaxElementLength2D:
     title = tr( "MAX_ELEMENT_LENGTH_2D" ); break;
   case SMESH::FT_MaxElementLength3D:

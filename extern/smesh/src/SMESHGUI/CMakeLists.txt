@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -44,6 +44,7 @@ INCLUDE_DIRECTORIES(
   ${PROJECT_SOURCE_DIR}/src/SMESHClient
   ${PROJECT_SOURCE_DIR}/src/MEDWrapper
   ${PROJECT_SOURCE_DIR}/src/SMESH_I
+  ${PROJECT_SOURCE_DIR}/src/SMESH
   ${PROJECT_BINARY_DIR}
   ${PROJECT_BINARY_DIR}/idl
 )
@@ -88,6 +89,7 @@ SET(_moc_HEADERS
   SMESHGUI_CreatePatternDlg.h
   SMESHGUI_NodesDlg.h
   SMESHGUI_SpinBox.h
+  SMESHGUI_SpinBoxForbiddendRange.h
   SMESHGUI_TransparencyDlg.h
   SMESHGUI_ClippingDlg.h
   SMESHGUI_GroupDlg.h
@@ -135,6 +137,7 @@ SET(_moc_HEADERS
   SMESHGUI_MakeNodeAtPointDlg.h
   SMESHGUI_MeshInfosBox.h
   SMESHGUI_Make2DFrom3DOp.h
+  SMESHGUI_MakeFull2DFrom3DOp.h
   SMESHGUI_FindElemByPointDlg.h
   SMESHGUI_MeshOrderDlg.h
   SMESHGUI_CopyMeshDlg.h
@@ -157,6 +160,9 @@ SET(_moc_HEADERS
   SMESHGUI_AddNodeOnSegmentDlg.h
   SMESHGUI_AddNodeOnFaceDlg.h
   SMESHGUI_InteractiveOp.h
+  SMESHGUI_CreateDualMeshDlg.h
+  SMESHGUI_CreateDualMeshOp.h
+  SMESHGUI_Meshio.h
 )
 
 # header files / no moc processing
@@ -198,6 +204,7 @@ SET(_other_SOURCES
   SMESHGUI_CreatePatternDlg.cxx
   SMESHGUI_NodesDlg.cxx
   SMESHGUI_SpinBox.cxx
+  SMESHGUI_SpinBoxForbiddendRange.cxx
   SMESHGUI_TransparencyDlg.cxx
   SMESHGUI_ClippingDlg.cxx
   SMESHGUI_GroupDlg.cxx
@@ -246,6 +253,7 @@ SET(_other_SOURCES
   SMESHGUI_FileInfoDlg.cxx
   SMESHGUI_MeshInfosBox.cxx
   SMESHGUI_Make2DFrom3DOp.cxx
+  SMESHGUI_MakeFull2DFrom3DOp.cxx
   SMESHGUI_FindElemByPointDlg.cxx
   SMESHGUI_MeshOrderDlg.cxx
   SMESHGUI_CopyMeshDlg.cxx
@@ -283,6 +291,9 @@ SET(_other_SOURCES
   SMESHGUI_AddNodeOnSegmentDlg.cxx
   SMESHGUI_AddNodeOnFaceDlg.cxx
   SMESHGUI_InteractiveOp.cxx
+  SMESHGUI_CreateDualMeshDlg.cxx
+  SMESHGUI_CreateDualMeshOp.cxx
+  SMESHGUI_Meshio.cxx
 )
 
 # sources / to compile

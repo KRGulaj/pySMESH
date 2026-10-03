@@ -1,0 +1,21 @@
+SET(SALOME_TEST_DRIVER "$ENV{KERNEL_ROOT_DIR}/bin/salome/appliskel/salome_test_driver.py")
+SET(PYTHON_TEST_DRIVER "$ENV{SALOME_APPLICATION_DIR}/__RUN_SALOME__/bin/salome/python_test_driver.py")
+
+SET(BOOTSTRAP_TEST_LIB "$ENV{SALOME_APPLICATION_DIR}/@BOOTSTRAP_TEST_LIB@")
+
+MACRO(SUBDIRLIST result curdir)
+  FILE(GLOB children RELATIVE ${curdir} ${curdir}/*)
+  SET(dirlist "")
+  FOREACH(child ${children})
+    IF(IS_DIRECTORY ${curdir}/${child})
+      LIST(APPEND dirlist ${child})
+    ENDIF()
+  ENDFOREACH()
+  SET(${result} ${dirlist})
+ENDMACRO()
+
+SET( SEXT_TEST_DIR $ENV{SALOME_APPLICATION_DIR}/__SALOME_EXT__/bin/salome/test )
+SUBDIRLIST( DIRS_LIST  ${SEXT_TEST_DIR} )
+FOREACH(DIR ${DIRS_LIST})
+    SUBDIRS(${SEXT_TEST_DIR}/${DIR})
+ENDFOREACH()

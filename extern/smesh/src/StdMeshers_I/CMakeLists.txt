@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -22,6 +22,7 @@
 INCLUDE_DIRECTORIES(
   ${OpenCASCADE_INCLUDE_DIR}
   ${HDF5_INCLUDE_DIRS}
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${KERNEL_INCLUDE_DIRS}
   ${GEOM_INCLUDE_DIRS}
   ${MEDFILE_INCLUDE_DIRS}
@@ -39,12 +40,6 @@ INCLUDE_DIRECTORIES(
   ${PROJECT_BINARY_DIR}/idl
 )
 
-IF(SALOME_SMESH_ENABLE_MEFISTO)
-  INCLUDE_DIRECTORIES(
-      ${PROJECT_SOURCE_DIR}/src/MEFISTO2
-  )
-ENDIF(SALOME_SMESH_ENABLE_MEFISTO)
-
 # additional preprocessor / compiler flags
 ADD_DEFINITIONS(
   ${OpenCASCADE_DEFINITIONS}
@@ -59,7 +54,7 @@ ENDIF(WIN32)
 
 # libraries to link to
 SET(_link_LIBRARIES
-  ${KERNEL_SALOMELocalTrace}
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
   ${KERNEL_SalomeGenericObj}
   ${OpenCASCADE_ModelingData_LIBRARIES}
   SalomeIDLSMESH
@@ -121,10 +116,8 @@ SET(StdMeshersEngine_HEADERS
   StdMeshers_PolygonPerFace_2D_i.hxx
   StdMeshers_PolyhedronPerSolid_3D_i.hxx
   StdMeshers_BlockRenumber_i.hxx
+  StdMeshers_ViscousLayerBuilder_i.hxx
 )
-IF(SALOME_SMESH_ENABLE_MEFISTO)
-  SET(StdMeshersEngine_HEADERS ${StdMeshersEngine_HEADERS} StdMeshers_MEFISTO_2D_i.hxx)
-ENDIF(SALOME_SMESH_ENABLE_MEFISTO)
 # --- sources ---
 
 # sources / static
@@ -178,11 +171,8 @@ SET(StdMeshersEngine_SOURCES
   StdMeshers_PolygonPerFace_2D_i.cxx
   StdMeshers_PolyhedronPerSolid_3D_i.cxx
   StdMeshers_BlockRenumber_i.cxx
+  StdMeshers_ViscousLayerBuilder_i.cxx
 )
-
-IF(SALOME_SMESH_ENABLE_MEFISTO)
-  SET(StdMeshersEngine_SOURCES ${StdMeshersEngine_SOURCES} StdMeshers_MEFISTO_2D_i.cxx)
-ENDIF(SALOME_SMESH_ENABLE_MEFISTO)
 
 # --- rules ---
 

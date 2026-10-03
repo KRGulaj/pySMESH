@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2022  CEA/DEN, EDF R&D
+// Copyright (C) 2021-2026  CEA, EDF
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -21,6 +21,10 @@
 
 #include <string>
 
+std::string RetrieveInternalInstanceOfLocalCppResourcesManager();
 std::string GetContainerManagerInstance();
 std::string GetResourcesManagerInstance();
 std::string GetExternalServerInstance();
+std::string GetLogManagerInstance();
+std::string GetLockMasterEntryInNS();
+std::string GetLockMasterInstance();

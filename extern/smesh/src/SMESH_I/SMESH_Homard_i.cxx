@@ -1,4 +1,4 @@
-// Copyright (C) 2011-2022  CEA/DEN, EDF R&D
+// Copyright (C) 2011-2026  CEA, EDF
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -591,9 +591,10 @@ void HOMARD_Cas_i::AddBoundaryGroup(const char* BoundaryName, const char* Group)
     //
     SALOME::ExceptionStruct es;
     es.type = SALOME::BAD_PARAM;
-#ifdef _DEBUG_
-    texte += "\nInvalid AddBoundaryGroup";
-#endif
+    
+    if (SALOME::VerbosityActivated())
+      texte += "\nInvalid AddBoundaryGroup";
+
     INFOS(texte);
     es.text = CORBA::string_dup(texte.c_str());
     throw SALOME::SALOME_Exception(es);

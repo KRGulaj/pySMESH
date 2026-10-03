@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2022  CEA/DEN, EDF R&D
+// Copyright (C) 2021-2026  CEA, EDF
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -68,4 +68,16 @@ Engines::IORType *SALOME_Embedded_NamingService::ResolveFirst(const char *Path)
   SALOME_Fake_NamingService ns;
   CORBA::Object_var obj = ns.ResolveFirst(Path);
   return ObjectToIOR(obj);
+}
+
+Engines::NSListOfStrings *SALOME_Embedded_NamingService::keys()
+{
+  SALOME_Fake_NamingService ns;
+  std::vector<std::string> ks = ns.repr();
+  Engines::NSListOfStrings *ret = new Engines::NSListOfStrings;
+  std::size_t sz(ks.size());
+  ret->length( sz );
+  for(std::size_t i = 0 ; i < sz ; ++i)
+    (*ret)[i] = CORBA::string_dup( ks[i].c_str() );
+  return ret;
 }

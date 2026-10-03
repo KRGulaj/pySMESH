@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -483,7 +483,6 @@ void SALOMEDS_Study_i::Clear()
 PortableServer::POA_ptr SALOMEDS_Study_i::_default_POA()
 {
   PortableServer::POA_ptr poa = GetThePOA();
-  MESSAGE("SALOMEDS_Study_i::_default_POA: " << poa);
   return PortableServer::POA::_duplicate(poa);
 }
 

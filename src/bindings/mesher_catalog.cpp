@@ -20,6 +20,7 @@
 
 #include "mesher/mesher.hpp"
 
+#include <cmath>
 #include <utility>
 
 #include <SMESHDS_Mesh.hxx>
@@ -54,22 +55,28 @@
 #include <StdMeshers_RadialPrism_3D.hxx>
 #include <StdMeshers_RadialQuadrangle_1D2D.hxx>
 #include <StdMeshers_Regular_1D.hxx>
+#include <StdMeshers_SegmentAroundVertex_0D.hxx>
+#include <StdMeshers_UseExisting_1D2D.hxx>
 
 // --- hypotheses ---
 #include <StdMeshers_Adaptive1D.hxx>
 #include <StdMeshers_Arithmetic1D.hxx>
 #include <StdMeshers_AutomaticLength.hxx>
+#include <StdMeshers_BlockRenumber.hxx>
 #include <StdMeshers_CartesianParameters3D.hxx>
 #include <StdMeshers_Deflection1D.hxx>
 #include <StdMeshers_FixedPoints1D.hxx>
 #include <StdMeshers_Geometric1D.hxx>
 #include <StdMeshers_LayerDistribution.hxx>
+#include <StdMeshers_LayerDistribution2D.hxx>
+#include <StdMeshers_LengthFromEdges.hxx>
 #include <StdMeshers_LocalLength.hxx>
 #include <StdMeshers_MaxElementArea.hxx>
 #include <StdMeshers_MaxElementVolume.hxx>
 #include <StdMeshers_MaxLength.hxx>
 #include <StdMeshers_NumberOfLayers.hxx>
 #include <StdMeshers_NumberOfLayers2D.hxx>
+#include <StdMeshers_NotConformAllowed.hxx>
 #include <StdMeshers_NumberOfSegments.hxx>
 #include <StdMeshers_ProjectionSource1D.hxx>
 #include <StdMeshers_ProjectionSource2D.hxx>
@@ -104,11 +111,18 @@ class Factory {
 // The algorithms. All of them are configured entirely through their hypotheses, so none
 // takes a parameter of its own — which is why they are a separate, flat table.
 SMESH_Hypothesis* make_algorithm(const std::string& name, Factory& f) {
+  // 0-D. It meshes nothing itself: it exists so that SegmentLengthAroundVertex on a vertex is
+  // taken into account by the 1-D algorithm of the edges that vertex bounds.
+  if (name == "SegmentAroundVertex_0D") return f.make<StdMeshers_SegmentAroundVertex_0D>();
   // 1-D
   if (name == "Regular_1D") return f.make<StdMeshers_Regular_1D>();
   if (name == "CompositeSegment_1D") return f.make<StdMeshers_CompositeSegment_1D>();
   if (name == "Projection_1D") return f.make<StdMeshers_Projection_1D>();
+  // "Use Edges/Faces to be Created Manually": they create nothing and mark their sub-mesh
+  // computed, so elements made by a script stand as that sub-shape's mesh.
+  if (name == "UseExisting_1D") return f.make<StdMeshers_UseExisting_1D>();
   // 2-D
+  if (name == "UseExisting_2D") return f.make<StdMeshers_UseExisting_2D>();
   if (name == "Quadrangle_2D") return f.make<StdMeshers_Quadrangle_2D>();
   if (name == "MEFISTO_2D") return f.make<StdMeshers_MEFISTO_2D>();
   if (name == "PolygonPerFace_2D") return f.make<StdMeshers_PolygonPerFace_2D>();
@@ -140,6 +154,19 @@ SMESH_Hypothesis* make_1d_hypothesis(const std::string& name, Params& p, Factory
       h->SetScaleFactor(p.number("scale_factor"));
     } else {
       p.number("scale_factor");  // consumed so the field is not reported as unknown
+    }
+    if (distribution == StdMeshers_NumberOfSegments::DT_BetaLaw) {
+      // SMESH 9.16 places node i at 1 + beta * (1 - r^(1-i/n)) / (1 + r^(1-i/n)) with
+      // r = (1 + beta) / (beta - 1) (StdMeshers_Regular_1D::computeBetaLaw). Upstream
+      // documents |beta| <= 1 as forbidden for that log, but SetBeta does not check it, and
+      // such a value yields NaN positions; so it is refused here. Read for this law only,
+      // so a caller that never sends `beta` keeps the behaviour it had.
+      const double beta = p.number("beta");
+      if (!(std::abs(beta) > 1.0)) {
+        throw PysmeshError("NumberOfSegments: the beta law needs |beta| > 1 (got " +
+                           std::to_string(beta) + ").");
+      }
+      h->SetBeta(beta);
     }
     if (distribution == StdMeshers_NumberOfSegments::DT_TabFunc) {
       h->SetConversionMode(p.integer("conversion_mode"));
@@ -218,6 +245,9 @@ SMESH_Hypothesis* make_1d_hypothesis(const std::string& name, Params& p, Factory
     return h;
   }
   if (name == "Propagation") return f.make<StdMeshers_Propagation>();
+  // Propagates the relative node distribution, not the hypothesis: an opposite edge of a
+  // different length gets the same number of nodes at the same fractions of its length.
+  if (name == "PropagOfDistribution") return f.make<StdMeshers_PropagOfDistribution>();
   if (name == "QuadraticMesh") return f.make<StdMeshers_QuadraticMesh>();
   return nullptr;
 }
@@ -237,6 +267,9 @@ SMESH_Hypothesis* make_area_hypothesis(const std::string& name, Params& p, Facto
     h->SetMaxVolume(p.number("max_volume"));
     return h;
   }
+  // The triangle size of MEFISTO_2D taken from the mean length of the boundary segments.
+  // Its one parameter, the mode, has the single value 1 upstream, set by the constructor.
+  if (name == "LengthFromEdges") return f.make<StdMeshers_LengthFromEdges>();
   if (name == "QuadranglePreference") return f.make<StdMeshers_QuadranglePreference>();
   if (name == "QuadrangleParams") {
     StdMeshers_QuadrangleParams* h = f.make<StdMeshers_QuadrangleParams>();
@@ -278,8 +311,30 @@ SMESH_Hypothesis* make_area_hypothesis(const std::string& name, Params& p, Facto
     h->SetToAddEdges(p.flag("add_edges"));
     h->SetToCreateFaces(p.flag("create_faces"));
     h->SetToConsiderInternalFaces(p.flag("consider_internal_faces"));
+    // New in SMESH 9.16 (9a170f0e1): a boundary polyhedron is replaced by a hexahedron when
+    // its volume divided by the volume of the equivalent hexahedron is bigger than `quanta`.
+    // Read only when sent, so the existing dataclass, which does not send it, keeps its
+    // behaviour. The range is the one SetQuanta accepts (StdMeshers_CartesianParameters3D
+    // .cxx:804); it is checked here so that a bad value raises PysmeshError.
+    if (p.has("use_quanta")) {
+      h->SetToUseQuanta(p.flag("use_quanta"));
+      const double quanta = p.number("quanta");
+      if (!(quanta >= 1e-6 && quanta <= 1.0)) {
+        throw PysmeshError("CartesianParameters3D: quanta must lie in [1e-6, 1] (got " +
+                           std::to_string(quanta) + ").");
+      }
+      h->SetQuanta(quanta);
+    }
     return h;
   }
+  // Renumbers the hexahedra and nodes of Hexa_3D like a structured i, j, k grid. Only the
+  // parameter-free form is built: for a block with edges parallel to the global axes the
+  // local axes default to the global ones (SMESH 3d_meshing_hypo.rst). The explicit form
+  // names its vertices by study entry strings, which need a SMESH_Mesh::TCallUp to resolve.
+  if (name == "BlockRenumber") return f.make<StdMeshers_BlockRenumber>();
+  // Lets local algorithms that mesh their own boundary sit side by side on adjacent
+  // sub-shapes, which gives a non-conformal mesh. Global only (SMESH_Mesh.cxx:658-668).
+  if (name == "NotConformAllowed") return f.make<StdMeshers_NotConformAllowed>();
   return nullptr;
 }
 
@@ -364,12 +419,16 @@ SMESH_Hypothesis* Mesher::build(const std::string& name, const py::dict& values)
   }
   if (hyp == nullptr) {
     // A layer distribution carries a 1-D hypothesis of its own, so it is built through the
-    // same factory recursively rather than through a second, parallel one.
-    if (name == "LayerDistribution") {
+    // same factory recursively rather than through a second, parallel one. The 2-D form,
+    // for RadialQuadrangle_1D2D, is the same class under its own name.
+    if (name == "LayerDistribution" || name == "LayerDistribution2D") {
       const py::dict spec = p.nested("distribution");
       SMESH_Hypothesis* inner =
           build(spec["name"].cast<std::string>(), spec["params"].cast<py::dict>());
-      StdMeshers_LayerDistribution* h = factory.make<StdMeshers_LayerDistribution>();
+      StdMeshers_LayerDistribution* h =
+          name == "LayerDistribution"
+              ? factory.make<StdMeshers_LayerDistribution>()
+              : factory.make<StdMeshers_LayerDistribution2D>();
       h->SetLayerDistribution(inner);
       hyp = h;
     }

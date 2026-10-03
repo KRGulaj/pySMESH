@@ -137,6 +137,8 @@ py::object Params::take(const char* key) {
   return values_[key];
 }
 
+bool Params::has(const char* key) const { return values_.contains(key); }
+
 double Params::number(const char* key) { return take(key).cast<double>(); }
 int Params::integer(const char* key) { return take(key).cast<int>(); }
 bool Params::flag(const char* key) { return take(key).cast<bool>(); }

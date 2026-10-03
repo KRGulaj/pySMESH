@@ -1,4 +1,4 @@
-// Copyright (C) 2021-2022  CEA/DEN, EDF R&D
+// Copyright (C) 2021-2026  CEA, EDF
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -16,10 +16,13 @@
 //
 // See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
 //
-#ifndef __KERNELSERVICES_HXX__
-#define __KERNELSERVICES_HXX__
+
+#pragma once
+
 #include <string>
 
 void RegisterCompoInternal(const std::string& compoName, const std::string& compoIOR);
 std::string RetrieveCompoInternal(const std::string& compoName);
-#endif
+void GenerateViolentMemoryFaultForTestPurpose();
+void GenerateDeadLockForTestPurpose();
+void EntryForDebuggerBreakPoint();

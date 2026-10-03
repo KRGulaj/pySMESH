@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -96,7 +96,7 @@ double StdMeshers_MaxLength::GetLength() const
 
 //================================================================================
 /*!
- * \brief Sets boolean parameter enabling/desabling usage of length computed
+ * \brief Sets boolean parameter enabling/disabling usage of length computed
  * basing on size of bounding box of shape to mesh
  */
 //================================================================================
@@ -125,7 +125,7 @@ void StdMeshers_MaxLength::SetPreestimatedLength(double length)
 
 //================================================================================
 /*!
- * \brief Returns value of boolean parameter enabling/desabling usage of length computed
+ * \brief Returns value of boolean parameter enabling/disabling usage of length computed
  * basing on size of bounding box of shape to mesh
  */
 //================================================================================

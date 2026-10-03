@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -19,6 +19,7 @@
 
 INCLUDE_DIRECTORIES(
   ${OMNIORB_INCLUDE_DIR}
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${PROJECT_BINARY_DIR}
   ${PROJECT_BINARY_DIR}/salome_adm
   ${PROJECT_SOURCE_DIR}/src/DSC/DSC_User
@@ -27,8 +28,6 @@ INCLUDE_DIRECTORIES(
   ${PROJECT_SOURCE_DIR}/src/DSC/DSC_User/Datastream/Calcium
   ${PROJECT_SOURCE_DIR}/src/DSC/DSC_User/Basic
   ${PROJECT_SOURCE_DIR}/src/DSC/DSC_Basic
-  ${PROJECT_SOURCE_DIR}/src/SALOMELocalTrace
-  ${PROJECT_SOURCE_DIR}/src/Basics
   ${PROJECT_SOURCE_DIR}/src/Utils
   ${PROJECT_SOURCE_DIR}/src/Container
   ${PROJECT_SOURCE_DIR}/src/GenericObj
@@ -70,7 +69,7 @@ TARGET_LINK_LIBRARIES(CalciumC SalomeDSCSuperv SalomeCalcium)
 INSTALL(TARGETS CalciumC EXPORT ${PROJECT_NAME}TargetGroup DESTINATION ${SALOME_INSTALL_LIBS})
 
 ADD_EXECUTABLE(test_DataIdContainer_Calcium test_DataIdContainer.cxx)
-TARGET_LINK_LIBRARIES(test_DataIdContainer_Calcium SalomeDSCSuperv SalomeContainer SalomeCalcium OpUtil SALOMELocalTrace ${OMNIORB_LIBRARIES} ${PLATFORM_LIBS})
+TARGET_LINK_LIBRARIES(test_DataIdContainer_Calcium SalomeDSCSuperv SalomeContainer SalomeCalcium OpUtil ${SALOMEBOOTSTRAP_SALOMELocalTrace} ${OMNIORB_LIBRARIES} ${PLATFORM_LIBS})
 
 SALOME_CONFIGURE_FILE(calcium_integer_port_uses.hxx.in calcium_integer_port_uses.hxx)
 SALOME_CONFIGURE_FILE(CalciumProvidesPort.hxx.in CalciumProvidesPort.hxx)

@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -218,6 +218,11 @@ public:
   void ExportDAT( const char* file, const CORBA::Boolean renumber );
   void ExportUNV( const char* file, const CORBA::Boolean renumber  );
   void ExportSTL( const char* file, bool isascii );
+
+  void ExportStructuredCGNS(SMESH::SMESH_IDSource_ptr meshPart,
+                            const char*               file,
+                            CORBA::Boolean            overwrite);
+
   void ExportCGNS(SMESH::SMESH_IDSource_ptr meshPart,
                   const char*               file,
                   CORBA::Boolean            overwrite,
@@ -226,7 +231,7 @@ public:
                  const char*               file,
                  CORBA::Boolean            withRequiredGroups);
 
-    
+
   template<class SPECLS>
     void ExportPartToMEDCommon(SPECLS&                   speCls,
                                SMESH::SMESH_IDSource_ptr meshPart,
@@ -248,6 +253,11 @@ public:
                        CORBA::Double             ZTolerance,
                        CORBA::Boolean            saveNumbers );
 
+  void ExportPartToMESHIO(SMESH::SMESH_IDSource_ptr meshPart,
+                          const char*               file,
+                          const char*               selectedFilter,
+                          const char*               converter = nullptr);
+
   CORBA::LongLong ExportPartToMEDCoupling(SMESH::SMESH_IDSource_ptr meshPart,
                                           CORBA::Boolean            auto_groups,
                                           CORBA::Boolean            autoDim,
@@ -264,7 +274,7 @@ public:
                        CORBA::Boolean            renumber);
   void ExportPartToSTL(SMESH::SMESH_IDSource_ptr meshPart,
                        const char*               file,
-                       CORBA::Boolean            isascii);
+                       CORBA::Boolean            isascii);                       
 
   CORBA::Double GetComputeProgress();
 
@@ -424,18 +434,18 @@ public:
    */
   void CreateGroupServants();
 
-  /*!
-   * \brief Return true if all sub-meshes are computed OK - to update an icon
-   */
-  bool IsComputedOK();
 
 
   // ====================================
   // SMESH_Mesh interface (continuation)
   // ====================================
+  /*!
+   * \brief Return true if all sub-meshes are computed OK - to update an icon
+   */
+  CORBA::Boolean IsComputedOK();
 
   /*!
-   * \brief Return groups cantained in _mapGroups by their IDs
+   * \brief Return groups contained in _mapGroups by their IDs
    */
   SMESH::ListOfGroups* GetGroups(const std::list<int>& groupIDs) const;
 
@@ -571,7 +581,7 @@ public:
    * Persistence of geometry tick
    */
   int& MainShapeTick() { return _mainShapeTick; }
-  
+
 
   /*!
    * Sets list of notebook variables used for Mesh operations separated by ":" symbol
@@ -678,10 +688,11 @@ private:
    */
   TListOfListOfInt findConcurrentSubMeshes();
 
+ protected:
+  ::SMESH_Mesh* _impl;        // :: force no namespace here
  private:
 
   static int    _idGenerator;
-  ::SMESH_Mesh* _impl;        // :: force no namespace here
   SMESH_Gen_i*  _gen_i;
   int           _id;          // id given by creator (unique within the creator instance)
   int           _nbInvalidHypos;

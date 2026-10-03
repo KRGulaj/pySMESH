@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2019-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -75,6 +75,14 @@ void SALOME_CPythonHelper::initializePython(int argc, char *argv[])
   PyObject *socket(PyImport_ImportModuleLevel(const_cast<char *>("socket"),_globals,_locals,tmp,0));
   PyDict_SetItemString(_globals,"sp",_subprocess);
   PyDict_SetItemString(_globals,"socket",socket);
+}
+
+void SALOME_CPythonHelper::allowPythonCallsFromDifferentThread() const
+{
+#if PY_VERSION_HEX < 0x03070000
+  PyEval_InitThreads(); /* Create (and acquire) the interpreter lock (for threads)*/
+#endif
+  PyEval_SaveThread(); /* Release the thread state */
 }
 
 void SALOME_CPythonHelper::registerToSalomePiDict(const std::string& processName, long pid) const

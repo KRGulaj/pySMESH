@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -159,12 +159,12 @@ module SMESH
       Update the study
      */
     void UpdateStudy();
-    
+
     /*!
       Set enable publishing in the study
      */
     void SetEnablePublish( in boolean theIsEnablePublish );
-    
+
     /*!
       Get enable publishing in the study
      */
@@ -233,6 +233,43 @@ module SMESH
       raises ( SALOME::SALOME_Exception );
 
     /*!
+    * Pauses the Python dump recording.
+    * Increments internal counter (TPythonDump::myCounter)
+    * While myCounter > 0, SMESH operations are not recorded to the Python dump.
+    *
+    * Must be paired with ResumePythonDumpRecording().
+    * Can be nested - each Pause must have corresponding Resume.
+    *
+    * Used by SMESH Python plugins to hide intermediate operations and record
+    * only high-level commands.
+    *
+    */
+    void PausePythonDumpRecording();
+
+    /*!
+    * Resumes Python dump recording.
+    * Decrements internal counter (TPythonDump::myCounter)
+    * When counter reaches 0, recording resumes.
+    * Must be paired with PausePythonDumpRecording()().
+    * If called when counter is already 0, logs warning and does nothing.
+    */
+    void ResumePythonDumpRecording();
+
+    /*!
+     * Manually add a command to the Python dump script.
+     * Used for Python plugins and scripts that need to record their operations
+     * in Python dump.
+     * Example:
+     *   smesh.AddToPythonScript("# Some operation")
+     *   smesh.AddToPythonScript("result = myPlugin.Process(mesh1, mesh2)")
+     *
+     * \param theCommand The Python command to add (valid Python statement)
+     *
+     * \note No automatic newlines are added - include them if needed.
+     */
+    void AddToPythonScript(in string theCommand);
+
+    /*!
      * Create a Mesh object, given a geometry shape.
      * Mesh is created empty (no points, no elements).
      * Shape is explored via GEOM_Client to create local copies.
@@ -243,10 +280,23 @@ module SMESH
       raises ( SALOME::SALOME_Exception );
 
     /*!
+     * Create a Mesh object, given a geometry shape.
+     * Mesh is created empty (no points, no elements).
+     * Shape is explored via GEOM_Client to create local copies.
+     * of TopoDS_Shapes and bind CORBA references of shape & subshapes
+     * with TopoDS_Shapes
+     * The mesh is a parallel one
+     */
+    SMESH_ParallelMesh CreateParallelMesh( in GEOM::GEOM_Object theObject )
+      raises ( SALOME::SALOME_Exception );
+    /*!
      * Create an empty mesh object
      */
     SMESH_Mesh CreateEmptyMesh()
       raises ( SALOME::SALOME_Exception );
+
+    SMESH_Mesh ReloadMeshFromFile(in SMESH_Mesh sourceMesh)
+      raises(SALOME::SALOME_Exception);
 
     /*!
      * Create Mesh object importing data from given UNV file
@@ -259,6 +309,42 @@ module SMESH
      * Create Mesh object(s) importing data from given MED file
      */
     mesh_array CreateMeshesFromMED( in string theFileName,
+                                    out SMESH::DriverMED_ReadStatus theStatus )
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Create Mesh object(s) importing data from given MAIL file
+     */
+    mesh_array CreateMeshesFromMAIL( in string theFileName,
+                                    out SMESH::DriverMED_ReadStatus theStatus )
+      raises ( SALOME::SALOME_Exception );
+    
+    /*!
+     * Create Mesh object(s) importing data from given INP (abaqus) file
+     */
+    mesh_array CreateMeshesFromINP( in string theFileName,
+                                    out SMESH::DriverMED_ReadStatus theStatus )
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
+     * Create Mesh object(s) importing data from given CDB (ansys) file
+     */
+    mesh_array CreateMeshesFromCDB( in string theFileName,
+                                    out SMESH::DriverMED_ReadStatus theStatus )
+      raises ( SALOME::SALOME_Exception );
+      
+      
+    /*!
+     * Create Mesh object(s) importing data from given ASC (systus) file
+     */
+    mesh_array CreateMeshesFromASC( in string theFileName,
+                                    out SMESH::DriverMED_ReadStatus theStatus )
+      raises ( SALOME::SALOME_Exception );
+      
+    /*!
+     * Create Mesh object(s) importing data from given GEOF (zset) file
+     */
+    mesh_array CreateMeshesFromGEOF( in string theFileName,
                                     out SMESH::DriverMED_ReadStatus theStatus )
       raises ( SALOME::SALOME_Exception );
 
@@ -286,6 +372,27 @@ module SMESH
       raises ( SALOME::SALOME_Exception );
 
     /*!
+     * Create a mesh and import data from any file supported by meshio library
+     */
+    mesh_array CreateMeshesFromMESHIO(in string theFileName,
+                                      out SMESH::DriverMED_ReadStatus theStatus,
+                                      in string selectedFilter,
+                                      in string converter)
+      raises (SALOME::SALOME_Exception);
+
+
+    /*!
+     * Create a dual mesh of a Tetrahedron mesh
+     *  \param mesh - TetraHedron mesh to create dual from
+     *  \param meshName - a name of the new mesh
+     *  \param adaptToShape - if True project boundary point on shape
+     */
+    SMESH_Mesh CreateDualMesh(in SMESH_IDSource mesh,
+                              in string         meshName,
+                              in boolean        adaptToShape)
+      raises ( SALOME::SALOME_Exception );
+
+    /*!
      * Create a mesh by copying a part of another mesh
      *  \param meshPart - a part of mesh to copy
      *  \param meshName - a name of the new mesh
@@ -305,7 +412,7 @@ module SMESH
      *  \param newGeometry - a new geometry
      *  \param meshName - a name of the new mesh
      *  \param toCopyGroups - to create groups in the new mesh
-     *  \param toReuseHypotheses - if True, existing hypothesis will be used by the new mesh, 
+     *  \param toReuseHypotheses - if True, existing hypothesis will be used by the new mesh,
      *         otherwise new hypotheses with the same parameters will be created for the new mesh.
      *  \param toCopyElements - to copy mesh elements of same sub-shapes of the two geometries
      *  \param newMesh - return a new mesh
@@ -526,10 +633,10 @@ module SMESH
      */
     long_array GetInsideSphere( in SMESH_IDSource theSource,
 				in ElementType    theElemType,
-				in double theX, 
-				in double theY, 
+				in double theX,
+				in double theY,
 				in double theZ,
-				in double theR );    
+				in double theR );
 
     /*!
      * Return indices of elements, which are located inside the box
@@ -544,12 +651,12 @@ module SMESH
      */
     long_array GetInsideBox( in SMESH_IDSource theSource,
 			     in ElementType    theElemType,
-			     in double theX1, 
-			     in double theY1, 
+			     in double theX1,
+			     in double theY1,
 			     in double theZ1,
 			     in double theX2,
 			     in double theY2,
-			     in double theZ2);    
+			     in double theZ2);
     /*!
      * Return indices of elements, which are located inside the box
      *  \param theSource - mesh, sub-mesh or group
@@ -565,14 +672,14 @@ module SMESH
      */
     long_array GetInsideCylinder( in SMESH_IDSource theSource,
 				  in ElementType    theElemType,
-				  in double theX, 
-				  in double theY, 
+				  in double theX,
+				  in double theY,
 				  in double theZ,
 				  in double theDX,
 				  in double theDY,
 				  in double theDZ,
 				  in double theH,
-				  in double theR );    
+				  in double theR );
     /*!
      * Return indices of elements, which are located inside the geometry
      *  \param theSource - mesh, sub-mesh or group
@@ -583,7 +690,7 @@ module SMESH
     long_array GetInside( in SMESH_IDSource theSource,
 			  in ElementType    theElemType,
 			  in GEOM::GEOM_Object theGeom,
-			  in double theTolerance );    
+			  in double theTolerance );
 
     MG_ADAPT CreateMG_ADAPT();
     SMESHHOMARD::HOMARD_Gen CreateHOMARD_ADAPT() raises ( SALOME::SALOME_Exception );

@@ -1,4 +1,4 @@
-# Copyright (C) 2014-2022  EDF R&D
+# Copyright (C) 2014-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -57,10 +57,10 @@ SET(sample_SCRIPT
 SALOME_INSTALL_SCRIPTS("${plugin_SCRIPTS}" ${MACMESH_INSTALL_PY})
 SALOME_INSTALL_SCRIPTS("${sample_SCRIPT}" ${SALOME_INSTALL_SCRIPT_PYTHON} DEF_PERMS)
 
-SET(testname MacMesh_Example_PressureValve)
-SALOME_GENERATE_TESTS_ENVIRONMENT(tests_env)
-ADD_TEST(
-  NAME ${testname}
-  COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_SOURCE_DIR}/doc/salome/examples/testme.py ${sample_SCRIPT})
-SET_TESTS_PROPERTIES(${testname} PROPERTIES ENVIRONMENT "${tests_env}")
-
+IF(SALOME_BUILD_TESTS)
+  SET(testname MacMesh_Example_PressureValve)
+  SALOME_GENERATE_TESTS_ENVIRONMENT(tests_env)
+  ADD_TEST(NAME ${testname}
+           COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_SOURCE_DIR}/test/test_helper.py ${sample_SCRIPT})
+  SET_TESTS_PROPERTIES(${testname} PROPERTIES ENVIRONMENT "${tests_env}" LABELS "macmesh")
+ENDIF()

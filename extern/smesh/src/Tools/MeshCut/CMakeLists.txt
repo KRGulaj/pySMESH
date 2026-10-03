@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  EDF R&D
+# Copyright (C) 2012-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -18,7 +18,11 @@
 #
 
 IF(SALOME_BUILD_GUI)
-  INCLUDE(UsePyQt)
+  INCLUDE(SalomeQtPythonBindings)
+  SALOME_SETUP_QT_PYTHON_BINDINGS()
+  IF(SALOME_USE_PYSIDE)
+    SALOME_SETUP_PYSIDE_SHIBOKEN()
+  ENDIF()
 ENDIF(SALOME_BUILD_GUI)
 
 # --- options ---
@@ -66,7 +70,7 @@ IF(SALOME_BUILD_GUI)
     MeshCutDialog.ui
   )
   # scripts / pyuic wrappings
-  PYQT_WRAP_UIC(_pyuic_SCRIPTS ${_pyuic_FILES} TARGET_NAME _target_name_pyuic)
+  SALOME_WRAP_UIC(_pyuic_SCRIPTS ${_pyuic_FILES} TARGET_NAME _target_name_pyuic)
 ENDIF(SALOME_BUILD_GUI)
 
 # --- rules ---

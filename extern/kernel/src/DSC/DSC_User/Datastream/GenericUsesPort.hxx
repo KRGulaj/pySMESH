@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -108,9 +108,8 @@ GenericUsesPort< DataManipulator,CorbaPortType, repositoryName, UsesPort  >::put
     CorbaPortTypeVar port = CorbaPortType::_narrow((*_my_ports)[i]);
     //if (i) { PB1
     //OLD :   copyOfData = DataManipulator::clone(data);
-#ifdef MYDEBUG
-    std::cerr << "-------- GenericUsesPort::put -------- " << std::endl;
-#endif
+    if (SALOME::VerbosityActivated())
+      std::cerr << "-------- GenericUsesPort::put -------- " << std::endl;
     //} PB1
     try {
       port->put(data,time,tag);
@@ -138,9 +137,9 @@ GenericUsesPort< DataManipulator, CorbaPortType, repositoryName, UsesPort
 {
   if (_my_ports) delete _my_ports;
 
-#ifdef MYDEBUG
-  std::cerr << "GenericUsesPort::uses_port_changed" << std::endl;
-#endif
+  if (SALOME::VerbosityActivated())
+    std::cerr << "GenericUsesPort::uses_port_changed" << std::endl;
+
   _my_ports = new_uses_port;
 }
 

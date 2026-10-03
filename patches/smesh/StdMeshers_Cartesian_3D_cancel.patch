@@ -1,0 +1,69 @@
+pySMESH: make StdMeshers_Cartesian_3D stop on a cancel again (SMESH V9_16_0).
+
+Symptom: a cancel (SMESH_Gen::CancelCompute, or a progress hook that cancels) no longer
+stops Cartesian_3D. The algorithm runs to its end, and only then does the compute report the
+cancel. A cancelled run keeps the complete mesh and takes longer than a run without a cancel.
+
+Upstream commit: SMESH 9f7d4a55e (2024-05-26, bos #42002, "Bodyfitting refactoring") moved
+the grid steps of StdMeshers_Cartesian_3D::Compute into
+Cartesian3D::Grid::GridInitAndInterserctWithShape.
+
+Root cause: Compute passes the member flag _computeCanceled (volatile bool, SMESH_Algo.hxx)
+by value. The three checks in the grid function (after SetCoordinates, after the
+intersection, after ComputeNodes) test a copy taken at the call, so they never see a cancel
+that arrives later. Compute also ignores the bool that the function returns. V9_9_0 tested
+the member itself at the same three points of Compute, and returned false.
+
+Change (the cancel path only; a run without a cancel builds the same mesh):
+* StdMeshers_Cartesian_3D_Grid.hxx and .cxx, Grid::GridInitAndInterserctWithShape: take the
+  flag as volatile bool&, so that each of the three checks reads the live member.
+* StdMeshers_Cartesian_3D.cxx, StdMeshers_Cartesian_3D::Compute: return false when the grid
+  function returns false. It returns false only at its three cancel checks.
+
+Not changed: StdMeshers.test/HexahedronTest.cxx and HexahedronCanonicalShapesTest.cxx pass a
+literal false; pySMESH does not build them. Hexahedron::MakeElements (the threaded volume
+step) has no cancel check, the same as in V9_9_0. With a ViscousLayers hypothesis, Compute
+builds the offset shape, then calls itself; the inner call resets the flag at its start (as
+V9_9_0's Compute did), so a cancel during the offset step is lost, and the layer step has no
+check. Upstream master at 83f8bf482 (2026-09-14) still passes the flag by value.
+
+diff --git a/src/StdMeshers/StdMeshers_Cartesian_3D.cxx b/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
+index 5a88d03..74730fe 100644
+--- a/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
++++ b/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
+@@ -202,7 +202,8 @@ bool StdMeshers_Cartesian_3D::Compute(SMESH_Mesh &         theMesh,
+ 
+     const auto numOfThreads = std::thread::hardware_concurrency() == 0 ? 1 : std::thread::hardware_concurrency();
+     map< TGeomID, vector< TGeomID > > edge2faceIDsMap;
+-    grid.GridInitAndInterserctWithShape( theShape, edge2faceIDsMap, _hyp, numOfThreads, _computeCanceled );
++    if ( !grid.GridInitAndInterserctWithShape( theShape, edge2faceIDsMap, _hyp, numOfThreads, _computeCanceled ))
++      return false; // canceled
+ 
+     // create volume elements
+     Hexahedron hex( &grid );
+diff --git a/src/StdMeshers/StdMeshers_Cartesian_3D_Grid.cxx b/src/StdMeshers/StdMeshers_Cartesian_3D_Grid.cxx
+index 3efa1e8..d52b477 100644
+--- a/src/StdMeshers/StdMeshers_Cartesian_3D_Grid.cxx
++++ b/src/StdMeshers/StdMeshers_Cartesian_3D_Grid.cxx
+@@ -937,7 +937,7 @@ void Grid::ComputeNodes(SMESH_MesherHelper& helper)
+ bool Grid::GridInitAndInterserctWithShape( const TopoDS_Shape& theShape,
+                                            TEdge2faceIDsMap& edge2faceIDsMap, 
+                                            const StdMeshers_CartesianParameters3D* hyp,
+-                                           const int /*numOfThreads*/, bool computeCanceled )
++                                           const int /*numOfThreads*/, volatile bool& computeCanceled )
+ {
+   InitGeometry( theShape );
+ 
+diff --git a/src/StdMeshers/StdMeshers_Cartesian_3D_Grid.hxx b/src/StdMeshers/StdMeshers_Cartesian_3D_Grid.hxx
+index df92d97..0382579 100644
+--- a/src/StdMeshers/StdMeshers_Cartesian_3D_Grid.hxx
++++ b/src/StdMeshers/StdMeshers_Cartesian_3D_Grid.hxx
+@@ -512,7 +512,7 @@ namespace Cartesian3D
+                                          std::map< TGeomID, std::vector< TGeomID > >& edge2faceIDsMap, 
+                                          const StdMeshers_CartesianParameters3D* hyp,
+                                          const int numOfThreads,
+-                                         bool computeCanceled );
++                                         volatile bool& computeCanceled );
+   };
+ 
+   // Implement parallel computation of Hexa with c++ thread implementation

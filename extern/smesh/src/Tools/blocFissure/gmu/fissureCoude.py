@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2014-2022  EDF R&D
+# Copyright (C) 2014-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -106,7 +106,10 @@ class fissureCoude(fissureGenerique):
 
     # --- tube coude sain
 
-    geometrieSaine = geompy.MakePartition([tube_1, coude, tube_2, P1, P2], [plan_y], [], [], geompy.ShapeType["SOLID"], 0, [], 1)
+    #Refactor to perform the partition in two steps to avoid break from occt (reported bug#)
+    #geometrieSaine = geompy.MakePartition([tube_1, coude, tube_2, P1, P2], [plan_y], [], [], geompy.ShapeType["SOLID"], 0, [], 1)
+    geometrieSaine0 = geompy.MakePartition([tube_1, coude], [plan_y], [], [], geompy.ShapeType["SOLID"], 0, [], 1)
+    geometrieSaine = geompy.MakePartition([geometrieSaine0, tube_2, P1, P2], [plan_y], [], [], geompy.ShapeType["SOLID"], 0, [], 1)
     geomPublish(initLog.debug, geometrieSaine, self.nomCas, self.numeroCas )
     [P1, P2] = geompy.RestoreGivenSubShapes(geometrieSaine, [P1, P2], GEOM.FSM_GetInPlaceByHistory, False, True)
 

@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -280,7 +280,7 @@ SMESHGUI_ScaleDlg::SMESHGUI_ScaleDlg( SMESHGUI* theModule ) :
 
   mySMESHGUI->SetActiveDialogBox((QDialog*)this);
 
-  // Costruction of the logical filter
+  // Construction of the logical filter
   SMESH_TypeFilter* aMeshOrSubMeshFilter = new SMESH_TypeFilter (SMESH::MESHorSUBMESH);
   SMESH_TypeFilter* aSmeshGroupFilter    = new SMESH_TypeFilter (SMESH::GROUP);
 

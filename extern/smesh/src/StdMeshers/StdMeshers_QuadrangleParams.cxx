@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -202,7 +202,7 @@ istream & StdMeshers_QuadrangleParams::LoadFrom(istream & load)
 
 //================================================================================
 /*!
- * \brief Redifined method
+ * \brief Redefined method
  * \param theMesh - the built mesh
  * \param theShape - the geometry of interest
  * \retval bool - true if parameter values have been successfully defined

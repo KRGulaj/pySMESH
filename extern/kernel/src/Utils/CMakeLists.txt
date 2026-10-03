@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -20,20 +20,20 @@
 IF(NOT SALOME_LIGHT_ONLY)
 
   INCLUDE_DIRECTORIES(
-    ${OMNIORB_INCLUDE_DIR}
-    ${PTHREAD_INCLUDE_DIR}
-    ${PROJECT_BINARY_DIR}/salome_adm
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../ArgvKeeper
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Basics
-    ${CMAKE_CURRENT_SOURCE_DIR}/../SALOMELocalTrace
     ${PROJECT_BINARY_DIR}/idl
+    ${OMNIORB_INCLUDE_DIR}
+    ${PTHREAD_INCLUDE_DIR}
+    ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
+    ${PROJECT_BINARY_DIR}/salome_adm
   )
   ADD_DEFINITIONS(${OMNIORB_DEFINITIONS} ${PTHREAD_DEFINITIONS})
   SET(COMMON_LIBS
     ArgvKeeper
-    SALOMELocalTrace 
+    ${SALOMEBOOTSTRAP_SALOMELocalTrace}
     SalomeIDLKernel 
+    ${SALOMEBOOTSTRAP_SALOMEException}
     ${OMNIORB_LIBRARIES} 
     ${PTHREAD_LIBRARIES}
   )
@@ -41,7 +41,6 @@ IF(NOT SALOME_LIGHT_ONLY)
     Utils_Timer.cxx
     duplicate.cxx
     Utils_CommException.cxx
-    Utils_SALOME_Exception.cxx
     Utils_Identity.cxx
     Utils_ORB_INIT.cxx
     Utils_DESTRUCTEUR_GENERIQUE.cxx
@@ -54,24 +53,22 @@ IF(NOT SALOME_LIGHT_ONLY)
 ELSE()
 
   INCLUDE_DIRECTORIES(
-    ${PTHREAD_INCLUDE_DIR}
-    ${PROJECT_BINARY_DIR}/salome_adm
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/../ArgvKeeper
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Basics
-    ${CMAKE_CURRENT_SOURCE_DIR}/../SALOMELocalTrace
+    ${PTHREAD_INCLUDE_DIR}
+    ${PROJECT_BINARY_DIR}/salome_adm
   )
   SET(COMMON_LIBS
     ArgvKeeper
-    SALOMELocalTrace
+    ${SALOMEBOOTSTRAP_SALOMELocalTrace}
+    ${SALOMEBOOTSTRAP_SALOMEException}
     ${PTHREAD_LIBRARIES}
   )
   SET(OpUtil_SOURCES
-    Utils_SALOME_Exception.cxx
     duplicate.cxx
     OpUtil.cxx
   )  
-  SET(COMMON_HEADERS_HXX Utils_SALOME_Exception.hxx OpUtil.hxx)
+  SET(COMMON_HEADERS_HXX OpUtil.hxx)
   
 ENDIF()
 

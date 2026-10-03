@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -53,7 +53,7 @@
  * The creation reason is that smeshBuilder.py commands defining hypotheses encapsulate
  * several SMESH engine method calls. As well, the dependencies between smeshBuilder.py
  * classes differ from ones between corresponding SMESH IDL interfaces.
- * 
+ *
  * Everything here is for internal usage by SMESH_2smeshpy::ConvertScript()
  * declared in SMESH_PythonDump.hxx
  */
@@ -223,7 +223,7 @@ struct ExportedMeshData
 
 // -------------------------------------------------------------------------------------
 /*!
- * \brief A container of strings groupped by prefix. It is used for a faster search of
+ * \brief A container of strings grouped by prefix. It is used for a faster search of
  *        objects requiring to KeepAgrCmds() in commands. A speed up is gained because
  *        only a common prefix (e.g. "aArea") of many object IDs is searched in a command
  *        and not every object ID
@@ -350,6 +350,7 @@ class _pyMesh: public _pyObject
   std::list< Handle(_pyMesh) >       myChildMeshes; // depending on me
   bool                               myGeomNotInStudy;
   Handle(_pyCommand)                 myLastComputeCmd;
+  Handle(_pyCommand)                 myLastCheckCmd;
 public:
   _pyMesh(const Handle(_pyCommand) creationCmd);
   _pyMesh(const Handle(_pyCommand) theCreationCmd, const _pyID & id);
@@ -373,7 +374,7 @@ private:
 
   DEFINE_STANDARD_RTTIEXT(_pyMesh,_pyObject)
 };
-#undef _pyMesh_ACCESS_METHOD 
+#undef _pyMesh_ACCESS_METHOD
 
 // -------------------------------------------------------------------------------------
 /*!

@@ -1,5 +1,5 @@
 # -*- coding: iso-8859-1 -*-
-# Copyright (C) 2010-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2010-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -40,12 +40,13 @@ def run(modulePath, functionName):
     The function functionName is supposed here to return a boolean value
     indicating if the test is OK (True) or NOT OK (False)
     """
-    moduleName = modulePath.replace('/','.') 
-    __import__ (moduleName)
+    moduleName = modulePath.replace('/','.')
+    import importlib
+    importlib.import_module(moduleName)
     module=sys.modules[moduleName]
     func = getattr(module,functionName)
     tabsize = 70-len(moduleName)-len(functionName)
-    print("[TEST] %s.%s %s test in progress" % (moduleName, functionName,"."*tabsize)) 
+    print("[TEST] %s.%s %s test in progress" % (moduleName, functionName,"."*tabsize))
     ok = func()
     if ( ok ):
         print("[TEST] %s.%s %s OK" % (moduleName, functionName,"."*tabsize))

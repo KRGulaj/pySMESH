@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -26,6 +26,7 @@
 
 #include "SALOME_GenericObj.idl"
 #include "SALOME_Exception.idl"
+#include "SALOME_Comm.idl"
 
 /*! \file SALOME_PyNode.idl \brief interface for remote python execution
 */
@@ -70,7 +71,7 @@ module Engines
     */
     pickledArgs execute(in string functionName, in pickledArgs inargs) raises (SALOME::SALOME_Exception);
 
-  } ;
+  };
 
   interface PyScriptNode : PyNodeBase
   {
@@ -89,21 +90,43 @@ module Engines
     */
     pickledArgs execute(in listofstring outargsname, in pickledArgs inargs) raises (SALOME::SALOME_Exception);
 
+    void executeSimple(in listofstring key, in listofstring val) raises (SALOME::SALOME_Exception);
+
     /*! \brief first part of whole execute method. This split is to reduce the memory peak.
     */
-    void executeFirst(in pickledArgs inargs) raises (SALOME::SALOME_Exception);
+    void executeFirst(in SALOME::SenderByte inargs) raises (SALOME::SALOME_Exception);
 
     /*! \brief second and last part of execute method. This split is to reduce the memory peak.
     */
-    pickledArgs executeSecond(in listofstring outargsname) raises (SALOME::SALOME_Exception);
+    SALOME::SenderByteSeq executeSecond(in listofstring outargsname) raises (SALOME::SALOME_Exception);
 
     pickledArgs getValueOfVarInContext(in string varName) raises (SALOME::SALOME_Exception);
 
     void assignVarInContext(in string varName, in pickledArgs value) raises (SALOME::SALOME_Exception);
 
     pickledArgs callMethodOnVarInContext(in string varName, in string methodName, in pickledArgs args) raises (SALOME::SALOME_Exception);
+    
+    listofstring listAllVarsInContext() raises (SALOME::SALOME_Exception);
+
+    void removeAllVarsInContext() raises (SALOME::SALOME_Exception);
   } ;
 
+  interface ContextExchanger
+  {
+    SALOME::SenderByte getInputContext() raises (SALOME::SALOME_Exception);
+    void pushOutputContext( in pickledArgs ctx ) raises (SALOME::SALOME_Exception);
+    void finishPushContext() raises (SALOME::SALOME_Exception);
+  };
+
+  interface GlobalsHolder
+  {
+  /*!
+  Simply a key / val holder.
+  */
+    void setAttr(in string ctx, in pickledArgs glbsAttachedToCtx) raises (SALOME::SALOME_Exception);
+    pickledArgs getAttr(in string ctx) raises (SALOME::SALOME_Exception);
+    void execute(in listofstring args, out long returnCode, out pickledArgs standardOutput, out pickledArgs standardError) raises (SALOME::SALOME_Exception);
+  };
 };
 
 #endif

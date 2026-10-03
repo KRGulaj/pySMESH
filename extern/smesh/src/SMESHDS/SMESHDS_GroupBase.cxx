@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -184,9 +184,9 @@ void SMESHDS_GroupBase::SetColorGroup(int theColorGroup)
   if ( aR < 0. || aR > 1. || // PAL19395
        aG < 0. || aG > 1. ||
        aB < 0. || aB > 1. )
-// #ifdef _DEBUG_
-//     cout << "SMESHDS_GroupBase::SetColorGroup("<<theColorGroup<<"), invalid color ignored"<<endl;
-// #endif
+// if (SALOME::VerbosityActivated())
+//  cout << "SMESHDS_GroupBase::SetColorGroup("<<theColorGroup<<"), invalid color ignored"<<endl;
+
     return;
   Quantity_Color aColor( aR, aG, aB, Quantity_TOC_RGB );
   SetColor( aColor );

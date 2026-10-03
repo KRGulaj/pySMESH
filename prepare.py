@@ -1,19 +1,34 @@
-"""Stage and patch vendored SMESH/KERNEL/GEOM sources into a build tree.
+"""Stage and patch vendored SALOME sources into a build tree.
 
-pySMESH vendors pristine upstream sources as git subtrees/slices under ``extern/``
-(``extern/smesh``, ``extern/kernel``, ``extern/geom``, ``extern/mefisto2``). Those trees
-are never modified. ``prepare.py`` copies the pieces we compile into ``staged/`` in the
-directory layout that SALOME/looooo's patch series expects, then applies the patches:
+pySMESH vendors pristine upstream sources under ``extern/``. Those trees are never
+modified. Every SALOME tree is at tag ``V9_16_0``:
 
-1. **looooo/SMESH** patch series (``patches/{kernel,geom,smesh}/*.patch``) — Windows/MSVC
-   shims, VTK 9.4/9.6 API breaks, MED strip, and the source fixes that make vanilla
-   SalomePlatform/smesh ``V9_9_0`` build standalone. looooo's ``external/SMESH`` submodule
-   *is* SalomePlatform/smesh ``V9_9_0``, so these apply against our ``extern/smesh`` cleanly.
-2. **conda-forge/smesh-feedstock** OCCT-8.0 layer (``patches/occt8/*.patch``) — brings the
-   OCCT-7.9-ready tree up to OCCT 8.0.0 (conda's authoritative Windows/OCCT-8.0 recipe).
+* ``extern/smesh``: SALOME SMESH, a squashed git subtree.
+* ``extern/kernel``: SALOME KERNEL, a squashed git subtree. Only ``src/Utils`` is
+  compiled.
+* ``extern/salome_bootstrap``: SALOME salome_bootstrap, a squashed git subtree. Since
+  ``V9_16_0`` it holds the KERNEL basics: ``Basics/``, ``SALOMELocalTrace/`` and the
+  ``SALOME_Exception`` class (``Exception/``).
+* ``extern/geom/src/GEOMUtils``: one directory of SALOME GEOM, a sparse copy.
+* ``extern/mefisto2``: the MEFISTO 2-D triangulator, carried forward verbatim from SMESH
+  ``V9_9_0`` (SALOME removed it in 2022), and looooo's f2c translation ``trte.c``.
 
-NETGEN is disabled, so NETGEN/NETGENPlugin sources and the ``0005-occt-8.0-netgen`` patch
-are intentionally excluded (see docs/reports/B0.md and PROVENANCE.md).
+``prepare.py`` copies the pieces we compile into ``staged/``, in the layout that the
+looooo/SMESH patch series expects. Then it applies the patches and the source edits:
+
+1. The **looooo/SMESH** patch series (``patches/{kernel,smesh}/*.patch``): Windows/MSVC
+   shims, the MED strip and the MEFISTO f2c wiring.
+2. Two **pySMESH** patches for code that is new in ``V9_16_0``:
+   ``patches/geom/GEOMUtils_GEOMAlgo.patch`` and
+   ``patches/smesh/SMESH_Gen_no_qt.patch``.
+3. The **conda-forge/smesh-feedstock** OCCT 8.0 layer (``patches/occt8/*.patch``).
+4. The source edits in this file that no patch carries (see ``_apply_source_edits``).
+
+Every patch is re-ported to ``V9_16_0`` and must apply exactly: every hunk at fuzz 0. A
+hunk that fails, is already applied, or targets a file that is not staged stops the run.
+
+NETGEN is disabled, so NETGEN/NETGENPlugin sources and their patches are not staged
+(see docs/reports/B0.md and PROVENANCE.md).
 
 Idempotent: re-running is a no-op once ``staged/.prepared`` exists unless ``--force`` is
 given. ``staged/`` is git-ignored.
@@ -25,72 +40,78 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import logging
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Final
 
-ROOT: Path = Path(__file__).resolve().parent
-EXTERN: Path = ROOT / "extern"
-PATCHES: Path = ROOT / "patches"
-STAGED: Path = ROOT / "staged"
-SENTINEL: Path = STAGED / ".prepared"
+logger = logging.getLogger(__name__)
 
-# KERNEL compiled slice: only these three dirs are built (cmake/Kernel), and looooo proves
-# they are include-closed after the strip-corba patch. Source: cmake/Kernel/CMakeLists.txt.
-KERNEL_SLICE_DIRS: tuple[str, ...] = ("Basics", "SALOMELocalTrace", "Utils")
+ROOT: Final[Path] = Path(__file__).resolve().parent
+EXTERN: Final[Path] = ROOT / "extern"
+PATCHES: Final[Path] = ROOT / "patches"
+STAGED: Final[Path] = ROOT / "staged"
+SENTINEL: Final[Path] = STAGED / ".prepared"
 
-# Ordered patch manifest: (patch path relative to patches/, apply-root relative to STAGED).
-# Patches are git-format (``a/``/``b/`` prefixes), applied with ``patch -p1`` under each root:
-# looooo patches at ``src/<module>`` and conda's OCCT-8.0 layer at the staged top, exactly
-# reproducing looooo/prepare.py and conda's recipe. GNU patch is used (not python-patch)
-# because our vendored V9_9_0 *tag* is newer than looooo's V9_9_0 *branch* pin and already
-# carries some of these fixes: ``-N`` skips already-applied hunks and ``--fuzz`` absorbs the
-# minor context offsets between tag and pin. Genuine conflicts still surface as ``*.rej``.
-PATCH_MANIFEST: tuple[tuple[str, str], ...] = (
+# KERNEL compiled slice: (source under extern/, destination under
+# staged/src/Kernel/src). cmake/Kernel/CMakeLists.txt compiles these four directories.
+# Since V9_16_0 SALOME keeps Basics/, SALOMELocalTrace/ and Exception/ in
+# salome_bootstrap, and Utils/ in KERNEL. The destination keeps the flat layout that the
+# KERNEL patches and the CMake files expect.
+KERNEL_SLICE: Final[tuple[tuple[str, str], ...]] = (
+    ("salome_bootstrap/__RUN_SALOME__/Basics", "Basics"),
+    ("salome_bootstrap/__RUN_SALOME__/SALOMELocalTrace", "SALOMELocalTrace"),
+    ("salome_bootstrap/__RUN_SALOME__/Exception", "Exception"),
+    ("kernel/src/Utils", "Utils"),
+)
+
+# MEFISTO carry-forward: (file in extern/mefisto2, directory under
+# staged/src/SMESH/src). Each file goes where SMESH V9_9_0 kept it, so mefisto.patch and
+# the CMake files find it.
+MEFISTO_FILES: Final[tuple[tuple[str, str], ...]] = (
+    ("aptrte.cxx", "MEFISTO2"),
+    ("aptrte.h", "MEFISTO2"),
+    ("Rn.h", "MEFISTO2"),
+    ("trte.c", "MEFISTO2"),
+    ("StdMeshers_MEFISTO_2D.cxx", "StdMeshers"),
+    ("StdMeshers_MEFISTO_2D.hxx", "StdMeshers"),
+)
+
+# Ordered patch manifest: (patch path relative to patches/, apply-root relative to
+# STAGED). Patches are git-format (``a/``/``b/`` prefixes), applied with ``patch -p1``
+# under each root: looooo patches at ``src/<module>`` and conda's OCCT 8.0 layer at the
+# staged top, as in looooo/prepare.py and conda's recipe. PROVENANCE.md lists the
+# patches that V9_16_0 made obsolete.
+PATCH_MANIFEST: Final[tuple[tuple[str, str], ...]] = (
     # --- KERNEL (looooo) : root staged/src/Kernel ---
     ("kernel/Kernel.patch", "src/Kernel"),
-    ("kernel/Kernel_occt781.patch", "src/Kernel"),
     ("kernel/Kernel_mingw_gcc15.patch", "src/Kernel"),
     ("kernel/Kernel_msvc_pthread.patch", "src/Kernel"),
     ("kernel/Kernel_msvc_set_unexpected.patch", "src/Kernel"),
-    # --- GEOM OCCT-8.0 fix is applied as a string replace (see _apply_geomutils_occt_fix);
-    #     looooo's geom/GEOMUtils.patch is context-fragile across GEOM V9_9_0 tag-vs-pin skew ---
+    # --- GEOM (pySMESH) : root staged/src/Geom ---
+    ("geom/GEOMUtils_GEOMAlgo.patch", "src/Geom"),
     # --- SMESH (looooo) : root staged/src/SMESH ; order mirrors looooo/prepare.py ---
     ("smesh/mefisto.patch", "src/SMESH"),
-    ("smesh/SMESH_ControlPnt.patch", "src/SMESH"),
-    ("smesh/SMESH_Controls.patch", "src/SMESH"),
     ("smesh/SMESH_Mesh.patch", "src/SMESH"),
+    ("smesh/SMESH_Gen_no_qt.patch", "src/SMESH"),
     ("smesh/SMESH_MeshAlgos.patch", "src/SMESH"),
     ("smesh/SMESH_Slot.patch", "src/SMESH"),
     ("smesh/SMESH_SMDS.patch", "src/SMESH"),
-    ("smesh/StdMeshers_Adaptive1D.patch", "src/SMESH"),
-    ("smesh/StdMeshers_Projection_2D.patch", "src/SMESH"),
-    ("smesh/StdMeshers_ViscousLayers.patch", "src/SMESH"),
     ("smesh/SMESH_occt781.patch", "src/SMESH"),
-    ("smesh/SMDS_UnstructuredGrid_vtk94.patch", "src/SMESH"),
-    # (SMDS_Mesh.cxx vtkPoints alloc fix is applied here as a string replace)
-    ("smesh/SMDS_MeshVolume_vtk96.patch", "src/SMESH"),
-    ("smesh/SMDS_VtkCellIterator_vtk96.patch", "src/SMESH"),
-    ("smesh/SMESH_MeshEditor_vtk96.patch", "src/SMESH"),
     ("smesh/SMESH_File_mingw.patch", "src/SMESH"),
-    ("smesh/SMESH_MesherHelper_msvc.patch", "src/SMESH"),
     ("smesh/StdMeshers_Quadrangle_2D_msvc.patch", "src/SMESH"),
+    # --- SMESH (pySMESH) : root staged/src/SMESH ---
+    ("smesh/StdMeshers_Cartesian_3D_cancel.patch", "src/SMESH"),
     # --- OCCT 8.0 layer (conda) : root staged/ ---
     ("occt8/0003-boost-regex-str-enum.patch", "."),
     ("occt8/0004-occt-8.0-compat.patch", "."),
 )
 
-# The looooo VTK-alloc string replace is sequenced right after the vtk94 patch.
-_VTK_ALLOC_AFTER: str = "smesh/SMDS_UnstructuredGrid_vtk94.patch"
-
-
-def _log(msg: str) -> None:
-    print(f"[prepare] {msg}", flush=True)
-
 
 def _copytree(src: Path, dst: Path) -> None:
     """Copy ``src`` onto ``dst`` (dst parent created); fail loudly if src is missing."""
-    if not src.exists():
+    if not src.is_dir():
         raise FileNotFoundError(f"expected vendored source missing: {src}")
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(src, dst, dirs_exist_ok=True)
@@ -98,242 +119,229 @@ def _copytree(src: Path, dst: Path) -> None:
 
 def _stage_sources() -> None:
     """Copy the compiled slices from extern/ into staged/src/{Kernel,Geom,SMESH}/src."""
-    _log("staging KERNEL slice")
-    for sub in KERNEL_SLICE_DIRS:
-        _copytree(EXTERN / "kernel/src" / sub, STAGED / "src/Kernel/src" / sub)
+    logger.info("staging KERNEL slice (salome_bootstrap + kernel)")
+    for src_rel, dst_rel in KERNEL_SLICE:
+        _copytree(EXTERN / src_rel, STAGED / "src/Kernel/src" / dst_rel)
 
-    _log("staging GEOMUtils slice")
+    logger.info("staging GEOMUtils slice")
     _copytree(EXTERN / "geom/src/GEOMUtils", STAGED / "src/Geom/src/GEOMUtils")
 
-    _log("staging SMESH src")
+    logger.info("staging SMESH src")
     _copytree(EXTERN / "smesh/src", STAGED / "src/SMESH/src")
 
-    _log("staging MEFISTO2 f2c trte.c")
-    trte = EXTERN / "mefisto2/trte.c"
-    if not trte.exists():
-        raise FileNotFoundError(f"expected vendored source missing: {trte}")
-    shutil.copyfile(trte, STAGED / "src/SMESH/src/MEFISTO2/trte.c")
-
-
-def _rej_files() -> set[Path]:
-    return set(STAGED.rglob("*.rej"))
-
-
-def _hunk_tally(patch_stdout: str) -> tuple[int, int]:
-    """Sum (failed, total) hunks across all files from GNU patch's summary lines.
-
-    Lines look like ``N out of M hunks FAILED -- saving rejects to file ...``. Files with no
-    failures don't emit such a line, so ``total`` here is the count over *failing files only*
-    — which is exactly what we need to decide "every hunk of this file failed" (superseded).
-    """
-    import re
-
-    failed = total = 0
-    for m in re.finditer(r"(\d+) out of (\d+) hunks? FAILED", patch_stdout):
-        failed += int(m.group(1))
-        total += int(m.group(2))
-    return failed, total
+    logger.info("staging MEFISTO carry-forward (extern/mefisto2)")
+    for name, dst_dir in MEFISTO_FILES:
+        src = EXTERN / "mefisto2" / name
+        if not src.is_file():
+            raise FileNotFoundError(f"expected vendored source missing: {src}")
+        dst = STAGED / "src/SMESH/src" / dst_dir / name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
 
 
 def _apply(patch_rel: str, root_rel: str) -> None:
-    """Apply one patch at the given staged root with GNU patch.
+    """Apply one patch at the given staged root with GNU patch, exactly.
 
-    ``-N`` skips hunks already present in our (newer) tag tree; ``--fuzz=2`` tolerates the
-    small context offsets between the V9_9_0 tag and looooo's branch pin. A genuine failure
-    is a *new* ``.rej`` file — that raises, and its contents are logged for the fixup.
+    ``--fuzz=0`` makes every hunk match its full context; an offset is accepted, because
+    the context still matched line for line. ``-N`` turns an already-applied hunk into
+    an ignored one instead of a reversal. Closed stdin stops patch from asking for a
+    file it cannot find. Patch exits non-zero on a failed, ignored or unreachable hunk;
+    that raises with the full patch output.
+
+    Args:
+        patch_rel: Patch path relative to ``patches/``.
+        root_rel: Apply root relative to ``staged/``.
+
+    Raises:
+        FileNotFoundError: The patch file does not exist.
+        RuntimeError: Any hunk did not apply.
     """
     patch_path = PATCHES / patch_rel
-    if not patch_path.exists():
+    if not patch_path.is_file():
         raise FileNotFoundError(f"patch not found: {patch_path}")
     root = (STAGED / root_rel).resolve()
-    before = _rej_files()
     proc = subprocess.run(
-        ["patch", "-p1", "-N", "--fuzz=2", "--no-backup-if-mismatch",
-         "-i", str(patch_path)],
-        cwd=str(root), capture_output=True, text=True,
+        [
+            "patch",
+            "-p1",
+            "-N",
+            "--fuzz=0",
+            "--no-backup-if-mismatch",
+            "-i",
+            str(patch_path),
+        ],
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        stdin=subprocess.DEVNULL,
+        check=False,
     )
-    new_rejs = _rej_files() - before
-    if not new_rejs:
-        status = "applied"
-        if "ignored" in proc.stdout or "previously applied" in proc.stdout:
-            status = "applied (some hunks already in tag)"
-        _log(f"{status}: {patch_rel}")
-        return
+    if proc.returncode != 0:
+        rejects = "\n".join(
+            f"  {r.relative_to(STAGED)}" for r in sorted(STAGED.rglob("*.rej"))
+        )
+        raise RuntimeError(
+            f"patch {patch_rel} at {root_rel} did not apply exactly "
+            f"(exit {proc.returncode}); rejects:\n{rejects}\n"
+            f"--- patch stdout ---\n{proc.stdout}\n--- patch stderr ---\n{proc.stderr}"
+        )
+    logger.info("applied: %s", patch_rel)
 
-    # A reject appeared. Distinguish "fully superseded by our newer tag" (every hunk failed —
-    # the file already carries an equivalent/newer fix) from a genuine partial conflict.
-    failed, total = _hunk_tally(proc.stdout)
-    if total > 0 and failed == total:
-        for rej in new_rejs:
-            rej.unlink()
-        _log(f"SKIPPED (superseded by V9_9_0 tag; {failed}/{total} hunks already covered): "
-             f"{patch_rel}")
-        return
 
-    detail = "\n".join(f"  {r.relative_to(STAGED)}" for r in sorted(new_rejs))
-    raise RuntimeError(
-        f"PARTIAL conflict applying {patch_rel} at {root_rel} "
-        f"({failed}/{total} hunks failed); rejects:\n{detail}\n"
-        f"--- patch stdout ---\n{proc.stdout}\n--- patch stderr ---\n{proc.stderr}"
+def _replace_once(target: Path, old: str, new: str) -> None:
+    """Apply one exact string replacement; idempotent; raise if the anchor is absent.
+
+    Args:
+        target: File to edit in place.
+        old: Anchor text, which must occur in the file.
+        new: Replacement text.
+
+    Raises:
+        RuntimeError: Neither the anchor nor its replacement is in the file.
+    """
+    content = target.read_text(encoding="utf-8", errors="surrogateescape")
+    if new in content:
+        return
+    if old not in content:
+        raise RuntimeError(f"fixup anchor not found in {target}: {old!r}")
+    target.write_text(
+        content.replace(old, new, 1), encoding="utf-8", errors="surrogateescape"
     )
 
 
 def _apply_smds_mesh_vtk_alloc() -> None:
     """VTK 9: pre-allocate vtkPoints to avoid an InsertPoint crash on Windows.
 
-    ``SetNumberOfPoints`` allocates the array; ``Allocate`` alone only reserves capacity.
+    ``SetNumberOfPoints`` allocates the array; ``Allocate`` alone only reserves
+    capacity. Both sites (the constructor and ``Clear``) carry the anchor at V9_16_0.
     Source: looooo/SMESH/prepare.py :: _apply_smds_mesh_vtk_alloc.
+
+    Raises:
+        RuntimeError: The anchor is not in ``SMDS_Mesh.cxx``.
     """
     target = STAGED / "src/SMESH/src/SMDS/SMDS_Mesh.cxx"
     old = "  points->SetNumberOfPoints( 0 );\n  myGrid->SetPoints( points );"
     new = "  points->SetNumberOfPoints( chunkSize );\n  myGrid->SetPoints( points );"
     content = target.read_text(encoding="utf-8", errors="surrogateescape")
-    if new in content:
-        _log("vtkPoints alloc fix already present")
-        return
     if old not in content:
         raise RuntimeError(f"vtkPoints alloc fix: pattern not found in {target}")
-    target.write_text(content.replace(old, new), encoding="utf-8",
-                      errors="surrogateescape")
-    _log("applied vtkPoints alloc fix (SMDS_Mesh.cxx)")
+    target.write_text(
+        content.replace(old, new), encoding="utf-8", errors="surrogateescape"
+    )
+    logger.info("applied vtkPoints alloc fix (SMDS_Mesh.cxx)")
 
 
-def _replace_once(target: Path, old: str, new: str) -> None:
-    """Apply a single exact string replacement; idempotent; raise if the anchor is absent."""
-    content = target.read_text(encoding="utf-8", errors="surrogateescape")
-    if new in content:
-        return
-    if old not in content:
-        raise RuntimeError(f"fixup anchor not found in {target}: {old!r}")
-    target.write_text(content.replace(old, new, 1), encoding="utf-8",
-                      errors="surrogateescape")
+# One-line comment inserted before each EvalD0 override (see _apply_source_edits).
+_EVALD0_NOTE: Final[str] = (
+    "    // OCCT 8.0: Value is no longer virtual;"
+    " EvalD0 is the evaluation entry point.\n"
+)
 
 
-def _apply_tag_fixups() -> None:
-    """V9_9_0-*tag*-specific source deltas not covered by the looooo/conda patch series.
+def _apply_source_edits() -> None:
+    """Source edits that no upstream patch carries, applied on the V9_16_0 tree.
 
-    The looooo/conda patches target looooo's V9_9_0 *branch* pin; our vendored V9_9_0 *tag*
-    differs in a few files, needing these OCCT-8.0 / Windows deltas on top (CORBA in OpUtil
-    is instead disabled via the SALOME_LIGHT compile definition in CMakeLists.txt):
-      * Basics_Utils.cxx : gethostname() needs <winsock2.h> on Windows (ws2_32 already linked).
-      * SMESH_TypeDefs.hxx: SMESH_TLink needs a default ctor for OCCT 8.0 NCollection maps.
+    Each edit is an exact string replacement; a missing anchor raises. CORBA in OpUtil
+    is disabled by the SALOME_LIGHT compile definition in CMakeLists.txt, not here.
+    PROVENANCE.md records each edit and the V9_9_0 edits that V9_16_0 made obsolete.
     """
+    # Basics_Utils.cxx calls gethostname(), which needs <winsock2.h> on Windows; the
+    # global WIN32_LEAN_AND_MEAN keeps <windows.h> from pulling it in (ws2_32 is
+    # linked).
     _replace_once(
         STAGED / "src/Kernel/src/Basics/Basics_Utils.cxx",
-        "#ifndef WIN32\n#include <unistd.h>\n#include <sys/stat.h>\n#include <execinfo.h>\n#endif",
-        "#ifndef WIN32\n#include <unistd.h>\n#include <sys/stat.h>\n#include <execinfo.h>\n"
-        "#else\n#include <winsock2.h>\n#endif")
-    _replace_once(
-        STAGED / "src/SMESH/src/SMESHUtils/SMESH_TypeDefs.hxx",
-        "struct SMESH_TLink: public NLink\n{",
-        "struct SMESH_TLink: public NLink\n{\n"
-        "  SMESH_TLink() {} // default ctor required by OCCT 8.0 NCollection maps")
-    # OCCT 8.0 calls a map's hasher as a functor (myHasher(key)); SMESH_TLink is used as its
-    # own hasher in NCollection_DataMap<SMESH_TLink,int,SMESH_TLink>, so give it the functor
-    # interface (mirrors the adjacent SMESH_TLinkHasher) in addition to the old static API.
-    _replace_once(
-        STAGED / "src/SMESH/src/SMESHUtils/SMESH_TypeDefs.hxx",
-        "  static Standard_Boolean IsEqual(const SMESH_TLink& l1, const SMESH_TLink& l2)\n"
-        "  {\n"
-        "    return ( l1.node1() == l2.node1() && l1.node2() == l2.node2() );\n"
-        "  }\n"
-        "};",
-        "  static Standard_Boolean IsEqual(const SMESH_TLink& l1, const SMESH_TLink& l2)\n"
-        "  {\n"
-        "    return ( l1.node1() == l2.node1() && l1.node2() == l2.node2() );\n"
-        "  }\n"
-        "  size_t operator()(const SMESH_TLink& link) const\n"
-        "  { return smIdHasher()( link.node1()->GetID() + link.node2()->GetID() ); }\n"
-        "  bool operator()(const SMESH_TLink& l1, const SMESH_TLink& l2) const\n"
-        "  { return ( l1.node1() == l2.node1() && l1.node2() == l2.node2() ); }\n"
-        "};")
-    # ElementsOnShape holds std::vector<Classifier> with Classifier only forward-declared in
-    # the header; MSVC eagerly instantiates the implicit copy ctor/operator= with an
-    # incomplete type (C2036) in every TU that copies the predicate (incl.
-    # StdMeshers_ViscousLayers). Make copy operations out-of-line so vector<Classifier> is
-    # instantiated only in SMESH_Controls.cxx, where Classifier is fully defined.
-    _replace_once(
-        STAGED / "src/SMESH/src/Controls/SMESH_ControlsDef.hxx",
-        "      ElementsOnShape();\n      ~ElementsOnShape();",
-        "      ElementsOnShape();\n"
-        "      ElementsOnShape(const ElementsOnShape&);\n"
-        "      ElementsOnShape& operator=(const ElementsOnShape&);\n"
-        "      ~ElementsOnShape();")
-    _replace_once(
-        STAGED / "src/SMESH/src/Controls/SMESH_Controls.cxx",
-        "ElementsOnShape::~ElementsOnShape()\n{\n  clearClassifiers();\n}",
-        "ElementsOnShape::~ElementsOnShape()\n{\n  clearClassifiers();\n}\n\n"
-        "// Out-of-line so std::vector<Classifier> instantiates where Classifier is complete.\n"
-        "ElementsOnShape::ElementsOnShape(const ElementsOnShape&) = default;\n"
-        "ElementsOnShape& ElementsOnShape::operator=(const ElementsOnShape&) = default;")
-    # StdMeshers_CompositeHexa_3D.hxx carries StdMeshers_CompositeSegment_1D's include guard
-    # (_SMESH_CompositeSegment_1D_HXX_) verbatim, so whichever of the two is included second
-    # is silenced entirely and its class is never declared. Any translation unit that needs
-    # both cannot be made to compile by reordering, because the collision is symmetric. Give
-    # the header its own guard.
+        "#ifndef WIN32\n#include <unistd.h>\n#include <sys/stat.h>\n"
+        "#include <execinfo.h>\n#endif",
+        "#ifndef WIN32\n#include <unistd.h>\n#include <sys/stat.h>\n"
+        "#include <execinfo.h>\n#else\n#include <winsock2.h>\n#endif",
+    )
+    # StdMeshers_CompositeHexa_3D.hxx carries the include guard of
+    # StdMeshers_CompositeSegment_1D (_SMESH_CompositeSegment_1D_HXX_) verbatim, so
+    # whichever of the two is included second is silenced entirely and its class is
+    # never declared. Any translation unit that needs both cannot be made to compile by
+    # reordering, because the collision is symmetric. Give the header its own guard.
     _replace_once(
         STAGED / "src/SMESH/src/StdMeshers/StdMeshers_CompositeHexa_3D.hxx",
-        "#ifndef _SMESH_CompositeSegment_1D_HXX_\n#define _SMESH_CompositeSegment_1D_HXX_",
-        "#ifndef _SMESH_CompositeHexa_3D_HXX_\n#define _SMESH_CompositeHexa_3D_HXX_")
+        "#ifndef _SMESH_CompositeSegment_1D_HXX_\n"
+        "#define _SMESH_CompositeSegment_1D_HXX_",
+        "#ifndef _SMESH_CompositeHexa_3D_HXX_\n#define _SMESH_CompositeHexa_3D_HXX_",
+    )
     # StdMeshers_Prism_3D caches three helper algorithms in function-local statics, each
-    # constructed against the FIRST SMESH_Gen it ever sees. That is safe in SALOME, which has
-    # one process-global generator, and unsafe here: pySMESH gives each Mesher its own
-    # generator, and ~SMESH_Gen nullifies the _gen of every hypothesis registered with it —
-    # including these singletons. A second Prism_3D compute in the same process then works
-    # through a singleton whose generator is gone, and segfaults.
+    # constructed against the FIRST SMESH_Gen it ever sees. That is safe in SALOME,
+    # which has one process-global generator, and unsafe here: pySMESH gives each Mesher
+    # its own generator, and ~SMESH_Gen nullifies the _gen of every hypothesis
+    # registered with it, these singletons included. A second Prism_3D compute in the
+    # same process then works through a singleton whose generator is gone, and
+    # segfaults.
     #
-    # Rebuild the singleton whenever the generator differs from the one it was built against.
-    # Deleting the stale one is safe in both directions: ~SMESH_Hypothesis is guarded on
-    # `_gen` for the dead-generator case, and merely un-registers itself for the live one.
-    for anchor, kind in (
-        ("      static TQuadrangleAlgo* algo = new TQuadrangleAlgo( fatherAlgo->GetGen() );",
-         "TQuadrangleAlgo"),
-        ("      static TProjction1dAlgo* algo = new TProjction1dAlgo( fatherAlgo->GetGen() );",
-         "TProjction1dAlgo"),
-        ("      static TProjction2dAlgo* algo = new TProjction2dAlgo( fatherAlgo->GetGen() );",
-         "TProjction2dAlgo"),
-    ):
+    # Rebuild the singleton whenever the generator differs from the one it was built
+    # against. Deleting the stale one is safe in both directions: ~SMESH_Hypothesis is
+    # guarded on `_gen` for the dead-generator case, and merely un-registers itself for
+    # the live one.
+    for kind in ("TQuadrangleAlgo", "TProjction1dAlgo", "TProjction2dAlgo"):
         _replace_once(
             STAGED / "src/SMESH/src/StdMeshers/StdMeshers_Prism_3D.cxx",
-            anchor,
+            f"      static {kind}* algo = new {kind}( fatherAlgo->GetGen() );",
             f"      static {kind}* algo = 0;\n"
             f"      if ( !algo || algo->GetGen() != fatherAlgo->GetGen() )\n"
-            f"      {{\n"
-            f"        delete algo; // its SMESH_Gen is gone; ~SMESH_Hypothesis guards on _gen\n"
+            "      {\n"
+            "        delete algo; // its SMESH_Gen is gone;"
+            " ~SMESH_Hypothesis guards on _gen\n"
             f"        algo = new {kind}( fatherAlgo->GetGen() );\n"
-            f"      }}")
-    # OCCT 8.0 made Adaptor3d_Curve::Value a NON-virtual inline forwarding to a new virtual
-    # EvalD0, whose base implementation raises Standard_NotImplemented. Prism_3D's two curve
-    # adaptors still override Value, which now merely *hides* the base one: every call through
-    # an Adaptor3d_Curve reference reaches the base EvalD0 and throws, so Prism_3D fails on
-    # every solid with "Standard_NotImplemented: Adaptor3d_Curve::EvalD0". Overriding EvalD0
-    # to forward to their own Value restores both paths. (Adaptor2d_Curve2d::Value is still
-    # virtual in 8.0, so the pcurve adaptor beside them needs nothing.)
+            "      }",
+        )
+    # OCCT 8.0 made Adaptor3d_Curve::Value and Adaptor3d_Surface::Value NON-virtual
+    # inlines that forward to a new virtual EvalD0, whose base implementation raises
+    # Standard_NotImplemented. The three 3-D adaptors of Prism_3D still define Value,
+    # which now merely *hides* the base one: every call through an Adaptor3d_Curve or
+    # Adaptor3d_Surface reference reaches the base EvalD0 and throws. For the two curve
+    # adaptors that failed Prism_3D on every solid; for TSideFace it fails every compute
+    # that reaches the block approach (SMESH_Block::TFace::Point calls Value through the
+    # base, report B1). Overriding EvalD0 to forward to their own Value restores both
+    # paths. Adaptor2d_Curve2d::Value is still virtual in 8.0.1, so the 2-D adaptors
+    # (TPCurveOnHorFaceAdaptor, the Adaptor2dCurve2d of StdMeshers_FaceSide and
+    # GEOMUtils::TrsfCurve2d) need nothing.
+    prism_hxx = STAGED / "src/SMESH/src/StdMeshers/StdMeshers_Prism_3D.hxx"
+    side_face = (
+        "    // redefine Adaptor methods\n"
+        "    gp_Pnt Value(const Standard_Real U,const Standard_Real V) const;"
+    )
     _replace_once(
-        STAGED / "src/SMESH/src/StdMeshers/StdMeshers_Prism_3D.hxx",
-        "    TVerticalEdgeAdaptor( const TParam2ColumnMap* columnsMap, const double parameter );\n"
-        "    gp_Pnt Value(const Standard_Real U) const;",
-        "    TVerticalEdgeAdaptor( const TParam2ColumnMap* columnsMap, const double parameter );\n"
-        "    gp_Pnt Value(const Standard_Real U) const;\n"
-        "    // OCCT 8.0: Value is no longer virtual; EvalD0 is the evaluation entry point.\n"
-        "    gp_Pnt EvalD0(const Standard_Real U) const override { return Value(U); }")
+        prism_hxx,
+        side_face,
+        side_face
+        + "\n"
+        + _EVALD0_NOTE
+        + "    gp_Pnt EvalD0(const Standard_Real U, const Standard_Real V) const"
+        " override\n"
+        "    { return Value(U, V); }",
+    )
+    curve_evald0 = (
+        "    gp_Pnt EvalD0(const Standard_Real U) const override { return Value(U); }"
+    )
+    vertical = (
+        "    TVerticalEdgeAdaptor( const TParam2ColumnMap* columnsMap, "
+        "const double parameter );\n"
+        "    gp_Pnt Value(const Standard_Real U) const;"
+    )
+    _replace_once(prism_hxx, vertical, vertical + "\n" + _EVALD0_NOTE + curve_evald0)
+    horizontal = (
+        "      :mySide(sideFace), myV( isTop ? 1.0 : 0.0 ) {}\n"
+        "    gp_Pnt Value(const Standard_Real U) const;"
+    )
     _replace_once(
-        STAGED / "src/SMESH/src/StdMeshers/StdMeshers_Prism_3D.hxx",
-        "      :mySide(sideFace), myV( isTop ? 1.0 : 0.0 ) {}\n"
-        "    gp_Pnt Value(const Standard_Real U) const;",
-        "      :mySide(sideFace), myV( isTop ? 1.0 : 0.0 ) {}\n"
-        "    gp_Pnt Value(const Standard_Real U) const;\n"
-        "    // OCCT 8.0: Value is no longer virtual; EvalD0 is the evaluation entry point.\n"
-        "    gp_Pnt EvalD0(const Standard_Real U) const override { return Value(U); }")
-    # ManifoldPart::process() walks its face vector from the requested start element and wraps
-    # at the end, but it advances the index itself and the wrap sits AFTER a `continue` that
-    # skips an already-treated face. So the moment the last face has already been treated —
-    # which is the ordinary case, since findConnected() treats a whole connected region at
-    # once — the index runs past the end and the process reads unallocated memory. With the
-    # start element at index 0 the loop also never terminates by its own condition. Both are
-    # reachable from a plain selection; measured as an access violation on a three-face
-    # fixture. Rewritten as a bounded modulo walk, which is the documented intent: visit every
-    # face exactly once, starting at the requested one.
+        prism_hxx, horizontal, horizontal + "\n" + _EVALD0_NOTE + curve_evald0
+    )
+    # ManifoldPart::process() walks its face vector from the requested start element
+    # and wraps at the end, but it advances the index itself and the wrap sits AFTER a
+    # `continue` that skips an already-treated face. So the moment the last face has
+    # already been treated (the ordinary case, since findConnected() treats a whole
+    # connected region at once) the index runs past the end and the process reads
+    # unallocated memory. With the start element at index 0 the loop also never
+    # terminates by its own condition. Both are reachable from a plain selection;
+    # measured as an access violation on a three-face fixture. Rewritten as a bounded
+    # modulo walk, which is the documented intent: visit every face exactly once,
+    # starting at the requested one.
     _replace_once(
         STAGED / "src/SMESH/src/Controls/SMESH_Controls.cxx",
         "  const int aStartIndx = myAllFacePtrIntDMap[aStartFace];\n"
@@ -347,79 +355,67 @@ def _apply_tag_fixups() -> None:
         "    SMDS_MeshFace* aFacePtr = myAllFacePtr[ fi ];",
         "  const int aStartIndx = myAllFacePtrIntDMap[aStartFace];\n"
         "  const int aNbFaces   = (int) myAllFacePtr.size();\n"
-        "  // Visit every face exactly once, starting at aStartIndx and wrapping. Indexing the\n"
+        "  // Visit every face exactly once, starting at aStartIndx and wrapping."
+        " Indexing the\n"
         "  // vector modulo its size keeps the walk in bounds whatever the body does.\n"
         "  for ( int fj = 0; fj < aNbFaces; fj++ )\n"
         "  {\n"
         "    const int fi = ( aStartIndx + fj ) % aNbFaces;\n"
-        "    SMDS_MeshFace* aFacePtr = myAllFacePtr[ fi ];")
+        "    SMDS_MeshFace* aFacePtr = myAllFacePtr[ fi ];",
+    )
     _replace_once(
         STAGED / "src/SMESH/src/Controls/SMESH_Controls.cxx",
         "    if ( fi == int( myAllFacePtr.size() - 1 ))\n"
         "      fi = 0;\n"
         "  } // end run on vector of faces",
-        "  } // end run on vector of faces; the wrap now lives in the loop head")
-    _log("applied V9_9_0-tag fixups (winsock, SMESH_TLink ctor+hasher, ElementsOnShape copy, "
-         "CompositeHexa_3D include guard, Prism_3D per-generator singletons, Prism_3D "
-         "Adaptor3d_Curve::EvalD0, ManifoldPart out-of-bounds walk)")
-
-
-def _apply_geomutils_occt_fix() -> None:
-    """Drop ``V3d_Coordinate`` (removed in recent OCCT) from GEOMUtils.cxx.
-
-    Equivalent to looooo's ``geom/GEOMUtils.patch`` but applied as a string replace so it is
-    robust to the 1-line context skew between GEOM ``V9_9_0`` tag (`b6f0965`, what we vendor)
-    and looooo's Geom submodule pin (`71b630d7`). ``ConvertClickToPoint`` is a headless-unused
-    GUI helper, but the whole .cxx must still compile, so the removed type must resolve.
-    Source of the edits: looooo/SMESH/patch/GEOMUtils.patch.
-    """
-    target = STAGED / "src/Geom/src/GEOMUtils/GEOMUtils.cxx"
-    content = target.read_text(encoding="utf-8", errors="surrogateescape")
-    edits = (
-        ("#include <V3d_Coordinate.hxx>\n\n", ""),
-        ("V3d_Coordinate XEye, YEye, ZEye, XAt, YAt, ZAt;",
-         "Standard_Real XEye, YEye, ZEye, XAt, YAt, ZAt;"),
+        "  } // end run on vector of faces; the wrap now lives in the loop head",
     )
-    for old, new in edits:
-        if old not in content:
-            raise RuntimeError(f"GEOMUtils OCCT fix: pattern not found in {target}: {old!r}")
-        content = content.replace(old, new)
-    target.write_text(content, encoding="utf-8", errors="surrogateescape")
-    _log("applied GEOMUtils OCCT fix (V3d_Coordinate removal)")
+    logger.info(
+        "applied source edits (winsock, CompositeHexa_3D include guard, Prism_3D "
+        "per-generator singletons, Prism_3D adaptors EvalD0, ManifoldPart bounded walk)"
+    )
 
 
 def prepare(force: bool = False) -> None:
+    """Build ``staged/`` from ``extern/``: stage, patch, edit, then write the sentinel.
+
+    Args:
+        force: Rebuild ``staged/`` even if the sentinel exists.
+    """
     if SENTINEL.exists() and not force:
-        _log(f"already prepared ({SENTINEL} exists); pass --force to rebuild")
+        logger.info("already prepared (%s exists); pass --force to rebuild", SENTINEL)
         return
     if STAGED.exists():
-        _log("removing existing staged/ tree")
+        logger.info("removing existing staged/ tree")
         shutil.rmtree(STAGED)
     STAGED.mkdir(parents=True)
 
     _stage_sources()
-    _apply_geomutils_occt_fix()
 
-    _log("applying patch series")
+    logger.info("applying patch series")
     for patch_rel, root_rel in PATCH_MANIFEST:
         _apply(patch_rel, root_rel)
-        if patch_rel == _VTK_ALLOC_AFTER:
-            _apply_smds_mesh_vtk_alloc()
 
-    _apply_tag_fixups()
+    _apply_smds_mesh_vtk_alloc()
+    _apply_source_edits()
     SENTINEL.write_text("prepared\n", encoding="utf-8")
-    _log(f"done: staged tree ready at {STAGED}")
+    logger.info("done: staged tree ready at %s", STAGED)
 
 
 def main() -> int:
+    """Parse the command line and run :func:`prepare`; return the process exit code."""
+    logging.basicConfig(level=logging.INFO, format="[prepare] %(message)s")
     parser = argparse.ArgumentParser(description="Stage and patch SMESH sources.")
-    parser.add_argument("--force", action="store_true",
-                        help="rebuild staged/ even if the sentinel exists")
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="rebuild staged/ even if the sentinel exists",
+    )
     args = parser.parse_args()
     try:
         prepare(force=args.force)
     except (FileNotFoundError, RuntimeError) as exc:
-        _log(f"ERROR: {exc}")
+        logger.error("ERROR: %s", exc)
         return 1
     return 0
 

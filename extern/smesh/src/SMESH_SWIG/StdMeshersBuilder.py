@@ -1,4 +1,4 @@
-# Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -25,6 +25,7 @@ LIBRARY = "libStdMeshersEngine.so"
 
 from salome.smesh.smesh_algorithm import Mesh_Algorithm
 import StdMeshers
+from salome.geom import geomBuilder
 
 #----------------------------
 # Mesh algo type identifiers
@@ -42,12 +43,7 @@ Algorithm type: Python 1D algorithm, see :class:`~StdMeshersBuilder.StdMeshersBu
 
 COMPOSITE   = "CompositeSegment_1D"
 """
-
 Algorithm type: Composite segment 1D algorithm, see :class:`~StdMeshersBuilder.StdMeshersBuilder_CompositeSegment`
-"""
-MEFISTO     = "MEFISTO_2D"
-"""
-Algorithm type: Triangle MEFISTO 2D algorithm, see :class:`~StdMeshersBuilder.StdMeshersBuilder_Triangle_MEFISTO`
 """
 
 Hexa        = "Hexa_3D"
@@ -192,7 +188,7 @@ class StdMeshersBuilder_Segment(Mesh_Algorithm):
         hyp.SetUsePreestimatedLength( length == 0.0 )
         return hyp
 
-    def NumberOfSegments(self, n, s=[], reversedEdges=[], UseExisting=0):
+    def NumberOfSegments(self, n, s=[], reversedEdges=[], UseExisting=0, beta=None):
         """
         Defines "NumberOfSegments" hypothesis to cut an edge in a fixed number of segments
 
@@ -203,6 +199,7 @@ class StdMeshersBuilder_Segment(Mesh_Algorithm):
                     A list item can also be a tuple (edge, 1st_vertex_of_edge)
             UseExisting: if ==true - searches for an existing hypothesis created with
                     the same parameters, else (default) - create a new one
+            beta: beta coefficient for Beta Law distribution
     
         Returns: 
             an instance of StdMeshers_NumberOfSegments hypothesis
@@ -213,15 +210,22 @@ class StdMeshersBuilder_Segment(Mesh_Algorithm):
             reversedEdges, UseExisting = [], reversedEdges
         entry = self.MainShapeEntry()
         reversedEdgeInd = self.ReversedEdgeIndices(reversedEdges)
-        if not s:
-            hyp = self.Hypothesis("NumberOfSegments", [n, reversedEdgeInd, entry],
-                                  UseExisting=UseExisting,
-                                  CompareMethod=self._compareNumberOfSegments)
-        else:
-            hyp = self.Hypothesis("NumberOfSegments", [n,s, reversedEdgeInd, entry],
-                                  UseExisting=UseExisting,
-                                  CompareMethod=self._compareNumberOfSegments)
+
+        args = [n, reversedEdgeInd, entry]
+        if s:
+            args.insert(1, s)
+        elif beta:
+            args.append(beta)
+
+        hyp = self.Hypothesis(
+            "NumberOfSegments", args,
+            UseExisting=UseExisting, CompareMethod=self._compareNumberOfSegments)
+
+        if s:
             hyp.SetScaleFactor(s)
+        elif beta:
+            hyp.SetBeta(s)
+
         hyp.SetNumberOfSegments(n)
         hyp.SetReversedEdges( reversedEdgeInd )
         hyp.SetObjectEntry( entry )
@@ -623,72 +627,6 @@ class StdMeshersBuilder_Segment_Python(Mesh_Algorithm):
 
     pass # end of StdMeshersBuilder_Segment_Python class
 
-class StdMeshersBuilder_Triangle_MEFISTO(Mesh_Algorithm):
-    """
-    Triangle MEFISTO 2D algorithm.
-    It is created by calling smeshBuilder.Mesh.Triangle(smeshBuilder.MEFISTO,geom=0)
-    """
-    
-
-    meshMethod = "Triangle"
-    """
-    name of the dynamic method in smeshBuilder.Mesh class
-    """
-    algoType   = MEFISTO
-    """
-    type of algorithm used with helper function in smeshBuilder.Mesh class
-    """
-    isDefault  = True
-    """
-    flag pointing whether this algorithm should be used by default in dynamic method
-        of smeshBuilder.Mesh class
-    """
-    docHelper  = "Create triangle 2D algorithm for faces"
-    """
-    doc string of the method
-    """
-
-    def __init__(self, mesh, geom=0):
-        """
-        Private constructor.
-
-        Parameters:
-            mesh: parent mesh object algorithm is assigned to
-            geom: geometry (shape/sub-shape) algorithm is assigned to;
-                if it is :code:`0` (default), the algorithm is assigned to the main shape
-        """
-        Mesh_Algorithm.__init__(self)
-        self.Create(mesh, geom, self.algoType)
-        pass
-
-    def MaxElementArea(self, area, UseExisting=0):
-        """
-        Defines "MaxElementArea" hypothesis basing on the definition of the maximum area of each triangle
-
-        Parameters:
-            area: for the maximum area of each triangle
-            UseExisting: if ==true - searches for an  existing hypothesis created with the
-                same parameters, else (default) - Create a new one
-        """
-        
-        from salome.smesh.smeshBuilder import IsEqual
-        comparator = lambda hyp, args: IsEqual(hyp.GetMaxElementArea(), args[0])
-        hyp = self.Hypothesis("MaxElementArea", [area], UseExisting=UseExisting,
-                              CompareMethod=comparator)
-        hyp.SetMaxElementArea(area)
-        return hyp
-
-    def LengthFromEdges(self):
-        """
-        Defines "LengthFromEdges" hypothesis to build triangles
-            based on the length of the edges taken from the wire
-        """
-        
-        hyp = self.Hypothesis("LengthFromEdges", UseExisting=1, CompareMethod=self.CompareEqualHyp)
-        return hyp
-
-    pass # end of StdMeshersBuilder_Triangle_MEFISTO class
-
 class StdMeshersBuilder_Quadrangle(Mesh_Algorithm):
     """
     Defines a quadrangle 2D algorithm.
@@ -809,9 +747,11 @@ class StdMeshersBuilder_Quadrangle(Mesh_Algorithm):
         if corners and isinstance( corners[0], GEOM._objref_GEOM_Object ):
             corners = [ self.mesh.geompyD.GetSubShapeID( self.mesh.geom, v ) for v in corners ]
 
-        if self.params.GetQuadType() != quadType:
+        #If quadType is None - will used default parameter ( StdMeshers.QUAD_STANDARD )
+        if quadType and self.params.GetQuadType() != quadType:
             self.params.SetQuadType(quadType)
-        if vertexID > 0:
+        #If triangleVertex is None - will used default parameter ( -1 ):
+        if triangleVertex and vertexID > 0:
             self.params.SetTriaVertex( vertexID )
         from salome.smesh.smeshBuilder import AssureGeomPublished
         for v in enfVertices:
@@ -1146,7 +1086,7 @@ class StdMeshersBuilder_Projection3D(Mesh_Algorithm):
         """
         Defines the "Source Shape 3D" hypothesis, specifying a meshed solid, from where
             the mesh pattern is taken, and, optionally, the  association of vertices
-            between the source and the target solid  (to which a hipothesis is assigned)
+            between the source and the target solid  (to which a hypothesis is assigned)
 
         Parameters:
             solid: from where the mesh pattern is taken
@@ -2084,3 +2024,106 @@ class StdMeshersBuilder_UseExisting_2D(Mesh_Algorithm):
         pass
 
     pass # end of StdMeshersBuilder_UseExisting_2D class
+    
+class StdMeshersBuilder_ViscousLayer(Mesh_Algorithm):
+    """ Defines the prismatic layer builder.
+
+    It is created by calling smeshBuilder.Mesh.ViscousLayerBuilder(geom=TheGeometry)
+    """
+    
+    meshMethod = "ViscousLayerBuilder"
+    """
+    name of the dynamic method in smeshBuilder.Mesh class
+    """
+    algoType   = "ViscousLayerBuilder"
+    """
+    type of algorithm used with helper function in smeshBuilder.Mesh class
+    """
+    docHelper  = "Viscous layer builder for 2D and 3D geometries"
+    """
+    doc string of the method
+    """
+    
+    # On create method it will call create method from mesh python class
+    # 
+    def __init__(self, mesh, geom = 0 ):
+        """
+        Private constructor.
+
+        Parameters:
+            mesh: parent mesh object algorithm is assigned to
+            geom: geometry (shape/sub-shape) algorithm is assigned to;
+                if it is :code:`0` (default), the algorithm is assigned to the main shape
+        """        
+        self.thickness          = None
+        self.numberOfLayers     = None
+        self.stretchFactor      = None
+        self.elementsId         = []
+        self.isElementToIgnore  = True
+        self.extrMethod         = StdMeshers.SURF_OFFSET_SMOOTH
+        self.groupName          = ""
+        self.shrinkGeometry     = None
+        self.algo               = self.Create(mesh, geom, self.algoType)     
+        pass
+
+    def setBuilderParameters( self, thickness, numberOfLayers, stretchFactor, elementsId=[], 
+                                    isElementToIgnore=True, extrMethod=StdMeshers.SURF_OFFSET_SMOOTH, groupName="" ):            
+        self.thickness          = thickness
+        self.numberOfLayers     = numberOfLayers
+        self.stretchFactor      = stretchFactor
+        self.elementsId         = elementsId        # can be faces or edges
+        self.isElementToIgnore  = isElementToIgnore
+        self.extrMethod         = extrMethod
+        self.groupName          = groupName
+
+        self.algo.SetTotalThickness( thickness )
+        self.algo.SetNumberLayers( numberOfLayers )
+        self.algo.SetStretchFactor( stretchFactor )
+        
+        #Faces are set based on int ids so if a collection of face geom objects is received cast it to int 
+        if elementsId and isinstance( elementsId, geomBuilder.GEOM._objref_GEOM_Object ):
+            elementsId = [ elementsId ]
+        if elementsId and isinstance( elementsId[0], geomBuilder.GEOM._objref_GEOM_Object ):
+            elementsIDs = []
+            for shape in elementsId:
+                try:
+                  ff = self.mesh.geompyD.SubShapeAll( shape, self.mesh.geompyD.ShapeType["FACE"] )
+                  if ( len( ff ) == 0 ):
+                    #try to get edges
+                    ff = self.mesh.geompyD.SubShapeAll( shape, self.mesh.geompyD.ShapeType["EDGE"] )
+
+                  for f in ff:
+                    elementsIDs.append( self.mesh.geompyD.GetSubShapeID(self.mesh.geom, f))
+                except:
+                  # try to get the SHAPERSTUDY engine directly, because GetGen does not work because of
+                  # simplification of access in geomBuilder: omniORB.registerObjref
+                  from SHAPERSTUDY_utils import getEngine
+                  gen = getEngine()
+                  if gen:
+                    aShapeOp = gen.GetIShapesOperations()
+                    ff = aShapeOp.ExtractSubShapes( shape, self.mesh.geompyD.ShapeType["FACE"], False)
+                    if (len(ff)==0):
+                        #try to get edges
+                        ff = aShapeOp.ExtractSubShapes( shape, self.mesh.geompyD.ShapeType["EDGE"], False)
+                    for f in ff:
+                      elementsIDs.append( aShapeOp.GetSubShapeIndex( self.mesh.geom, f ))
+            elementsId = elementsIDs
+
+        self.algo.SetFaces( elementsId, isElementToIgnore )    
+        self.algo.SetGroupName( groupName )   
+        self.algo.SetMethod( extrMethod )        
+        
+    def GetShrinkGeometry( self ):
+        if isinstance(self.geom, geomBuilder.GEOM._objref_GEOM_Object):
+            self.shrinkGeometry = self.algo.GetShrinkGeometry( self.mesh.GetMesh(), self.geom )
+        
+        return self.shrinkGeometry
+
+    def AddLayers( self, shrinkMesh ):
+        success = self.algo.AddLayers( shrinkMesh.GetMesh(), self.mesh.GetMesh(), self.geom )
+        if ( success ):
+            return self.mesh  #Return the original mesh of the builder
+        else:
+            return shrinkMesh
+
+    pass # end of StdMeshersBuilder_ViscousLayer class

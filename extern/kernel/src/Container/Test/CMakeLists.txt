@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -18,7 +18,7 @@
 #
 
 SET(LOCAL_TEST_DIR ${KERNEL_TEST_DIR}/Container)
-INSTALL(FILES testcontainer.py DESTINATION ${LOCAL_TEST_DIR})
+INSTALL(FILES testcontainer.py testProxy.py DESTINATION ${LOCAL_TEST_DIR})
 
 INSTALL(FILES CTestTestfileInstall.cmake
         DESTINATION ${LOCAL_TEST_DIR}

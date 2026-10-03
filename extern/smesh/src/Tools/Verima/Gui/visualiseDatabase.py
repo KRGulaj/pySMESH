@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (C) 2013-2022  EDF R&D
+# Copyright (C) 2013-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -23,7 +23,10 @@ rep=os.path.dirname(os.path.abspath(__file__))
 installDir=os.path.join(rep,'..')
 sys.path.insert(0,installDir)
 
-from qtsalome import QApplication
+if 'SALOME_USE_PYSIDE' in os.environ:
+  from PySide2.QtWidgets import QApplication
+else:
+  from PyQt5.Qt import QApplication
 from Gui.maFenetreChoix import MaFenetreChoix
 from Base.dataBase import Base
 

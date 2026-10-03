@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -25,10 +25,12 @@ IF(SALOME_SMESH_USE_TBB)
 ENDIF(SALOME_SMESH_USE_TBB)
 
 INCLUDE_DIRECTORIES(
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${KERNEL_INCLUDE_DIRS}
   ${OpenCASCADE_INCLUDE_DIR}
   ${Boost_INCLUDE_DIRS}
   ${PROJECT_SOURCE_DIR}/src/SMDS
+  ${PROJECT_SOURCE_DIR}/src/SMESHUtils
   ${TBB_INCLUDES}
 )
 
@@ -46,8 +48,9 @@ ENDIF(SALOME_SMESH_USE_TBB)
 SET(_link_LIBRARIES
   ${OpenCASCADE_KERNEL}
   ${OpenCASCADE_ModelingData_LIBRARIES}
-  ${KERNEL_SALOMELocalTrace}
-  SMDS
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
+  SMDS  
+  SMESHUtils
   ${TBB_LIBS}
 )
 
@@ -67,7 +70,6 @@ SET(SMESHDS_HEADERS
   SMESHDS_GroupOnGeom.hxx
   SMESHDS_GroupOnFilter.hxx
   SMESH_SMESHDS.hxx
-  SMESHDS_DataMapOfShape.hxx
   SMESH_Controls.hxx
 )
 

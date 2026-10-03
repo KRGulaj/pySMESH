@@ -40,8 +40,16 @@
         <translation>Fichiers CGNS</translation>
     </message>
     <message>
+        <source>INP_FILES_FILTER</source>
+        <translation>Fichiers ABAQUS INP</translation>
+    </message>
+    <message>
         <source>CGNS_EXPORT_ELEMS_BY_TYPE</source>
         <translation>Groupe les éléments par type</translation>
+    </message>
+    <message>
+        <source>STRUCTUREDCGNS</source>
+        <translation>Format structuré (uniquement pour les maillages Hexahedron(i,j,k) et Quadrangle: Mapping)</translation>
     </message>
     <message>
         <source>GMF_ASCII_FILES_FILTER</source>
@@ -98,6 +106,10 @@
     <message>
         <source>OVER_CONSTRAINED_VOLUME</source>
         <translation>Volumes sur-contraints</translation>
+    </message>
+    <message>
+        <source>SCALED_JACOBIAN</source>
+        <translation>Jacobien normalisé</translation>
     </message>
     <message>
         <source>MIN_DIAG_ELEMENTS</source>
@@ -261,6 +273,10 @@
         <translation>Informations sur le maillage</translation>
     </message>
     <message>
+        <source>MEN_RELOAD_FROM_FILE</source>
+        <translation>Reload from file</translation>
+    </message>
+    <message>
         <source>MEN_ALL</source>
         <translation>Tous</translation>
     </message>
@@ -291,6 +307,10 @@
     <message>
         <source>MEN_COPY_MESH</source>
         <translation>Copier le maillage</translation>
+    </message>
+    <message>
+    <source>MEN_CREATE_DUAL_MESH</source>
+        <translation>Création du maillage Dual</translation>
     </message>
     <message>
         <source>MEN_CLIP</source>
@@ -467,6 +487,10 @@
     <message>
         <source>MEN_2D_FROM_3D</source>
         <translation>Créer les éléments de frontière</translation>
+    </message>
+    <message>
+        <source>MEN_2D_FROM_3D_ELEMENTS</source>
+        <translation>Créer les faces des éléments volumiques</translation>
     </message>
     <message>
         <source>MEN_MESH_ORDER</source>
@@ -857,6 +881,46 @@
         <translation>Fichier MED</translation>
     </message>
     <message>
+        <source>MEN_IMPORT_MAIL</source>
+        <translation>Fichier MAIL</translation>
+    </message>
+    <message>
+        <source>MEN_IMPORT_INP</source>
+        <translation>Fichier INP</translation>
+    </message>
+        <message>
+        <source>MEN_IMPORT_CDB</source>
+        <translation>Fichier CDB</translation>
+    </message>
+        <message>
+        <source>MEN_IMPORT_ASC</source>
+        <translation>Fichier ASC</translation>
+    </message>
+        <message>
+        <source>MEN_IMPORT_GEOF</source>
+        <translation>Fichier GEOF</translation>
+    </message>
+    <message>
+        <source>MEN_MAIL</source>
+        <translation>Fichier MAIL</translation>
+    </message>
+    <message>
+        <source>MEN_INP</source>
+        <translation>Fichier INP</translation>
+    </message>
+    <message>
+        <source>MEN_CDB</source>
+        <translation>Fichier CDB</translation>
+    </message>
+    <message>
+        <source>MEN_ASC</source>
+        <translation>Fichier ASC</translation>
+    </message>
+    <message>
+        <source>MEN_GEOF</source>
+        <translation>Fichier GEOF</translation>
+    </message>
+    <message>
         <source>MEN_IMPORT_CGNS</source>
         <translation>Fichier CGNS</translation>
     </message>
@@ -871,6 +935,14 @@
     <message>
         <source>MEN_GMF</source>
         <translation>Fichier GMF</translation>
+    </message>
+    <message>
+        <source>MEN_IMPORT_MESHIO</source>
+        <translation>autres formats</translation>
+    </message>
+    <message>
+        <source>MEN_EXPORT_MESHIO</source>
+        <translation>autres formats</translation>
     </message>
     <message>
         <source>MEN_MERGE</source>
@@ -1313,8 +1385,16 @@
         <translation>Volume</translation>
     </message>
     <message>
+        <source>MEN_SCALED_JACOBIAN</source>
+        <translation>Jacobien normalisé</translation>
+    </message>
+    <message>
         <source>MEN_WARP</source>
         <translation>Angle de déformation</translation>
+    </message>
+    <message>
+        <source>MEN_WARP_3D</source>
+        <translation>Déformation 3D</translation>
     </message>
     <message>
         <source>MEN_WHAT_IS</source>
@@ -1393,6 +1473,11 @@ Choisissez un maillage et essayez de nouveau</translation>
         <source>GROUP_NAME_IS_EMPTY</source>
         <translation>Le nom du groupe n'est pas indiqué.
 Indiquez le nom d'un nouveau groupe à créer ou choisissez un groupe existant.</translation>
+    </message>
+    <message>
+        <source>SEVERAL_GROUPS_IN_SELECTION</source>
+        <translation>Vous essayez probablement de sélectionner des objets appartenant à des groupes différents.
+=Veuillez ne sélectionner que des objets d un seul groupe.</translation>
     </message>
     <message>
         <source>MESH_GEOM_GRP_CHOSEN</source>
@@ -1947,6 +2032,10 @@ ce qui peut faire planter l'application. Voulez-vous continuer la visualisation 
 Vérifiez l'espace disponible sur le disque.</translation>
     </message>
     <message>
+        <source>SMESH_EXPORT_FAILED_SHORT</source>
+        <translation>Impossible d'exporter le maillage.</translation>
+    </message>
+    <message>
         <source>SMESH_EXPORT_MED_DUPLICATED_GRP</source>
         <translation>Il y a des noms de groupes dupliqués dans le maillage &quot;%1&quot;.
 Vous pouvez annuler l'exportation et les renommer,
@@ -1977,6 +2066,22 @@ Ecraser le fichier ?</translation>
 des maillages avec les noms suivants: %1
 Le fichier obtenu pourrait être incorrect.
 Ecraser le fichier ?</translation>
+    </message>
+    <message>
+        <source>SMESH_EXPORT_MESHIO_ONLY_MESH</source>
+        <translation>La mise en œuvre actuelle utilise l'exportation via un fichier MED intermédiaire.
+Cependant, meshio ne prend pas en charge la lecture des fichiers MED comportant plusieurs maillages.
+Les maillages sélectionnés seront enregistrés dans des fichiers séparés.
+
+Voulez-vous continuer?</translation>
+    </message>
+    <message>
+        <source>SMESH_MESHIO_NOT_INSTALLED</source>
+        <translation>Meshio n'est pas installé!
+L'opération sera annulée.
+
+Essayez d'installer meshio avec une commande:
+pip install meshio[all]</translation>
     </message>
     <message>
         <source>EXPORT_NOT_SUPPORTED</source>
@@ -2217,6 +2322,14 @@ Référez-vous à la documentation sur l'algorithme et la géométrie supportée
     <message>
         <source>SMESH_LOGARITHMIC_SCALARBAR</source>
         <translation>Logarithmique</translation>
+    </message>
+    <message>
+        <source>SMESH_TRESHOLD_SCALARBAR</source>
+        <translation>Seuil</translation>
+    </message>
+    <message>
+        <source>SMESH_WIREFRAME_OFF_SCALARBAR</source>
+        <translation>Filaire désactivé</translation>
     </message>
     <message>
         <source>SMESH_MAKE_GROUPS</source>
@@ -3272,6 +3385,10 @@ Utilisez le menu &quot;Visualiser une entité&quot; pour les afficher.
         <translation>Tous</translation>
     </message>
     <message>
+        <source>STB_RELOAD_FROM_FILE</source>
+        <translation>Reload original mesh from file</translation>
+    </message>
+    <message>
         <source>STB_AREA</source>
         <translation>Aire</translation>
     </message>
@@ -3298,6 +3415,10 @@ Utilisez le menu &quot;Visualiser une entité&quot; pour les afficher.
     <message>
         <source>STB_COPY_MESH</source>
         <translation>Copie le maillage</translation>
+    </message>
+    <message>
+        <source>STB_CREATE_DUAL_MESH</source>
+        <translation>Création du maillage Dual</translation>
     </message>
     <message>
         <source>STB_CLIP</source>
@@ -3354,6 +3475,10 @@ Utilisez le menu &quot;Visualiser une entité&quot; pour les afficher.
     <message>
         <source>STB_2D_FROM_3D</source>
         <translation>Créer les éléments de frontière</translation>
+    </message>
+    <message>
+        <source>STB_2D_FROM_3D_ELEMENTS</source>
+        <translation>Créer les faces des éléments volumiques</translation>
     </message>
     <message>
         <source>STB_MESH_ORDER</source>
@@ -3492,6 +3617,10 @@ Utilisez le menu &quot;Visualiser une entité&quot; pour les afficher.
         <translation>Exporter au format UNV</translation>
     </message>
     <message>
+        <source>STB_EXPORT_MESHIO</source>
+        <translation>Exporter vers autre format via GMSH ou MESHIO</translation>
+    </message>
+    <message>
         <source>STB_EXTRUSION</source>
         <translation>Extrusion</translation>
     </message>
@@ -3610,6 +3739,10 @@ Utilisez le menu &quot;Visualiser une entité&quot; pour les afficher.
     <message>
         <source>STB_IMPORT_GMF</source>
         <translation>Importer un ficher GMF</translation>
+    </message>
+    <message>
+        <source>STB_IMPORT_MESHIO</source>
+        <translation>Importer un ficher via GMSH ou MESHIO</translation>
     </message>
     <message>
         <source>STB_GMF</source>
@@ -3896,8 +4029,16 @@ Utilisez le menu &quot;Visualiser une entité&quot; pour les afficher.
         <translation>Volume</translation>
     </message>
     <message>
+        <source>STB_SCALED_JACOBIAN</source>
+        <translation>Jacobien normalisé</translation>
+    </message>
+    <message>
         <source>STB_WARP</source>
         <translation>Angle de déformation</translation>
+    </message>
+    <message>
+        <source>STB_WARP_3D</source>
+        <translation>Déformation 3D</translation>
     </message>
     <message>
         <source>STB_WHAT_IS</source>
@@ -3992,6 +4133,10 @@ Utilisez le menu &quot;Visualiser une entité&quot; pour les afficher.
         <translation>Informations sur le maillage</translation>
     </message>
     <message>
+        <source>TOP_RELOAD_FROM_FILE</source>
+        <translation>Reload from file</translation>
+    </message>
+    <message>
         <source>TOP_ALL</source>
         <translation>Tous</translation>
     </message>
@@ -4078,6 +4223,10 @@ Utilisez le menu &quot;Visualiser une entité&quot; pour les afficher.
     <message>
         <source>TOP_2D_FROM_3D</source>
         <translation>Créer les éléments de frontière</translation>
+    </message>
+    <message>
+        <source>TOP_2D_FROM_3D_ELEMENTS</source>
+        <translation>Créer les faces des éléments volumiques</translation>
     </message>
     <message>
         <source>TOP_MESH_ORDER</source>
@@ -4608,8 +4757,16 @@ Utilisez le menu &quot;Visualiser une entité&quot; pour les afficher.
         <translation>Volume</translation>
     </message>
     <message>
+        <source>TOP_SCALED_JACOBIAN</source>
+        <translation>Jacobien normalisé</translation>
+    </message>
+    <message>
         <source>TOP_WARP</source>
         <translation>Angle de déformation</translation>
+    </message>
+    <message>
+        <source>TOP_WARP_3D</source>
+        <translation>Déformation 3D</translation>
     </message>
     <message>
         <source>TOP_WHAT_IS</source>
@@ -4634,6 +4791,10 @@ Utilisez le menu &quot;Visualiser une entité&quot; pour les afficher.
     <message>
         <source>WARP_ELEMENTS</source>
         <translation>Déformation</translation>
+    </message>
+    <message>
+        <source>WARP_3D_ELEMENTS</source>
+        <translation>Déformation 3D</translation>
     </message>
     <message>
         <source>MEN_FILE_INFO</source>
@@ -5683,6 +5844,29 @@ Sélectionner des éléments et essayer encore</translation>
     <message>
         <source>NON_CONFORM_WARNING</source>
         <translation>Attention: le maillage généré sera a priori non-conforme</translation>
+    </message>
+</context>
+<context>
+    <name>SMESHGUI_CreateDualMeshDlg</name>
+    <message>
+        <source>CAPTION</source>
+        <translation>Create Dual Mesh</translation>
+    </message>
+    <message>
+        <source>MESH</source>
+        <translation>Maillage ou Sous-maillage</translation>
+    </message>
+    <message>
+        <source>NON_TETRA_MESH_WARNING</source>
+        <translation>Attention : Le maillage ne doit contenir que des tétrahédres</translation>
+    </message>
+    <message>
+        <source>DUAL_MESH_NAME</source>
+        <translation>Nom du maillage Dual</translation>
+    </message>
+    <message>
+        <source>PROJ_SHAPE</source>
+        <translation>Projection des élements de bord sur la géométrie</translation>
     </message>
 </context>
 <context>
@@ -7397,6 +7581,14 @@ Il y a trop peu de points dans le fichier </translation>
         <source>ALL_DOMAINS</source>
         <translation>Tous les domaines</translation>
     </message>
+    <message>
+        <source>ADVANCED_OPTIONS</source>
+        <translation>Options avancées</translation>
+    </message>
+    <message>
+    <source>AVOID_GENERATING_OVER_CONSTRAINED_VOLUMES</source>
+    <translation>Ne pas générer de volumes sur-contraints</translation>
+    </message>
 </context>
 <context>
     <name>SMESHGUI_PrecisionDlg</name>
@@ -7876,6 +8068,17 @@ Il y a trop peu de points dans le fichier </translation>
     </message>
 </context>
 <context>
+    <name>SMESHGUI_MakeFull2DFrom3DDlg</name>
+    <message>
+        <source>CAPTION</source>
+        <translation>Créer les faces des éléments volumiques</translation>
+    </message>
+    <message>
+        <source>2D_FROM_3D_ELEMENTS</source>
+        <translation>Faces des éléments volumiques</translation>
+    </message>
+</context> 
+<context>
     <name>SMESHGUI_Make2DFrom3DDlg</name>
     <message>
         <source>CAPTION</source>
@@ -7924,6 +8127,43 @@ Il y a trop peu de points dans le fichier </translation>
     <message>
         <source>CREATE_GROUP</source>
         <translation>Créer un groupe</translation>
+    </message>
+</context>
+<context>
+    <name>SMESHGUI_MakeFull2DFrom3DOp</name>
+    <message>
+        <source>NB_ADDED</source>
+        <translation>%1 faces ont été ajoutés</translation>
+    </message>
+    <message>
+    <source>WRONG_GROUPS</source>
+    <translation>Les groupes suivants n'ont pas été traités
+en raison de leurs types incompatibles:
+%1</translation>
+    </message>
+    <message>
+        <source>SMESH_ERR_NO_INPUT_MESH</source>
+        <translation>Aucun maillage, sous-maillage ou groupe source n'est indiqué</translation>
+    </message>
+    <message>
+        <source>SMESH_TOO_MANY_MESHES</source>
+        <translation>Un seul maillage à la fois peut être traité</translation>
+    </message>
+    <message>
+        <source>SMESH_NOT_ONLY_GROUPS</source>
+        <translation>Impossible de traiter à la fois des maillages et des groupes</translation>
+    </message>
+    <message>
+        <source>SMESH_ERR_NO_3D_ELEMENTS</source>
+        <translation>L'objet source ne contient pas d'éléments 3D</translation>
+    </message>
+    <message>
+        <source>SMESH_ERR_MESH_NAME_NOT_SPECIFIED</source>
+        <translation>Le nom du nouveau maillage n'est pas indiqué</translation>
+    </message>
+    <message>
+        <source>SMESH_ERR_GRP_NAME_NOT_SPECIFIED</source>
+        <translation>Le nom du groupe n'est pas indiqué</translation>
     </message>
 </context>
 <context>
@@ -9011,6 +9251,14 @@ en rouge dans le browser.</translation>
     <message>
         <source>AverageLengthForHypoSet</source>
         <translation>Taille moyenne</translation>
+    </message>
+</context>
+<context>
+    <name>SMESHGUI_SpinBoxForbiddendRange</name>
+    <message>
+        <source>VALID_RANGE_NOVAR_MSG</source>
+        <translation>Spécifier une valeur à virgule flottante dans la plage [%1; %2) U (%3; %4]
+avec une précision de %5 chiffres</translation>
     </message>
 </context>
 </TS>

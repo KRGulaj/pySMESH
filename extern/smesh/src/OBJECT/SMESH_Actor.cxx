@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -80,13 +80,11 @@
 #include <vtkImplicitBoolean.h>
 #include <vtkImplicitFunctionCollection.h>
 
+#include <vtkThreshold.h>
+#include <vtkPassThrough.h>
+
 #include "utilities.h"
 
-#ifdef _DEBUG_
-static int MYDEBUG = 0;
-#else
-static int MYDEBUG = 0;
-#endif
 
 SMESH_ActorDef* SMESH_ActorDef::New(){
   return new SMESH_ActorDef();
@@ -114,7 +112,7 @@ SMESH_Actor* SMESH_Actor::New(TVisualObjPtr theVisualObj,
 
 SMESH_ActorDef::SMESH_ActorDef()
 {
-  if(MYDEBUG) MESSAGE("SMESH_ActorDef - "<<this);
+  MESSAGE("SMESH_ActorDef - "<<this);
 
   SALOME_Actor::SetVisibility(false); // avoid update of pipelines
 
@@ -125,6 +123,7 @@ SMESH_ActorDef::SMESH_ActorDef()
   myIsPointsVisible = false;
   myIsEntityModeCache = false;
   myRepresentationCache = 0;
+  objectEntitiesCache = 0;
 
   myHighlightActor = SMESH_SVTKActor::New();
   myHighlightActor->Delete(); // vtkSmartPointer!
@@ -589,7 +588,7 @@ SMESH_ActorDef::SMESH_ActorDef()
 
 SMESH_ActorDef::~SMESH_ActorDef()
 {
-  if(MYDEBUG) MESSAGE("~SMESH_ActorDef - "<<this);
+  MESSAGE("~SMESH_ActorDef - "<<this);
 
   // Please keep the order same as one in the header file
 
@@ -842,6 +841,8 @@ void SMESH_ActorDef::SetControlMode( eControl theMode, bool theCheckEntityMode )
   my3DActor->GetMapper()->SetScalarVisibility(false);
   myBallActor->GetMapper()->SetScalarVisibility(false);
   myScalarBarActor->SetVisibility(false);
+  ClipThreshold(false);
+  SetWireframeOff(false);
 
   bool anIsScalarVisible = theMode > eNone;
 
@@ -952,6 +953,14 @@ void SMESH_ActorDef::SetControlMode( eControl theMode, bool theCheckEntityMode )
       myControlActor = my3DActor;
       break;
     }
+    case eScaledJacobian:
+    {
+      SMESH::Controls::ScaledJacobian* aControl = new SMESH::Controls::ScaledJacobian();
+      aControl->SetPrecision( myControlsPrecision );
+      myFunctor.reset( aControl );
+      myControlActor = my3DActor;
+      break;
+    }
     case eMaxElementLength2D:
     {
       SMESH::Controls::MaxElementLength2D* aControl = new SMESH::Controls::MaxElementLength2D();
@@ -1002,6 +1011,14 @@ void SMESH_ActorDef::SetControlMode( eControl theMode, bool theCheckEntityMode )
       aControl->SetPrecision( myControlsPrecision );
       myFunctor.reset( aControl );
       myControlActor = my2DActor;
+      break;
+    }
+    case eWarping3D:
+    {
+      SMESH::Controls::Warping3D* aControl = new SMESH::Controls::Warping3D();
+      aControl->SetPrecision(myControlsPrecision);
+      myFunctor.reset(aControl);
+      myControlActor = my3DActor;
       break;
     }
     case eSkew:
@@ -1069,6 +1086,10 @@ void SMESH_ActorDef::SetControlMode( eControl theMode, bool theCheckEntityMode )
         my1DExtActor->SetExtControlMode(myFunctor,myScalarBarActor,myLookupTable);
         UpdateDistribution();
         break;
+      case eWarping3D:
+        my2DExtActor->SetExtControlMode(myFunctor, myScalarBarActor, myLookupTable);
+        UpdateDistribution();
+        break;
       default:
         myControlActor->SetControlMode(myFunctor,myScalarBarActor,myLookupTable);
         UpdateDistribution();
@@ -1111,7 +1132,6 @@ void SMESH_ActorDef::SetControlMode( eControl theMode, bool theCheckEntityMode )
     QString aTitle = QString(myScalarBarActor->GetTitle());
     aTitle.replace(QRegExp("(:\\s).*"),"\\1"+ QString::number(GetNumberControlEntities()));
     myScalarBarActor->SetTitle(aTitle.toUtf8().constData());
-
   }
   else {
     if(theCheckEntityMode){
@@ -1186,7 +1206,7 @@ void SMESH_ActorDef::AddToRender(vtkRenderer* theRenderer)
 
   theRenderer->AddActor(myHighlitableActor);
 
-  theRenderer->AddActor2D(myScalarBarActor);
+  theRenderer->AddViewProp(myScalarBarActor);
 
   // the superclass' method should be called at the end
   // (in particular, for correct work of selection)
@@ -1507,12 +1527,14 @@ void SMESH_ActorDef::SetVisibility(int theMode, bool theIsUpdateRepersentation)
   my3DExtActor->VisibilityOff();
 
   myScalarBarActor->VisibilityOff();
+  
 
   if ( GetVisibility() ) {
     if ( theIsUpdateRepersentation )
       SetRepresentation(GetRepresentation());
-
-    if(myControlMode != eNone) {
+  
+    // Avoid calling VisibilityOn of ExtActor after editing hypothesis. Use the same criteria than scalarBarActor
+    if( myControlMode != eNone && myFunctor && myVisualObj->GetNbEntities( myFunctor->GetType() ) ) { 
       switch(myControlMode) {
       case eFreeNodes:
       case eCoincidentNodes:
@@ -1533,6 +1555,7 @@ void SMESH_ActorDef::SetVisibility(int theMode, bool theIsUpdateRepersentation)
       case eBareBorderFace:
       case eOverConstrainedFace:
       case eCoincidentElems2D:
+      case eWarping3D:
         my2DExtActor->VisibilityOn();
         break;
       case eBareBorderVolume:
@@ -1542,14 +1565,14 @@ void SMESH_ActorDef::SetVisibility(int theMode, bool theIsUpdateRepersentation)
         break;
       default:;
       }
-      if ( myFunctor && myVisualObj->GetNbEntities( myFunctor->GetType() ))
-        myScalarBarActor->VisibilityOn();
-    }
+      myScalarBarActor->VisibilityOn();
+    }    
 
     if ( GetPickable( ))
       myPickableActor->VisibilityOn();
 
-    if ( GetRepresentation() != ePoint )
+    if ( GetRepresentation() != ePoint && 
+      !(IsClipThresholdOn() && GetActorForThreshold() != myControlActor)) // Avoid calling VisibilityOn if for display result of Threshold Criteria need only ExtActor
     {
       if(myEntityMode & e0DElements  ){
         my0DActor->VisibilityOn();
@@ -1650,6 +1673,12 @@ void SMESH_ActorDef::SetEntityMode(unsigned int theMode)
   {
     myRepresentationCache = GetRepresentation();
     SetRepresentation( ePoint );
+  }
+
+  if ( anObjectEntities != 0 && objectEntitiesCache == 0 )
+  {
+    objectEntitiesCache = anObjectEntities;
+    SetRepresentation( eSurface );
   }
 
   if ( myEntityMode != theMode )
@@ -1819,6 +1848,8 @@ void SMESH_ActorDef::UpdateHighlight()
   case SMESH_DeviceActor::eSurface:
   case SMESH_DeviceActor::eWireframe:
     {
+      anIsVisible = anIsVisible && !IsWireframeOff();
+
       if(myIsHighlighted) {
         myHighlitableActor->SetProperty(myHighlightProp);
       }else if(myIsPreselected){
@@ -1927,7 +1958,7 @@ void SMESH_ActorDef::Render(vtkRenderer* /*ren*/)
 
 void SMESH_ActorDef::Update()
 {
-  if(MYDEBUG) MESSAGE("SMESH_ActorDef::Update");
+  MESSAGE("SMESH_ActorDef::Update");
 
   myVisualObj->Update();
 
@@ -2485,6 +2516,71 @@ void SMESH_ActorDef::UpdateScalarBar()
 
 }
 
+// Get Actor for Threshold criteria compute
+SMESH_DeviceActor* SMESH_ActorDef::GetActorForThreshold()
+{
+  switch (myControlMode) {
+  case eLength2D:
+    return my1DExtActor;
+  case eWarping3D:
+    return my2DExtActor;
+  default:;
+    return myControlActor;
+  }
+}
+
+// Hides the cells beyond threshold if isThresholdOn == true.
+void SMESH_ActorDef::ClipThreshold(bool isThresholdOn,double min /*= 0.0*/, double max /*= 0.0*/)
+{
+  SMESH_DeviceActor* anActor = GetActorForThreshold();
+  if (anActor != myControlActor)
+    myControlActor->VisibilityOff();
+
+  myIsClipThresholdOn = isThresholdOn;
+  if (isThresholdOn)
+  {
+    // Initialize the filter
+    vtkSmartPointer<vtkThreshold> threshold = vtkSmartPointer<vtkThreshold>::New();
+
+    // We have set scalar data with SMESH_DeviceActor::SetControlMode() call as vtkDataSetAttributes::SCALARS.
+    // So, we don't need to pass an array name in SetInputArrayToProcess().
+    threshold->SetInputConnection(anActor->myMergeFilter->GetOutputPort());
+    threshold->SetInputArrayToProcess(0, 0, 0, vtkDataObject::FIELD_ASSOCIATION_CELLS, vtkDataSetAttributes::SCALARS);
+
+    // Set range
+    threshold->SetThresholdFunction(vtkThreshold::THRESHOLD_BETWEEN);
+    threshold->SetLowerThreshold(min);
+    threshold->SetUpperThreshold(max);
+
+    // Debug output
+    threshold->Update();
+    SCRUTE(threshold->GetOutput()->GetNumberOfCells());
+
+    // Add to the filters' chain
+    vtkAlgorithmOutput* port = threshold->GetOutputPort();
+    anActor->myPassFilter[0]->SetInputConnection(port);
+  }
+  else
+  {
+    // Restore the filters' chain
+    anActor->SetImplicitFunctionUsed(anActor->myIsImplicitFunctionUsed);
+    // Restore Actor filters when after Controls, which not use ExtACtor was called Controls, which use ExtActor
+    // For avoid artifact's
+    if (anActor != myControlActor)
+      myControlActor->SetImplicitFunctionUsed(myControlActor->myIsImplicitFunctionUsed);
+
+    myControlActor->VisibilityOn();
+  }
+}
+
+// Hides the wireframe if isWireframeOff == true.
+void SMESH_ActorDef::SetWireframeOff(bool isWireframeOff)
+{
+  myIsWireframeOff = isWireframeOff;
+
+  UpdateHighlight();
+}
+
 void SMESH_ActorDef::UpdateDistribution()
 {
   if(SMESH::Controls::NumericalFunctor* fun =
@@ -2657,7 +2753,7 @@ void SMESH_ActorDef::UpdateFilter()
   }
   if ( GetVisibility() )
     aFilter->Update();
-  if (MYDEBUG) MESSAGE(aFilter->GetOutput()->GetNumberOfCells());
+  MESSAGE(aFilter->GetOutput()->GetNumberOfCells());
 }
 
 #ifndef DISABLE_PLOT2DVIEWER

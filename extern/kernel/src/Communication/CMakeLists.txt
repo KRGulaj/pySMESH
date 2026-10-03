@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -23,16 +23,17 @@ INCLUDE_DIRECTORIES(
   ${MPI_CXX_INCLUDE_PATH}
   ${PYTHON_INCLUDE_DIRS}
   ${PROJECT_BINARY_DIR}/salome_adm
-  ${CMAKE_CURRENT_SOURCE_DIR}/../Basics
-  ${CMAKE_CURRENT_SOURCE_DIR}/../SALOMELocalTrace
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${CMAKE_CURRENT_SOURCE_DIR}/../Utils
+  ${CMAKE_CURRENT_SOURCE_DIR}/../GenericObj
   ${PROJECT_BINARY_DIR}/idl
 )
 
 SET(COMMON_LIBS
   OpUtil
-  SALOMELocalTrace
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
   SalomeIDLKernel
+  SalomeGenericObj
   ${PYTHON_LIBRARIES}
   ${MPI_CXX_LIBRARIES}
 )
@@ -45,6 +46,7 @@ SET(SalomeCommunication_SOURCES
   SALOMEMultiComm.cxx
   ReceiverFactory.cxx
   MatrixClient.cxx
+  SenderByteImpl.cxx
 )
 
 ADD_DEFINITIONS(${OMNIORB_DEFINITIONS} ${MPI_DEFINITIONS})
@@ -64,6 +66,7 @@ SET(COMMON_HEADERS_HXX
   SALOME_Communication.hxx
   SALOME_Matrix_i.hxx
   SenderFactory.hxx
+  SenderByteImpl.hxx
 )
 
 INSTALL(FILES ${COMMON_HEADERS_HXX} DESTINATION ${SALOME_INSTALL_HEADERS})

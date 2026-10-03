@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -164,6 +164,19 @@ namespace SMESH
     Warping_i();
     FunctorType                     GetFunctorType();
   };
+
+  /*
+    Class       : Warping3D_i
+    Description : Functor for calculating 3D warping
+  */
+  class SMESH_I_EXPORT Warping3D_i : public virtual POA_SMESH::Warping3D,
+    public virtual NumericalFunctor_i
+  {
+  public:
+    Warping3D_i();
+    FunctorType                     GetFunctorType();
+  };
+
   
   
   /*
@@ -302,7 +315,7 @@ namespace SMESH
 
   /*
     Class       : MultiConnection_i
-    Description : Functor for calculating number of faces conneted to the edge
+    Description : Functor for calculating number of faces connected to the edge
   */
   class SMESH_I_EXPORT MultiConnection_i: public virtual POA_SMESH::MultiConnection,
                                           public virtual NumericalFunctor_i
@@ -314,7 +327,7 @@ namespace SMESH
   
   /*
     Class       : MultiConnection2D_i
-    Description : Functor for calculating number of faces conneted to the edge
+    Description : Functor for calculating number of faces connected to the edge
   */
   class SMESH_I_EXPORT MultiConnection2D_i: public virtual POA_SMESH::MultiConnection2D,
                                             public virtual NumericalFunctor_i
@@ -349,6 +362,18 @@ namespace SMESH
   {
   public:
     NodeConnectivityNumber_i();
+    FunctorType                     GetFunctorType();
+  };
+
+  /*
+    Class       : ScaledJacobian_i
+    Description : Functor returning the scaled jacobian
+  */
+  class SMESH_I_EXPORT ScaledJacobian_i: public virtual POA_SMESH::ScaledJacobian,
+                                       public virtual NumericalFunctor_i
+  {
+  public:
+    ScaledJacobian_i();
     FunctorType                     GetFunctorType();
   };
   
@@ -1109,10 +1134,12 @@ namespace SMESH
     AspectRatio_ptr           CreateAspectRatio();
     AspectRatio3D_ptr         CreateAspectRatio3D();
     Warping_ptr               CreateWarping();
+    Warping3D_ptr             CreateWarping3D();
     Taper_ptr                 CreateTaper();
     Skew_ptr                  CreateSkew();
     Area_ptr                  CreateArea();
     Volume3D_ptr              CreateVolume3D();
+    ScaledJacobian_ptr        CreateScaledJacobian();
     MaxElementLength2D_ptr    CreateMaxElementLength2D();
     MaxElementLength3D_ptr    CreateMaxElementLength3D();
     Length_ptr                CreateLength();

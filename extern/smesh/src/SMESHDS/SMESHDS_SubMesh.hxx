@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -86,6 +86,8 @@ class SMESHDS_EXPORT SMESHDS_SubMesh : public SMDS_ElementHolder
   virtual void tmpClear();
   virtual void add( const SMDS_MeshElement* element );
   virtual void compact() {}
+  // Commented out to avoid SMESH_netgen_runner_1D2D3D test failure
+  // virtual void clear() override { Clear(); }
 
  private:
 

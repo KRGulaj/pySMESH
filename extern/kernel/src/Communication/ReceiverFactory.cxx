@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -186,3 +186,47 @@ int *ReceiverFactory::getValueOneShot(SALOME::SenderInt_ptr sender,long &size)
     }
 }
 
+SeqByteReceiver::SeqByteReceiver(SALOME::SenderByte_ptr sender):_obj(SALOME::SenderByte::_duplicate(sender))
+{
+}
+
+char *SeqByteReceiver::data(unsigned long& size)
+{
+  size = _obj->getSize();
+  if(size <= CHUNK_SIZE)
+  {
+    this->fetchOneShot( size );
+    return reinterpret_cast<char *>(_data_one_shot->get_buffer());
+  }
+  else
+  {
+    this->fetchByChunks( size );
+    return _data_for_split_case.get();
+  }
+}
+
+void SeqByteReceiver::fetchOneShot(unsigned long size)
+{
+  _data_one_shot.reset( _obj->sendPart(0,size) );
+}
+
+void SeqByteReceiver::fetchByChunks(unsigned long size)
+{
+  _data_for_split_case.reset( new char[size] );
+  char *destination = _data_for_split_case.get();
+  constexpr unsigned long EFF_CHUNK_SIZE = CHUNK_SIZE / 8;
+  unsigned long iStart = 0;
+  unsigned long iEnd = EFF_CHUNK_SIZE;
+  while( iStart!=iEnd && iEnd <= size )
+  {
+    std::unique_ptr<SALOME::vectorOfByte> part( _obj->sendPart(iStart,iEnd) );
+    const unsigned char *partC = part->get_buffer();
+    std::copy(partC,partC+(iEnd-iStart),destination+iStart);
+    iStart = iEnd; iEnd = std::min(iStart + EFF_CHUNK_SIZE,size);
+  }
+}
+
+SeqByteReceiver::~SeqByteReceiver()
+{
+  _obj->UnRegister();
+}

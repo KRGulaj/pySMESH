@@ -152,6 +152,11 @@ class Params {
   // hypothesis (a layer distribution is a 1-D hypothesis inside a 3-D one).
   py::dict nested(const char* key);
 
+  // Whether the caller sent `key`. Only for an option that upstream added after the
+  // dataclass of its branch was written: the branch reads it when sent, so a caller that
+  // does not know the option keeps the behaviour it had. done() still refuses an unread key.
+  bool has(const char* key) const;
+
   // Raise unless every key has been consumed.
   void done() const;
 

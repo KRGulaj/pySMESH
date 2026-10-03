@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -20,9 +20,11 @@
 # --- options ---
 # additional include directories
 INCLUDE_DIRECTORIES(
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${KERNEL_INCLUDE_DIRS}
   ${OpenCASCADE_INCLUDE_DIR}
   ${Boost_INCLUDE_DIRS}
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${PROJECT_SOURCE_DIR}/src/SMDS
 )
 
@@ -38,6 +40,9 @@ SET(_link_LIBRARIES
    ${OpenCASCADE_FoundationClasses_LIBRARIES}
    ${OpenCASCADE_ModelingData_LIBRARIES}
    ${Boost_LIBRARIES}
+   ${SALOMEBOOTSTRAP_SALOMEException}
+   ${KERNEL_OpUtil}
+   ${SALOMEBOOTSTRAP_SALOMEException}
    SMDS
 )
 
@@ -63,6 +68,8 @@ SET(SMESHUtils_HEADERS
   SMESH_Indexer.hxx
   SMESH_BoostTxtArchive.hxx
   SMESH_MGLicenseKeyGen.hxx
+  SMESH_RegularGrid.hxx
+  SMESH_RegularGridTemplate.hxx
   )
 
 # --- sources ---
@@ -88,6 +95,7 @@ SET(SMESHUtils_SOURCES
   SMESH_PolyLine.cxx
   SMESH_BoostTxtArchive.cxx
   SMESH_MGLicenseKeyGen.cxx
+  SMESH_RegularGrid.cxx
   )
 
 # --- rules ---

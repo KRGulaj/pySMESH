@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -20,6 +20,7 @@
 # --- options ---
 # additional include directories
 INCLUDE_DIRECTORIES(
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${KERNEL_INCLUDE_DIRS}
   ${OpenCASCADE_INCLUDE_DIR}
   ${Boost_INCLUDE_DIRS}
@@ -40,7 +41,7 @@ SET(_link_LIBRARIES
   ${OpenCASCADE_FoundationClasses_LIBRARIES}
   ${OpenCASCADE_DataExchange_LIBRARIES}
   ${OpenCASCADE_ModelingAlgorithms_LIBRARIES}
-  ${KERNEL_SALOMEBasics}
+  ${SALOMEBOOTSTRAP_SALOMEBasics}
   MeshDriver
   SMDS
   SMESHUtils
@@ -48,8 +49,8 @@ SET(_link_LIBRARIES
 
 SET(_link_LIBRARIES_bin
   ${KERNEL_OpUtil}
-  ${KERNEL_SALOMELocalTrace}
-  ${KERNEL_SALOMEBasics}
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
+  ${SALOMEBOOTSTRAP_SALOMEBasics}
   ${KERNEL_SalomeIDLKERNEL}
   ${OpenCASCADE_FoundationClasses_LIBRARIES}
   ${OpenCASCADE_DataExchange_LIBRARIES}

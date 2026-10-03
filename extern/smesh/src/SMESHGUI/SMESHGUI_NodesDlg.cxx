@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -107,13 +107,13 @@ namespace SMESH
       }
     } 
     catch ( SALOME::SALOME_Exception& exc ) {
-      INFOS( "Follow exception was cought:\n\t" << exc.details.text );
+      INFOS( "Follow exception was caught:\n\t" << exc.details.text );
     }
     catch ( const std::exception& exc ) {
-      INFOS( "Follow exception was cought:\n\t" << exc.what() );
+      INFOS( "Follow exception was caught:\n\t" << exc.what() );
     } 
     catch ( ... ) {
-      INFOS( "Unknown exception was cought !!!" );
+      INFOS( "Unknown exception was caught !!!" );
     }
     return aNodeId;
   }

@@ -1,4 +1,4 @@
-// Copyright (C) 2019-2022  CEA/DEN, EDF R&D
+// Copyright (C) 2019-2026  CEA, EDF
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -22,28 +22,20 @@
 %{
 #include "Launcher.hxx"
 #include "ResourcesManager.hxx"
+#include "LauncherResourceDefinition.hxx"
 
-struct ResourceDefinition_cpp
+#include <sstream>
+
+std::shared_ptr<ResourcesManager_cpp> HandleToLocalInstance(const std::string& ptrInStringFrmt)
 {
-public:
-  std::string name;
-  std::string hostname;
-  std::string type;
-  std::string protocol;
-  std::string username;
-  std::string applipath;
-  std::string OS;
-  int  mem_mb;
-  int  cpu_clock;
-  int  nb_node;
-  int  nb_proc_per_node;
-  std::string batch;
-  std::string mpiImpl;
-  std::string iprotocol;
-  bool can_launch_batch_jobs;
-  bool can_run_containers;
-  std::string working_directory;
-};
+  std::istringstream iss(ptrInStringFrmt);
+  void *zePtr(nullptr);
+  iss >> zePtr;
+  std::shared_ptr<ResourcesManager_cpp> *effPtr = reinterpret_cast<std::shared_ptr<ResourcesManager_cpp> *>(zePtr);
+  std::shared_ptr<ResourcesManager_cpp> ret(*effPtr);
+  delete effPtr;
+  return ret;
+}
 %}
 
 %include "std_string.i"
@@ -102,6 +94,7 @@ public:
   resourceParams resource_required;
   std::string queue;
   std::string partition;
+  std::string verbose_py_log_level;
   bool exclusive;
   unsigned int mem_per_cpu;
   std::string wckey;
@@ -113,27 +106,7 @@ public:
 
 // see ResourceDefinition from SALOME_ResourcesManager.idl
 // no other c++ equivalent. Convertion from ParserResourcesType
-struct ResourceDefinition_cpp
-{
-public:
-  std::string name;
-  std::string hostname;
-  std::string type;
-  std::string protocol;
-  std::string username;
-  std::string applipath;
-  std::string OS;
-  int  mem_mb;
-  int  cpu_clock;
-  int  nb_node;
-  int  nb_proc_per_node;
-  std::string batch;
-  std::string mpiImpl;
-  std::string iprotocol;
-  bool can_launch_batch_jobs;
-  bool can_run_containers;
-  std::string working_directory;
-};
+%include <LauncherResourceDefinition.hxx>
 
 %exception
 {
@@ -159,35 +132,55 @@ class ResourcesManager_cpp
 public:
   ResourcesManager_cpp(const char *xmlFilePath);
   std::vector<std::string> GetFittingResources(const resourceParams& params);
+  void WriteInXmlFile(std::string xml_file);
+  void DeleteAllResourcesInCatalog();
 %extend
 {
   ResourceDefinition_cpp GetResourceDefinition(const std::string& name)
   {
     ResourceDefinition_cpp swig_result;
     ParserResourcesType cpp_result = $self->GetResourcesDescr(name);
-
-    swig_result.name = cpp_result.Name;
-    swig_result.hostname = cpp_result.HostName;
-    swig_result.type = cpp_result.getResourceTypeStr();
-    swig_result.protocol = cpp_result.getAccessProtocolTypeStr();
-    swig_result.username = cpp_result.UserName;
-    swig_result.applipath = cpp_result.AppliPath;
-    swig_result.OS = cpp_result.OS;
-    swig_result.mem_mb = cpp_result.DataForSort._memInMB;
-    swig_result.cpu_clock = cpp_result.DataForSort._CPUFreqMHz;
-    swig_result.nb_node = cpp_result.DataForSort._nbOfNodes;
-    swig_result.nb_proc_per_node = cpp_result.DataForSort._nbOfProcPerNode;
-    swig_result.batch = cpp_result.getBatchTypeStr();
-    swig_result.mpiImpl = cpp_result.getMpiImplTypeStr();
-    swig_result.iprotocol = cpp_result.getClusterInternalProtocolStr();
-    swig_result.can_launch_batch_jobs = cpp_result.can_launch_batch_jobs;
-    swig_result.can_run_containers = cpp_result.can_run_containers;
-    swig_result.working_directory = cpp_result.working_directory;
-
+    swig_result.fromPRT( cpp_result );
     return swig_result;
+  }
+
+  void DeleteResourceInCatalog(const std::string& name)
+  {
+    $self->DeleteResourceInCatalog(name.c_str());
+  }
+  
+  void AddResourceInCatalog (const ResourceDefinition_cpp& new_resource)
+  {
+    ParserResourcesType new_resource_cpp( new_resource.toPRT() );
+    $self->AddResourceInCatalog(new_resource_cpp);
+  }
+
+  void AddResourceInCatalogNoQuestion (const ResourceDefinition_cpp& new_resource)
+  {
+    ParserResourcesType new_resource_cpp( new_resource.toPRT() );
+    $self->AddResourceInCatalogNoQuestion(new_resource_cpp);
+  }
+  
+  void ParseXmlFiles()
+  {
+    $self->ParseXmlFiles();
+  }
+  
+  std::vector<std::string> GetListOfEntries() const
+  {
+    const MapOfParserResourcesType& allRes = $self->GetList();
+    std::vector<std::string> ret;
+    for(auto it : allRes)
+      ret.push_back(it.first);
+    return ret;
   }
 }
 };
+
+%inline
+{
+  std::shared_ptr<ResourcesManager_cpp> HandleToLocalInstance(const std::string& ptrInStringFrmt);
+}
 
 %exception
 {
@@ -219,6 +212,7 @@ public:
   void         clearJobWorkingDir(int job_id);
   bool         getJobDumpState(int job_id, std::string directory);
   bool         getJobWorkFile(int job_id, std::string work_file, std::string directory);
+  long         getMaximumDurationInSecond(int job_id);
   void         stopJob(int job_id);
   void         removeJob(int job_id);
   std::string  dumpJob(int job_id);
@@ -229,3 +223,131 @@ public:
   long createJobWithFile(std::string xmlExecuteFile, std::string clusterName);
   void SetResourcesManager(std::shared_ptr<ResourcesManager_cpp>& rm );
 };
+
+%pythoncode %{
+def CreateSSHContainerResource(hostname,applipath,nbOfNodes=1):
+  return CreateContainerResource(hostname,applipath,"ssh",nbOfNodes)
+
+def CreateSRUNContainerResource(hostname,applipath,nbOfNodes=1):
+  return CreateContainerResource(hostname,applipath,"srun",nbOfNodes)
+
+def CreateContainerResource(hostname,applipath,protocol,nbOfNodes=1):
+  import getpass
+  ret = ResourceDefinition_cpp()
+  ret.name = hostname.split(".")[0]
+  ret.hostname = ret.name
+  ret.protocol = protocol
+  ret.applipath = applipath
+  ret.nb_node = nbOfNodes
+  ret.nb_proc_per_node = 1
+  ret.can_run_containers = True
+  ret.can_launch_batch_jobs = False
+  ret.mpiImpl = "no mpi"
+  ret.iprotocol = protocol
+  ret.type = "single_machine"
+  ret.username = getpass.getuser()
+  return ret
+
+def ResourceDefinition_cpp_repr(self):
+  pat0 = "{} = {}"
+  pat1 = "{} = \"{}\""
+  data = [("name","name",pat0),
+  ("hostname","hostname",pat0),
+  ("type","type",pat0),
+  ("protocol","protocol",pat0),
+  ("userName","username",pat0),
+  ("appliPath","applipath",pat1),
+  ("mpi","mpiImpl",pat0),
+  ("nbOfNodes","nb_node",pat0),
+  ("nbOfProcPerNode","nb_proc_per_node",pat0),
+  ("canRunContainer","can_run_containers",pat0)
+  ]
+  ret = [c.format(a,getattr(self,b)) for a,b,c in data]
+  return "\n".join( ret )
+
+def ResourcesManager_cpp_GetList(self):
+  return {name:self.GetResourceDefinition(name) for name in self.GetListOfEntries()}
+
+def ResourcesManager_cpp___getitem__(self,name):
+  return self.GetResourceDefinition(name)
+
+def ResourcesManager_cpp___repr__(self):
+  return str( self.GetList() )
+
+ListOfAttrCommon = ['name', 'OS', 'applipath', 'batch', 'can_launch_batch_jobs', 'can_run_containers', 'componentList', 'cpu_clock', 'hostname', 'iprotocol', 'mem_mb', 'mpiImpl', 'nb_node', 'nb_proc_per_node', 'protocol', 'type', 'username', 'working_directory']
+
+def ResourceDefinition_cpp_isEqual(self,other):
+  return all( [getattr(self,k) == getattr(other,k) for k in ListOfAttrCommon] )
+
+def RetrieveRMCppSingleton():
+  import KernelLauncher
+  return HandleToLocalInstance( KernelLauncher.RetrieveInternalInstanceOfLocalCppResourcesManager() )
+
+def GetPlayGroundInsideASlurmJob():
+  import subprocess as sp
+  cont = sp.check_output(["srun","hostname"])
+  nodesMul = [elt for elt in cont.decode().split("\n") if elt != ""]
+  from collections import defaultdict
+  d = defaultdict(int)
+  for elt in nodesMul:
+      d[elt]+=1
+  return d
+
+def BuildCatalogFromScratch(protocol,appliPath):
+  import os
+  d = GetPlayGroundInsideASlurmJob()
+  rmcpp = RetrieveRMCppSingleton()
+  rmcpp.DeleteAllResourcesInCatalog()
+  for k,v in d.items():
+      contRes = CreateContainerResource(hostname=k,applipath=appliPath,protocol=protocol,nbOfNodes=v)
+      rmcpp.AddResourceInCatalogNoQuestion(contRes)
+
+def GetRequestForGiveContainer(hostname, contName):
+  import Engines
+  import os
+  rp=Engines.ResourceParameters(name=hostname,
+                                hostname=hostname,
+                                can_launch_batch_jobs=False,
+                                can_run_containers=True,
+                                OS="Linux",
+                                componentList=[],
+                                nb_proc=1,
+                                mem_mb=1000,
+                                cpu_clock=1000,
+                                nb_node=1,
+                                nb_proc_per_node=1,
+                                policy="first",
+                                resList=[])
+
+  cp=Engines.ContainerParameters(container_name=contName,
+                                  mode="start",
+                                  workingdir=os.path.expanduser("~"),
+                                  nb_proc=1,
+                                  isMPI=False,
+                                  parallelLib="",
+                                  resource_params=rp)
+  return cp
+
+
+def FromEngineResourceDefinitionToCPP( corbaInstance ):
+  """
+  Convert Engine.ResourceDefinition to ResourceDefinition_cpp instance
+  """
+  ret = ResourceDefinition_cpp()
+  for k in ListOfAttrCommon:
+    setattr(ret,k,getattr(corbaInstance,k))
+  return ret
+
+def ToEngineResourceDefinitionFromCPP( cppInstance ):
+  import Engines
+  return Engines.ResourceDefinition(**{k:getattr(cppInstance,k) for k in ListOfAttrCommon})
+
+ResourceDefinition_cpp.repr = ResourceDefinition_cpp_repr
+ResourceDefinition_cpp.__repr__ = ResourceDefinition_cpp_repr
+ResourceDefinition_cpp.__eq__ = ResourceDefinition_cpp_isEqual
+
+ResourcesManager_cpp.GetList = ResourcesManager_cpp_GetList
+ResourcesManager_cpp.__getitem__ = ResourcesManager_cpp___getitem__
+ResourcesManager_cpp.__repr__ = ResourcesManager_cpp___repr__
+%}
+

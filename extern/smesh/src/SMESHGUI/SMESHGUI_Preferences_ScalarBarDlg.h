@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -50,6 +50,8 @@ class SalomeApp_IntSpinBox;
 class QtxColorButton;
 class LightApp_SelectionMgr;
 
+class vtkLookupTable;
+
 class SMESHGUI_EXPORT SMESHGUI_Preferences_ScalarBarDlg : public QDialog
 { 
   Q_OBJECT
@@ -69,6 +71,10 @@ public:
                                              const double,
                                              const double );
   void                     initScalarBarFromResources();
+
+protected:
+  void                     applyThreshold(double min, double max);
+  void                     applyWireframeOff();
 
 protected slots:
   virtual void             reject();
@@ -97,6 +103,8 @@ private:
   QLineEdit*               myMinEdit;
   QLineEdit*               myMaxEdit;
   QCheckBox*               myLogarithmicCheck;
+  QCheckBox*               myThresholdCheck;
+  QCheckBox*               myWireframeOffCheck;
 
   QGroupBox*               myFontGrp;
   QtxColorButton*          myTitleColorBtn;

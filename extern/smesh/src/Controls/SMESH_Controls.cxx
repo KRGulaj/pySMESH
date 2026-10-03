@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -40,10 +40,7 @@
 #include <Basics_Utils.hxx>
 
 #include <BRepAdaptor_Surface.hxx>
-#include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
-#include <BRepClass3d_SolidClassifier.hxx>
-#include <BRepClass_FaceClassifier.hxx>
 #include <BRep_Tool.hxx>
 #include <GeomLib_IsPlanarSurface.hxx>
 #include <Geom_CylindricalSurface.hxx>
@@ -1039,12 +1036,12 @@ namespace{
   //================================================================================
   /*!
    * \brief HOMARD method of hexahedron quality
-   * 1. Decompose the hexa into 24 tetra: each face is splitted into 4 triangles by
+   * 1. Decompose the hexa into 24 tetra: each face is split into 4 triangles by
    *    adding the diagonals and every triangle is connected to the center of the hexa.
    * 2. Compute the quality of every tetra with the same formula as for the standard quality,
    *    except that the factor for the normalization is not the same because the final goal
    *    is to have a quality equal to 1 for a perfect cube. So the formula is:
-   *    qual = max(lengthes of 6 edges) * (sum of surfaces of 4 faces) / (7.6569*6*volume)
+   *    qual = max(lengths of 6 edges) * (sum of surfaces of 4 faces) / (7.6569*6*volume)
    * 3. The quality of the hexa is the highest value of the qualities of the 24 tetra
    */
   //================================================================================
@@ -1134,6 +1131,7 @@ double AspectRatio3D::GetValue( const TSequenceOfXYZ& P )
     if     (nbNodes==10) nbNodes=4; // quadratic tetrahedron
     else if(nbNodes==13) nbNodes=5; // quadratic pyramid
     else if(nbNodes==15) nbNodes=6; // quadratic pentahedron
+    else if(nbNodes==18) nbNodes=6; // bi-quadratic pentahedron
     else if(nbNodes==20) nbNodes=8; // quadratic hexahedron
     else if(nbNodes==27) nbNodes=8; // tri-quadratic hexahedron
     else return aQuality;
@@ -1423,21 +1421,7 @@ bool Warping::IsApplicable( const SMDS_MeshElement* element ) const
 
 double Warping::GetValue( const TSequenceOfXYZ& P )
 {
-  if ( P.size() != 4 )
-    return 0;
-
-  gp_XYZ G = ( P( 1 ) + P( 2 ) + P( 3 ) + P( 4 ) ) / 4.;
-
-  double A1 = ComputeA( P( 1 ), P( 2 ), P( 3 ), G );
-  double A2 = ComputeA( P( 2 ), P( 3 ), P( 4 ), G );
-  double A3 = ComputeA( P( 3 ), P( 4 ), P( 1 ), G );
-  double A4 = ComputeA( P( 4 ), P( 1 ), P( 2 ), G );
-
-  double val = Max( Max( A1, A2 ), Max( A3, A4 ) );
-
-  const double eps = 0.1; // val is in degrees
-
-  return val < eps ? 0. : val;
+  return ComputeValue(P);
 }
 
 double Warping::ComputeA( const gp_XYZ& thePnt1,
@@ -1464,6 +1448,25 @@ double Warping::ComputeA( const gp_XYZ& thePnt1,
   return asin( fabs( H / L ) ) * 180. / M_PI;
 }
 
+double Warping::ComputeValue(const TSequenceOfXYZ& thePoints) const
+{
+  if (thePoints.size() != 4)
+    return 0;
+
+  gp_XYZ G = (thePoints(1) + thePoints(2) + thePoints(3) + thePoints(4)) / 4.;
+
+  double A1 = ComputeA(thePoints(1), thePoints(2), thePoints(3), G);
+  double A2 = ComputeA(thePoints(2), thePoints(3), thePoints(4), G);
+  double A3 = ComputeA(thePoints(3), thePoints(4), thePoints(1), G);
+  double A4 = ComputeA(thePoints(4), thePoints(1), thePoints(2), G);
+
+  double val = Max(Max(A1, A2), Max(A3, A4));
+
+  const double eps = 0.1; // val is in degrees
+
+  return val < eps ? 0. : val;
+}
+
 double Warping::GetBadRate( double Value, int /*nbNodes*/ ) const
 {
   // the warp is in the range [0.0,PI/2]
@@ -1477,6 +1480,93 @@ SMDSAbs_ElementType Warping::GetType() const
   return SMDSAbs_Face;
 }
 
+
+//================================================================================
+/*
+  Class       : Warping3D
+  Description : Functor for calculating warping
+*/
+//================================================================================
+
+bool Warping3D::IsApplicable(const SMDS_MeshElement* element) const
+{
+  return NumericalFunctor::IsApplicable(element);//&& element->NbNodes() == 4;
+}
+
+double Warping3D::GetValue(long theId)
+{
+  double aVal = 0;
+  myCurrElement = myMesh->FindElement(theId);
+  if (myCurrElement)
+  {
+    WValues aValues;
+    ProcessVolumeELement(aValues);
+    for (const auto& aValue: aValues)
+    {
+      aVal = Max(aVal, aValue.myWarp);
+    }
+  }
+  return aVal;
+}
+
+double Warping3D::GetValue(const TSequenceOfXYZ& P)
+{
+  return ComputeValue(P);
+}
+
+SMDSAbs_ElementType Warping3D::GetType() const
+{
+  return SMDSAbs_Volume;
+}
+
+bool Warping3D::Value::operator<(const Warping3D::Value& x) const
+{
+  if (myPntIds.size() != x.myPntIds.size())
+    return myPntIds.size() < x.myPntIds.size();
+
+  for (int anInd = 0; anInd < myPntIds.size(); ++anInd)
+    if (myPntIds[anInd] != x.myPntIds[anInd])
+      return myPntIds[anInd] != x.myPntIds[anInd];
+
+  return false;
+}
+
+// Compute value on each face of volume
+void Warping3D::ProcessVolumeELement(WValues& theValues)
+{
+  SMDS_VolumeTool aVTool(myCurrElement);
+  double aCoord[3];
+  for (int aFaceID = 0; aFaceID < aVTool.NbFaces(); ++aFaceID)
+  {
+    TSequenceOfXYZ aPoints;
+    std::set<const SMDS_MeshNode*> aNodes;
+    std::vector<long> aNodeIds;
+    const SMDS_MeshNode** aNodesPtr = aVTool.GetFaceNodes(aFaceID);
+
+    if (aNodesPtr)
+    {
+      for (int i = 0; i < aVTool.NbFaceNodes(aFaceID); ++i)
+      {
+        aNodesPtr[i]->GetXYZ(aCoord);
+        aPoints.push_back(gp_XYZ{ aCoord[0], aCoord[1], aCoord[2] });
+        aNodeIds.push_back(aNodesPtr[i]->GetID());
+      }
+      double aWarp = GetValue(aPoints);
+      Value aVal{ aWarp, aNodeIds };
+
+      theValues.push_back(aVal);
+    }
+  }
+}
+
+void Warping3D::GetValues(WValues& theValues)
+{
+  for (SMDS_VolumeIteratorPtr anIter = myMesh->volumesIterator(); anIter->more(); )
+  {
+    myCurrElement = anIter->next();
+    ProcessVolumeELement(theValues);
+  }
+}
 
 //================================================================================
 /*
@@ -2142,7 +2232,7 @@ double Deflection2D::GetBadRate( double Value, int /*nbNodes*/ ) const
 //================================================================================
 /*
   Class       : MultiConnection
-  Description : Functor for calculating number of faces conneted to the edge
+  Description : Functor for calculating number of faces connected to the edge
 */
 //================================================================================
 
@@ -2169,7 +2259,7 @@ SMDSAbs_ElementType MultiConnection::GetType() const
 //================================================================================
 /*
   Class       : MultiConnection2D
-  Description : Functor for calculating number of faces conneted to the edge
+  Description : Functor for calculating number of faces connected to the edge
 */
 //================================================================================
 
@@ -2349,6 +2439,70 @@ double NodeConnectivityNumber::GetBadRate( double Value, int /*nbNodes*/ ) const
 SMDSAbs_ElementType NodeConnectivityNumber::GetType() const
 {
   return SMDSAbs_Node;
+}
+
+//================================================================================
+/*
+  Class       : ScaledJacobian
+  Description : Functor returning the ScaledJacobian for volumetric elements
+*/
+//================================================================================
+
+double ScaledJacobian::GetValue( long theElementId )
+{  
+  if ( theElementId && myMesh ) {
+    SMDS_VolumeTool aVolumeTool;
+    if ( aVolumeTool.Set( myMesh->FindElement( theElementId )))
+      return aVolumeTool.GetScaledJacobian();
+  }
+  return 0;
+
+  /* 
+  //VTK version not used because lack of implementation for HEXAGONAL_PRISM. 
+  //Several mesh quality measures implemented in vtkMeshQuality can be accessed left here as reference
+  double aVal = 0;
+  myCurrElement = myMesh->FindElement( theElementId );
+  if ( myCurrElement )
+  {
+    VTKCellType cellType      = myCurrElement->GetVtkType();
+    vtkUnstructuredGrid* grid = const_cast<SMDS_Mesh*>( myMesh )->GetGrid();
+    vtkCell* avtkCell         = grid->GetCell( myCurrElement->GetVtkID() );
+    switch ( cellType )
+    {
+      case VTK_QUADRATIC_TETRA:      
+      case VTK_TETRA:
+        aVal = Round( vtkMeshQuality::TetScaledJacobian( avtkCell ));
+        break;
+      case VTK_QUADRATIC_HEXAHEDRON:
+      case VTK_HEXAHEDRON:
+        aVal = Round( vtkMeshQuality::HexScaledJacobian( avtkCell ));
+        break;
+      case VTK_QUADRATIC_WEDGE:
+      case VTK_WEDGE: //Pentahedron
+        aVal = Round( vtkMeshQuality::WedgeScaledJacobian( avtkCell ));
+        break;
+      case VTK_QUADRATIC_PYRAMID:
+      case VTK_PYRAMID:
+        aVal = Round( vtkMeshQuality::PyramidScaledJacobian( avtkCell ));
+        break;
+      case VTK_HEXAGONAL_PRISM:
+      case VTK_POLYHEDRON:
+      default:
+        break;
+    }          
+  }
+  return aVal;
+  */
+}
+
+double ScaledJacobian::GetBadRate( double Value, int /*nbNodes*/ ) const
+{
+  return Value;
+}
+
+SMDSAbs_ElementType ScaledJacobian::GetType() const
+{
+  return SMDSAbs_Volume;
 }
 
 /*
@@ -3289,7 +3443,7 @@ void CoplanarFaces::SetMesh( const SMDS_Mesh* theMesh )
       return;
 
     const double cosTol = Cos( myToler * M_PI / 180. );
-    NCollection_Map< SMESH_TLink, SMESH_TLink > checkedLinks;
+    NCollection_Map< SMESH_TLink, SMESH_TLinkHasher > checkedLinks;
 
     std::list< std::pair< const SMDS_MeshElement*, gp_Vec > > faceQueue;
     faceQueue.push_back( std::make_pair( face, myNorm ));
@@ -4337,58 +4491,14 @@ bool ElementsOnSurface::isOnSurface( const SMDS_MeshNode* theNode )
 //  ElementsOnShape
 //================================================================================
 
-namespace {
-  const int theIsCheckedFlag = 0x0000100;
-}
-
-struct ElementsOnShape::Classifier
-{
-  Classifier(): mySolidClfr(0), myProjFace(0), myProjEdge(0), myFlags(0) { myU = myV = 1e100; }
-  ~Classifier();
-  void Init(const TopoDS_Shape& s, double tol, const Bnd_B3d* box = 0 );
-  bool IsOut(const gp_Pnt& p)        { return SetChecked( true ), (this->*myIsOutFun)( p ); }
-  TopAbs_ShapeEnum ShapeType() const { return myShape.ShapeType(); }
-  const TopoDS_Shape& Shape() const  { return myShape; }
-  const Bnd_B3d* GetBndBox() const   { return & myBox; }
-  double Tolerance() const           { return myTol; }
-  bool IsChecked()                   { return myFlags & theIsCheckedFlag; }
-  bool IsSetFlag( int flag ) const   { return myFlags & flag; }
-  void SetChecked( bool is ) { is ? SetFlag( theIsCheckedFlag ) : UnsetFlag( theIsCheckedFlag ); }
-  void SetFlag  ( int flag ) { myFlags |= flag; }
-  void UnsetFlag( int flag ) { myFlags &= ~flag; }
-  void GetParams( double & u, double & v ) const { u = myU; v = myV; }
-
-private:
-  bool isOutOfSolid (const gp_Pnt& p);
-  bool isOutOfBox   (const gp_Pnt& p);
-  bool isOutOfFace  (const gp_Pnt& p);
-  bool isOutOfEdge  (const gp_Pnt& p);
-  bool isOutOfVertex(const gp_Pnt& p);
-  bool isOutOfNone  (const gp_Pnt& /*p*/) { return true; }
-  bool isBox        (const TopoDS_Shape& s);
-
-  TopoDS_Shape prepareSolid( const TopoDS_Shape& theSolid );
-
-  bool (Classifier::*          myIsOutFun)(const gp_Pnt& p);
-  BRepClass3d_SolidClassifier* mySolidClfr;
-  Bnd_B3d                      myBox;
-  GeomAPI_ProjectPointOnSurf*  myProjFace;
-  GeomAPI_ProjectPointOnCurve* myProjEdge;
-  gp_Pnt                       myVertexXYZ;
-  TopoDS_Shape                 myShape;
-  double                       myTol;
-  double                       myU, myV; // result of isOutOfFace() and isOutOfEdge()
-  int                          myFlags;
-};
-
 struct ElementsOnShape::OctreeClassifier : public SMESH_Octree
 {
-  OctreeClassifier( const std::vector< ElementsOnShape::Classifier* >& classifiers );
+  OctreeClassifier( const std::vector< Classifier* >& classifiers );
   OctreeClassifier( const OctreeClassifier*                           otherTree,
-                    const std::vector< ElementsOnShape::Classifier >& clsOther,
-                    std::vector< ElementsOnShape::Classifier >&       cls );
+                    const std::vector< Classifier >& clsOther,
+                    std::vector< Classifier >&       cls );
   void GetClassifiersAtPoint( const gp_XYZ& p,
-                              std::vector< ElementsOnShape::Classifier* >& classifiers );
+                              std::vector< Classifier* >& classifiers );
   size_t GetSize();
 
 protected:
@@ -4397,7 +4507,7 @@ protected:
   void          buildChildrenData();
   Bnd_B3d*      buildRootBox();
 
-  std::vector< ElementsOnShape::Classifier* > myClassifiers;
+  std::vector< Classifier* > myClassifiers;
 };
 
 
@@ -4425,9 +4535,10 @@ Predicate* ElementsOnShape::clone() const
     size += sizeof( myWorkClassifiers[0] ) * myWorkClassifiers.size();
   if ( size > 1e+9 ) // 1G
   {
-#ifdef _DEBUG_
+
+  if (SALOME::VerbosityActivated())
     std::cout << "Avoid ElementsOnShape::clone(), too large: " << size << " bytes " << std::endl;
-#endif
+
     return 0;
   }
 
@@ -4710,199 +4821,8 @@ bool ElementsOnShape::IsSatisfy (const SMDS_MeshNode* node,
   return !isNodeOut;
 }
 
-void ElementsOnShape::Classifier::Init( const TopoDS_Shape& theShape,
-                                        double              theTol,
-                                        const Bnd_B3d*      theBox )
-{
-  myShape = theShape;
-  myTol   = theTol;
-  myFlags = 0;
-
-  bool isShapeBox = false;
-  switch ( myShape.ShapeType() )
-  {
-  case TopAbs_SOLID:
-  {
-    if (( isShapeBox = isBox( theShape )))
-    {
-      myIsOutFun = & ElementsOnShape::Classifier::isOutOfBox;
-    }
-    else
-    {
-      mySolidClfr = new BRepClass3d_SolidClassifier( prepareSolid( theShape ));
-      myIsOutFun = & ElementsOnShape::Classifier::isOutOfSolid;
-    }
-    break;
-  }
-  case TopAbs_FACE:
-  {
-    Standard_Real u1,u2,v1,v2;
-    Handle(Geom_Surface) surf = BRep_Tool::Surface( TopoDS::Face( theShape ));
-    if ( surf.IsNull() )
-      myIsOutFun = & ElementsOnShape::Classifier::isOutOfNone;
-    else
-    {
-      surf->Bounds( u1,u2,v1,v2 );
-      myProjFace = new GeomAPI_ProjectPointOnSurf;
-      myProjFace->Init( surf, u1,u2, v1,v2, myTol );
-      myIsOutFun = & ElementsOnShape::Classifier::isOutOfFace;
-    }
-    break;
-  }
-  case TopAbs_EDGE:
-  {
-    Standard_Real u1, u2;
-    Handle(Geom_Curve) curve = BRep_Tool::Curve( TopoDS::Edge( theShape ), u1, u2);
-    if ( curve.IsNull() )
-      myIsOutFun = & ElementsOnShape::Classifier::isOutOfNone;
-    else
-    {
-      myProjEdge = new GeomAPI_ProjectPointOnCurve;
-      myProjEdge->Init( curve, u1, u2 );
-      myIsOutFun = & ElementsOnShape::Classifier::isOutOfEdge;
-    }
-    break;
-  }
-  case TopAbs_VERTEX:
-  {
-    myVertexXYZ = BRep_Tool::Pnt( TopoDS::Vertex( theShape ) );
-    myIsOutFun = & ElementsOnShape::Classifier::isOutOfVertex;
-    break;
-  }
-  default:
-    throw SALOME_Exception("Programmer error in usage of ElementsOnShape::Classifier");
-  }
-
-  if ( !isShapeBox )
-  {
-    if ( theBox )
-    {
-      myBox = *theBox;
-    }
-    else
-    {
-      Bnd_Box box;
-      if ( myShape.ShapeType() == TopAbs_FACE )
-      {
-        BRepAdaptor_Surface SA( TopoDS::Face( myShape ), /*useBoundaries=*/false );
-        if ( SA.GetType() == GeomAbs_BSplineSurface )
-          BRepBndLib::AddOptimal( myShape, box,
-                                  /*useTriangulation=*/true, /*useShapeTolerance=*/true );
-      }
-      if ( box.IsVoid() )
-        BRepBndLib::Add( myShape, box );
-      myBox.Clear();
-      myBox.Add( box.CornerMin() );
-      myBox.Add( box.CornerMax() );
-      gp_XYZ halfSize = 0.5 * ( box.CornerMax().XYZ() - box.CornerMin().XYZ() );
-      for ( int iDim = 1; iDim <= 3; ++iDim )
-      {
-        double x = halfSize.Coord( iDim );
-        halfSize.SetCoord( iDim, x + Max( myTol, 1e-2 * x ));
-      }
-      myBox.SetHSize( halfSize );
-    }
-  }
-}
-
-ElementsOnShape::Classifier::~Classifier()
-{
-  delete mySolidClfr; mySolidClfr = 0;
-  delete myProjFace;  myProjFace = 0;
-  delete myProjEdge;  myProjEdge = 0;
-}
-
-TopoDS_Shape ElementsOnShape::Classifier::prepareSolid( const TopoDS_Shape& theSolid )
-{
-  // try to limit tolerance of theSolid down to myTol (issue #19026)
-
-  // check if tolerance of theSolid is more than myTol
-  bool tolIsOk = true; // max tolerance is at VERTEXes
-  for ( TopExp_Explorer exp( theSolid, TopAbs_VERTEX ); exp.More() &&  tolIsOk; exp.Next() )
-    tolIsOk = ( myTol >= BRep_Tool::Tolerance( TopoDS::Vertex( exp.Current() )));
-  if ( tolIsOk )
-    return theSolid;
-
-  // make a copy to prevent the original shape from changes
-  TopoDS_Shape resultShape = BRepBuilderAPI_Copy( theSolid );
-
-  if ( !GEOMUtils::FixShapeTolerance( resultShape, TopAbs_SHAPE, myTol ))
-    return theSolid;
-  return resultShape;
-}
-
-bool ElementsOnShape::Classifier::isOutOfSolid( const gp_Pnt& p )
-{
-  if ( isOutOfBox( p )) return true;
-  mySolidClfr->Perform( p, myTol );
-  return ( mySolidClfr->State() != TopAbs_IN && mySolidClfr->State() != TopAbs_ON );
-}
-
-bool ElementsOnShape::Classifier::isOutOfBox( const gp_Pnt& p )
-{
-  return myBox.IsOut( p.XYZ() );
-}
-
-bool ElementsOnShape::Classifier::isOutOfFace( const gp_Pnt& p )
-{
-  if ( isOutOfBox( p )) return true;
-  myProjFace->Perform( p );
-  if ( myProjFace->IsDone() && myProjFace->LowerDistance() <= myTol )
-  {
-    // check relatively to the face
-    myProjFace->LowerDistanceParameters( myU, myV );
-    gp_Pnt2d aProjPnt( myU, myV );
-    BRepClass_FaceClassifier aClsf ( TopoDS::Face( myShape ), aProjPnt, myTol );
-    if ( aClsf.State() == TopAbs_IN || aClsf.State() == TopAbs_ON )
-      return false;
-  }
-  return true;
-}
-
-bool ElementsOnShape::Classifier::isOutOfEdge( const gp_Pnt& p )
-{
-  if ( isOutOfBox( p )) return true;
-  myProjEdge->Perform( p );
-  bool isOn = ( myProjEdge->NbPoints() > 0 && myProjEdge->LowerDistance() <= myTol );
-  if ( isOn )
-    myU = myProjEdge->LowerDistanceParameter();
-  return !isOn;
-}
-
-bool ElementsOnShape::Classifier::isOutOfVertex( const gp_Pnt& p )
-{
-  return ( myVertexXYZ.Distance( p ) > myTol );
-}
-
-bool ElementsOnShape::Classifier::isBox(const TopoDS_Shape& theShape )
-{
-  TopTools_IndexedMapOfShape vMap;
-  TopExp::MapShapes( theShape, TopAbs_VERTEX, vMap );
-  if ( vMap.Extent() != 8 )
-    return false;
-
-  myBox.Clear();
-  for ( int i = 1; i <= 8; ++i )
-    myBox.Add( BRep_Tool::Pnt( TopoDS::Vertex( vMap( i ))).XYZ() );
-
-  gp_XYZ pMin = myBox.CornerMin(), pMax = myBox.CornerMax();
-  for ( int i = 1; i <= 8; ++i )
-  {
-    gp_Pnt p = BRep_Tool::Pnt( TopoDS::Vertex( vMap( i )));
-    for ( int iC = 1; iC <= 3; ++ iC )
-    {
-      double d1 = Abs( pMin.Coord( iC ) - p.Coord( iC ));
-      double d2 = Abs( pMax.Coord( iC ) - p.Coord( iC ));
-      if ( Min( d1, d2 ) > myTol )
-        return false;
-    }
-  }
-  myBox.Enlarge( myTol );
-  return true;
-}
-
 ElementsOnShape::
-OctreeClassifier::OctreeClassifier( const std::vector< ElementsOnShape::Classifier* >& classifiers )
+OctreeClassifier::OctreeClassifier( const std::vector< Classifier* >& classifiers )
   :SMESH_Octree( new SMESH_TreeLimit )
 {
   myClassifiers = classifiers;
@@ -4911,8 +4831,8 @@ OctreeClassifier::OctreeClassifier( const std::vector< ElementsOnShape::Classifi
 
 ElementsOnShape::
 OctreeClassifier::OctreeClassifier( const OctreeClassifier*                           otherTree,
-                                    const std::vector< ElementsOnShape::Classifier >& clsOther,
-                                    std::vector< ElementsOnShape::Classifier >&       cls )
+                                    const std::vector< Classifier >& clsOther,
+                                    std::vector< Classifier >&       cls )
   :SMESH_Octree( new SMESH_TreeLimit )
 {
   myBox = new Bnd_B3d( *otherTree->getBox() );
@@ -4938,7 +4858,7 @@ OctreeClassifier::OctreeClassifier( const OctreeClassifier*                     
 
 void ElementsOnShape::
 OctreeClassifier::GetClassifiersAtPoint( const gp_XYZ& point,
-                                         std::vector< ElementsOnShape::Classifier* >& result )
+                                         std::vector< Classifier* >& result )
 {
   if ( getBox()->IsOut( point ))
     return;
@@ -5208,7 +5128,7 @@ double BelongToGeom::GetTolerance()
 
 /*
   Class       : LyingOnGeom
-  Description : Predicate for verifying whether entiy lying or partially lying on
+  Description : Predicate for verifying whether entity lying or partially lying on
   specified geometrical support
 */
 

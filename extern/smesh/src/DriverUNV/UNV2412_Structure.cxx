@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -141,7 +141,7 @@ using namespace UNV2412;
 //    111 Solid Linear Tetrahedron
 //    112 Solid Linear Wedge
 //    113 Solid Parabolic Wedge
-//    114 Solid Cubic Wedge
+//    114 Solid Quadratic Pyramid
 //    115 Solid Linear Brick
 //    116 Solid Parabolic Brick
 //    117 Solid Cubic Brick
@@ -177,6 +177,7 @@ using namespace UNV2412;
 //    222 Parabolic rigin surface
 //    231 Axisymmetric linear rigid surface
 //    232 Axisymmetric parabolic rigid surface
+//    312 Solid Linear Pyramid
 
 
 
@@ -350,7 +351,8 @@ bool UNV2412::IsVolume(int theFeDescriptorId){
 
   case 117: // Solid Cubic Brick
 
-  case 114: // pyramid of 13 nodes (quadratic)
+  case 312: // Solid Linear Pyramid - PIRA5
+  case 114: // Solid Quadratic Pyramid - PIRA13
     return true;
   }
   return false;

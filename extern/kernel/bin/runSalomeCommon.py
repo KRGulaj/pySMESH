@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #  -*- coding: iso-8859-1 -*-
-# Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 #
 # Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 # CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -34,32 +34,13 @@ import subprocess
 from salomeContextUtils import ScriptAndArgsObjectEncoder
 import platform
 import logging
+from salome_utils import positionVerbosityOfLogger
+
 logger = logging.getLogger()
 
-class ColoredFormatter(logging.Formatter):
-    BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(30,38)
-    COLORS = { 'WARNING': YELLOW, 'INFO': WHITE, 'DEBUG': BLUE, 'CRITICAL': YELLOW, 'ERROR': RED }
-    def __init__(self, *args, **kwargs):
-        logging.Formatter.__init__(self, *args, **kwargs)
-    def format(self, record):
-        RESET_SEQ = "\033[0m"
-        COLOR_SEQ = "\033[1;%dm"
-        record.levelname = COLOR_SEQ % ColoredFormatter.COLORS[record.levelname] + record.levelname + RESET_SEQ
-        return logging.Formatter.format(self, record)
-
 def setVerbose(verbose):
-    global logger
-    formatter = logging.Formatter('%(levelname)s : %(asctime)s : %(message)s ',style='%')
-    formatter.default_time_format = '%H:%M:%S'
-    formatter.default_msec_format = "%s.%03d"
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(formatter)
-    logger.addHandler(stream_handler)
-
     verbose_map = { "0": logging.WARNING, "1": logging.INFO, "2": logging.DEBUG}
-    if verbose in verbose_map:
-        logger.setLevel(verbose_map[verbose])
-
+    positionVerbosityOfLogger( verbose_map[verbose] )
 # -----------------------------------------------------------------------------
 #
 # Class definitions to launch CORBA Servers
@@ -301,6 +282,18 @@ class CommonSessionServer(Server):
                     self.SCMD2+=['--pyscript=%s'%(msg)]
                     pass
                 pass
+                if self.args['gui_log_file'] is not None:
+                    guilogfile = self.args['gui_log_file']
+                    if os.path.exists(guilogfile) and os.path.isfile(guilogfile):
+                        try:
+                            os.remove(guilogfile)
+                        except:
+                            print("Error: cannot remove existing log file", guilogfile)
+                            guilogfile = None
+                    if guilogfile is not None:
+                        self.SCMD2+=['--gui-log-file=%s'%guilogfile]
+                    pass
+                pass
             pass
         if self.args['noexcepthandler']:
             self.SCMD2+=['--no-exception-handler']
@@ -356,8 +349,8 @@ class CommonSessionServer(Server):
             f = open(".gdbinit4salome", "w")
             f.write("set args ")
             args = " ".join(self.CMD[1:])
-            args = args.replace("(", "\(")
-            args = args.replace(")", "\)")
+            args = args.replace("(", r"\(")
+            args = args.replace(")", r"\)")
             f.write(args)
             f.write("\n")
             f.close()

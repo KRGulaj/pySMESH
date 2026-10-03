@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 #
-# Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -203,6 +203,8 @@ def TEST_createBoxMesh():
     Hexa_3D = smesh.CreateHypothesis('Hexa_3D')
     status = boxmesh.AddHypothesis(Hexa_3D)
     isDone = boxmesh.Compute()
+    if not isDone:
+      raise Exception("Error when computing Mesh")
 
     smesh.SetName(boxmesh.GetMesh(), 'boxmesh')
     if salome.sg.hasDesktop():

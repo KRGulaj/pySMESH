@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -238,8 +238,10 @@ SMESH::ElementType SMESHGUI_GroupOnShapeOp::ElementType(GEOM::GEOM_Object_var ge
     }
     else if ( !aShapeOp->_is_nil() ) // just a compoud shape
     {
-      GEOM::ListOfLong_var ids = aShapeOp->SubShapeAllIDs( geom, GEOM::SHAPE, false );
-      if ( ids->length() ) {
+      GEOM::ListOfLong_var ids = aShapeOp->GetAllSubShapesIDs( geom,
+                                                          GEOM::SHAPE,/*sorted=*/false);
+      if ( ids->length() )
+      {
         GEOM::GEOM_Object_wrap member = aShapeOp->GetSubShape( geom, ids[0] );
         return ElementType( member );
       }

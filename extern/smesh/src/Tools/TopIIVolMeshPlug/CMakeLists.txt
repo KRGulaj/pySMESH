@@ -1,4 +1,4 @@
-# Copyright (C) 2013-2022  EDF R&D
+# Copyright (C) 2013-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -22,7 +22,11 @@ IF(SALOME_BUILD_DOC)
 ENDIF(SALOME_BUILD_DOC)
 
 IF(SALOME_BUILD_GUI)
-  INCLUDE(UsePyQt)
+  INCLUDE(SalomeQtPythonBindings)
+  SALOME_SETUP_QT_PYTHON_BINDINGS()
+  IF(SALOME_USE_PYSIDE)
+    SALOME_SETUP_PYSIDE_SHIBOKEN()
+  ENDIF()
 ENDIF(SALOME_BUILD_GUI)
 
 # --- scripts ---
@@ -43,13 +47,12 @@ IF(SALOME_BUILD_GUI)
     TopIIVolMeshMonitor.ui
   )
   # scripts / pyuic wrappings
-  PYQT_WRAP_UIC(_pyuic_SCRIPTS ${_pyuic_FILES} TARGET_NAME _target_name_pyuic)
+  SALOME_WRAP_UIC(_pyuic_SCRIPTS ${_pyuic_FILES} TARGET_NAME _target_name_pyuic)
 ENDIF(SALOME_BUILD_GUI)
 
 # --- rules ---
 
 SALOME_INSTALL_SCRIPTS("${_plugin_SCRIPTS}" ${SALOME_SMESH_INSTALL_PLUGINS})
-MESSAGE(VERBOSE "iNSTALLATION FOLDER ${SALOME_SMESH_INSTALL_PLUGINS}")
 IF(SALOME_BUILD_GUI)
   SALOME_INSTALL_SCRIPTS("${_pyuic_SCRIPTS}" ${SALOME_SMESH_INSTALL_PLUGINS} TARGET_NAME _target_name_pyuic_py)
   # add dependency of compiled py files on uic files in order

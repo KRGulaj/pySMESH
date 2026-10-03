@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -16,7 +16,7 @@
 #
 # See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
 #
-CMAKE_MINIMUM_REQUIRED(VERSION 2.8.8 FATAL_ERROR)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.0)
 INCLUDE(CMakeDependentOption)
 
 # Project name
@@ -38,7 +38,7 @@ ENDIF()
 
 # Versioning
 # ===========
-SALOME_SETUP_VERSION(9.9.0)
+SALOME_SETUP_VERSION(9.16.0)
 MESSAGE(STATUS "Building ${PROJECT_NAME_UC} ${${PROJECT_NAME_UC}_VERSION} from \"${${PROJECT_NAME_UC}_GIT_SHA1}\"")
 
 # Platform setup
@@ -59,7 +59,6 @@ OPTION(SALOME_BUILD_TESTS "Build SALOME tests" ON)
 # Advanced:
 OPTION(SALOME_LIGHT_ONLY "Build SALOME Light only (no CORBA)" OFF)
 OPTION(SALOME_USE_LIBBATCH "Use LibBatch in KERNEL" OFF)
-OPTION(SALOME_USE_64BIT_IDS "Size of IDs to refer cells and nodes. 32 bits when OFF (default), 64 bits when ON." OFF)
 CMAKE_DEPENDENT_OPTION(SALOME_PACO_PARALLEL "Build with PACO (implies SALOME_USE_MPI)" OFF
                        "NOT SALOME_LIGHT_ONLY" OFF)
 CMAKE_DEPENDENT_OPTION(SALOME_USE_MPI "Use MPI containers" OFF
@@ -119,6 +118,17 @@ IF(SALOME_BUILD_DOC)
   SALOME_LOG_OPTIONAL_PACKAGE(Graphviz SALOME_BUILD_DOC)
   SALOME_LOG_OPTIONAL_PACKAGE(Sphinx SALOME_BUILD_DOC)
 ENDIF()
+
+# Find SalomeBootstrap
+# ===========
+SET(SALOMEBOOTSTRAP_ROOT_DIR $ENV{SALOMEBOOTSTRAP_ROOT_DIR} CACHE PATH "Path to the Salome Bootstrap")
+IF(EXISTS ${SALOMEBOOTSTRAP_ROOT_DIR})
+  FIND_PACKAGE(SalomeBootstrap REQUIRED)
+  ADD_DEFINITIONS(${SALOMEBOOTSTRAP_DEFINITIONS})
+  INCLUDE_DIRECTORIES(${SALOMEBOOTSTRAP_INCLUDE_DIRS})
+ELSE(EXISTS ${SALOMEBOOTSTRAP_ROOT_DIR})
+  MESSAGE(FATAL_ERROR "We absolutely need a Salome Bootstrap, please define SALOMEBOOTSTRAP_ROOT_DIR")
+ENDIF(EXISTS ${SALOMEBOOTSTRAP_ROOT_DIR})
 
 # Detection summary:
 SALOME_PACKAGE_REPORT_AND_CHECK()
@@ -213,7 +223,7 @@ INCLUDE(CMakePackageConfigHelpers)
 # They all have to be INSTALL'd with the option "EXPORT ${PROJECT_NAME}TargetGroup"
 
 SET(_${PROJECT_NAME}_exposed_targets
-  SALOMEBasics ArgvKeeper SALOMELocalTrace SalomeHDFPersist OpUtil)
+  ArgvKeeper SalomeHDFPersist OpUtil)
 
 # CORBA specific targets:
 IF(NOT SALOME_LIGHT_ONLY)
@@ -242,7 +252,7 @@ ENDIF()
 
 # Test targets:
 IF(SALOME_BUILD_TESTS)
-  LIST(APPEND _${PROJECT_NAME}_exposed_targets SALOMELocalTraceTest UnitTests)
+  LIST(APPEND _${PROJECT_NAME}_exposed_targets UnitTests)
   IF(NOT SALOME_LIGHT_ONLY)
     LIST(APPEND _${PROJECT_NAME}_exposed_targets
       SALOMETraceCollectorTest UtilsTest NamingServiceTest SalomeTestComponentEngine

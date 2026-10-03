@@ -1,0 +1,176 @@
+pySMESH: build GEOMUtils.cxx (GEOM V9_16_0) without SALOME common_geometry_lib.
+
+GEOM commit f5db6d7cf (2025-03-06, bos #44310) moved the GEOMAlgo package from GEOM into
+the separate repository SalomePlatform/common_geometry_lib, and GEOMUtils.cxx now calls
+GEOMAlgo_AlgoTools::DefaultDeflection, ::MeshShape and ::FixCurveOnSurfaceTolerances
+(the last since geom b47f19fb9). pySMESH vendors only GEOMUtils. This patch defines those
+three functions inside GEOMUtils.cxx, in a file-local namespace GEOMAlgo_AlgoTools, with
+bodies verbatim from common_geometry_lib V9_16_0 (e7b5227096fef835a448004ee06cf5938850b1c4,
+src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx:1650-1772, LGPL-2.1) and the default arguments of its
+GEOMAlgo_AlgoTools.hxx. The call sites are unchanged, so GEOMUtils behaves as in V9_16_0.
+
+diff --git a/src/GEOMUtils/GEOMUtils.cxx b/src/GEOMUtils/GEOMUtils.cxx
+index bcf290f..f1299b0 100644
+--- a/src/GEOMUtils/GEOMUtils.cxx
++++ b/src/GEOMUtils/GEOMUtils.cxx
+@@ -24,7 +24,159 @@
+ 
+ #include <GEOMUtils.hxx>
+ 
+-#include <GEOMAlgo_AlgoTools.hxx>
++// pySMESH: SALOME moved the GEOMAlgo package out of GEOM into common_geometry_lib
++// (geom commit f5db6d7cf), and pySMESH does not vendor common_geometry_lib. The three
++// GEOMAlgo_AlgoTools functions that this file calls are defined here instead, in a
++// file-local namespace of the same name, so every call site below is unchanged. The
++// bodies are verbatim from common_geometry_lib V9_16_0 (e7b5227096fe),
++// src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx; the default arguments are those of
++// GEOMAlgo_AlgoTools.hxx.
++#include <TopoDS_Edge.hxx>
++#include <TopoDS_Face.hxx>
++#include <TopoDS_Shape.hxx>
++#include <BRepBndLib.hxx>
++#include <BRepLib_CheckCurveOnSurface.hxx>
++#include <BRepMesh_IncrementalMesh.hxx>
++#include <BRepTools.hxx>
++#include <BRep_TEdge.hxx>
++#include <BRep_Tool.hxx>
++#include <Bnd_Box.hxx>
++#include <Poly_Polygon3D.hxx>
++#include <Poly_Triangulation.hxx>
++#include <Prs3d.hxx>
++#include <TopExp_Explorer.hxx>
++#include <TopLoc_Location.hxx>
++#include <TopoDS.hxx>
++
++namespace
++{
++namespace GEOMAlgo_AlgoTools
++{
++//=======================================================================
++//function : DefaultDeflection
++//purpose  :
++//=======================================================================
++double DefaultDeflection()
++{
++  return 0.001;
++}
++
++//=======================================================================
++//function : CanBeMeshed
++//purpose  :
++//=======================================================================
++static bool GEOMAlgo_AlgoTools_CanBeMeshed (const TopoDS_Shape& theShape,
++                                            const bool          theCheckMesh,
++                                            bool&               theHasMesh)
++{
++  // Is shape triangulated?
++  theHasMesh = true;
++
++  TopExp_Explorer ex (theShape, TopAbs_FACE);
++  TopLoc_Location aLoc;
++  if (ex.More()) {
++    if (theCheckMesh) {
++      for ( ; ex.More() && theHasMesh; ex.Next() ) {
++        const TopoDS_Face& aFace = TopoDS::Face( ex.Current() );
++        Handle(Poly_Triangulation) aPoly = BRep_Tool::Triangulation( aFace, aLoc );
++        theHasMesh = !aPoly.IsNull(); 
++      }
++    }
++  }
++  else { // no faces, try edges
++    ex.Init(theShape, TopAbs_EDGE);
++    if (!ex.More()) {
++      return false; // nothing to mesh
++    }
++    if (theCheckMesh) {
++      for ( ; ex.More() && theHasMesh; ex.Next() ) {
++        Handle(Poly_Polygon3D) aPE = BRep_Tool::Polygon3D(TopoDS::Edge(ex.Current()), aLoc);
++        theHasMesh = !aPE.IsNull();
++      }
++    }
++  }
++
++  return true;
++}
++
++//=======================================================================
++//function : MeshShape
++//purpose  :
++//=======================================================================
++bool MeshShape( const TopoDS_Shape theShape,
++                const double theDeflection = DefaultDeflection(),
++                const bool theForced = true,
++                const double theAngleDeflection = 0.5,
++                const bool isRelative = true,
++                const bool doPostCheck = false)
++{
++  Standard_Real aDeflection = (theDeflection <= 0) ? DefaultDeflection() : theDeflection;
++
++  // Is shape triangulated?
++  bool alreadyMeshed = true;
++  if (!GEOMAlgo_AlgoTools_CanBeMeshed (theShape, /*theCheckMesh*/true, alreadyMeshed))
++    return false;
++
++  if (alreadyMeshed && !theForced)
++    return true;
++
++  if (isRelative) {
++    // Compute bounding box
++    Bnd_Box B;
++    BRepBndLib::Add(theShape, B);
++    if (B.IsVoid())
++      return false; // NPAL15983 (Bug when displaying empty groups)
++
++    Standard_Real aDeviationCoeff = aDeflection;
++    Standard_Real aMaxChordialDeviation = aDeflection;
++    aDeflection = Prs3d::GetDeflection(B, aDeviationCoeff, aMaxChordialDeviation);
++  }
++
++  // Clean triangulation before compute incremental mesh
++  BRepTools::Clean(theShape);
++
++  // Compute triangulation
++  BRepMesh_IncrementalMesh mesh (theShape, aDeflection, Standard_False, theAngleDeflection); 
++
++  if (!doPostCheck)
++    return true;
++
++  if (!mesh.IsDone())
++    return false;
++
++  GEOMAlgo_AlgoTools_CanBeMeshed(theShape, /*theCheckMesh*/true, alreadyMeshed);
++  return alreadyMeshed;
++}
++
++//=======================================================================
++//function : FixCurveOnSurfaceTolerances
++//purpose  :
++//=======================================================================
++bool FixCurveOnSurfaceTolerances(const TopoDS_Shape& theShape)
++{
++  bool isChanged = false;
++  for (TopExp_Explorer exf(theShape, TopAbs_FACE); exf.More(); exf.Next()) {
++    TopoDS_Face aFace = TopoDS::Face(exf.Current());
++    for (TopExp_Explorer exe(aFace, TopAbs_EDGE); exe.More(); exe.Next()) {
++      TopoDS_Edge anEdge = TopoDS::Edge(exe.Current());
++      BRepLib_CheckCurveOnSurface aCS;
++      aCS.Init(anEdge, aFace);
++      aCS.Perform();
++      if (aCS.IsDone()) {
++        Standard_Real prec = BRep_Tool::Tolerance(anEdge);
++        Standard_Real precExact = aCS.MaxDistance();
++        if (precExact > prec) {
++          const Handle(BRep_TEdge)& TE = *((Handle(BRep_TEdge)*)&anEdge.TShape());
++          TE->Tolerance(precExact);
++          isChanged = true;
++        }
++      }
++    }
++  }
++  return isChanged;
++}
++} // namespace GEOMAlgo_AlgoTools
++} // namespace
+ 
+ #include <Utils_ExceptHandlers.hxx>
+ 

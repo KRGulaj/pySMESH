@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -18,23 +18,21 @@
 #
 
 INCLUDE_DIRECTORIES(
-  ${OMNIORB_INCLUDE_DIR}
-  ${PTHREAD_INCLUDE_DIR}
-  ${PROJECT_BINARY_DIR}/salome_adm
   ${CMAKE_CURRENT_SOURCE_DIR}/../ArgvKeeper
-  ${CMAKE_CURRENT_SOURCE_DIR}/../Basics
   ${CMAKE_CURRENT_SOURCE_DIR}/../Utils
-  ${CMAKE_CURRENT_SOURCE_DIR}/../SALOMELocalTrace
-  ${CMAKE_CURRENT_SOURCE_DIR}/../Basics
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${CMAKE_CURRENT_SOURCE_DIR}/../NamingService
   ${CMAKE_CURRENT_SOURCE_DIR}/../Logger
   ${PROJECT_BINARY_DIR}/idl
+  ${OMNIORB_INCLUDE_DIR}
+  ${PTHREAD_INCLUDE_DIR}
+  ${PROJECT_BINARY_DIR}/salome_adm
 )
 
 ADD_DEFINITIONS(${OMNIORB_DEFINITIONS} ${PTHREAD_DEFINITIONS})
 ADD_LIBRARY(with_loggerTraceCollector SALOMETraceCollector.cxx TraceCollector_WaitForServerReadiness.cxx)
 
-TARGET_LINK_LIBRARIES(with_loggerTraceCollector SalomeNS ArgvKeeper SALOMELocalTrace SalomeLoggerServer OpUtil SalomeIDLKernel ${OMNIORB_LIBRARIES} ${PTHREAD_LIBRARIES})
+TARGET_LINK_LIBRARIES(with_loggerTraceCollector SalomeNS ArgvKeeper ${SALOMEBOOTSTRAP_SALOMELocalTrace} SalomeLoggerServer OpUtil SalomeIDLKernel ${OMNIORB_LIBRARIES} ${PTHREAD_LIBRARIES})
 INSTALL(TARGETS with_loggerTraceCollector EXPORT ${PROJECT_NAME}TargetGroup DESTINATION ${SALOME_INSTALL_LIBS})
 
 FILE(GLOB COMMON_HEADERS_HXX "${CMAKE_CURRENT_SOURCE_DIR}/*.hxx")

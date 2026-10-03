@@ -7,7 +7,25 @@ subdirectory roots folded into the paths so the combined patch applies
 with -p1 at the source root. The four bundled Netgen src/Netgen/libsrc/occ
 files whose upstream hunks assume earlier Netgen patches not present in
 this release tarball are handled separately in the next patch.
+
+Re-ported to SALOME SMESH, KERNEL and GEOM V9_16_0 by pySMESH. Every hunk applies at
+fuzz 0. Changes from the conda-forge text:
+
+* Dropped, because pySMESH never stages these files: the NETGENPlugin and Netgen
+  sections (NETGEN is not built) and SMESH_MeshVSLink.hxx (not in SMESH V9_16_0).
+* StdMeshers_Cartesian_3D.cxx no longer includes Bnd_B3d.hxx; V9_16_0 moved the
+  include to StdMeshers_Cartesian_3D_Grid.hxx, which gets the same Bnd_B3.hxx change.
+* The same OCCT 8.0 pass on the code that is new in V9_16_0:
+  - SMESH_ControlsClassifier.hxx: Bnd_B3d.hxx -> Bnd_B3.hxx;
+  - SMESH_ControlsClassifier.cxx: include TopTools_IndexedMapOfShape.hxx, which OCCT 8
+    headers no longer pull in;
+  - SMESH_RegularGrid.hxx: TopTools_ListIteratorOfListOfShape.hxx -> TopTools_ListOfShape.hxx;
+  - StdMeshers_Cartesian_VL.cxx: iterate a const TopTools_ListOfShape by const reference;
+  - GEOMUtils::ProjectPointOnFace and GEOMUtils::DistanceToProjectionOnFace: five
+    ::Raise() calls become throw (OCCT 8 removed Standard_Failure::Raise).
+
 diff --git a/src/Geom/src/GEOMUtils/GEOMUtils.cxx b/src/Geom/src/GEOMUtils/GEOMUtils.cxx
+index f1299b0..3077472 100644
 --- a/src/Geom/src/GEOMUtils/GEOMUtils.cxx
 +++ b/src/Geom/src/GEOMUtils/GEOMUtils.cxx
 @@ -20,7 +20,7 @@
@@ -19,7 +37,7 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils.cxx b/src/Geom/src/GEOMUtils/GEOMU
  
  #include <GEOMUtils.hxx>
  
-@@ -62,7 +62,7 @@
+@@ -216,7 +216,7 @@ bool FixCurveOnSurfaceTolerances(const TopoDS_Shape& theShape)
  #include <TopExp_Explorer.hxx>
  #include <TopTools_MapOfShape.hxx>
  #include <TopTools_ListOfShape.hxx>
@@ -27,8 +45,8 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils.cxx b/src/Geom/src/GEOMUtils/GEOMU
 +#include <TopTools_ListOfShape.hxx>
  #include <TopTools_Array1OfShape.hxx>
  
- #include <Geom_Circle.hxx>
-@@ -402,10 +402,10 @@
+ #include <GeomAPI_ProjectPointOnSurf.hxx>
+@@ -449,10 +449,10 @@ gp_Vec GEOMUtils::GetVector (const TopoDS_Shape& theShape,
                               Standard_Boolean doConsiderOrientation)
  {
    if (theShape.IsNull())
@@ -41,7 +59,7 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils.cxx b/src/Geom/src/GEOMUtils/GEOMU
  
    TopoDS_Edge anE = TopoDS::Edge(theShape);
  
-@@ -413,11 +413,11 @@
+@@ -460,11 +460,11 @@ gp_Vec GEOMUtils::GetVector (const TopoDS_Shape& theShape,
    TopExp::Vertices(anE, V1, V2, doConsiderOrientation);
  
    if (V1.IsNull() || V2.IsNull())
@@ -55,7 +73,7 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils.cxx b/src/Geom/src/GEOMUtils/GEOMU
    }
  
    return aV;
-@@ -767,7 +767,7 @@
+@@ -792,7 +792,7 @@ TopoDS_Shape GEOMUtils::GetEdgeNearPoint (const TopoDS_Shape& theShape,
    }
  
    if (nbEdges == 0)
@@ -64,7 +82,7 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils.cxx b/src/Geom/src/GEOMUtils/GEOMU
  
    mapShape.Clear();
    Standard_Integer ind = 1;
-@@ -781,7 +781,7 @@
+@@ -806,7 +806,7 @@ TopoDS_Shape GEOMUtils::GetEdgeNearPoint (const TopoDS_Shape& theShape,
        // 2. Classify the point relatively each edge
        BRepExtrema_DistShapeShape aDistTool (thePoint, anEdges(ind));
        if (!aDistTool.IsDone())
@@ -73,7 +91,7 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils.cxx b/src/Geom/src/GEOMUtils/GEOMU
  
        aDistances(ind) = aDistTool.Value();
        ind++;
-@@ -804,10 +804,10 @@
+@@ -829,10 +829,10 @@ TopoDS_Shape GEOMUtils::GetEdgeNearPoint (const TopoDS_Shape& theShape,
      }
    }
    if (nbFound > 1) {
@@ -86,10 +104,51 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils.cxx b/src/Geom/src/GEOMUtils/GEOMU
    }
    else {
    }
+@@ -949,7 +949,7 @@ gp_Pnt GEOMUtils::ProjectPointOnFace(const gp_Pnt& thePoint,
+                                      const double theTol)
+ {
+   if (theFace.IsNull() || theFace.ShapeType() != TopAbs_FACE)
+-    Standard_TypeMismatch::Raise
++    throw Standard_TypeMismatch
+       ("Projection aborted : the target shape is not a face");
+ 
+   TopoDS_Face aFace = TopoDS::Face(theFace);
+@@ -962,10 +962,10 @@ gp_Pnt GEOMUtils::ProjectPointOnFace(const gp_Pnt& thePoint,
+   proj.Init(surface, U1, U2, V1, V2);
+   proj.Perform(thePoint);
+   if (!proj.IsDone())
+-    StdFail_NotDone::Raise("Projection aborted : the algorithm failed");
++    throw StdFail_NotDone("Projection aborted : the algorithm failed");
+   int nbPoints = proj.NbPoints();
+   if (nbPoints < 1)
+-    Standard_ConstructionError::Raise("Projection aborted : No solution found");
++    throw Standard_ConstructionError("Projection aborted : No solution found");
+   proj.LowerDistanceParameters(theU, theV);
+   gp_Pnt2d aProjPnt (theU, theV);
+ 
+@@ -991,7 +991,7 @@ gp_Pnt GEOMUtils::ProjectPointOnFace(const gp_Pnt& thePoint,
+       }
+     }
+     if (!isSol) {
+-      Standard_ConstructionError::Raise("Projection aborted : No solution found");
++      throw Standard_ConstructionError("Projection aborted : No solution found");
+     }
+   }
+ 
+@@ -1011,7 +1011,7 @@ Standard_Real GEOMUtils::DistanceToProjectionOnFace(const gp_Pnt& thePoint,
+   Standard_Real aMinDist = -1;
+ 
+   if (theFace.IsNull() || theFace.ShapeType() != TopAbs_FACE)
+-    Standard_TypeMismatch::Raise
++    throw Standard_TypeMismatch
+       ("Projection aborted : the target shape is not a face");
+ 
+   TopoDS_Face aFace = TopoDS::Face(theFace);
 diff --git a/src/Geom/src/GEOMUtils/GEOMUtils_TrsfCurve2d.cxx b/src/Geom/src/GEOMUtils/GEOMUtils_TrsfCurve2d.cxx
+index 2f47a02..29ee04a 100644
 --- a/src/Geom/src/GEOMUtils/GEOMUtils_TrsfCurve2d.cxx
 +++ b/src/Geom/src/GEOMUtils/GEOMUtils_TrsfCurve2d.cxx
-@@ -257,7 +257,7 @@
+@@ -278,7 +278,7 @@ Standard_Real GEOMUtils::TrsfCurve2d::Resolution(const Standard_Real Ruv) const
  //=======================================================================
  gp_Lin2d GEOMUtils::TrsfCurve2d::Line() const
  {
@@ -98,7 +157,7 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils_TrsfCurve2d.cxx b/src/Geom/src/GEO
  
    return gp_Lin2d();
  }
-@@ -268,7 +268,7 @@
+@@ -289,7 +289,7 @@ gp_Lin2d GEOMUtils::TrsfCurve2d::Line() const
  //=======================================================================
  gp_Circ2d  GEOMUtils::TrsfCurve2d::Circle() const
  {
@@ -107,7 +166,7 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils_TrsfCurve2d.cxx b/src/Geom/src/GEO
  
    return gp_Circ2d();
  }
-@@ -279,7 +279,7 @@
+@@ -300,7 +300,7 @@ gp_Circ2d  GEOMUtils::TrsfCurve2d::Circle() const
  //=======================================================================
  gp_Elips2d GEOMUtils::TrsfCurve2d::Ellipse() const
  {
@@ -116,7 +175,7 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils_TrsfCurve2d.cxx b/src/Geom/src/GEO
  
    return gp_Elips2d();
  }
-@@ -290,7 +290,7 @@
+@@ -311,7 +311,7 @@ gp_Elips2d GEOMUtils::TrsfCurve2d::Ellipse() const
  //=======================================================================
  gp_Hypr2d GEOMUtils::TrsfCurve2d::Hyperbola() const
  {
@@ -125,7 +184,7 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils_TrsfCurve2d.cxx b/src/Geom/src/GEO
  
    return gp_Hypr2d();
  }
-@@ -301,7 +301,7 @@
+@@ -322,7 +322,7 @@ gp_Hypr2d GEOMUtils::TrsfCurve2d::Hyperbola() const
  //=======================================================================
  gp_Parab2d GEOMUtils::TrsfCurve2d::Parabola() const
  {
@@ -134,7 +193,7 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils_TrsfCurve2d.cxx b/src/Geom/src/GEO
  
    return gp_Parab2d();
  }
-@@ -312,7 +312,7 @@
+@@ -333,7 +333,7 @@ gp_Parab2d GEOMUtils::TrsfCurve2d::Parabola() const
  //=======================================================================
  Standard_Integer GEOMUtils::TrsfCurve2d::Degree() const
  {
@@ -143,7 +202,7 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils_TrsfCurve2d.cxx b/src/Geom/src/GEO
  
    return 0;
  }
-@@ -332,7 +332,7 @@
+@@ -353,7 +353,7 @@ Standard_Boolean GEOMUtils::TrsfCurve2d::IsRational() const
  //=======================================================================
  Standard_Integer GEOMUtils::TrsfCurve2d::NbPoles() const
  {
@@ -152,7 +211,7 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils_TrsfCurve2d.cxx b/src/Geom/src/GEO
  
    return 0;
  }
-@@ -343,7 +343,7 @@
+@@ -364,7 +364,7 @@ Standard_Integer GEOMUtils::TrsfCurve2d::NbPoles() const
  //=======================================================================
  Standard_Integer GEOMUtils::TrsfCurve2d::NbKnots() const
  {
@@ -161,7 +220,7 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils_TrsfCurve2d.cxx b/src/Geom/src/GEO
  
    return 0;
  }
-@@ -354,7 +354,7 @@
+@@ -375,7 +375,7 @@ Standard_Integer GEOMUtils::TrsfCurve2d::NbKnots() const
  //=======================================================================
  Handle(Geom2d_BezierCurve) GEOMUtils::TrsfCurve2d::Bezier() const
  {
@@ -170,7 +229,7 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils_TrsfCurve2d.cxx b/src/Geom/src/GEO
  
    return NULL;
  }
-@@ -365,7 +365,7 @@
+@@ -386,7 +386,7 @@ Handle(Geom2d_BezierCurve) GEOMUtils::TrsfCurve2d::Bezier() const
  //=======================================================================
  Handle(Geom2d_BSplineCurve) GEOMUtils::TrsfCurve2d::BSpline() const
  {
@@ -180,9 +239,10 @@ diff --git a/src/Geom/src/GEOMUtils/GEOMUtils_TrsfCurve2d.cxx b/src/Geom/src/GEO
    return NULL;
  }
 diff --git a/src/SMESH/src/Controls/SMESH_Controls.cxx b/src/SMESH/src/Controls/SMESH_Controls.cxx
+index fd7a1a0..9f36373 100644
 --- a/src/SMESH/src/Controls/SMESH_Controls.cxx
 +++ b/src/SMESH/src/Controls/SMESH_Controls.cxx
-@@ -52,7 +52,7 @@
+@@ -49,7 +49,7 @@
  #include <NCollection_Map.hxx>
  #include <Precision.hxx>
  #include <ShapeAnalysis_Surface.hxx>
@@ -191,12 +251,38 @@ diff --git a/src/SMESH/src/Controls/SMESH_Controls.cxx b/src/SMESH/src/Controls/
  #include <TColStd_MapOfInteger.hxx>
  #include <TColStd_SequenceOfAsciiString.hxx>
  #include <TColgp_Array1OfXYZ.hxx>
+diff --git a/src/SMESH/src/Controls/SMESH_ControlsClassifier.cxx b/src/SMESH/src/Controls/SMESH_ControlsClassifier.cxx
+index 3890c45..fd3d240 100644
+--- a/src/SMESH/src/Controls/SMESH_ControlsClassifier.cxx
++++ b/src/SMESH/src/Controls/SMESH_ControlsClassifier.cxx
+@@ -32,6 +32,7 @@
+ #include <BRepBndLib.hxx>
+ #include <TopoDS.hxx>
+ #include <TopExp.hxx>
++#include <TopTools_IndexedMapOfShape.hxx>
+ #include <GeomAPI_ProjectPointOnSurf.hxx>
+ #include <GeomAPI_ProjectPointOnCurve.hxx>
+ 
+diff --git a/src/SMESH/src/Controls/SMESH_ControlsClassifier.hxx b/src/SMESH/src/Controls/SMESH_ControlsClassifier.hxx
+index a878266..be4d743 100644
+--- a/src/SMESH/src/Controls/SMESH_ControlsClassifier.hxx
++++ b/src/SMESH/src/Controls/SMESH_ControlsClassifier.hxx
+@@ -26,7 +26,7 @@
+ #include "SMESH_Controls.hxx"
+ 
+ #include <TopoDS_Shape.hxx>
+-#include <Bnd_B3d.hxx>
++#include <Bnd_B3.hxx>
+ 
+ class BRepClass3d_SolidClassifier;
+ class GeomAPI_ProjectPointOnSurf;
 diff --git a/src/SMESH/src/Controls/SMESH_ControlsDef.hxx b/src/SMESH/src/Controls/SMESH_ControlsDef.hxx
+index a756376..21c97de 100644
 --- a/src/SMESH/src/Controls/SMESH_ControlsDef.hxx
 +++ b/src/SMESH/src/Controls/SMESH_ControlsDef.hxx
-@@ -27,7 +27,7 @@
- 
+@@ -28,7 +28,7 @@
  #include "SMESH_TypeDefs.hxx"
+ #include "SMESH_ControlsClassifier.hxx"
  
 -#include <Bnd_B3d.hxx>
 +#include <Bnd_B3.hxx>
@@ -204,9 +290,10 @@ diff --git a/src/SMESH/src/Controls/SMESH_ControlsDef.hxx b/src/SMESH/src/Contro
  #include <GeomAPI_ProjectPointOnSurf.hxx>
  #include <Quantity_Color.hxx>
 diff --git a/src/SMESH/src/DriverSTL/DriverSTL_R_SMDS_Mesh.cxx b/src/SMESH/src/DriverSTL/DriverSTL_R_SMDS_Mesh.cxx
+index 25b7e5e..aa621c3 100644
 --- a/src/SMESH/src/DriverSTL/DriverSTL_R_SMDS_Mesh.cxx
 +++ b/src/SMESH/src/DriverSTL/DriverSTL_R_SMDS_Mesh.cxx
-@@ -297,7 +297,7 @@
+@@ -321,7 +321,7 @@ Driver_Mesh::Status DriverSTL_R_SMDS_Mesh::readBinary(SMESH_File& file) const
    if ( (filesize - HEADER_SIZE) % SIZEOF_STL_FACET != 0 
        // Commented to allow reading small files (ex: 1 face)
        /*|| (filesize < STL_MIN_FILE_SIZE)*/) {
@@ -215,19 +302,8 @@ diff --git a/src/SMESH/src/DriverSTL/DriverSTL_R_SMDS_Mesh.cxx b/src/SMESH/src/D
    }
  
    // don't trust the number of triangles which is coded in the file
-diff --git a/src/SMESH/src/MeshVSLink/SMESH_MeshVSLink.hxx b/src/SMESH/src/MeshVSLink/SMESH_MeshVSLink.hxx
---- a/src/SMESH/src/MeshVSLink/SMESH_MeshVSLink.hxx
-+++ b/src/SMESH/src/MeshVSLink/SMESH_MeshVSLink.hxx
-@@ -41,6 +41,8 @@
- #include <MeshVS_EntityType.hxx>
- // #include <Standard_Address.hxx>
- #include <TColStd_HArray1OfInteger.hxx>
-+#include <TColStd_Array1OfReal.hxx>
-+#include <MeshVS_HArray1OfSequenceOfInteger.hxx>
- #include <Standard_Real.hxx>
- #include <Standard_Version.hxx>
- 
 diff --git a/src/SMESH/src/SMESH/SMESH_Algo.cxx b/src/SMESH/src/SMESH/SMESH_Algo.cxx
+index 2e6fe82..8857651 100644
 --- a/src/SMESH/src/SMESH/SMESH_Algo.cxx
 +++ b/src/SMESH/src/SMESH/SMESH_Algo.cxx
 @@ -52,7 +52,7 @@
@@ -240,9 +316,10 @@ diff --git a/src/SMESH/src/SMESH/SMESH_Algo.cxx b/src/SMESH/src/SMESH/SMESH_Algo
  #include <TopoDS.hxx>
  #include <TopoDS_Edge.hxx>
 diff --git a/src/SMESH/src/SMESH/SMESH_Mesh.cxx b/src/SMESH/src/SMESH/SMESH_Mesh.cxx
+index 95b4d50..99b8a20 100644
 --- a/src/SMESH/src/SMESH/SMESH_Mesh.cxx
 +++ b/src/SMESH/src/SMESH/SMESH_Mesh.cxx
-@@ -66,7 +66,7 @@
+@@ -67,7 +67,7 @@
  #include <TColStd_MapOfInteger.hxx>
  #include <TopExp.hxx>
  #include <TopExp_Explorer.hxx>
@@ -252,9 +329,10 @@ diff --git a/src/SMESH/src/SMESH/SMESH_Mesh.cxx b/src/SMESH/src/SMESH/SMESH_Mesh
  #include <TopTools_MapOfShape.hxx>
  #include <TopoDS_Iterator.hxx>
 diff --git a/src/SMESH/src/SMESH/SMESH_MeshEditor.cxx b/src/SMESH/src/SMESH/SMESH_MeshEditor.cxx
+index 732f780..9f515c2 100644
 --- a/src/SMESH/src/SMESH/SMESH_MeshEditor.cxx
 +++ b/src/SMESH/src/SMESH/SMESH_MeshEditor.cxx
-@@ -66,7 +66,7 @@
+@@ -68,7 +68,7 @@
  #include <TopAbs_State.hxx>
  #include <TopExp.hxx>
  #include <TopExp_Explorer.hxx>
@@ -264,10 +342,11 @@ diff --git a/src/SMESH/src/SMESH/SMESH_MeshEditor.cxx b/src/SMESH/src/SMESH/SMES
  #include <TopTools_SequenceOfShape.hxx>
  #include <TopoDS.hxx>
 diff --git a/src/SMESH/src/SMESH/SMESH_MesherHelper.cxx b/src/SMESH/src/SMESH/SMESH_MesherHelper.cxx
+index 6699e3a..559dfe3 100644
 --- a/src/SMESH/src/SMESH/SMESH_MesherHelper.cxx
 +++ b/src/SMESH/src/SMESH/SMESH_MesherHelper.cxx
-@@ -53,8 +53,8 @@
- #include <ShapeAnalysis.hxx>
+@@ -54,8 +54,8 @@
+ #include <ShapeAnalysis_Curve.hxx>
  #include <TopExp.hxx>
  #include <TopExp_Explorer.hxx>
 -#include <TopTools_ListIteratorOfListOfShape.hxx>
@@ -278,6 +357,7 @@ diff --git a/src/SMESH/src/SMESH/SMESH_MesherHelper.cxx b/src/SMESH/src/SMESH/SM
  #include <TopoDS.hxx>
  #include <gp_Ax3.hxx>
 diff --git a/src/SMESH/src/SMESH/SMESH_Pattern.cxx b/src/SMESH/src/SMESH/SMESH_Pattern.cxx
+index 9bb6ce8..93a0fbe 100644
 --- a/src/SMESH/src/SMESH/SMESH_Pattern.cxx
 +++ b/src/SMESH/src/SMESH/SMESH_Pattern.cxx
 @@ -61,7 +61,8 @@
@@ -291,6 +371,7 @@ diff --git a/src/SMESH/src/SMESH/SMESH_Pattern.cxx b/src/SMESH/src/SMESH/SMESH_P
  #include <TopoDS_Edge.hxx>
  #include <TopoDS_Face.hxx>
 diff --git a/src/SMESH/src/SMESH/SMESH_ProxyMesh.cxx b/src/SMESH/src/SMESH/SMESH_ProxyMesh.cxx
+index 02d2bc9..d1e3574 100644
 --- a/src/SMESH/src/SMESH/SMESH_ProxyMesh.cxx
 +++ b/src/SMESH/src/SMESH/SMESH_ProxyMesh.cxx
 @@ -28,7 +28,7 @@
@@ -303,19 +384,19 @@ diff --git a/src/SMESH/src/SMESH/SMESH_ProxyMesh.cxx b/src/SMESH/src/SMESH/SMESH
  #include <TopTools_IndexedMapOfShape.hxx>
  
 diff --git a/src/SMESH/src/SMESH/SMESH_subMesh.cxx b/src/SMESH/src/SMESH/SMESH_subMesh.cxx
+index d3c0a65..f2f0fd1 100644
 --- a/src/SMESH/src/SMESH/SMESH_subMesh.cxx
 +++ b/src/SMESH/src/SMESH/SMESH_subMesh.cxx
-@@ -47,8 +47,8 @@
+@@ -47,7 +47,7 @@
  #include <TopExp.hxx>
  #include <TopExp_Explorer.hxx>
  #include <TopTools_IndexedMapOfShape.hxx>
 -#include <TopTools_ListIteratorOfListOfShape.hxx>
- #include <TopTools_ListOfShape.hxx>
 +#include <TopTools_ListOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
  #include <TopoDS.hxx>
  #include <TopoDS_Compound.hxx>
- #include <TopoDS_Iterator.hxx>
-@@ -1599,7 +1599,7 @@
+@@ -1605,7 +1605,7 @@ bool SMESH_subMesh::ComputeStateEngine(compute_event event)
          catch (Standard_Failure& ex) {
            if ( !_computeError ) _computeError = SMESH_ComputeError::New();
            _computeError->myName    = COMPERR_OCC_EXCEPTION;
@@ -325,6 +406,7 @@ diff --git a/src/SMESH/src/SMESH/SMESH_subMesh.cxx b/src/SMESH/src/SMESH/SMESH_s
              _computeError->myComment += ": ";
              _computeError->myComment += ex.GetMessageString();
 diff --git a/src/SMESH/src/SMESHGUI/SMESHGUI_CreatePolyhedralVolumeDlg.cxx b/src/SMESH/src/SMESHGUI/SMESHGUI_CreatePolyhedralVolumeDlg.cxx
+index 2845f33..ff40235 100644
 --- a/src/SMESH/src/SMESHGUI/SMESHGUI_CreatePolyhedralVolumeDlg.cxx
 +++ b/src/SMESH/src/SMESHGUI/SMESHGUI_CreatePolyhedralVolumeDlg.cxx
 @@ -55,7 +55,7 @@
@@ -337,6 +419,7 @@ diff --git a/src/SMESH/src/SMESHGUI/SMESHGUI_CreatePolyhedralVolumeDlg.cxx b/src
  // VTK includes
  #include <vtkCell.h>
 diff --git a/src/SMESH/src/SMESHGUI/SMESHGUI_FilterDlg.cxx b/src/SMESH/src/SMESHGUI/SMESHGUI_FilterDlg.cxx
+index 3a3a186..f0859a0 100644
 --- a/src/SMESH/src/SMESHGUI/SMESHGUI_FilterDlg.cxx
 +++ b/src/SMESH/src/SMESHGUI/SMESHGUI_FilterDlg.cxx
 @@ -81,7 +81,7 @@
@@ -349,6 +432,7 @@ diff --git a/src/SMESH/src/SMESHGUI/SMESHGUI_FilterDlg.cxx b/src/SMESH/src/SMESH
  // Qt includes
  #include <QFrame>
 diff --git a/src/SMESH/src/SMESHGUI/SMESHGUI_IdPreview.cxx b/src/SMESH/src/SMESHGUI/SMESHGUI_IdPreview.cxx
+index aa5a3b7..91ed322 100644
 --- a/src/SMESH/src/SMESHGUI/SMESHGUI_IdPreview.cxx
 +++ b/src/SMESH/src/SMESHGUI/SMESHGUI_IdPreview.cxx
 @@ -29,7 +29,7 @@
@@ -361,6 +445,7 @@ diff --git a/src/SMESH/src/SMESHGUI/SMESHGUI_IdPreview.cxx b/src/SMESH/src/SMESH
  #include <vtkActor2D.h>
  #include <vtkDataSetMapper.h>
 diff --git a/src/SMESH/src/SMESHGUI/SMESHGUI_MergeDlg.cxx b/src/SMESH/src/SMESHGUI/SMESHGUI_MergeDlg.cxx
+index de67c84..4a564b1 100644
 --- a/src/SMESH/src/SMESHGUI/SMESHGUI_MergeDlg.cxx
 +++ b/src/SMESH/src/SMESHGUI/SMESHGUI_MergeDlg.cxx
 @@ -54,7 +54,7 @@
@@ -373,6 +458,7 @@ diff --git a/src/SMESH/src/SMESHGUI/SMESHGUI_MergeDlg.cxx b/src/SMESH/src/SMESHG
  // IDL includes
  #include <SALOMEconfig.h>
 diff --git a/src/SMESH/src/SMESHGUI/SMESHGUI_MultiEditDlg.cxx b/src/SMESH/src/SMESHGUI/SMESHGUI_MultiEditDlg.cxx
+index 97dd81a..d991712 100644
 --- a/src/SMESH/src/SMESHGUI/SMESHGUI_MultiEditDlg.cxx
 +++ b/src/SMESH/src/SMESHGUI/SMESHGUI_MultiEditDlg.cxx
 @@ -60,10 +60,10 @@
@@ -389,6 +475,7 @@ diff --git a/src/SMESH/src/SMESHGUI/SMESHGUI_MultiEditDlg.cxx b/src/SMESH/src/SM
  
  // VTK includes
 diff --git a/src/SMESH/src/SMESHUtils/SMESH_Block.cxx b/src/SMESH/src/SMESHUtils/SMESH_Block.cxx
+index 7c943f8..78c2890 100644
 --- a/src/SMESH/src/SMESHUtils/SMESH_Block.cxx
 +++ b/src/SMESH/src/SMESHUtils/SMESH_Block.cxx
 @@ -38,7 +38,7 @@
@@ -410,6 +497,7 @@ diff --git a/src/SMESH/src/SMESHUtils/SMESH_Block.cxx b/src/SMESH/src/SMESHUtils
  #include <TopoDS.hxx>
  #include <TopoDS_Compound.hxx>
 diff --git a/src/SMESH/src/SMESHUtils/SMESH_FillHole.cxx b/src/SMESH/src/SMESHUtils/SMESH_FillHole.cxx
+index 2574ca7..157e947 100644
 --- a/src/SMESH/src/SMESHUtils/SMESH_FillHole.cxx
 +++ b/src/SMESH/src/SMESHUtils/SMESH_FillHole.cxx
 @@ -37,7 +37,7 @@
@@ -422,6 +510,7 @@ diff --git a/src/SMESH/src/SMESHUtils/SMESH_FillHole.cxx b/src/SMESH/src/SMESHUt
  namespace
  {
 diff --git a/src/SMESH/src/SMESHUtils/SMESH_MAT2d.cxx b/src/SMESH/src/SMESHUtils/SMESH_MAT2d.cxx
+index 69f9cf6..e16f5e4 100644
 --- a/src/SMESH/src/SMESHUtils/SMESH_MAT2d.cxx
 +++ b/src/SMESH/src/SMESHUtils/SMESH_MAT2d.cxx
 @@ -32,7 +32,7 @@
@@ -434,6 +523,7 @@ diff --git a/src/SMESH/src/SMESHUtils/SMESH_MAT2d.cxx b/src/SMESH/src/SMESHUtils
  #include <GCPnts_TangentialDeflection.hxx>
  // #include <GCPnts_UniformAbscissa.hxx>
 diff --git a/src/SMESH/src/SMESHUtils/SMESH_MeshAlgos.hxx b/src/SMESH/src/SMESHUtils/SMESH_MeshAlgos.hxx
+index ad1849b..4e2352d 100644
 --- a/src/SMESH/src/SMESHUtils/SMESH_MeshAlgos.hxx
 +++ b/src/SMESH/src/SMESHUtils/SMESH_MeshAlgos.hxx
 @@ -42,7 +42,7 @@
@@ -446,6 +536,7 @@ diff --git a/src/SMESH/src/SMESHUtils/SMESH_MeshAlgos.hxx b/src/SMESH/src/SMESHU
  class SMDS_Mesh;
  class SMDS_MeshElement;
 diff --git a/src/SMESH/src/SMESHUtils/SMESH_Octree.hxx b/src/SMESH/src/SMESHUtils/SMESH_Octree.hxx
+index 48a62b5..9803997 100644
 --- a/src/SMESH/src/SMESHUtils/SMESH_Octree.hxx
 +++ b/src/SMESH/src/SMESHUtils/SMESH_Octree.hxx
 @@ -31,7 +31,7 @@
@@ -458,11 +549,12 @@ diff --git a/src/SMESH/src/SMESHUtils/SMESH_Octree.hxx b/src/SMESH/src/SMESHUtil
  //================================================================================
  /*!
 diff --git a/src/SMESH/src/SMESHUtils/SMESH_Offset.cxx b/src/SMESH/src/SMESHUtils/SMESH_Offset.cxx
+index 3d61319..98c2076 100644
 --- a/src/SMESH/src/SMESHUtils/SMESH_Offset.cxx
 +++ b/src/SMESH/src/SMESHUtils/SMESH_Offset.cxx
-@@ -30,7 +30,7 @@
- 
+@@ -31,7 +31,7 @@
  #include <Utils_SALOME_Exception.hxx>
+ #include <Basics_OCCTVersion.hxx>
  
 -#include <Bnd_B3d.hxx>
 +#include <Bnd_B3.hxx>
@@ -470,6 +562,7 @@ diff --git a/src/SMESH/src/SMESHUtils/SMESH_Offset.cxx b/src/SMESH/src/SMESHUtil
  #include <gp_Lin.hxx>
  #include <gp_Pln.hxx>
 diff --git a/src/SMESH/src/SMESHUtils/SMESH_Quadtree.hxx b/src/SMESH/src/SMESHUtils/SMESH_Quadtree.hxx
+index 0cb4490..3a5d5c4 100644
 --- a/src/SMESH/src/SMESHUtils/SMESH_Quadtree.hxx
 +++ b/src/SMESH/src/SMESHUtils/SMESH_Quadtree.hxx
 @@ -29,7 +29,7 @@
@@ -481,7 +574,21 @@ diff --git a/src/SMESH/src/SMESHUtils/SMESH_Quadtree.hxx b/src/SMESH/src/SMESHUt
  
  /*!
   * \brief 2D tree of anything.
+diff --git a/src/SMESH/src/SMESHUtils/SMESH_RegularGrid.hxx b/src/SMESH/src/SMESHUtils/SMESH_RegularGrid.hxx
+index b241a02..7d98d15 100644
+--- a/src/SMESH/src/SMESHUtils/SMESH_RegularGrid.hxx
++++ b/src/SMESH/src/SMESHUtils/SMESH_RegularGrid.hxx
+@@ -31,7 +31,7 @@
+ #include <TopExp.hxx>
+ #include <TopExp_Explorer.hxx>
+ #include <TopTools_DataMapOfShapeReal.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <TopTools_MapOfShape.hxx>
+ #include <TopoDS.hxx>
+ 
 diff --git a/src/SMESH/src/SMESHUtils/SMESH_TryCatch.hxx b/src/SMESH/src/SMESHUtils/SMESH_TryCatch.hxx
+index fc393fa..c162da3 100644
 --- a/src/SMESH/src/SMESHUtils/SMESH_TryCatch.hxx
 +++ b/src/SMESH/src/SMESHUtils/SMESH_TryCatch.hxx
 @@ -76,9 +76,9 @@
@@ -498,6 +605,7 @@ diff --git a/src/SMESH/src/SMESHUtils/SMESH_TryCatch.hxx b/src/SMESH/src/SMESHUt
    }                                                                     \
    catch ( ::SMESH_ComputeError& ce )                                    \
 diff --git a/src/SMESH/src/SMESH_I/SMESH_2smeshpy.cxx b/src/SMESH/src/SMESH_I/SMESH_2smeshpy.cxx
+index d4d7249..878accd 100644
 --- a/src/SMESH/src/SMESH_I/SMESH_2smeshpy.cxx
 +++ b/src/SMESH/src/SMESH_I/SMESH_2smeshpy.cxx
 @@ -36,7 +36,7 @@
@@ -510,6 +618,7 @@ diff --git a/src/SMESH/src/SMESH_I/SMESH_2smeshpy.cxx b/src/SMESH/src/SMESH_I/SM
  
  #include "SMESH_Gen_i.hxx"
 diff --git a/src/SMESH/src/SMESH_I/SMESH_Filter_i.cxx b/src/SMESH/src/SMESH_I/SMESH_Filter_i.cxx
+index 37c224a..2598e5f 100644
 --- a/src/SMESH/src/SMESH_I/SMESH_Filter_i.cxx
 +++ b/src/SMESH/src/SMESH_I/SMESH_Filter_i.cxx
 @@ -50,8 +50,8 @@
@@ -524,6 +633,7 @@ diff --git a/src/SMESH/src/SMESH_I/SMESH_Filter_i.cxx b/src/SMESH/src/SMESH_I/SM
  #include <TColStd_ListOfReal.hxx>
  #include <TColStd_SequenceOfHAsciiString.hxx>
 diff --git a/src/SMESH/src/SMESH_I/SMESH_Gen_i.cxx b/src/SMESH/src/SMESH_I/SMESH_Gen_i.cxx
+index 2aef521..6147a46 100644
 --- a/src/SMESH/src/SMESH_I/SMESH_Gen_i.cxx
 +++ b/src/SMESH/src/SMESH_I/SMESH_Gen_i.cxx
 @@ -33,7 +33,7 @@
@@ -536,9 +646,10 @@ diff --git a/src/SMESH/src/SMESH_I/SMESH_Gen_i.cxx b/src/SMESH/src/SMESH_I/SMESH
  #include <TopTools_MapOfShape.hxx>
  #include <TopoDS.hxx>
 diff --git a/src/SMESH/src/SMESH_I/SMESH_Mesh_i.cxx b/src/SMESH/src/SMESH_I/SMESH_Mesh_i.cxx
+index ba73bec..d740b7c 100644
 --- a/src/SMESH/src/SMESH_I/SMESH_Mesh_i.cxx
 +++ b/src/SMESH/src/SMESH_I/SMESH_Mesh_i.cxx
-@@ -73,7 +73,7 @@
+@@ -74,7 +74,7 @@
  #include <TopExp.hxx>
  #include <TopExp_Explorer.hxx>
  #include <TopTools_DataMapOfShapeShape.hxx>
@@ -548,6 +659,7 @@ diff --git a/src/SMESH/src/SMESH_I/SMESH_Mesh_i.cxx b/src/SMESH/src/SMESH_I/SMES
  #include <TopoDS_Compound.hxx>
  
 diff --git a/src/SMESH/src/SMESH_I/SMESH_PythonDump.cxx b/src/SMESH/src/SMESH_I/SMESH_PythonDump.cxx
+index f998bfd..4294433 100644
 --- a/src/SMESH/src/SMESH_I/SMESH_PythonDump.cxx
 +++ b/src/SMESH/src/SMESH_I/SMESH_PythonDump.cxx
 @@ -41,7 +41,7 @@
@@ -560,9 +672,10 @@ diff --git a/src/SMESH/src/SMESH_I/SMESH_PythonDump.cxx b/src/SMESH/src/SMESH_I/
  
  #include <cstring>
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Adaptive1D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_Adaptive1D.cxx
+index dc719de..7cdd6bb 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_Adaptive1D.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_Adaptive1D.cxx
-@@ -40,7 +40,7 @@
+@@ -39,7 +39,7 @@
  #include <BRepBndLib.hxx>
  #include <BRepMesh_IncrementalMesh.hxx>
  #include <BRep_Tool.hxx>
@@ -571,7 +684,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Adaptive1D.cxx b/src/SMESH/src/
  #include <Bnd_Box.hxx>
  #include <GCPnts_AbscissaPoint.hxx>
  #include <GeomAdaptor_Curve.hxx>
-@@ -49,6 +49,7 @@
+@@ -48,6 +48,7 @@
  #include <Poly_PolygonOnTriangulation.hxx>
  #include <Poly_Triangulation.hxx>
  #include <TColgp_Array1OfPnt.hxx>
@@ -579,7 +692,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Adaptive1D.cxx b/src/SMESH/src/
  #include <TopExp.hxx>
  #include <TopExp_Explorer.hxx>
  #include <TopLoc_Location.hxx>
-@@ -74,9 +75,9 @@
+@@ -73,9 +74,9 @@ namespace // internal utils
     */
    struct BBox : public Bnd_B3d
    {
@@ -593,6 +706,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Adaptive1D.cxx b/src/SMESH/src/
    //================================================================================
    /*!
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_CartesianParameters3D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_CartesianParameters3D.cxx
+index 0b057d3..6cca253 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_CartesianParameters3D.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_CartesianParameters3D.cxx
 @@ -44,7 +44,7 @@
@@ -604,10 +718,11 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_CartesianParameters3D.cxx b/src
  #include <TopTools_MapOfShape.hxx>
  #include <TopoDS.hxx>
  #include <TopoDS_Face.hxx>
-diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Cartesian_3D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
---- a/src/SMESH/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
-+++ b/src/SMESH/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
-@@ -54,7 +54,7 @@
+diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Cartesian_3D_Grid.hxx b/src/SMESH/src/StdMeshers/StdMeshers_Cartesian_3D_Grid.hxx
+index df92d97..2229981 100644
+--- a/src/SMESH/src/StdMeshers/StdMeshers_Cartesian_3D_Grid.hxx
++++ b/src/SMESH/src/StdMeshers/StdMeshers_Cartesian_3D_Grid.hxx
+@@ -74,7 +74,7 @@
  #include <BRepTopAdaptor_FClass2d.hxx>
  #include <BRep_Builder.hxx>
  #include <BRep_Tool.hxx>
@@ -616,7 +731,21 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Cartesian_3D.cxx b/src/SMESH/sr
  #include <Bnd_Box.hxx>
  #include <ElSLib.hxx>
  #include <GCPnts_UniformDeflection.hxx>
+diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Cartesian_VL.cxx b/src/SMESH/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
+index 1e9d5a1..67e37ff 100644
+--- a/src/SMESH/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
++++ b/src/SMESH/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
+@@ -1049,7 +1049,7 @@ void StdMeshers_Cartesian_VL::ViscousBuilder::getOffsetSubShape( const TopoDS_Sh
+         {
+           // In boolean operations the shapes are modified or deleted
+           const TopTools_ListOfShape& newGlueShapes = _solidCompound.Modified( ns );
+-          for ( TopoDS_Shape& ngs : newGlueShapes )
++          for ( const TopoDS_Shape& ngs : newGlueShapes )
+             if ( ngs.ShapeType() == ns.ShapeType() /*&& !ngs.Checked()*/  )
+               subShapeList.push_back( ngs );
+           
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_CompositeHexa_3D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_CompositeHexa_3D.cxx
+index 01252d4..6c1a751 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_CompositeHexa_3D.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_CompositeHexa_3D.cxx
 @@ -44,12 +44,12 @@
@@ -635,6 +764,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_CompositeHexa_3D.cxx b/src/SMES
  #include <TopTools_SequenceOfShape.hxx>
  #include <TopoDS.hxx>
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_CompositeSegment_1D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_CompositeSegment_1D.cxx
+index 5a99dc7..893eba6 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_CompositeSegment_1D.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_CompositeSegment_1D.cxx
 @@ -46,7 +46,7 @@
@@ -647,6 +777,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_CompositeSegment_1D.cxx b/src/S
  #include <TopoDS.hxx>
  #include <TopoDS_Edge.hxx>
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Distribution.hxx b/src/SMESH/src/StdMeshers/StdMeshers_Distribution.hxx
+index 2ce0288..e76c348 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_Distribution.hxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_Distribution.hxx
 @@ -34,7 +34,8 @@
@@ -659,7 +790,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Distribution.hxx b/src/SMESH/sr
  #include <TColStd_Array1OfReal.hxx>
  
  #include <smIdType.hxx>
-@@ -100,7 +101,7 @@
+@@ -100,7 +101,7 @@ public:
  
  private:
    Handle(ExprIntrp_GenExp)    myExpr;
@@ -669,6 +800,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Distribution.hxx b/src/SMESH/sr
  };
  
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Hexa_3D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_Hexa_3D.cxx
+index 303554b..d233878 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_Hexa_3D.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_Hexa_3D.cxx
 @@ -44,7 +44,7 @@
@@ -681,6 +813,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Hexa_3D.cxx b/src/SMESH/src/Std
  #include <TopExp_Explorer.hxx>
  #include <TopTools_MapOfShape.hxx>
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Import_1D2D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_Import_1D2D.cxx
+index d7e48f9..bdb4c61 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_Import_1D2D.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_Import_1D2D.cxx
 @@ -52,7 +52,7 @@
@@ -693,6 +826,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Import_1D2D.cxx b/src/SMESH/src
  #include <GeomAPI_ProjectPointOnSurf.hxx>
  #include <GeomAdaptor_Surface.hxx>
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_MEFISTO_2D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_MEFISTO_2D.cxx
+index 0884956..bcb7f77 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_MEFISTO_2D.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_MEFISTO_2D.cxx
 @@ -57,7 +57,7 @@
@@ -705,6 +839,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_MEFISTO_2D.cxx b/src/SMESH/src/
  #include <TopTools_MapOfShape.hxx>
  #include <TopoDS.hxx>
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_NumberOfSegments.cxx b/src/SMESH/src/StdMeshers/StdMeshers_NumberOfSegments.cxx
+index 4bf63ee..f621f15 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_NumberOfSegments.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_NumberOfSegments.cxx
 @@ -35,7 +35,8 @@
@@ -718,6 +853,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_NumberOfSegments.cxx b/src/SMES
  #include <TColStd_Array1OfReal.hxx>
  #include <TCollection_AsciiString.hxx>
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Penta_3D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_Penta_3D.cxx
+index 1f21c92..0e3d2e2 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_Penta_3D.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_Penta_3D.cxx
 @@ -47,7 +47,7 @@
@@ -730,6 +866,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Penta_3D.cxx b/src/SMESH/src/St
  #include <TopTools_SequenceOfShape.hxx>
  #include <TopTools_MapOfShape.hxx>
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Prism_3D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_Prism_3D.cxx
+index 7d3454a..bd933e0 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_Prism_3D.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_Prism_3D.cxx
 @@ -47,7 +47,7 @@
@@ -751,6 +888,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Prism_3D.cxx b/src/SMESH/src/St
  #include <TopTools_MapOfShape.hxx>
  #include <TopTools_SequenceOfShape.hxx>
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_ProjectionUtils.cxx b/src/SMESH/src/StdMeshers/StdMeshers_ProjectionUtils.cxx
+index ed61ada..bd4afcf 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_ProjectionUtils.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_ProjectionUtils.cxx
 @@ -60,10 +60,10 @@
@@ -768,6 +906,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_ProjectionUtils.cxx b/src/SMESH
  #include <TopTools_MapOfShape.hxx>
  #include <TopoDS.hxx>
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Projection_1D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_Projection_1D.cxx
+index 6a55506..265b19e 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_Projection_1D.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_Projection_1D.cxx
 @@ -48,7 +48,7 @@
@@ -780,9 +919,10 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Projection_1D.cxx b/src/SMESH/s
  #include "utilities.h"
  
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Projection_2D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_Projection_2D.cxx
+index 3aa3dcc..8e12b96 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_Projection_2D.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_Projection_2D.cxx
-@@ -54,7 +54,7 @@
+@@ -59,7 +59,7 @@
  #include <BRepAdaptor_Surface.hxx>
  #include <BRepMesh_Delaun.hxx>
  #include <BRep_Tool.hxx>
@@ -791,7 +931,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Projection_2D.cxx b/src/SMESH/s
  #include <GeomAPI_ExtremaCurveCurve.hxx>
  #include <GeomAPI_ProjectPointOnSurf.hxx>
  #include <GeomAdaptor_Curve.hxx>
-@@ -70,8 +70,8 @@
+@@ -78,8 +78,8 @@
  #include <Precision.hxx>
  #include <TopExp.hxx>
  #include <TopExp_Explorer.hxx>
@@ -803,6 +943,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Projection_2D.cxx b/src/SMESH/s
  #include <TopoDS.hxx>
  #include <TopoDS_Solid.hxx>
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Propagation.cxx b/src/SMESH/src/StdMeshers/StdMeshers_Propagation.cxx
+index 0cf7571..3fa7f9f 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_Propagation.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_Propagation.cxx
 @@ -36,7 +36,7 @@
@@ -815,9 +956,10 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Propagation.cxx b/src/SMESH/src
  #include <TopoDS.hxx>
  
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Quadrangle_2D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_Quadrangle_2D.cxx
+index d25e6ae..436e345 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_Quadrangle_2D.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_Quadrangle_2D.cxx
-@@ -57,7 +57,7 @@
+@@ -58,7 +58,7 @@
  #include <TopExp.hxx>
  #include <TopExp_Explorer.hxx>
  #include <TopTools_DataMapOfShapeReal.hxx>
@@ -827,6 +969,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Quadrangle_2D.cxx b/src/SMESH/s
  #include <TopoDS.hxx>
  
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Quadrangle_2D.hxx b/src/SMESH/src/StdMeshers/StdMeshers_Quadrangle_2D.hxx
+index 3779593..8921ede 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_Quadrangle_2D.hxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_Quadrangle_2D.hxx
 @@ -34,7 +34,7 @@
@@ -839,6 +982,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Quadrangle_2D.hxx b/src/SMESH/s
  class SMDS_MeshNode;
  class SMESH_Mesh;
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_RadialPrism_3D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_RadialPrism_3D.cxx
+index 6927b23..b8f25f3 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_RadialPrism_3D.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_RadialPrism_3D.cxx
 @@ -48,7 +48,7 @@
@@ -851,6 +995,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_RadialPrism_3D.cxx b/src/SMESH/
  #include <TopoDS.hxx>
  #include <TopoDS_Shell.hxx>
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_RadialQuadrangle_1D2D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_RadialQuadrangle_1D2D.cxx
+index 095a17f..b01ba47 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_RadialQuadrangle_1D2D.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_RadialQuadrangle_1D2D.cxx
 @@ -58,7 +58,7 @@
@@ -863,6 +1008,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_RadialQuadrangle_1D2D.cxx b/src
  
  
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Regular_1D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_Regular_1D.cxx
+index f5d1ad0..20a6e22 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_Regular_1D.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_Regular_1D.cxx
 @@ -26,6 +26,7 @@
@@ -874,9 +1020,10 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_Regular_1D.cxx b/src/SMESH/src/
  #include "SMDS_MeshElement.hxx"
  #include "SMDS_MeshNode.hxx"
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_ViscousLayers.cxx b/src/SMESH/src/StdMeshers/StdMeshers_ViscousLayers.cxx
+index b214b98..60ff5ec 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_ViscousLayers.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_ViscousLayers.cxx
-@@ -62,8 +62,8 @@
+@@ -66,8 +66,8 @@
  #include <BRepLProp_SLProps.hxx>
  #include <BRepOffsetAPI_MakeOffsetShape.hxx>
  #include <BRep_Tool.hxx>
@@ -887,7 +1034,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_ViscousLayers.cxx b/src/SMESH/s
  #include <ElCLib.hxx>
  #include <GCPnts_AbscissaPoint.hxx>
  #include <GCPnts_TangentialDeflection.hxx>
-@@ -84,7 +84,7 @@
+@@ -88,7 +88,7 @@
  #include <TopExp_Explorer.hxx>
  #include <TopTools_IndexedMapOfShape.hxx>
  #include <TopTools_ListOfShape.hxx>
@@ -897,6 +1044,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_ViscousLayers.cxx b/src/SMESH/s
  #include <TopoDS.hxx>
  #include <TopoDS_Edge.hxx>
 diff --git a/src/SMESH/src/StdMeshers/StdMeshers_ViscousLayers2D.cxx b/src/SMESH/src/StdMeshers/StdMeshers_ViscousLayers2D.cxx
+index 4ef023b..388a9c8 100644
 --- a/src/SMESH/src/StdMeshers/StdMeshers_ViscousLayers2D.cxx
 +++ b/src/SMESH/src/StdMeshers/StdMeshers_ViscousLayers2D.cxx
 @@ -51,8 +51,8 @@
@@ -920,6 +1068,7 @@ diff --git a/src/SMESH/src/StdMeshers/StdMeshers_ViscousLayers2D.cxx b/src/SMESH
  #include <TopTools_MapOfShape.hxx>
  #include <TopoDS.hxx>
 diff --git a/src/SMESH/src/StdMeshersGUI/StdMeshersGUI_DistrPreview.h b/src/SMESH/src/StdMeshersGUI/StdMeshersGUI_DistrPreview.h
+index 25deaf2..a9f0286 100644
 --- a/src/SMESH/src/StdMeshersGUI/StdMeshersGUI_DistrPreview.h
 +++ b/src/SMESH/src/StdMeshersGUI/StdMeshersGUI_DistrPreview.h
 @@ -39,7 +39,8 @@
@@ -932,7 +1081,7 @@ diff --git a/src/SMESH/src/StdMeshersGUI/StdMeshersGUI_DistrPreview.h b/src/SMES
  #include <TColStd_Array1OfReal.hxx>
  
  class QwtPlotCurve;
-@@ -87,7 +88,7 @@
+@@ -87,7 +88,7 @@ private:
    QwtPlotCurve*             myDistr;
    QwtPlotMarker*            myMsg;
    Handle(ExprIntrp_GenExp)  myExpr;
@@ -941,258 +1090,3 @@ diff --git a/src/SMESH/src/StdMeshersGUI/StdMeshersGUI_DistrPreview.h b/src/SMES
    TColStd_Array1OfReal      myValues;
    bool                      myIsDone;
    StdMeshers::StdMeshers_NumberOfSegments_var  myHypo;
-diff --git a/src/SMESH/src/NETGENPlugin/src/NETGEN/netgen53ForSalome.patch b/src/SMESH/src/NETGENPlugin/src/NETGEN/netgen53ForSalome.patch
---- a/src/SMESH/src/NETGENPlugin/src/NETGEN/netgen53ForSalome.patch
-+++ b/src/SMESH/src/NETGENPlugin/src/NETGEN/netgen53ForSalome.patch
-@@ -320,9 +320,9 @@
- @@ -47,9 +47,7 @@
-  #include <TopOpeBRep_EdgesIntersector.hxx>
-  #include <TopOpeBRep_Point2d.hxx>
-- #include <TopTools_ListIteratorOfListOfShape.hxx>
-+ #include <TopTools_ListOfShape.hxx>
- -#include <TopTools_ListOfShape.hxx>
-- #include <TopTools_MapIteratorOfMapOfShape.hxx>
-+ #include <TopTools_MapOfShape.hxx>
- -#include <TopTools_MapOfShape.hxx>
-  #include <TopoDS.hxx>
-  #include <TopoDS_Edge.hxx>
-@@ -362,8 +362,8 @@
- +++ netgen-5.3.1_SRC_modif/libsrc/occ/Partition_Inter3d.cxx	2017-09-11 18:08:21.229312406 +0300
- @@ -48,7 +48,6 @@
-  #include <TopOpeBRepTool_BoxSort.hxx>
-- #include <TopTools_DataMapIteratorOfDataMapOfShapeListOfShape.hxx>
-- #include <TopTools_ListIteratorOfListOfShape.hxx>
-+ #include <TopTools_DataMapOfShapeListOfShape.hxx>
-+ #include <TopTools_ListOfShape.hxx>
- -#include <TopTools_ListOfShape.hxx>
-  #include <TopoDS.hxx>
-  #include <TopoDS_Compound.hxx>
-@@ -514,9 +514,9 @@
- @@ -48,7 +48,6 @@
-  #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
-  #include <TopTools_IndexedMapOfShape.hxx>
-- #include <TopTools_ListIteratorOfListOfShape.hxx>
-+ #include <TopTools_ListOfShape.hxx>
- -#include <TopTools_ListOfShape.hxx>
-- #include <TopTools_MapIteratorOfMapOfShape.hxx>
-+ #include <TopTools_MapOfShape.hxx>
-  #include <TopTools_SequenceOfShape.hxx>
-  
- diff -Naur netgen-5.3.1_SRC_orig/libsrc/occ/Partition_Spliter.hxx netgen-5.3.1_SRC_modif/libsrc/occ/Partition_Spliter.hxx
-diff --git a/src/SMESH/src/NETGENPlugin/src/NETGENPlugin/NETGENPlugin_Mesher.cxx b/src/SMESH/src/NETGENPlugin/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
---- a/src/SMESH/src/NETGENPlugin/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
-+++ b/src/SMESH/src/NETGENPlugin/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
-@@ -59,7 +59,7 @@
- #include <BRepMesh_IncrementalMesh.hxx>
- #include <BRep_Builder.hxx>
- #include <BRep_Tool.hxx>
--#include <Bnd_B3d.hxx>
-+#include <Bnd_B3.hxx>
- #include <GeomLib_IsPlanarSurface.hxx>
- #include <NCollection_Map.hxx>
- #include <Poly_Triangulation.hxx>
-@@ -69,10 +69,10 @@
- #include <TopExp.hxx>
- #include <TopExp_Explorer.hxx>
- #include <TopLoc_Location.hxx>
--#include <TopTools_DataMapIteratorOfDataMapOfShapeInteger.hxx>
--#include <TopTools_DataMapIteratorOfDataMapOfShapeShape.hxx>
- #include <TopTools_DataMapOfShapeInteger.hxx>
- #include <TopTools_DataMapOfShapeShape.hxx>
-+#include <TopTools_DataMapOfShapeInteger.hxx>
-+#include <TopTools_DataMapOfShapeShape.hxx>
- #include <TopTools_MapOfShape.hxx>
- #include <TopoDS.hxx>
- #include <TopoDS_Compound.hxx>
-@@ -2803,7 +2803,7 @@
-   {
-     SMESH_Comment str("Exception in netgen::OCCGenerateMesh()");
-     str << " at " << netgen::multithread.task
--        << ": " << ex.DynamicType()->Name();
-+        << ": " << ex.ExceptionType();
-     if ( ex.GetMessageString() && strlen( ex.GetMessageString() ))
-       str << ": " << ex.GetMessageString();
-     return str;
-diff --git a/src/SMESH/src/NETGENPlugin/src/NETGENPlugin/NETGENPlugin_NETGEN_2D_ONLY.cxx b/src/SMESH/src/NETGENPlugin/src/NETGENPlugin/NETGENPlugin_NETGEN_2D_ONLY.cxx
---- a/src/SMESH/src/NETGENPlugin/src/NETGENPlugin/NETGENPlugin_NETGEN_2D_ONLY.cxx
-+++ b/src/SMESH/src/NETGENPlugin/src/NETGENPlugin/NETGENPlugin_NETGEN_2D_ONLY.cxx
-@@ -22,6 +22,7 @@
- // Project   : SALOME
- //
- #include "NETGENPlugin_NETGEN_2D_ONLY.hxx"
-+#include <TopTools_MapOfShape.hxx>
- 
- #include "NETGENPlugin_Mesher.hxx"
- #include "NETGENPlugin_Hypothesis_2D.hxx"
-@@ -504,7 +505,7 @@
-         err = 1;
-         str << "Exception in  netgen::OCCGenerateMesh()"
-             << " at " << netgen::multithread.task
--            << ": " << ex.DynamicType()->Name();
-+            << ": " << ex.ExceptionType();
-         if ( ex.GetMessageString() && strlen( ex.GetMessageString() ))
-           str << ": " << ex.GetMessageString();
-       }
-diff --git a/src/SMESH/src/NETGENPlugin/src/NETGENPlugin/NETGENPlugin_NETGEN_3D.cxx b/src/SMESH/src/NETGENPlugin/src/NETGENPlugin/NETGENPlugin_NETGEN_3D.cxx
---- a/src/SMESH/src/NETGENPlugin/src/NETGENPlugin/NETGENPlugin_NETGEN_3D.cxx
-+++ b/src/SMESH/src/NETGENPlugin/src/NETGENPlugin/NETGENPlugin_NETGEN_3D.cxx
-@@ -51,7 +51,8 @@
- #include <GProp_GProps.hxx>
- #include <TopExp.hxx>
- #include <TopExp_Explorer.hxx>
--#include <TopTools_ListIteratorOfListOfShape.hxx>
-+#include <TopTools_ListOfShape.hxx>
-+#include <TopTools_MapOfShape.hxx>
- #include <TopoDS.hxx>
- 
- #include <Standard_Failure.hxx>
-@@ -510,7 +511,7 @@
-   {
-     SMESH_Comment str("Exception in  netgen::OCCGenerateMesh()");
-     str << " at " << netgen::multithread.task
--        << ": " << ex.DynamicType()->Name();
-+        << ": " << ex.ExceptionType();
-     if ( ex.GetMessageString() && strlen( ex.GetMessageString() ))
-       str << ": " << ex.GetMessageString();
-     error(str);
-diff --git a/src/SMESH/src/NETGENPlugin/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx b/src/SMESH/src/NETGENPlugin/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx
---- a/src/SMESH/src/NETGENPlugin/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx
-+++ b/src/SMESH/src/NETGENPlugin/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx
-@@ -40,7 +40,7 @@
- #include <SMESH_MeshEditor.hxx>
- #include <SMESH_subMesh.hxx>
- 
--#include <Bnd_B3d.hxx>
-+#include <Bnd_B3.hxx>
- #include <Precision.hxx>
- 
- #include <occgeom.hpp>
-diff --git a/src/Netgen/libsrc/occ/Partition_Inter2d.cxx b/src/Netgen/libsrc/occ/Partition_Inter2d.cxx
---- a/src/Netgen/libsrc/occ/Partition_Inter2d.cxx
-+++ b/src/Netgen/libsrc/occ/Partition_Inter2d.cxx
-@@ -46,10 +46,9 @@
- #include <TopOpeBRepDS_Transition.hxx>
- #include <TopOpeBRep_EdgesIntersector.hxx>
- #include <TopOpeBRep_Point2d.hxx>
--#include <TopTools_ListIteratorOfListOfShape.hxx>
- #include <TopTools_ListOfShape.hxx>
--#include <TopTools_MapIteratorOfMapOfShape.hxx>
- #include <TopTools_MapOfShape.hxx>
-+#include <TopTools_IndexedMapOfShape.hxx>
- #include <TopoDS.hxx>
- #include <TopoDS_Edge.hxx>
- #include <TopoDS_Vertex.hxx>
-diff --git a/src/Netgen/libsrc/occ/Partition_Inter2d.hxx b/src/Netgen/libsrc/occ/Partition_Inter2d.hxx
---- a/src/Netgen/libsrc/occ/Partition_Inter2d.hxx
-+++ b/src/Netgen/libsrc/occ/Partition_Inter2d.hxx
-@@ -38,6 +38,7 @@
- #else
-    #include <BRepAlgo_AsDes.hxx>
-    #include <TopTools_MapOfShape.hxx>
-+   #include <TopTools_ListOfShape.hxx>
- #endif
- 
- #ifndef _Standard_Real_HeaderFile
-diff --git a/src/Netgen/libsrc/occ/Partition_Inter3d.cxx b/src/Netgen/libsrc/occ/Partition_Inter3d.cxx
---- a/src/Netgen/libsrc/occ/Partition_Inter3d.cxx
-+++ b/src/Netgen/libsrc/occ/Partition_Inter3d.cxx
-@@ -46,9 +46,10 @@
- #include <TopExp_Explorer.hxx>
- 
- #include <TopOpeBRepTool_BoxSort.hxx>
--#include <TopTools_DataMapIteratorOfDataMapOfShapeListOfShape.hxx>
--#include <TopTools_ListIteratorOfListOfShape.hxx>
-+#include <TopTools_DataMapOfShapeListOfShape.hxx>
- #include <TopTools_ListOfShape.hxx>
-+#include <TopTools_IndexedMapOfShape.hxx>
-+#include <TColStd_ListOfInteger.hxx>
- #include <TopoDS.hxx>
- #include <TopoDS_Compound.hxx>
- #include <TopoDS_Edge.hxx>
-@@ -85,7 +86,7 @@
- #include <TopOpeBRepTool_GeomTool.hxx>
- #include <TopOpeBRepTool_OutCurveType.hxx>
- #include <TopOpeBRep_DSFiller.hxx>
--#include <TopTools_DataMapIteratorOfDataMapOfShapeShape.hxx>
-+#include <TopTools_DataMapOfShapeShape.hxx>
- #include <stdio.h>
- 
- //=======================================================================
-diff --git a/src/Netgen/libsrc/occ/Partition_Loop.cxx b/src/Netgen/libsrc/occ/Partition_Loop.cxx
---- a/src/Netgen/libsrc/occ/Partition_Loop.cxx
-+++ b/src/Netgen/libsrc/occ/Partition_Loop.cxx
-@@ -44,12 +44,12 @@
- #include <Geom_Surface.hxx>
- 
- #include <TopTools_SequenceOfShape.hxx>
--#include <TopTools_ListIteratorOfListOfShape.hxx>
-+#include <TopTools_ListOfShape.hxx>
- #include <TopTools_MapOfShape.hxx>
--#include <TopTools_MapIteratorOfMapOfShape.hxx>
-+#include <TopTools_MapOfShape.hxx>
- #include <TopTools_MapOfOrientedShape.hxx>
- #include <TopTools_DataMapOfShapeShape.hxx>
--#include <TopTools_DataMapIteratorOfDataMapOfShapeListOfShape.hxx>
-+#include <TopTools_DataMapOfShapeListOfShape.hxx>
- 
- #include <gp_Pnt.hxx>
- #include <gp_Pnt2d.hxx>
-diff --git a/src/Netgen/libsrc/occ/Partition_Loop2d.cxx b/src/Netgen/libsrc/occ/Partition_Loop2d.cxx
---- a/src/Netgen/libsrc/occ/Partition_Loop2d.cxx
-+++ b/src/Netgen/libsrc/occ/Partition_Loop2d.cxx
-@@ -34,14 +34,14 @@
- #include <TColStd_SequenceOfReal.hxx>
- #include <TopExp.hxx>
- #include <TopExp_Explorer.hxx>
--#include <TopTools_DataMapIteratorOfDataMapOfShapeListOfShape.hxx>
--#include <TopTools_DataMapIteratorOfDataMapOfShapeShape.hxx>
-+#include <TopTools_DataMapOfShapeListOfShape.hxx>
-+#include <TopTools_DataMapOfShapeShape.hxx>
- #include <TopTools_DataMapOfShapeInteger.hxx>
- #include <TopTools_DataMapOfShapeReal.hxx>    // V6.5
- #include <TopTools_DataMapOfShapeShape.hxx>
- #include <TopTools_IndexedMapOfShape.hxx>
--#include <TopTools_ListIteratorOfListOfShape.hxx>
--#include <TopTools_MapIteratorOfMapOfShape.hxx>
-+#include <TopTools_ListOfShape.hxx>
-+#include <TopTools_MapOfShape.hxx>
- #include <TopTools_MapOfOrientedShape.hxx>
- #include <TopTools_MapOfShape.hxx>
- #include <TopTools_SequenceOfShape.hxx>
-diff --git a/src/Netgen/libsrc/occ/Partition_Loop3d.cxx b/src/Netgen/libsrc/occ/Partition_Loop3d.cxx
---- a/src/Netgen/libsrc/occ/Partition_Loop3d.cxx
-+++ b/src/Netgen/libsrc/occ/Partition_Loop3d.cxx
-@@ -17,11 +17,11 @@
- #include <TopExp.hxx>
- #include <BRep_Builder.hxx>
- #include <TopTools_MapOfShape.hxx>
--#include <TopTools_ListIteratorOfListOfShape.hxx>
-+#include <TopTools_ListOfShape.hxx>
- #include <TopoDS_Shell.hxx>
- #include <TopoDS_Iterator.hxx>
- #include <TopoDS.hxx>
--#include <TopTools_MapIteratorOfMapOfShape.hxx>
-+#include <TopTools_MapOfShape.hxx>
- #include <gp_Vec.hxx>
- #include <gp_Pnt.hxx>
- #include <Geom2d_Curve.hxx>
-diff --git a/src/Netgen/libsrc/occ/Partition_Spliter.cxx b/src/Netgen/libsrc/occ/Partition_Spliter.cxx
---- a/src/Netgen/libsrc/occ/Partition_Spliter.cxx
-+++ b/src/Netgen/libsrc/occ/Partition_Spliter.cxx
-@@ -43,13 +43,13 @@
- #include <TopExp.hxx>
- #include <TopExp_Explorer.hxx>
- 
--#include <TopTools_DataMapIteratorOfDataMapOfShapeListOfShape.hxx>
- #include <TopTools_DataMapOfShapeListOfShape.hxx>
-+#include <TopTools_DataMapOfShapeListOfShape.hxx>
- #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
- #include <TopTools_IndexedMapOfShape.hxx>
--#include <TopTools_ListIteratorOfListOfShape.hxx>
- #include <TopTools_ListOfShape.hxx>
--#include <TopTools_MapIteratorOfMapOfShape.hxx>
-+#include <TopTools_ListOfShape.hxx>
-+#include <TopTools_MapOfShape.hxx>
- #include <TopTools_SequenceOfShape.hxx>
- 
- #include <Geom2d_Curve.hxx>

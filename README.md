@@ -367,6 +367,12 @@ inside the wheel. The build
 environment must not contain an `occt` package. CMake accepts only OCCT 8.0.1
 from the prefix you name, and stops on any other.
 
+The SALOME sources are vendored unmodified in `extern/`, at tag `V9_16_0`: SMESH,
+KERNEL, salome_bootstrap and GEOM's `GEOMUtils`, plus the MEFISTO triangulator
+carried forward from SMESH `V9_9_0`. `prepare.py` copies the compiled parts into
+`staged/` and applies `patches/`; every patch must apply exactly. PROVENANCE.md
+lists every source, commit and patch.
+
 ```bash
 conda env create -f ci/environment.yml
 conda activate <the env name in ci/environment.yml>

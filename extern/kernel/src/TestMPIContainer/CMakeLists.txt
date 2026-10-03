@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -18,12 +18,7 @@
 #
 
 INCLUDE_DIRECTORIES(
-  ${MPI_CXX_INCLUDE_PATH}
-  ${OMNIORB_INCLUDE_DIR}
-  ${PROJECT_BINARY_DIR}/salome_adm
   ${CMAKE_CURRENT_SOURCE_DIR}/../ArgvKeeper
-  ${CMAKE_CURRENT_SOURCE_DIR}/../Basics
-  ${CMAKE_CURRENT_SOURCE_DIR}/../SALOMELocalTrace
   ${CMAKE_CURRENT_SOURCE_DIR}/../NamingService
   ${CMAKE_CURRENT_SOURCE_DIR}/../Utils
   ${CMAKE_CURRENT_SOURCE_DIR}/../Registry
@@ -33,6 +28,10 @@ INCLUDE_DIRECTORIES(
   ${CMAKE_CURRENT_SOURCE_DIR}/../MPIContainer
   ${CMAKE_CURRENT_SOURCE_DIR}/../GenericObj
   ${PROJECT_BINARY_DIR}/idl
+  ${MPI_CXX_INCLUDE_PATH}
+  ${OMNIORB_INCLUDE_DIR}
+  ${PROJECT_BINARY_DIR}/salome_adm
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
 )
 
 ADD_DEFINITIONS(${OMNIORB_DEFINITIONS} ${MPI_DEFINITIONS})
@@ -44,8 +43,9 @@ SET(COMMON_LIBS
   SalomeResourcesManager
   SalomeNS
   OpUtil
-  SALOMELocalTrace
-  SALOMEBasics
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
+  ${SALOMEBOOTSTRAP_SALOMEBasics}
+  ${SALOMEBOOTSTRAP_KERNELBasics}
   SalomeContainer
   SalomeMPIContainer
   SalomeGenericObj

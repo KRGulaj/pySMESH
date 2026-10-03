@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -20,7 +20,6 @@
 INCLUDE_DIRECTORIES(
   ${CPPUNIT_INCLUDE_DIRS}
   ${CMAKE_SOURCE_DIR}/src/ArgvKeeper
-  ${CMAKE_SOURCE_DIR}/src/Basics/Test
 )
 
 SET(LOCAL_TEST_DIR ${KERNEL_TEST_DIR}/ArgvKeeper)

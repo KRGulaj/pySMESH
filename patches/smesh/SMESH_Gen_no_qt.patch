@@ -1,0 +1,24 @@
+pySMESH: build SMESH_Gen.cxx (SMESH V9_16_0) without Qt on Windows.
+
+SMESH commit be238b4bb (2023-03-09, multinode parallel meshing) made SMESH_Gen.cxx include
+<QString> and <QProcess> unconditionally. Their only user, SMESH_Gen::send_mesh, compiles its
+body only #ifndef WIN32, and on WIN32 SMESH_Gen::parallelComputeSubMeshes throws
+"ParallelMesh is not working on Windows". pySMESH builds without Qt, so this patch puts the two
+includes under the same #ifndef WIN32 guard. No compiled code changes.
+
+diff --git a/src/SMESH/SMESH_Gen.cxx b/src/SMESH/SMESH_Gen.cxx
+index 24de572..c835f2a 100644
+--- a/src/SMESH/SMESH_Gen.cxx
++++ b/src/SMESH/SMESH_Gen.cxx
+@@ -51,8 +51,11 @@
+ #include "memoire.h"
+ #include <functional>
+ 
++// QString/QProcess serve only SMESH_Gen::send_mesh, whose body is #ifndef WIN32.
++#ifndef WIN32
+ #include <QString>
+ #include <QProcess>
++#endif
+ 
+ #ifdef WIN32
+   #include <windows.h>

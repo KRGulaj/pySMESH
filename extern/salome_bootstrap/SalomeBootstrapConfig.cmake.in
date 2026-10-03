@@ -1,0 +1,108 @@
+# - Config file for the @PROJECT_NAME@ package
+# It defines the following variables.
+# Specific to the package @PROJECT_NAME@ itself:
+#  @PROJECT_NAME_UC@_ROOT_DIR_EXP - the root path of the installation providing this CMake file
+#
+# Other stuff specific to this package:
+#  SALOMEBOOTSTRAP_BUILD_TESTS - ON if tests for KERNEL module has been built
+
+###############################################################
+# Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
+#
+# Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
+# CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
+#
+# This library is free software; you can redistribute it and/or
+# modify it under the terms of the GNU Lesser General Public
+# License as published by the Free Software Foundation; either
+# version 2.1 of the License, or (at your option) any later version.
+#
+# This library is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+# Lesser General Public License for more details.
+#
+# You should have received a copy of the GNU Lesser General Public
+# License along with this library; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307 USA
+#
+# See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
+#
+
+### Initialisation performed by CONFIGURE_PACKAGE_CONFIG_FILE:
+@PACKAGE_INIT@
+
+# Load the dependencies for the libraries of @PROJECT_NAME@
+# (contains definitions for IMPORTED targets). This is only
+# imported if we are not built as a subproject (in this case targets are already there)
+IF(NOT TARGET SALOMEBasics AND NOT @PROJECT_NAME@_BINARY_DIR)
+  INCLUDE("@PACKAGE_BOOTSTRAP_INSTALL_CMAKE@/@PROJECT_NAME@Targets.cmake")
+ENDIF()
+
+# Package root dir:
+SET_AND_CHECK(SALOMEBOOTSTRAP_ROOT_DIR_EXP "@PACKAGE_CMAKE_INSTALL_PREFIX@")
+
+# Include directories and definitions
+SET_AND_CHECK(SALOMEBOOTSTRAP_INCLUDE_DIRS "${SALOMEBOOTSTRAP_ROOT_DIR_EXP}/@BOOTSTRAP_INSTALL_HEADERS@")
+SET(SALOMEBOOTSTRAP_INCLUDE_DIRS "${SALOMEBOOTSTRAP_INCLUDE_DIRS};@_SalomeBootstrap_EXTRA_HEADERS@")
+SET(SALOMEBOOTSTRAP_DEFINITIONS)
+
+#### Now the specificities
+
+SET(SALOME_USE_64BIT_IDS      @SALOME_USE_64BIT_IDS@)
+SET(SALOMEBOOTSTRAP_BUILD_TESTS    @SALOME_BUILD_TESTS@)
+
+
+# Prerequisites:
+IF(SALOMEBOOTSTRAP_BUILD_TESTS)
+  SET_AND_CHECK(CPPUNIT_ROOT_DIR_EXP  "@PACKAGE_CPPUNIT_ROOT_DIR@")
+ENDIF()
+
+SET_AND_CHECK(PTHREAD_ROOT_DIR_EXP  "@PACKAGE_PTHREAD_ROOT_DIR@")
+SET_AND_CHECK(PYTHON_ROOT_DIR_EXP   "@PACKAGE_PYTHON_ROOT_DIR@")
+
+# For all prerequisites, load the corresponding targets if the package was used
+# in CONFIG mode. This ensures dependent projects link correctly
+# without having to set LD_LIBRARY_PATH:
+SET(_PREREQ_@PROJECT_NAME@ @_PREREQ_LIST@)
+SET(_PREREQ_@PROJECT_NAME@_CONFIG_DIR @_PREREQ_DIR_LIST@)
+SET(_PREREQ_@PROJECT_NAME@_COMPONENTS "@_PREREQ_COMPO_LIST@")
+LIST(LENGTH _PREREQ_@PROJECT_NAME@_CONFIG_DIR _list_len_@PROJECT_NAME@)
+IF(NOT _list_len_@PROJECT_NAME@ EQUAL 0)
+  # Another CMake stupidity - FOREACH(... RANGE r) generates r+1 numbers ...
+  MATH(EXPR _range_@PROJECT_NAME@ "${_list_len_@PROJECT_NAME@}-1")
+  FOREACH(_p_@PROJECT_NAME@ RANGE ${_range_@PROJECT_NAME@})
+    LIST(GET _PREREQ_@PROJECT_NAME@            ${_p_@PROJECT_NAME@} _pkg_@PROJECT_NAME@    )
+    LIST(GET _PREREQ_@PROJECT_NAME@_CONFIG_DIR ${_p_@PROJECT_NAME@} _pkg_dir_@PROJECT_NAME@)
+    LIST(GET _PREREQ_@PROJECT_NAME@_COMPONENTS ${_p_@PROJECT_NAME@} _pkg_compo_@PROJECT_NAME@)
+    IF(NOT OMIT_DETECT_PACKAGE_${_pkg_@PROJECT_NAME@})
+      MESSAGE(STATUS "===> Reloading targets from ${_pkg_@PROJECT_NAME@} ...")
+      IF(NOT _pkg_compo_@PROJECT_NAME@)
+        FIND_PACKAGE(${_pkg_@PROJECT_NAME@} REQUIRED NO_MODULE
+            PATHS "${_pkg_dir_@PROJECT_NAME@}"
+            NO_DEFAULT_PATH)
+      ELSE()
+        STRING(REPLACE "," ";" _compo_lst_@PROJECT_NAME@ "${_pkg_compo_@PROJECT_NAME@}")
+        MESSAGE(STATUS "===> (components: ${_pkg_compo_@PROJECT_NAME@})")
+        FIND_PACKAGE(${_pkg_@PROJECT_NAME@} REQUIRED NO_MODULE
+            COMPONENTS ${_compo_lst_@PROJECT_NAME@}
+            PATHS "${_pkg_dir_@PROJECT_NAME@}"
+            NO_DEFAULT_PATH)
+      ENDIF()
+    ENDIF()
+  ENDFOREACH()
+ENDIF()
+
+# Installation directories
+SET(SALOME_INSTALL_BINS "@SALOME_INSTALL_BINS@")
+SET(SALOME_INSTALL_LIBS "@SALOME_INSTALL_LIBS@")
+SET(SALOME_INSTALL_HEADERS "@SALOME_INSTALL_HEADERS@")
+SET(SALOME_INSTALL_CMAKE "@SALOME_INSTALL_CMAKE@")
+
+# Exposed targets:
+SET(SALOMEBOOTSTRAP_SALOMELog SALOMELog)
+SET(SALOMEBOOTSTRAP_SALOMEBasics SALOMEBasics)
+SET(SALOMEBOOTSTRAP_KernelBasics KernelBasics)
+SET(SALOMEBOOTSTRAP_SALOMELocalTrace SALOMELocalTrace)
+SET(SALOMEBOOTSTRAP_SALOMELocalTraceTest SALOMELocalTraceTest)
+SET(SALOMEBOOTSTRAP_SALOMEException SALOMEException)

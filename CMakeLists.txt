@@ -106,8 +106,9 @@ add_compile_definitions(
     SALOME_LIGHT   # no-CORBA build: disables omniORB/CORBA branches in KERNEL (OpUtil, ...)
     SALOME_USE_64BIT_IDS _OCC64
     BOOST_ALL_NO_LIB BOOST_ALL_DYN_LINK
-    # --- KERNEL / Geom ---
+    # --- KERNEL / salome_bootstrap / Geom ---
     BASICS_EXPORTS SALOMEBasics_EXPORTS SALOMELOCALTRACE_EXPORTS SALOMELocalTrace_EXPORTS
+    BOOTSTRAP_UTILS_EXPORTS   # SALOME_Exception, in salome_bootstrap's Exception/ since 9.16
     UTILS_EXPORTS OpUtil_EXPORTS
     # --- SMESH modules ---
     SMDS_EXPORTS SMESHDS_EXPORTS SMESHUtils_EXPORTS
@@ -130,7 +131,8 @@ endif()
 
 # Cross-module include closure (avoids header path whack-a-mole for the monolithic build).
 include_directories(
-    ${KERNEL_SRC_DIR}/Basics ${KERNEL_SRC_DIR}/SALOMELocalTrace ${KERNEL_SRC_DIR}/Utils
+    ${KERNEL_SRC_DIR}/Basics ${KERNEL_SRC_DIR}/SALOMELocalTrace ${KERNEL_SRC_DIR}/Exception
+    ${KERNEL_SRC_DIR}/Utils
     ${GEOM_SRC_DIR}/GEOMUtils
     ${SMESH_SRC_DIR}/SMDS ${SMESH_SRC_DIR}/SMESHDS ${SMESH_SRC_DIR}/SMESH
     ${SMESH_SRC_DIR}/SMESHUtils ${SMESH_SRC_DIR}/Controls

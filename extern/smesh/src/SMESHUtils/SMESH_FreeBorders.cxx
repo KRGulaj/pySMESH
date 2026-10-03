@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // This library is free software; you can redistribute it and/or
 // modify it under the terms of the GNU Lesser General Public
@@ -444,7 +444,7 @@ void SMESH_MeshAlgos::FindCoincidentFreeBorders(SMDS_Mesh&              mesh,
                                                 CoincidentFreeBorders & foundFreeBordes)
 {
   // find free links
-  typedef NCollection_DataMap<SMESH_TLink, const SMDS_MeshElement*, SMESH_TLink > TLink2FaceMap;
+  typedef NCollection_DataMap<SMESH_TLink, const SMDS_MeshElement*, SMESH_TLinkHasher > TLink2FaceMap;
   TLink2FaceMap linkMap;
   int nbSharedLinks = 0;
   SMDS_FaceIteratorPtr faceIt = mesh.facesIterator();
@@ -840,7 +840,7 @@ void SMESH_MeshAlgos::FindFreeBorders(SMDS_Mesh&       theMesh,
   bool isManifold = true;
 
   // find free links
-  typedef NCollection_DataMap<SMESH_TLink, const SMDS_MeshElement*, SMESH_TLink > TLink2FaceMap;
+  typedef NCollection_DataMap<SMESH_TLink, const SMDS_MeshElement*, SMESH_TLinkHasher > TLink2FaceMap;
   TLink2FaceMap linkMap;
   int nbSharedLinks = 0;
   SMDS_FaceIteratorPtr faceIt = theMesh.facesIterator();

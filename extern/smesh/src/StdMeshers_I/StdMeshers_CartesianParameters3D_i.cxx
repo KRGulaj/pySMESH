@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -416,6 +416,63 @@ void  StdMeshers_CartesianParameters3D_i::SetToCreateFaces(CORBA::Boolean toCrea
 CORBA::Boolean StdMeshers_CartesianParameters3D_i::GetToCreateFaces()
 {
   return GetImpl()->GetToCreateFaces();
+}
+
+
+//=======================================================================
+//function : SetToUseQuanta
+//purpose  : Enables use of quanta value.
+//=======================================================================
+
+void  StdMeshers_CartesianParameters3D_i::SetToUseQuanta(CORBA::Boolean toUseQuanta)
+{
+  if ( GetToUseQuanta() == toUseQuanta )
+    return;
+  GetImpl()->SetToUseQuanta( toUseQuanta );
+  SMESH::TPythonDump() << _this() << ".SetToUseQuanta( " << toUseQuanta << " )";
+}
+
+//=======================================================================
+//function : GetToUseQuanta
+//purpose  : Check the value of toUseQuanta option
+//=======================================================================
+
+CORBA::Boolean StdMeshers_CartesianParameters3D_i::GetToUseQuanta()
+{
+  return GetImpl()->GetToUseQuanta();
+}
+
+//=============================================================================
+/*!
+ *  SetQuanta
+ */
+//=============================================================================
+
+void StdMeshers_CartesianParameters3D_i::SetQuanta(CORBA::Double quanta)
+  
+{
+  ASSERT( myBaseImpl );
+  try {
+    this->GetImpl()->SetQuanta(quanta);
+  }
+  catch ( SALOME_Exception& S_ex ) {
+    THROW_SALOME_CORBA_EXCEPTION( S_ex.what(), SALOME::BAD_PARAM );
+  }
+
+  if ( GetToUseQuanta() )
+    // Update Python script
+    SMESH::TPythonDump() << _this() << ".SetQuanta( " << SMESH::TVar(quanta) << " )";
+}
+
+//=============================================================================
+/*!
+ *  GetQuanta
+ */
+//=============================================================================
+
+CORBA::Double StdMeshers_CartesianParameters3D_i::GetQuanta()
+{
+  return this->GetImpl()->GetQuanta();
 }
 
 //=======================================================================

@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -20,8 +20,7 @@
 // See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
 //
 
-#ifndef __SALOME_CONTAINERMANAGER_HXX__
-#define __SALOME_CONTAINERMANAGER_HXX__
+#pragma once
 
 #include "SALOME_Container.hxx"
 
@@ -32,7 +31,10 @@
 
 #include "Utils_Mutex.hxx"
 
+#include <vector>
 #include <string>
+#include <utility>
+#include <functional>
 #include <set>
 
 class SALOME_NamingService_Abstract;
@@ -46,16 +48,52 @@ public:
   ~SALOME_ContainerManager();
 
   // Corba Methods
-  Engines::Container_ptr GiveContainer(const Engines::ContainerParameters& params);
+  Engines::Container_ptr GiveContainer(const Engines::ContainerParameters& params) override;
 
-  void ShutdownContainers();
+  void ShutdownContainers() override;
+
+  void ShutdownContainersNow() override;
+
+  void SetOverrideEnvForContainers(const Engines::KeyValDict& env) override;
+
+  Engines::KeyValDict *GetOverrideEnvForContainers() override;
+
+  void SetCodeOnContainerStartUp(const char *code) override;
+
+  char *GetCodeOnContainerStartUp() override;
 
   // C++ Methods
   void Shutdown();
 
   void DeclareUsingSalomeSession() { _isSSL = false; }
 
+  CORBA::Long GetTimeOutToLaunchServerInSecond() override;
+
+  void SetTimeOutToLaunchServerInSecond(CORBA::Long timeInSecond) override;
+
+  CORBA::Long GetDeltaTimeBetweenNSLookupAtLaunchTimeInMilliSecond() override;
+
+  void SetDeltaTimeBetweenNSLookupAtLaunchTimeInMilliSecond(CORBA::Long timeInMS) override;
+
+  CORBA::Long GetDeltaTimeBetweenCPUMemMeasureInMilliSecond() override;
+
+  void SetDeltaTimeBetweenCPUMemMeasureInMilliSecond(CORBA::Long timeInMS) override;
+
+  void SetBigObjOnDiskThreshold(CORBA::Long thresholdInByte) override;
+
+  void SetBigObjOnDiskDirectory(const char *directory) override;
+
+  void SetDirectoryForReplayFiles(const char *directory) override;
+
+  void SetNumberOfRetry(CORBA::Long nbRetry) override;
+
+  CORBA::Long GetNumberOfRetry() override;
+
   static const char *_ContainerManagerNameInNS;
+
+private:
+
+  void ShutdownContainersGeneric(std::function<void(Engines::Container_ptr)> funcToBeCalledOnContainer);
 
 protected:
   // C++ methods
@@ -66,6 +104,8 @@ protected:
   Engines::Container_ptr
   FindContainer(const Engines::ContainerParameters& params,
                 const std::string& resource);
+
+  std::string GetCppBinaryOfKernelSSLContainer() const;
 
   std::string GetCppBinaryOfKernelContainer() const;
   
@@ -94,8 +134,21 @@ protected:
   std::string GetMPIZeroNode(const std::string machine, const std::string machinesFile) const;
 
   std::string machinesFile(const int nbproc);
+  
+  std::string getCommandToRunRemoteProcessCommon(const std::string& templateName, const std::string& remoteScript, 
+                                          AccessProtocolType protocol, 
+                                          const std::string & hostname, 
+                                          const std::string & username,
+                                          const std::string & applipath,
+                                          const std::string & workdir) const;
 
   std::string getCommandToRunRemoteProcess(AccessProtocolType protocol, 
+                                          const std::string & hostname, 
+                                          const std::string & username,
+                                          const std::string & applipath,
+                                          const std::string & workdir="") const;
+                                          
+  std::string getCommandToRunRemoteProcessNoAppli(AccessProtocolType protocol, 
                                           const std::string & hostname, 
                                           const std::string & username,
                                           const std::string & applipath,
@@ -178,7 +231,13 @@ public:
   static void SleepInSecond(int ellapseTimeInSecond);
  private:
   static const int TIME_OUT_TO_LAUNCH_CONT;
+  static const int DFT_DELTA_TIME_NS_LOOKUP_IN_MS;
   static Utils_Mutex _getenvMutex;
   static Utils_Mutex _systemMutex;
+private:
+  std::vector< std::pair<std::string, std::string> > _override_env;
+  int _time_out_in_second;
+  int _delta_time_ns_lookup_in_ms;
+  int _delta_time_measure_in_ms;
+  std::string _code_to_exe_on_startup;
 };
-#endif

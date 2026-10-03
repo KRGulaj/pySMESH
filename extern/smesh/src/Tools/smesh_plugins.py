@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-# Copyright (C) 2011-2022  EDF R&D
+# Copyright (C) 2011-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -21,7 +21,10 @@
 #
 import salome_pluginsmanager
 import os
-from qtsalome import QIcon
+if 'SALOME_USE_PYSIDE' in os.environ:
+  from PySide2.QtGui import QIcon
+else:
+  from PyQt5.Qt import QIcon
 
 try:
   from spadderPlugin import runSpadderPlugin
@@ -62,6 +65,24 @@ except Exception as e:
   pass
 
 try:
+  from mmgplugin.mmgPlug_plugin import Mmg
+  salome_pluginsmanager.AddFunction('ReMesh with MMG',
+                                    'Run MMG',
+                                    Mmg)
+except Exception as e:
+  salome_pluginsmanager.logger.info('ERROR: MMG plug-in is unavailable: {}'.format(e))
+  pass
+
+try:
+  from meshbooleanplugin.mesh_boolean_plugin import MeshBoolean
+  icon_file = os.path.join(os.getenv('SMESH_ROOT_DIR'),'share', 'salome', 'resources', 'smesh', 'mesh_plugins_boolean.png')
+  salome_pluginsmanager.AddFunction('Boolean Mesh Operations', 'Perform boolean operations on meshes', MeshBoolean,
+                                    icon=QIcon(icon_file))
+except Exception as e:
+  salome_pluginsmanager.logger.info('ERROR: MeshBoolean plug-in is unavailable: {}'.format(e))
+  pass
+
+try:
   from blocFissure.ihm.fissureCoude_plugin import fissureCoudeDlg
   salome_pluginsmanager.AddFunction('Meshed Pipe with a crack (blocFissure plugin)',
                                     'Create a mesh with blocFissure tool',
@@ -88,7 +109,7 @@ try:
                                       'Add a crack in a mesh with Zcracks plug-in',
                                       ZcracksLct)
 except Exception as e:
-  #print 'probleme zcracks'
+  #print 'problem zcracks'
   salome_pluginsmanager.logger.info('ERROR: Zcrack plug-in is unavailable: {}'.format(e))
   pass
 
@@ -99,6 +120,32 @@ try:
                                     'run topological volumic mesher',
                                     TopIIVolMeshLct)
 except Exception as e:
-  #print 'probleme zcracks'
   salome_pluginsmanager.logger.info('ERROR: TopIIVolMesh plug-in is unavailable: {}'.format(e))
   pass
+
+import sys
+import importlib
+import importlib.util
+
+smesh_pyplugin_dir = os.getenv("SMESH_PYPLUGIN_DIR")
+if smesh_pyplugin_dir:
+  plugin_dirs = smesh_pyplugin_dir.split(":")
+  # reverse plugin_dirs list to call smesh python plugin in good order
+  plugin_dirs.reverse()
+  for plg_dir in plugin_dirs:
+    if os.path.exists(plg_dir):
+      sys.path.insert(0, plg_dir)
+      #for filename in sorted(
+      #        filter(lambda x: os.path.isfile(os.path.join(plg_dir, x)),
+      #        os.listdir(plg_dir))):
+      for filename in os.listdir(plg_dir):
+        if filename.endswith(".py"):
+            f = os.path.join(plg_dir, filename)
+            try:
+              module_name = os.path.splitext(os.path.basename(f))[0]
+              _specs = importlib.util.find_spec(module_name)
+              _module = importlib.util.module_from_spec(_specs)
+              _specs.loader.exec_module(_module)
+              _module.init()
+            except:
+              print("Can not load python plugin from {}".format(plg_dir))

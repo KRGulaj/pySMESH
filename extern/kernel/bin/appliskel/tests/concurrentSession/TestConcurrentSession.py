@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (C) 2013-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2013-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -18,15 +18,10 @@
 # See http://www.salome-platform.org/ or email : webmaster.salome@opencascade.com
 #
 
-import unittest
-import tempfile
-
-import os
-import sys
-import imp
-from io import StringIO
-import multiprocessing
 import logging
+import multiprocessing
+import sys
+import unittest
 
 def new_instance(running_instances):
   from salome_instance import SalomeInstance

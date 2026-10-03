@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -20,8 +20,6 @@
 SET(SUBDIR_BASE
   ArgvKeeper
   AppQuickStart
-  Basics
-  SALOMELocalTrace
   HDFPersist
   KERNEL_PY
   Utils
@@ -59,11 +57,6 @@ SET(SUBDIR_CORBA
 SET(SUBDIR_MPI MPIContainer TestMPIContainer)
 SET(SUBDIR_PARALLEL ParallelContainer)
 
-# CppUnit directories:
-SET(SUBDIR_CPPUNIT_BASE
-  Basics/Test
-  SALOMELocalTrace/Test
-)
 SET(SUBDIR_CPPUNIT_CORBA
   Logger/Test
   SALOMETraceCollector/Test

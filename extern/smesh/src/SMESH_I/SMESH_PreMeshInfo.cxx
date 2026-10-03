@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -926,9 +926,9 @@ void SMESH_PreMeshInfo::readSubMeshes(DriverMED_R_SMESHDS_Mesh* reader) const
           // -- Most probably a bad study was saved when there were
           // not fixed bugs in SMDS_MeshInfo
           if ( elemSet.size() < nbElems ) {
-#ifdef _DEBUG_
-            cout << "SMESH_Gen_i::Load(), warning: Node position data is invalid" << endl;
-#endif
+            if (SALOME::VerbosityActivated())
+              cout << "SMESH_Gen_i::Load(), warning: Node position data is invalid" << endl;
+
             nbElems = elemSet.size();
           }
           // add elements to sub-meshes

@@ -68,29 +68,36 @@ add_library(DriverUNV STATIC ${DriverUNV_SRC})
 target_link_libraries(DriverUNV PUBLIC SMDS SMESHDS Driver)
 target_include_directories(DriverUNV PUBLIC ${SMESH_SRC_DIR}/DriverUNV)
 
-# --- MEFISTO2 : 2D triangulator (aptrte.cxx + f2c trte.c vendored in extern/mefisto2) ---
+# --- MEFISTO2 : 2D triangulator. SALOME removed it after V9_9_0; aptrte.cxx and the f2c
+#     trte.c come from extern/mefisto2 (carried forward, see PROVENANCE.md), and
+#     prepare.py stages them where V9_9_0 kept them. StdMeshers_MEFISTO_2D.cxx is staged
+#     into StdMeshers/ and compiled by the StdMeshers glob below. ---
 file(GLOB MEFISTO2_SRC ${SMESH_SRC_DIR}/MEFISTO2/aptrte.cxx ${SMESH_SRC_DIR}/MEFISTO2/trte.c)
 add_library(MEFISTO2 STATIC ${MEFISTO2_SRC})
 target_link_libraries(MEFISTO2 PUBLIC Kernel)
 target_include_directories(MEFISTO2 PUBLIC ${SMESH_SRC_DIR}/MEFISTO2)
 
 # --- SMESH core (MG_ADAPT.cxx excluded: needs MeshGems) ---
+# New in V9_16_0 and compiled: SMESH_SequentialMesh (what SMESH_Gen::CreateMesh now
+# returns), SMESH_ParallelMesh (its compute throws on WIN32 upstream; never bound),
+# SMESH_MeshLocker, SMESH_DriverShape (STEP/BREP shape files: TKDESTEP, TKXSBase) and
+# SMESH_DriverMesh (MED files; its bodies are guarded by WITH_MED in SMESH_Mesh.patch).
 file(GLOB SMESH_SRC ${SMESH_SRC_DIR}/SMESH/*.cxx)
 list(REMOVE_ITEM SMESH_SRC "${SMESH_SRC_DIR}/SMESH/MG_ADAPT.cxx")
 add_library(SMESH STATIC ${SMESH_SRC})
 target_link_libraries(SMESH PUBLIC
     Kernel Geom Controls SMESHDS Driver DriverDAT DriverSTL DriverUNV DriverGMF
-    TKShHealing TKPrim TKG2d TKCDF
+    TKShHealing TKPrim TKG2d TKCDF TKDESTEP TKXSBase
     ${Boost_LIBRARIES})
 target_include_directories(SMESH PUBLIC ${SMESH_SRC_DIR}/SMESH)
 
 # --- StdMeshers : standard hypotheses/algorithms, incl. ViscousLayers ---
-# Complete since v2: Cartesian_3D, Import_1D2D, MaxElementVolume, MaxElementArea and
-# PolyhedronPerSolid_3D were excluded in v1 for MSVC C2036 —
-# SMESH::Controls::ElementsOnShape's *implicit* copy/move instantiated against an incomplete
-# nested Classifier. prepare.py's `_apply_tag_fixups` now declares those copy operations
-# out-of-line (defined in SMESH_Controls.cxx, where Classifier is complete), which is the fix
-# the v1 build comment named; with it the five translation units compile unmodified.
+# Complete: a plain file(GLOB) with no exclusion. v1 excluded Cartesian_3D, Import_1D2D,
+# MaxElementVolume, MaxElementArea and PolyhedronPerSolid_3D for MSVC C2036 (the implicit
+# copy of SMESH::Controls::ElementsOnShape against an incomplete nested Classifier). Since
+# V9_16_0 Classifier is a complete type in SMESH_ControlsClassifier.hxx, so they compile
+# unmodified. The glob also takes the 9.16 Cartesian_3D_Grid, _Hexahedron and _VL files,
+# StdMeshers_ViscousLayerBuilder, and the carried-forward StdMeshers_MEFISTO_2D.
 file(GLOB StdMeshers_SRC ${SMESH_SRC_DIR}/StdMeshers/*.cxx)
 add_library(StdMeshers STATIC ${StdMeshers_SRC})
 target_link_libraries(StdMeshers PUBLIC SMESH MEFISTO2 TKOffset TKExpress ${Boost_LIBRARIES})

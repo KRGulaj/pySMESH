@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -22,7 +22,23 @@
 //  File   : SMESHGUI.cxx
 //  Author : Nicolas REJNERI, Open CASCADE S.A.S.
 
+#include <Basics_OCCTVersion.hxx>
+
+#if OCC_VERSION_LARGE < 0x07080000
+
 #include <Standard_math.hxx>  // E.A. must be included before Python.h to fix compilation on windows
+
+#else
+
+#ifdef _MSC_VER
+#ifndef _USE_MATH_DEFINES
+#define _USE_MATH_DEFINES
+#endif
+#include <math.h>
+#endif
+
+#endif
+
 #ifdef HAVE_FINITE
 #undef HAVE_FINITE            // VSR: avoid compilation warning on Linux : "HAVE_FINITE" redefined
 #endif
@@ -65,10 +81,12 @@
 #include "SMESHGUI_MG_ADAPTDRIVER.h"
 #include "SMESHGUI_HomardAdaptDlg.h"
 #include "SMESHGUI_Make2DFrom3DOp.h"
+#include "SMESHGUI_MakeFull2DFrom3DOp.h"
 #include "SMESHGUI_MakeNodeAtPointDlg.h"
 #include "SMESHGUI_Measurements.h"
 #include "SMESHGUI_MergeDlg.h"
 #include "SMESHGUI_MeshInfo.h"
+#include "SMESHGUI_Meshio.h"
 #include "SMESHGUI_MeshOp.h"
 #include "SMESHGUI_MeshOrderOp.h"
 #include "SMESHGUI_MeshPatternDlg.h"
@@ -97,10 +115,15 @@
 #include "SMESHGUI_SymmetryDlg.h"
 #include "SMESHGUI_TranslationDlg.h"
 #include "SMESHGUI_TransparencyDlg.h"
+#include "SMESHGUI_CreateDualMeshDlg.h"
+#include "SMESHGUI_CreateDualMeshOp.h"
 #include "SMESHGUI_Utils.h"
 #include "SMESHGUI_VTKUtils.h"
 
 #include "SMESH_version.h"
+
+#include "SMESHDS_Mesh.hxx"
+#include "SMESH_Mesh.hxx"
 
 #include "SMESH_Actor.h"
 #include "SMESH_ActorUtils.h"
@@ -201,6 +224,8 @@ namespace
 
   void ExportMeshToFile(int theCommandID);
 
+  void ReloadMeshFromFile(int theCommandID);
+
   void SetDisplayMode(int theCommandID, VTK::MarkerMap& theMarkerMap);
 
   void SetDisplayEntity(int theCommandID);
@@ -210,6 +235,7 @@ namespace
   void Control( int theCommandID );
 
   // Definitions
+
   //================================================================================
   /*!
    * \brief Reads meshes from file
@@ -221,6 +247,7 @@ namespace
   {
     QStringList filter;
     std::string myExtension;
+    QString selectedFilter; 
 
     if ( theCommandID == SMESHOp::OpImportMED ||
          theCommandID == SMESHOp::OpPopupImportMED ) {
@@ -248,7 +275,30 @@ namespace
       filter.append( QObject::tr( "GMF_ASCII_FILES_FILTER" ) + " (*.mesh)"  );
       filter.append( QObject::tr( "GMF_BINARY_FILES_FILTER") + " (*.meshb)" );
     }
+    else if (theCommandID == SMESHOp::OpImportMESHIO) {
 
+      filter = SMESHGUI_Meshio::GetImportFileFilter();
+    }
+    else if ( theCommandID == SMESHOp::OpImportMAIL||
+              theCommandID == SMESHOp::OpPopupImportMAIL ) {
+      filter.append( QObject::tr( "MAIL_FILES_FILTER" ) + " (*.mail)" );
+    }
+    else if ( theCommandID == SMESHOp::OpImportINP ||
+      theCommandID == SMESHOp::OpPopupImportINP ) {
+        filter.append( QObject::tr( "INP_FILES_FILTER" ) + " (*.inp)" );
+      }
+    else if ( theCommandID == SMESHOp::OpImportCDB ||
+                  theCommandID == SMESHOp::OpPopupImportCDB ) {
+          filter.append( QObject::tr( "CDB_FILES_FILTER" ) + " (*.cdb)" );
+      }
+    else if ( theCommandID == SMESHOp::OpImportASC ||
+              theCommandID == SMESHOp::OpPopupImportASC ) {
+      filter.append( QObject::tr( "ASC_FILES_FILTER" ) + " (*.asc)" );
+      }
+    else if ( theCommandID == SMESHOp::OpImportGEOF ||
+              theCommandID == SMESHOp::OpPopupImportGEOF ) {
+      filter.append( QObject::tr( "GEOF_FILES_FILTER" ) + " (*.geof)" );
+      }
     QString anInitialPath = "";
     if ( SUIT_FileDlg::getLastVisitedPath().isEmpty() )
       anInitialPath = QDir::currentPath();
@@ -273,6 +323,7 @@ namespace
       filenames = SUIT_FileDlg::getOpenFileNames( SMESHGUI::desktop(),
                                                   anInitialPath,
                                                   filter,
+                                                  selectedFilter,
                                                   QObject::tr( "SMESH_IMPORT_MESH" ) );
     }
     if ( filenames.count() > 0 )
@@ -363,20 +414,88 @@ namespace
               }
               break;
             }
+          case SMESHOp::OpImportMESHIO:
+            {
+              if (!SMESHGUI_Meshio::IsConverterInstalled(SMESH_Meshio::GetConverterForExtension(selectedFilter)))
+                return;
+              aMeshes = SMESHGUI_Meshio::ImportMesh(theComponentMesh, filename, errors, selectedFilter);
+              break;
+            }
+          case SMESHOp::OpImportMAIL:
+          case SMESHOp::OpPopupImportMAIL:
+            {
+              // MAIL format
+              SMESH::DriverMED_ReadStatus res;
+              aMeshes = theComponentMesh->CreateMeshesFromMAIL( filename.toUtf8().constData(), res );
+              if ( res != SMESH::DRS_OK ) {
+                errors.append( QString( "%1 :\n\t%2" ).arg( filename ).
+                               arg( QObject::tr( QString( "SMESH_DRS_%1" ).arg( res ).toLatin1().data() ) ) );
+              }
+              break;
+            }
+          case SMESHOp::OpImportINP:
+          case SMESHOp::OpPopupImportINP:
+            {
+              // INP format
+              SMESH::DriverMED_ReadStatus res;
+              aMeshes = theComponentMesh->CreateMeshesFromINP( filename.toUtf8().constData(), res );
+              if ( res != SMESH::DRS_OK ) {
+                errors.append( QString( "%1 :\n\t%2" ).arg( filename ).
+                               arg( QObject::tr( QString( "SMESH_DRS_%1" ).arg( res ).toLatin1().data() ) ) );
+              }
+              break;
+            }
+          case SMESHOp::OpImportCDB:
+          case SMESHOp::OpPopupImportCDB:
+            {
+              // INP format
+              SMESH::DriverMED_ReadStatus res;
+              aMeshes = theComponentMesh->CreateMeshesFromCDB( filename.toUtf8().constData(), res );
+              if ( res != SMESH::DRS_OK ) {
+                errors.append( QString( "%1 :\n\t%2" ).arg( filename ).
+                               arg( QObject::tr( QString( "SMESH_DRS_%1" ).arg( res ).toLatin1().data() ) ) );
+              }
+              break;
+            }
+          case SMESHOp::OpImportASC:
+          case SMESHOp::OpPopupImportASC:
+            {
+              // INP format
+              SMESH::DriverMED_ReadStatus res;
+              aMeshes = theComponentMesh->CreateMeshesFromASC( filename.toUtf8().constData(), res );
+              if ( res != SMESH::DRS_OK ) {
+                errors.append( QString( "%1 :\n\t%2" ).arg( filename ).
+                               arg( QObject::tr( QString( "SMESH_DRS_%1" ).arg( res ).toLatin1().data() ) ) );
+              }
+              break;
+            }
+          case SMESHOp::OpImportGEOF:
+          case SMESHOp::OpPopupImportGEOF:
+            {
+              // INP format
+              SMESH::DriverMED_ReadStatus res;
+              aMeshes = theComponentMesh->CreateMeshesFromGEOF( filename.toUtf8().constData(), res );
+              if ( res != SMESH::DRS_OK ) {
+                errors.append( QString( "%1 :\n\t%2" ).arg( filename ).
+                               arg( QObject::tr( QString( "SMESH_DRS_%1" ).arg( res ).toLatin1().data() ) ) );
+              }
+              break;
+            }
           }
         }
         catch ( const SALOME::SALOME_Exception& S_ex ) {
-          errors.append( QString( "%1 :\n\t%2" ).arg( filename ).
-                         arg( QObject::tr( "SMESH_ERR_UNKNOWN_IMPORT_ERROR" ) ) );
+          const QString exText(S_ex.details.text);
+          if (exText.startsWith("External Converter"))
+            errors.append('\n' + exText);
+          else
+            errors.append( QString( "%1 :\n\n%2 \n\n\t%3" ).arg( filename ).arg(exText).
+                          arg( QObject::tr( "SMESH_ERR_UNKNOWN_IMPORT_ERROR" ) ) );
         }
 
         for ( int i = 0, iEnd = aMeshes->length(); i < iEnd; i++ )
         {
           _PTR(SObject) aMeshSO = SMESH::FindSObject( aMeshes[i] );
           if ( aMeshSO ) {
-            _PTR(StudyBuilder) aBuilder = aStudy->NewBuilder();
-            _PTR(AttributePixMap) aPixmap = aBuilder->FindOrCreateAttribute( aMeshSO, "AttributePixMap" );
-            aPixmap->SetPixMap( "ICON_SMESH_TREE_MESH_IMPORTED" );
             if ( theCommandID == SMESHOp::OpImportUNV ) // mesh names aren't taken from the file for UNV import
               SMESH::SetName( aMeshSO, QFileInfo(filename).fileName() );
 
@@ -437,8 +556,14 @@ namespace
                          theCommandID == SMESHOp::OpPopupExportCGNS );
     const bool isGMF = ( theCommandID == SMESHOp::OpExportGMF ||
                          theCommandID == SMESHOp::OpPopupExportGMF );
+    const bool isMESHIO = (theCommandID == SMESHOp::OpExportMESHIO);
 
-    const bool multiMeshSupported = ( isMED || isCGNS ); // file can hold several meshes
+    // if (isMESHIO && !SMESHGUI_Meshio::IsMeshioInstalled())
+    // {
+    //   return;
+    // }
+
+    const bool multiMeshSupported = isMED || isCGNS || isMESHIO; // file can hold several meshes
     if ( selected.Extent() == 0 || ( selected.Extent() > 1 && !multiMeshSupported ))
       return;
     SUIT_ResourceMgr* resMgr = SUIT_Session::session()->resourceMgr();
@@ -514,7 +639,7 @@ namespace
     SMESH::SMESH_Mesh_var            aMesh = aMeshOrGroup->GetMesh();
     QString                      aMeshName = (*aMeshIter).second;
 
-    if ( isMED || isCGNS ) // formats where group names must be unique
+    if (isMED || isCGNS || isMESHIO) // formats where group names must be unique
     {
       // check for equal group names within each mesh
       for( aMeshIter = aMeshList.begin(); aMeshIter != aMeshList.end(); aMeshIter++ ) {
@@ -548,7 +673,6 @@ namespace
       notSupportedElemTypes.push_back( SMESH::Entity_Quad_Polygon );
       notSupportedElemTypes.push_back( SMESH::Entity_Polyhedra );
       notSupportedElemTypes.push_back( SMESH::Entity_Quad_Polyhedra );
-      notSupportedElemTypes.push_back( SMESH::Entity_Pyramid );
       notSupportedElemTypes.push_back( SMESH::Entity_Hexagonal_Prism );
       notSupportedElemTypes.push_back( SMESH::Entity_0D );
       notSupportedElemTypes.push_back( SMESH::Entity_Ball );
@@ -624,6 +748,7 @@ namespace
     // Get parameters of export operation
 
     QString aFilename;
+    QString aSelectedFilter; // for meshio to get a filter selected by user
     int aFormat =-1;         // for MED version used for write
     bool isOkToWrite = true; // to check MED file version compatibility before adding a mesh in an existing file
 
@@ -634,6 +759,7 @@ namespace
     bool   toFindOutDim = true;
     bool    saveNumbers = resMgr->booleanValue( "SMESH", "med_save_numbers", true );
     bool     toRenumber = true;
+    bool  structureCGNS = false;
     double         zTol = resMgr->doubleValue( "SMESH", "med_ztolerance", 0. );
 
     QString aFilter, aTitle = QObject::tr("SMESH_EXPORT_MESH");
@@ -654,20 +780,51 @@ namespace
                                             anInitialPath + QString("/") + aMeshName,
                                             aFilter, aTitle, false);
     }
-    else if ( isCGNS || isUNV || isDAT ) // Export to [ CGNS | UNV | DAT ] - one option
+    else if ( isCGNS )
     {
-      const char* theOptionResource = isCGNS ? "cgns_group_elems_by_type" : "export_renumber";
+      const char* theOptionResource = "cgns_group_elems_by_type";
       bool option = resMgr->booleanValue( "SMESH", theOptionResource, false );
 
       QStringList checkBoxes;
-      checkBoxes << QObject::tr( isCGNS ? "CGNS_EXPORT_ELEMS_BY_TYPE" : "SMESH_RENUMBER" );
+      checkBoxes << QObject::tr( "CGNS_EXPORT_ELEMS_BY_TYPE" ) << QObject::tr("STRUCTUREDCGNS");
+
+      SalomeApp_CheckFileDlg* fd = new SalomeApp_CheckFileDlg ( SMESHGUI::desktop(), false, checkBoxes, true, true );
+
+      fd->setWindowTitle( aTitle );
+      fd->setNameFilter( QObject::tr( "CGNS_FILES_FILTER" ) + " (*.cgns)" );
+
+      if ( !anInitialPath.isEmpty() )
+        fd->setDirectory( anInitialPath );
+      fd->selectFile( aMeshName );
+      SMESHGUI_FileValidator* fv = new SMESHGUI_FileValidator( fd );
+      fd->setValidator( fv );
+      fd->SetChecked( option, 0 );
+
+      if ( fd->exec() )
+      {
+        aFilename     = fd->selectedFile();
+        structureCGNS = fd->IsChecked( 1 );
+      }
+
+      toOverwrite = fv->isOverwrite( aFilename );
+      option      = fd->IsChecked( 0 );
+      SMESHGUI::resourceMgr()->setValue("SMESH", theOptionResource, option );
+      toCreateGroups = option;
+
+      delete fd;
+    }
+    else if ( isUNV || isDAT ) // Export to [ UNV | DAT ] - one option
+    {
+      const char* theOptionResource = "export_renumber";
+      bool option = resMgr->booleanValue( "SMESH", theOptionResource, false );
+
+      QStringList checkBoxes;
+      checkBoxes << QObject::tr( "SMESH_RENUMBER" );
 
       SalomeApp_CheckFileDlg* fd =
         new SalomeApp_CheckFileDlg ( SMESHGUI::desktop(), false, checkBoxes, true, true );
       fd->setWindowTitle( aTitle );
-      if ( isCGNS )
-        fd->setNameFilter( QObject::tr( "CGNS_FILES_FILTER" ) + " (*.cgns)" );
-      else if ( isUNV )
+      if ( isUNV )
         fd->setNameFilter( QObject::tr( "IDEAS_FILES_FILTER" ) + " (*.unv)" );
       else if ( isDAT )
         fd->setNameFilter( QObject::tr( "DAT_FILES_FILTER" ) + " (*.dat)" );
@@ -683,17 +840,17 @@ namespace
       toOverwrite    = fv->isOverwrite( aFilename );
       option = fd->IsChecked( 0 );
       SMESHGUI::resourceMgr()->setValue("SMESH", theOptionResource, option );
-      ( isCGNS ? toCreateGroups : toRenumber ) = option;
+      toRenumber = option;
 
       delete fd;
     }
     else if ( isSTL ) // Export to STL
     {
       QMap<QString, int> aFilterMap;
+      QStringList filters;
       aFilterMap.insert( QObject::tr( "STL_ASCII_FILES_FILTER" ) + " (*.stl)", 1 );
       aFilterMap.insert( QObject::tr( "STL_BIN_FILES_FILTER" )   + " (*.stl)", 0 );
 
-      QStringList filters;
       QMap<QString, int>::const_iterator it = aFilterMap.begin();
       for ( ; it != aFilterMap.end(); ++it )
         filters.push_back( it.key() );
@@ -701,7 +858,7 @@ namespace
       SUIT_FileDlg* fd = new SUIT_FileDlg( SMESHGUI::desktop(), false, true, true );
       fd->setWindowTitle( aTitle );
       fd->setNameFilters( filters );
-      fd->selectNameFilter( QObject::tr( "STL_ASCII_FILES_FILTER" ) + " (*.stl)" );
+
       if ( !anInitialPath.isEmpty() )
         fd->setDirectory( anInitialPath );
       fd->selectFile(aMeshName);
@@ -709,7 +866,8 @@ namespace
       while (!is_ok) {
         if ( fd->exec() )
           aFilename = fd->selectedFile();
-        aIsASCII_STL = (aFilterMap[fd->selectedNameFilter()]) == 1 ? true: false;
+        if ( isSTL )
+          aIsASCII_STL = (aFilterMap[fd->selectedNameFilter()]) == 1 ? true: false;
         is_ok = true;
       }
       delete fd;
@@ -869,6 +1027,14 @@ namespace
         delete zTolWdg;
       delete fd;
     }
+    else if (isMESHIO)
+    {
+      if (SMESHGUI_Meshio::CheckMeshCount(aMeshList))
+      {
+        aFilename = SMESHGUI_Meshio::GetFileName(aSelectedFilter);
+        MESSAGE("aSelectedFilter: " << aSelectedFilter.toStdString());
+      }
+    }
     else
     {
       return;
@@ -936,14 +1102,21 @@ namespace
         else if ( isCGNS )
         {
           aMeshIter = aMeshList.begin();
+
           for( int aMeshIndex = 0; aMeshIter != aMeshList.end(); aMeshIter++, aMeshIndex++ )
           {
             SMESH::SMESH_IDSource_var aMeshOrGroup = (*aMeshIter).first;
             SMESH::SMESH_Mesh_var        aMeshItem = aMeshOrGroup->GetMesh();
-            aMeshItem->ExportCGNS( aMeshOrGroup,
-                                   aFilename.toUtf8().data(),
-                                   toOverwrite && aMeshIndex == 0,
-                                   toCreateGroups );
+
+            if ( !structureCGNS )
+              aMeshItem->ExportCGNS( aMeshOrGroup,
+                                    aFilename.toUtf8().data(),
+                                    toOverwrite && aMeshIndex == 0,
+                                    toCreateGroups );
+            else
+              aMeshItem->ExportStructuredCGNS( aMeshOrGroup,
+                                                aFilename.toUtf8().data(),
+                                                toOverwrite && aMeshIndex == 0 );
           }
         }
         else if ( isGMF )
@@ -951,23 +1124,119 @@ namespace
           toCreateGroups = true;
           aMesh->ExportGMF( aMeshOrGroup, aFilename.toUtf8().data(), toCreateGroups );
         }
+        else if (isMESHIO)
+        {
+          SMESHGUI_Meshio::ExportMesh(aMeshList, aFilename, aSelectedFilter);
+        }
       }
       catch (const SALOME::SALOME_Exception& S_ex)
       {
         wc.suspend();
+        const QString exText(S_ex.details.text);
+
         if ( S_ex.details.type == SALOME::COMM && // communicate about too large mesh
              strncmp( "format=", S_ex.details.sourceFile.in(), 7 ) == 0 )
 
           SUIT_MessageBox::critical(SMESHGUI::desktop(),
                                     QObject::tr("SMESH_WRN_WARNING"),
                                     QObject::tr(S_ex.details.text.in() ));
-        else
+        else if (exText.startsWith("External Converter"))
+        {
+          SUIT_MessageBox::warning(SMESHGUI::desktop(),
+                                   QObject::tr("SMESH_WRN_WARNING"),
+                                   QObject::tr("SMESH_EXPORT_FAILED_SHORT") + "\n\n" + exText);
+        }
+        else if ( isMED )
+        {
           SUIT_MessageBox::warning(SMESHGUI::desktop(),
                                    QObject::tr("SMESH_WRN_WARNING"),
                                    QObject::tr("SMESH_EXPORT_FAILED") + SalomeApp_Tools::ExceptionToString(S_ex));
+        }
+        else
+          SUIT_MessageBox::warning(SMESHGUI::desktop(),
+                                   QObject::tr("SMESH_WRN_WARNING"),
+                                   SalomeApp_Tools::ExceptionToString(S_ex));
         wc.resume();
       }
     }
+  }
+
+  //================================================================================
+  /*!
+   * \brief Reload selected mesh from file a file
+   */
+   //================================================================================
+  void ReloadMeshFromFile(int theCommandID)
+  {
+    LightApp_SelectionMgr* aSel = SMESHGUI::selectionMgr();
+    SALOME_ListIO selected;
+    if (aSel)
+      aSel->selectedObjects(selected);
+
+    QList< QPair< SMESH::SMESH_IDSource_var, QString > >           aMeshList;
+    QList< QPair< SMESH::SMESH_IDSource_var, QString > >::iterator aMeshIter;
+    SALOME_ListIteratorOfListIO It(selected);
+
+    // Iterate by all selected
+    for (; It.More(); It.Next())
+    {
+      Handle(SALOME_InteractiveObject) anIObject = It.Value();
+      SMESH::SMESH_IDSource_var aMeshItem =
+        SMESH::IObjectToInterface<SMESH::SMESH_IDSource>(anIObject);
+      
+      if (aMeshItem->_is_nil()) {
+        SUIT_MessageBox::warning(SMESHGUI::desktop(),
+          QObject::tr("SMESH_WRN_WARNING"),
+          QObject::tr("SMESH_BAD_MESH_SELECTION"));
+        continue;
+      }
+
+      SMESH::SMESH_Mesh_var aMeshByIO = SMESH::GetMeshByIO(anIObject);
+      SMESH::SelectionProxy aMesh = SMESH::SelectionProxy(aMeshItem);
+      SMESH::MedInfo anInfo = aMesh.medFileInfo();
+      if (!anInfo.isValid())
+        continue;
+
+      SMESH::ListOfGroups aGroups = *aMeshByIO->GetGroups();
+      for (int i = 0; i < aGroups.length(); ++i)
+      {
+        auto X = aGroups[i];
+        _PTR(SObject) aGroupSObject = SMESH::FindSObject(X);
+        SMESH_Actor* anActor = SMESH::FindActorByEntry(aGroupSObject->GetID().c_str());
+        SMESH::smIdType_array aMeshInfo = *X->GetMeshInfo();
+        
+        if (anActor)
+        {
+          vtkTypeBool isVisib = anActor->GetVisibility();
+          SMESH::UpdateView(!isVisib ? SMESH::eDisplay : SMESH::eErase, aGroupSObject->GetID().c_str());
+        }
+        else
+          SMESH::UpdateView(SMESH::eErase, aGroupSObject->GetID().c_str());
+      }
+
+      SMESH::mesh_array_var aMeshes = new SMESH::mesh_array;
+      {
+        // re-import mesh
+        SMESH::SMESH_Mesh_var aReloadedMesh = SMESHGUI::GetSMESHGen()->ReloadMeshFromFile(aMeshByIO);
+
+        QStringList anEntryList;
+
+        _PTR(SObject) aMeshSO = SMESH::FindSObject(aReloadedMesh);
+        if (aMeshSO) {
+          anEntryList.append(aMeshSO->GetID().c_str());
+        }
+        SMESHGUI::GetSMESHGUI()->updateObjBrowser();
+        if (LightApp_Application* anApp =
+          dynamic_cast<LightApp_Application*>(SUIT_Session::session()->activeApplication()))
+          anApp->browseObjects(anEntryList);
+      }
+
+      SMESH::SMESH_GroupBase_var aGroup = SMESH::SMESH_GroupBase::_narrow(aMeshItem);
+      QString aMeshName = anIObject->getName();
+      aMeshList.append(QPair< SMESH::SMESH_IDSource_var, QString >(aMeshItem, aMeshName));
+
+    }
+    SMESH::UpdateView();
   }
 
   inline void InverseEntityMode(unsigned int& theOutputMode,
@@ -1118,6 +1387,8 @@ namespace
       type = QObject::tr( "ASPECTRATIO_3D_ELEMENTS" );
     else if ( dynamic_cast< SMESH::Controls::Warping* >( f.get() ) )
       type = QObject::tr( "WARP_ELEMENTS" );
+    else if (dynamic_cast<SMESH::Controls::Warping3D*>(f.get()))
+      type = QObject::tr("WARP_3D_ELEMENTS");
     else if ( dynamic_cast< SMESH::Controls::Taper* >( f.get() ) )
       type = QObject::tr( "TAPER_ELEMENTS" );
     else if ( dynamic_cast< SMESH::Controls::Skew* >( f.get() ) )
@@ -1160,6 +1431,8 @@ namespace
       type = QObject::tr( "EQUAL_VOLUME" );
     else if ( dynamic_cast< SMESH::Controls::NodeConnectivityNumber* >( f.get() ) )
       type = QObject::tr( "NODE_CONNECTIVITY_NB" );
+    else if ( dynamic_cast< SMESH::Controls::ScaledJacobian* >( f.get() ) )
+      type = QObject::tr( "SCALED_JACOBIAN" );
     return type;
   }
 
@@ -1775,7 +2048,9 @@ namespace
     ActionControl.Bind( SMESHOp::OpMaxElementLength2D,    SMESH_Actor::eMaxElementLength2D );
     ActionControl.Bind( SMESHOp::OpEqualFace,             SMESH_Actor::eCoincidentElems2D );
     ActionControl.Bind( SMESHOp::OpAspectRatio3D,         SMESH_Actor::eAspectRatio3D );
+    ActionControl.Bind( SMESHOp::OpWarping3D,             SMESH_Actor::eWarping3D );
     ActionControl.Bind( SMESHOp::OpVolume,                SMESH_Actor::eVolume3D );
+    ActionControl.Bind( SMESHOp::OpScaledJacobian,        SMESH_Actor::eScaledJacobian );
     ActionControl.Bind( SMESHOp::OpMaxElementLength3D,    SMESH_Actor::eMaxElementLength3D );
     ActionControl.Bind( SMESHOp::OpBareBorderVolume,      SMESH_Actor::eBareBorderVolume );
     ActionControl.Bind( SMESHOp::OpOverConstrainedVolume, SMESH_Actor::eOverConstrainedVolume );
@@ -2142,7 +2417,7 @@ SMESHGUI::SMESHGUI() : SalomeApp_Module( "SMESH" )
   {
     CORBA::Boolean anIsEmbeddedMode;
     myComponentSMESH = SMESH_Client::GetSMESHGen(getApp()->orb(),anIsEmbeddedMode);
-     
+
     //MESSAGE("-------------------------------> anIsEmbeddedMode=" << anIsEmbeddedMode);
 
     //  0019923: EDF 765 SMESH : default values of hypothesis
@@ -2551,6 +2826,7 @@ bool SMESHGUI::OnGUIEvent( int theCommandID )
   SVTK_ViewWindow* vtkwnd = dynamic_cast<SVTK_ViewWindow*>( view );
 
   //QAction* act = action( theCommandID );
+  bool logAction(false);
 
   switch (theCommandID) {
   case SMESHOp::OpDelete:
@@ -2563,18 +2839,34 @@ bool SMESHGUI::OnGUIEvent( int theCommandID )
   case SMESHOp::OpImportSTL:
   case SMESHOp::OpImportCGNS:
   case SMESHOp::OpImportGMF:
+  case SMESHOp::OpImportMESHIO:
+  case SMESHOp::OpImportMAIL:
+  case SMESHOp::OpImportINP:
+  case SMESHOp::OpImportCDB:
+  case SMESHOp::OpImportASC:
+  case SMESHOp::OpImportGEOF:
   case SMESHOp::OpPopupImportDAT:
   case SMESHOp::OpPopupImportUNV:
   case SMESHOp::OpPopupImportMED:
   case SMESHOp::OpPopupImportSTL:
   case SMESHOp::OpPopupImportCGNS:
   case SMESHOp::OpPopupImportGMF:
+  case SMESHOp::OpPopupImportMAIL:
+  case SMESHOp::OpPopupImportINP:
+  case SMESHOp::OpPopupImportCDB:
+  case SMESHOp::OpPopupImportASC:
+  case SMESHOp::OpPopupImportGEOF:
     {
       if(isStudyLocked()) break;
       ::ImportMeshesFromFile(GetSMESHGen(),theCommandID);
       break;
     }
-
+  case SMESHOp::OpReloadFromFile:
+  {
+    if (isStudyLocked()) break;
+    ::ReloadMeshFromFile(theCommandID);
+    break;
+  }
   case SMESHOp::OpFileInformation:
     {
       SALOME_ListIO selected;
@@ -2599,6 +2891,7 @@ bool SMESHGUI::OnGUIEvent( int theCommandID )
   case SMESHOp::OpExportSTL:
   case SMESHOp::OpExportCGNS:
   case SMESHOp::OpExportGMF:
+  case SMESHOp::OpExportMESHIO:
   case SMESHOp::OpPopupExportDAT:
   case SMESHOp::OpPopupExportMED:
   case SMESHOp::OpPopupExportUNV:
@@ -2868,6 +3161,7 @@ bool SMESHGUI::OnGUIEvent( int theCommandID )
     break;
   case SMESHOp::OpCopyMesh:
     {
+      logAction = true;
       if (isStudyLocked()) break;
       EmitSignalDeactivateDialog();
       ( new SMESHGUI_CopyMeshDlg( this ) )->show();
@@ -3051,7 +3345,9 @@ bool SMESHGUI::OnGUIEvent( int theCommandID )
   // Adaptation - end
   case SMESHOp::OpSplitBiQuadratic:
   case SMESHOp::OpConvertMeshToQuadratic:
+  case SMESHOp::OpCreateDualMesh:
   case SMESHOp::OpCreateBoundaryElements: // create 2D mesh from 3D
+  case SMESHOp::OpCreate2DElements: // create full 2D mesh from 3D
   case SMESHOp::OpReorientFaces:
   case SMESHOp::OpCreateGeometryGroup:
     {
@@ -3363,7 +3659,6 @@ bool SMESHGUI::OnGUIEvent( int theCommandID )
       }
       break;
     }
-
   case SMESHOp::OpFindElementByPoint:
     {
       startOperation( theCommandID );
@@ -3691,6 +3986,7 @@ bool SMESHGUI::OnGUIEvent( int theCommandID )
     }
   case SMESHOp::OpTranslation:
     {
+      logAction = true;
       if(isStudyLocked()) break;
       if ( warnOnGeomModif() )
         break; // action forbidden as geometry modified
@@ -3706,6 +4002,7 @@ bool SMESHGUI::OnGUIEvent( int theCommandID )
     }
   case SMESHOp::OpRotation:
     {
+      logAction = true;
       if(isStudyLocked()) break;
       if ( warnOnGeomModif() )
         break; // action forbidden as geometry modified
@@ -3721,6 +4018,7 @@ bool SMESHGUI::OnGUIEvent( int theCommandID )
     }
   case SMESHOp::OpSymmetry:
     {
+      logAction = true;
       if(isStudyLocked()) break;
       if ( warnOnGeomModif() )
         break; // action forbidden as geometry modified
@@ -3736,6 +4034,7 @@ bool SMESHGUI::OnGUIEvent( int theCommandID )
     }
   case SMESHOp::OpScale:
     {
+      logAction = true;
       if(isStudyLocked()) break;
       if ( warnOnGeomModif() )
         break; // action forbidden as geometry modified
@@ -3752,6 +4051,7 @@ bool SMESHGUI::OnGUIEvent( int theCommandID )
 
   case SMESHOp::OpOffset:
     {
+      logAction = true;
       if(isStudyLocked()) break;
       if ( warnOnGeomModif() )
         break; // action forbidden as geometry modified
@@ -3768,6 +4068,7 @@ bool SMESHGUI::OnGUIEvent( int theCommandID )
 
   case SMESHOp::OpSewing:
     {
+      logAction = true;
       if(isStudyLocked()) break;
       if ( warnOnGeomModif() )
         break; // action forbidden as geometry modified
@@ -3898,7 +4199,9 @@ bool SMESHGUI::OnGUIEvent( int theCommandID )
   case SMESHOp::OpMaxElementLength2D:
   case SMESHOp::OpEqualFace:
   case SMESHOp::OpAspectRatio3D:
+  case SMESHOp::OpWarping3D:
   case SMESHOp::OpVolume:
+  case SMESHOp::OpScaledJacobian:
   case SMESHOp::OpMaxElementLength3D:
   case SMESHOp::OpBareBorderVolume:
   case SMESHOp::OpOverConstrainedVolume:
@@ -3995,6 +4298,14 @@ bool SMESHGUI::OnGUIEvent( int theCommandID )
 
   anApp->updateActions(); //SRN: To update a Save button in the toolbar
   //updateObjBrowser();
+  if(logAction)
+  {
+    QAction* anAction = action( theCommandID );
+    CAM_Application::logStructuredUserEvent( "Mesh",
+                                             "Operation",
+                                             anAction->text(),
+                                             "activated" );
+  }
   return true;
 }
 
@@ -4119,13 +4430,24 @@ void SMESHGUI::initialize( CAM_Application* app )
   createSMESHAction( SMESHOp::OpImportUNV, "IMPORT_UNV", "", (Qt::CTRL+Qt::Key_I) );
   createSMESHAction( SMESHOp::OpImportMED, "IMPORT_MED", "", (Qt::CTRL+Qt::Key_M) );
   createSMESHAction( SMESHOp::OpImportSTL, "IMPORT_STL"  );
+  createSMESHAction( SMESHOp::OpImportMAIL, "IMPORT_MAIL" );
+  createSMESHAction( SMESHOp::OpImportINP, "IMPORT_INP" );
+  createSMESHAction( SMESHOp::OpImportCDB, "IMPORT_CDB" );
+  createSMESHAction( SMESHOp::OpImportASC, "IMPORT_ASC" );
+  createSMESHAction( SMESHOp::OpImportGEOF, "IMPORT_GEOF" );
 #ifdef WITH_CGNS
   createSMESHAction( SMESHOp::OpImportCGNS, "IMPORT_CGNS" );
 #endif
   createSMESHAction( SMESHOp::OpImportGMF,  "IMPORT_GMF"  );
+  createSMESHAction( SMESHOp::OpImportMESHIO,  "IMPORT_MESHIO" );
   createSMESHAction( SMESHOp::OpPopupImportUNV, "IMPORT_UNV");
   createSMESHAction( SMESHOp::OpPopupImportMED, "IMPORT_MED");
   createSMESHAction( SMESHOp::OpPopupImportSTL, "IMPORT_STL"  );
+  createSMESHAction( SMESHOp::OpPopupImportMAIL, "IMPORT_MAIL");
+  createSMESHAction( SMESHOp::OpPopupImportINP, "IMPORT_INP");
+  createSMESHAction( SMESHOp::OpPopupImportCDB, "IMPORT_CDB");
+  createSMESHAction( SMESHOp::OpPopupImportASC, "IMPORT_ASC");
+  createSMESHAction( SMESHOp::OpPopupImportGEOF, "IMPORT_GEOF");
 #ifdef WITH_CGNS
   createSMESHAction( SMESHOp::OpPopupImportCGNS, "IMPORT_CGNS" );
 #endif
@@ -4139,6 +4461,7 @@ void SMESHGUI::initialize( CAM_Application* app )
   createSMESHAction( SMESHOp::OpExportCGNS, "CGNS");
 #endif
   createSMESHAction( SMESHOp::OpExportGMF,      "GMF" );
+  createSMESHAction( SMESHOp::OpExportMESHIO,   "EXPORT_MESHIO" );
   createSMESHAction( SMESHOp::OpPopupExportDAT, "DAT" );
   createSMESHAction( SMESHOp::OpPopupExportMED, "MED" );
   createSMESHAction( SMESHOp::OpPopupExportUNV, "UNV" );
@@ -4181,6 +4504,7 @@ void SMESHGUI::initialize( CAM_Application* app )
   //createSMESHAction( SMESHOp::OpStdInfo, "STD_INFO",        "ICON_STD_INFO" );
   //createSMESHAction( SMESHOp::OpWhatIs, "WHAT_IS",         "ICON_WHAT_IS" ); // VSR: issue #0021242 (eliminate "Mesh Element Information" command)
   createSMESHAction( SMESHOp::OpFindElementByPoint,   "FIND_ELEM",               "ICON_FIND_ELEM" );
+  createSMESHAction( SMESHOp::OpReloadFromFile,       "RELOAD_FROM_FILE");
   //update
   createSMESHAction( SMESHOp::OpFreeNode,              "FREE_NODE",               "ICON_FREE_NODE",     0, true );
   createSMESHAction( SMESHOp::OpEqualNode,             "EQUAL_NODE",              "ICON_EQUAL_NODE",    0, true );
@@ -4205,11 +4529,13 @@ void SMESHGUI::initialize( CAM_Application* app )
   createSMESHAction( SMESHOp::OpMaxElementLength2D,    "MAX_ELEMENT_LENGTH_2D",   "ICON_MAX_ELEMENT_LENGTH_2D",   0, true );
   createSMESHAction( SMESHOp::OpEqualFace,             "EQUAL_FACE",              "ICON_EQUAL_FACE",    0, true );
   createSMESHAction( SMESHOp::OpAspectRatio3D,         "ASPECT_3D",               "ICON_ASPECT_3D",     0, true );
+  createSMESHAction( SMESHOp::OpWarping3D,             "WARP_3D",                 "ICON_WARP",          0, true);
   createSMESHAction( SMESHOp::OpVolume,                "VOLUME_3D",               "ICON_VOLUME_3D",     0, true );
   createSMESHAction( SMESHOp::OpMaxElementLength3D,    "MAX_ELEMENT_LENGTH_3D",   "ICON_MAX_ELEMENT_LENGTH_3D",   0, true );
   createSMESHAction( SMESHOp::OpBareBorderVolume,      "BARE_BORDER_VOLUME",      "ICON_BARE_BORDER_VOLUME",      0, true );
   createSMESHAction( SMESHOp::OpOverConstrainedVolume, "OVER_CONSTRAINED_VOLUME", "ICON_OVER_CONSTRAINED_VOLUME", 0, true );
   createSMESHAction( SMESHOp::OpEqualVolume,           "EQUAL_VOLUME",            "ICON_EQUAL_VOLUME",  0, true );
+  createSMESHAction( SMESHOp::OpScaledJacobian,        "SCALED_JACOBIAN",         "ICON_SCALED_JACOBIAN",         0, true );
   createSMESHAction( SMESHOp::OpOverallMeshQuality,    "OVERALL_MESH_QUALITY",    "ICON_OVL_MESH_QUALITY" );
 
   createSMESHAction( SMESHOp::OpNode,                   "NODE",            "ICON_DLG_NODE" );
@@ -4275,7 +4601,9 @@ void SMESHGUI::initialize( CAM_Application* app )
   createSMESHAction( SMESHOp::OpRevolution,             "REVOLUTION",      "ICON_REVOLUTION" );
   createSMESHAction( SMESHOp::OpPatternMapping,         "MAP",             "ICON_MAP" );
   createSMESHAction( SMESHOp::OpConvertMeshToQuadratic, "CONV_TO_QUAD",    "ICON_CONV_TO_QUAD" );
+  createSMESHAction( SMESHOp::OpCreateDualMesh,         "CREATE_DUAL_MESH","ICON_CREATE_DUAL_MESH" );
   createSMESHAction( SMESHOp::OpCreateBoundaryElements, "2D_FROM_3D",      "ICON_2D_FROM_3D" );
+  createSMESHAction( SMESHOp::OpCreate2DElements,    "2D_FROM_3D_ELEMENTS","ICON_2D_FROM_3D_ELEMENTS" );
 
   createSMESHAction( SMESHOp::OpReset,               "RESET" );
   createSMESHAction( SMESHOp::OpScalarBarProperties, "SCALAR_BAR_PROP" );
@@ -4347,9 +4675,9 @@ void SMESHGUI::initialize( CAM_Application* app )
                << SMESHOp::OpMinimumAngle << SMESHOp::OpWarpingAngle << SMESHOp::OpSkew
                << SMESHOp::OpMaxElementLength2D << SMESHOp::OpBareBorderFace
                << SMESHOp::OpOverConstrainedFace << SMESHOp::OpEqualFace                // face controls
-               << SMESHOp::OpAspectRatio3D << SMESHOp::OpVolume
+               << SMESHOp::OpAspectRatio3D << SMESHOp::OpVolume << SMESHOp::OpWarping3D
                << SMESHOp::OpMaxElementLength3D << SMESHOp::OpBareBorderVolume
-               << SMESHOp::OpOverConstrainedVolume << SMESHOp::OpEqualVolume;           // volume controls
+               << SMESHOp::OpOverConstrainedVolume << SMESHOp::OpEqualVolume << SMESHOp::OpScaledJacobian; // volume controls
   QActionGroup* aCtrlGroup = new QActionGroup( application()->desktop() );
   aCtrlGroup->setExclusive( true );
   for( int i = 0; i < aCtrlActions.size(); i++ )
@@ -4384,14 +4712,23 @@ void SMESHGUI::initialize( CAM_Application* app )
       transfId = createMenu( tr( "MEN_TRANSF" ), modifyId, 405 ),
       basicPropId = createMenu( tr( "MEN_BASIC_PROPERTIES" ), measureId, -1, 10 );
 
+  // Import menu
   //createMenu( SMESHOp::OpImportDAT, importId, -1 );
   createMenu( SMESHOp::OpImportUNV,  importId, -1 );
   createMenu( SMESHOp::OpImportMED,  importId, -1 );
   createMenu( SMESHOp::OpImportSTL,  importId, -1 );
+  createMenu( SMESHOp::OpImportMAIL,  importId, -1 );
+  createMenu( SMESHOp::OpImportINP,  importId, -1 );
+  createMenu( SMESHOp::OpImportCDB,  importId, -1 );
+  createMenu( SMESHOp::OpImportASC,  importId, -1 );
+  createMenu( SMESHOp::OpImportGEOF,  importId, -1 );
 #ifdef WITH_CGNS
   createMenu( SMESHOp::OpImportCGNS, importId, -1 );
 #endif
   createMenu( SMESHOp::OpImportGMF,  importId, -1 );
+  createMenu( SMESHOp::OpImportMESHIO,  importId, -1 ); // formats supported by meshio lib
+
+  // Export menu
   createMenu( SMESHOp::OpExportDAT,  exportId, -1 );
   createMenu( SMESHOp::OpExportMED,  exportId, -1 );
   createMenu( SMESHOp::OpExportUNV,  exportId, -1 );
@@ -4400,6 +4737,7 @@ void SMESHGUI::initialize( CAM_Application* app )
   createMenu( SMESHOp::OpExportCGNS, exportId, -1 );
 #endif
   createMenu( SMESHOp::OpExportGMF,  exportId, -1 );
+  createMenu( SMESHOp::OpExportMESHIO,  exportId, -1 ); // formats supported by meshio lib
   createMenu( separator(), fileId, 10 );
 
   createMenu( SMESHOp::OpDelete, editId, -1 );
@@ -4411,6 +4749,7 @@ void SMESHGUI::initialize( CAM_Application* app )
   createMenu( SMESHOp::OpEditMeshOrSubMesh,    meshId, -1 );
   createMenu( SMESHOp::OpBuildCompoundMesh,    meshId, -1 );
   createMenu( SMESHOp::OpCopyMesh,             meshId, -1 );
+  createMenu( SMESHOp::OpCreateDualMesh,       meshId, -1 );
   createMenu( separator(),                     meshId, -1 );
   createMenu( SMESHOp::OpCompute,              meshId, -1 );
   createMenu( SMESHOp::OpPreCompute,           meshId, -1 );
@@ -4459,11 +4798,13 @@ void SMESHGUI::initialize( CAM_Application* app )
   createMenu( SMESHOp::OpEqualFace,             faceId,   -1 );
   createMenu( SMESHOp::OpDeflection2D,          faceId,   -1 );
   createMenu( SMESHOp::OpAspectRatio3D,         volumeId, -1 );
+  createMenu( SMESHOp::OpWarping3D,             volumeId, -1 );
   createMenu( SMESHOp::OpVolume,                volumeId, -1 );
   createMenu( SMESHOp::OpMaxElementLength3D,    volumeId, -1 );
   createMenu( SMESHOp::OpBareBorderVolume,      volumeId, -1 );
   createMenu( SMESHOp::OpOverConstrainedVolume, volumeId, -1 );
   createMenu( SMESHOp::OpEqualVolume,           volumeId, -1 );
+  createMenu( SMESHOp::OpScaledJacobian,        volumeId, -1 );
   createMenu( separator(),                      ctrlId,   -1 );
   createMenu( SMESHOp::OpReset,                 ctrlId,   -1 );
   createMenu( separator(),                      ctrlId,   -1 );
@@ -4524,6 +4865,7 @@ void SMESHGUI::initialize( CAM_Application* app )
 
   createMenu( SMESHOp::OpConvertMeshToQuadratic, modifyId, -1 );
   createMenu( SMESHOp::OpCreateBoundaryElements, modifyId, -1 );
+  createMenu( SMESHOp::OpCreate2DElements,       modifyId, -1 );
   createMenu( SMESHOp::OpExtrusion,              modifyId, -1 );
   createMenu( SMESHOp::OpExtrusionAlongAPath,    modifyId, -1 );
   createMenu( SMESHOp::OpRevolution,             modifyId, -1 );
@@ -4616,11 +4958,13 @@ void SMESHGUI::initialize( CAM_Application* app )
 
   int ctrl3dTb = createTool( tr( "TB_CTRL3D" ), QString( "SMESHVolumeControlsToolbar" ) ) ;
   createTool( SMESHOp::OpAspectRatio3D,         ctrl3dTb );
+  createTool( SMESHOp::OpWarping3D,             ctrl3dTb );
   createTool( SMESHOp::OpVolume,                ctrl3dTb );
   createTool( SMESHOp::OpMaxElementLength3D,    ctrl3dTb );
   createTool( SMESHOp::OpBareBorderVolume,      ctrl3dTb );
   createTool( SMESHOp::OpOverConstrainedVolume, ctrl3dTb );
   createTool( SMESHOp::OpEqualVolume,           ctrl3dTb );
+  createTool( SMESHOp::OpScaledJacobian,        ctrl3dTb );
 
   int addElemTb = createTool( tr( "TB_ADD" ), QString( "SMESHAddElementToolbar" ) ) ;
   createTool( SMESHOp::OpNode,              addElemTb );
@@ -4676,6 +5020,7 @@ void SMESHGUI::initialize( CAM_Application* app )
   int modifyTb = createTool( tr( "TB_MODIFY" ), QString( "SMESHModificationToolbar" ) ) ;
   createTool( SMESHOp::OpConvertMeshToQuadratic, modifyTb );
   createTool( SMESHOp::OpCreateBoundaryElements, modifyTb );
+  createTool( SMESHOp::OpCreate2DElements,       modifyTb );
   createTool( SMESHOp::OpExtrusion,              modifyTb );
   createTool( SMESHOp::OpExtrusionAlongAPath,    modifyTb );
   createTool( SMESHOp::OpRevolution,             modifyTb );
@@ -4777,6 +5122,7 @@ void SMESHGUI::initialize( CAM_Application* app )
   createPopupItem( SMESHOp::OpFileInformation,   OB, mesh, "&& selcount=1 && isImported" );
   createPopupItem( SMESHOp::OpMeshInformation,   OB, mesh_part );
   createPopupItem( SMESHOp::OpFindElementByPoint,OB, mesh_group, "&& selcount=1 && " + hasElems );
+  createPopupItem( SMESHOp::OpReloadFromFile,    OB, mesh, "&& isImported");
   createPopupItem( SMESHOp::OpOverallMeshQuality,OB, mesh_part );
   popupMgr()->insert( separator(), -1, 0 );
   createPopupItem( SMESHOp::OpCreateGroup,       OB, mesh, "&& selcount=1" );
@@ -4814,11 +5160,17 @@ void SMESHGUI::initialize( CAM_Application* app )
 #endif
   createPopupItem( SMESHOp::OpPopupExportGMF,  OB, mesh_group, only_one_non_empty, anId );
   createPopupItem( SMESHOp::OpPopupExportDAT,  OB, mesh_group, only_one_non_empty, anId );
+  createPopupItem( SMESHOp::OpExportMESHIO,    OB, mesh_group, only_one_non_empty, anId );
 
   anId = popupMgr()->insert( tr( "MEN_IMPORT" ), -1, -1 );        // IMPORT submenu
   createPopupItem( SMESHOp::OpPopupImportMED,  OB, smesh, "", anId );
   createPopupItem( SMESHOp::OpPopupImportUNV,  OB, smesh, "", anId );
   createPopupItem( SMESHOp::OpPopupImportSTL,  OB, smesh, "", anId );
+  createPopupItem( SMESHOp::OpPopupImportMAIL,  OB, smesh, "", anId );
+  createPopupItem( SMESHOp::OpPopupImportINP,  OB, smesh, "", anId );
+  createPopupItem( SMESHOp::OpPopupImportCDB,  OB, smesh, "", anId );
+  createPopupItem( SMESHOp::OpPopupImportASC,  OB, smesh, "", anId );
+  createPopupItem( SMESHOp::OpPopupImportGEOF,  OB, smesh, "", anId );
 #ifdef WITH_CGNS
   createPopupItem( SMESHOp::OpPopupImportCGNS, OB, smesh, "", anId );
 #endif
@@ -5078,6 +5430,10 @@ void SMESHGUI::initialize( CAM_Application* app )
   popupMgr()->setRule( action( SMESHOp::OpAspectRatio3D ), aMeshInVtkHasVolumes, QtxPopupMgr::VisibleRule );
   popupMgr()->setRule( action( SMESHOp::OpAspectRatio3D ), "controlMode = 'eAspectRatio3D'", QtxPopupMgr::ToggleRule );
 
+  popupMgr()->insert ( action( SMESHOp::OpWarping3D ), aSubId, -1 );
+  popupMgr()->setRule( action( SMESHOp::OpWarping3D ), aMeshInVtkHasVolumes, QtxPopupMgr::VisibleRule );
+  popupMgr()->setRule( action( SMESHOp::OpWarping3D), "controlMode = 'eWarping3D'", QtxPopupMgr::ToggleRule );
+
   popupMgr()->insert ( action( SMESHOp::OpVolume ), aSubId, -1 );
   popupMgr()->setRule( action( SMESHOp::OpVolume ), aMeshInVtkHasVolumes, QtxPopupMgr::VisibleRule );
   popupMgr()->setRule( action( SMESHOp::OpVolume ), "controlMode = 'eVolume3D'", QtxPopupMgr::ToggleRule );
@@ -5097,6 +5453,10 @@ void SMESHGUI::initialize( CAM_Application* app )
   popupMgr()->insert ( action( SMESHOp::OpEqualVolume  ), aSubId, -1 );
   popupMgr()->setRule( action( SMESHOp::OpEqualVolume ), aMeshInVtkHasVolumes, QtxPopupMgr::VisibleRule );
   popupMgr()->setRule( action( SMESHOp::OpEqualVolume ), "controlMode = 'eCoincidentElems3D'", QtxPopupMgr::ToggleRule );
+
+  popupMgr()->insert ( action( SMESHOp::OpScaledJacobian  ), aSubId, -1 );
+  popupMgr()->setRule( action( SMESHOp::OpScaledJacobian ), aMeshInVtkHasVolumes, QtxPopupMgr::VisibleRule );
+  popupMgr()->setRule( action( SMESHOp::OpScaledJacobian ), "controlMode = 'eScaledJacobian'", QtxPopupMgr::ToggleRule );
 
   popupMgr()->insert( separator(), anId, -1 );
 
@@ -6024,6 +6384,12 @@ LightApp_Operation* SMESHGUI::createOperation( const int id ) const
     break;
   case SMESHOp::OpCreateBoundaryElements: // create 2D mesh as boundary on 3D
     op = new SMESHGUI_Make2DFrom3DOp();
+    break;
+  case SMESHOp::OpCreateDualMesh:
+    op = new SMESHGUI_CreateDualMeshOp();
+    break;
+  case SMESHOp::OpCreate2DElements:
+    op = new SMESHGUI_MakeFull2DFrom3DOp();
     break;
   case SMESHOp::OpReorientFaces:
     op = new SMESHGUI_ReorientFacesOp();

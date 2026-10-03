@@ -1,4 +1,4 @@
-# Copyright (C) 2006-2022  EDF R&D
+# Copyright (C) 2006-2026  CEA, EDF
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -30,7 +30,10 @@ def MeshCut(context):
   import os
   import subprocess
   import tempfile
-  from qtsalome import QFileDialog, QMessageBox, QDialog
+  if 'SALOME_USE_PYSIDE' in os.environ:
+    from PySide2.QtWidgets import QFileDialog, QMessageBox, QDialog
+  else:
+    from PyQt5.Qt import QFileDialog, QMessageBox, QDialog
   from MeshCutDialog_ui import Ui_Dialog
   
   class CutDialog(QDialog):

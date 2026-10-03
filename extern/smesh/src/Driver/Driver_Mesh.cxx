@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -28,7 +28,6 @@
 
 #include "SMESH_Comment.hxx"
 
-//#define _DEBUG_
 #include <utilities.h>
 
 using namespace std;
@@ -79,9 +78,7 @@ Driver_Mesh::Status Driver_Mesh::addMessage(const std::string& msg,
   myErrorMessages.push_back( msg );
 
   MESSAGE(msg);
-#ifdef _DEBUG_
-  cout << msg << endl;
-#endif
+
   return ( myStatus = isFatal ? DRS_FAIL : DRS_WARN_SKIP_ELEM );
 }
 

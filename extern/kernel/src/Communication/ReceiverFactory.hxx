@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -41,6 +41,24 @@ public:
 private:
   static double *getValueOneShot(SALOME::SenderDouble_ptr sender,long &size);
   static int *getValueOneShot(SALOME::SenderInt_ptr sender,long &size);
+};
+
+#include <memory>
+
+class COMMUNICATION_EXPORT SeqByteReceiver
+{
+public:
+  SeqByteReceiver(SALOME::SenderByte_ptr sender);
+  char *data(unsigned long& size);
+  ~SeqByteReceiver();
+private:
+  void fetchOneShot(unsigned long size);
+  void fetchByChunks(unsigned long size);
+private:
+  static constexpr unsigned long CHUNK_SIZE = 2000000000;
+  std::unique_ptr<char[]> _data_for_split_case;
+  std::unique_ptr<SALOME::vectorOfByte> _data_one_shot;
+  SALOME::SenderByte_var _obj;
 };
 
 #endif

@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -46,11 +46,6 @@
 #include <vtkUnstructuredGridWriter.h>
 #include <vtkUnsignedCharArray.h>
 
-//#ifdef _DEBUG_
-//static int MYDEBUG = 1;
-//#else
-//static int MYDEBUG = 0;
-//#endif
 
 namespace SMESH
 {

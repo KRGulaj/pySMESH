@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -21,11 +21,10 @@ INCLUDE_DIRECTORIES(
   ${CPPUNIT_INCLUDE_DIRS}
   ${OMNIORB_INCLUDE_DIR}
   ${PTHREAD_INCLUDE_DIR}
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${PROJECT_BINARY_DIR}/salome_adm
-  ${PROJECT_SOURCE_DIR}/src/Basics/Test
   ${CMAKE_CURRENT_SOURCE_DIR}/..
   ${PROJECT_SOURCE_DIR}/src/NamingService
-  ${PROJECT_SOURCE_DIR}/src/SALOMELocalTrace
   ${PROJECT_SOURCE_DIR}/src/Basics
   ${PROJECT_SOURCE_DIR}/src/Utils
   ${PROJECT_SOURCE_DIR}/src/LifeCycleCORBA
@@ -40,8 +39,9 @@ SET(SalomeKernelHelpersTest_LIBS
   SalomeKernelHelpers
   ${OMNIORB_LIBRARIES}
   SalomeNS
-  SALOMELocalTrace
-  SALOMEBasics
+  ${SALOMEBOOTSTRAP_SALOMELocalTrace}
+  ${SALOMEBOOTSTRAP_SALOMEBasics}
+  ${SALOMEBOOTSTRAP_KERNELBasics}
   OpUtil
   SalomeLifeCycleCORBA
   SalomeContainer

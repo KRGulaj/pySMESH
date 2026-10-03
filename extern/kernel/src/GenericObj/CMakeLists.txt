@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+# Copyright (C) 2012-2026  CEA, EDF, OPEN CASCADE
 #
 # This library is free software; you can redistribute it and/or
 # modify it under the terms of the GNU Lesser General Public
@@ -20,15 +20,14 @@
 INCLUDE_DIRECTORIES(
   ${OMNIORB_INCLUDE_DIR}
   ${PTHREAD_INCLUDE_DIR}
+  ${SALOMEBOOTSTRAP_INCLUDE_DIRS}
   ${PROJECT_BINARY_DIR}/salome_adm
-  ${CMAKE_CURRENT_SOURCE_DIR}/../Basics
-  ${CMAKE_CURRENT_SOURCE_DIR}/../SALOMELocalTrace
   ${PROJECT_BINARY_DIR}/idl
 )
 
 ADD_DEFINITIONS(${OMNIORB_DEFINITIONS})
 ADD_LIBRARY(SalomeGenericObj SALOME_GenericObj_i.cc)
-TARGET_LINK_LIBRARIES(SalomeGenericObj SALOMELocalTrace SalomeIDLKernel)
+TARGET_LINK_LIBRARIES(SalomeGenericObj ${SALOMEBOOTSTRAP_SALOMELocalTrace} SalomeIDLKernel)
 INSTALL(TARGETS SalomeGenericObj EXPORT ${PROJECT_NAME}TargetGroup DESTINATION ${SALOME_INSTALL_LIBS})
 
 INSTALL(FILES SALOME_GenericObj_i.hh SALOME_GenericObj_wrap.hxx DESTINATION ${SALOME_INSTALL_HEADERS})

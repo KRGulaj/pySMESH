@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -1563,11 +1563,13 @@ void SMESHGUI_FilterTable::updateAdditionalWidget()
   bool isDbl = ( aCriterion == SMESH::FT_AspectRatio        ||
                  aCriterion == SMESH::FT_AspectRatio3D      ||
                  aCriterion == SMESH::FT_Warping            ||
+                 aCriterion == SMESH::FT_Warping3D          ||
                  aCriterion == SMESH::FT_MinimumAngle       ||
                  aCriterion == SMESH::FT_Taper              ||
                  aCriterion == SMESH::FT_Skew               ||
                  aCriterion == SMESH::FT_Area               ||
                  aCriterion == SMESH::FT_Volume3D           ||
+                 aCriterion == SMESH::FT_ScaledJacobian     ||
                  aCriterion == SMESH::FT_MaxElementLength2D ||
                  aCriterion == SMESH::FT_MaxElementLength3D ||
                  aCriterion == SMESH::FT_Length             ||
@@ -1603,8 +1605,10 @@ const char* SMESHGUI_FilterTable::getPrecision( const int aType )
   case SMESH::FT_AspectRatio:
   case SMESH::FT_AspectRatio3D:
   case SMESH::FT_Taper:
+  case SMESH::FT_ScaledJacobian:
     retval = "parametric_precision"; break;
   case SMESH::FT_Warping:
+  case SMESH::FT_Warping3D:
   case SMESH::FT_MinimumAngle:
   case SMESH::FT_Skew:
   case SMESH::FT_CoplanarFaces:
@@ -1811,11 +1815,13 @@ void SMESHGUI_FilterTable::onCriterionChanged (const int row, const int /*col*/,
   case SMESH::FT_AspectRatio:
   case SMESH::FT_AspectRatio3D:
   case SMESH::FT_Warping:
+  case SMESH::FT_Warping3D:
   case SMESH::FT_MinimumAngle:
   case SMESH::FT_Taper:
   case SMESH::FT_Skew:
   case SMESH::FT_Area:
   case SMESH::FT_Volume3D:
+  case SMESH::FT_ScaledJacobian:
   case SMESH::FT_MaxElementLength2D:
   case SMESH::FT_MaxElementLength3D: anIsDoubleCriterion = true; break;
 
@@ -1990,7 +1996,7 @@ void SMESHGUI_FilterTable::onCriterionChanged (const int row, const int /*col*/,
   }
   aTable->setEditable( nbCompareSigns == 3, row, 1);
 
-  // enable/desable Threshold
+  // enable/disable Threshold
   if ( aCriterionType == SMESH::FT_GroupColor ||
        anIsComboCriterion ||
        anIsIntCriterion ||
@@ -2268,6 +2274,7 @@ const QMap<int, QString>& SMESHGUI_FilterTable::getCriteria (const int theType) 
     if (aCriteria.isEmpty())
     {
       aCriteria[ SMESH::FT_AspectRatio3D        ] = tr("ASPECT_RATIO_3D");
+      aCriteria[ SMESH::FT_Warping3D            ] = tr("WARPING_3D");
       aCriteria[ SMESH::FT_RangeOfIds           ] = tr("RANGE_OF_IDS");
       aCriteria[ SMESH::FT_BelongToMeshGroup    ] = tr("BELONG_TO_MESH_GROUP");
       aCriteria[ SMESH::FT_BelongToGeom         ] = tr("BELONG_TO_GEOM");
@@ -2284,6 +2291,7 @@ const QMap<int, QString>& SMESHGUI_FilterTable::getCriteria (const int theType) 
       aCriteria[ SMESH::FT_EqualVolumes         ] = tr("EQUAL_VOLUME");
       aCriteria[ SMESH::FT_EntityType           ] = tr("ENTITY_TYPE");
       aCriteria[ SMESH::FT_ConnectedElements    ] = tr("CONNECTED_ELEMS");
+      aCriteria[ SMESH::FT_ScaledJacobian       ] = tr("SCALED_JACOBIAN");
     }
     return aCriteria;
   }

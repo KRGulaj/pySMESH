@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -81,7 +81,7 @@ struct STDMESHERS_EXPORT FaceQuadStruct
     const UVPtStruct& Last()  const {
       return GetUVPtStruct()[ to-nbNodeOut-(IsReversed() ? -1 : +1)];
     }
-    // some sortcuts
+    // some shortcuts
     const std::vector<UVPtStruct>& GetUVPtStruct(bool isXConst=0, double constValue=0) const
     { return nbNodeOut ?
         grid->SimulateUVPtStruct( NbPoints()-nbNodeOut-1, isXConst, constValue ) :

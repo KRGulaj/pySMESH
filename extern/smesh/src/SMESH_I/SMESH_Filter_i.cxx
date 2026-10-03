@@ -1,4 +1,4 @@
-// Copyright (C) 2007-2022  CEA/DEN, EDF R&D, OPEN CASCADE
+// Copyright (C) 2007-2026  CEA, EDF, OPEN CASCADE
 //
 // Copyright (C) 2003-2007  OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
 // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS
@@ -399,6 +399,20 @@ namespace SMESH {
     return SMESH::FT_Warping;
   }
 
+  /*
+    Class       : Warping3D_i
+    Description : Functor for calculating warping
+  */
+  Warping3D_i::Warping3D_i()
+  {
+    myNumericalFunctorPtr.reset(new Controls::Warping3D());
+    myFunctorPtr = myNumericalFunctorPtr;
+  }
+
+  FunctorType Warping3D_i::GetFunctorType()
+  {
+    return SMESH::FT_Warping3D;
+  }
 
   /*
     Class       : Taper_i
@@ -458,6 +472,21 @@ namespace SMESH {
   FunctorType Volume3D_i::GetFunctorType()
   {
     return SMESH::FT_Volume3D;
+  }
+
+  /*
+    Class       : ScaledJacobian_i
+    Description : Functor for calculating volume of 3D element
+  */
+  ScaledJacobian_i::ScaledJacobian_i()
+  {
+    myNumericalFunctorPtr.reset( new Controls::ScaledJacobian() );
+    myFunctorPtr = myNumericalFunctorPtr;
+  }
+
+  FunctorType ScaledJacobian_i::GetFunctorType()
+  {
+    return SMESH::FT_ScaledJacobian;
   }
 
   /*
@@ -601,7 +630,7 @@ namespace SMESH {
 
   /*
     Class       : MultiConnection_i
-    Description : Functor for calculating number of faces conneted to the edge
+    Description : Functor for calculating number of faces connected to the edge
   */
   MultiConnection_i::MultiConnection_i()
   {
@@ -646,7 +675,7 @@ namespace SMESH {
 
   /*
     Class       : MultiConnection2D_i
-    Description : Functor for calculating number of faces conneted to the edge
+    Description : Functor for calculating number of faces connected to the edge
   */
   MultiConnection2D_i::MultiConnection2D_i()
   {
@@ -2091,6 +2120,14 @@ namespace SMESH {
   }
 
 
+  Warping3D_ptr FilterManager_i::CreateWarping3D()
+  {
+    SMESH::Warping3D_i* aServant = new SMESH::Warping3D_i();
+    SMESH::Warping3D_var anObj = aServant->_this();
+    TPythonDump() << aServant << " = " << this << ".CreateWarping3D()";
+    return anObj._retn();
+  }
+
   Taper_ptr FilterManager_i::CreateTaper()
   {
     SMESH::Taper_i* aServant = new SMESH::Taper_i();
@@ -2126,6 +2163,13 @@ namespace SMESH {
     return anObj._retn();
   }
 
+  ScaledJacobian_ptr FilterManager_i::CreateScaledJacobian()
+  {
+    SMESH::ScaledJacobian_i* aServant = new SMESH::ScaledJacobian_i();
+    SMESH::ScaledJacobian_var anObj   = aServant->_this();
+    TPythonDump()<<aServant<<" = "<<this<<".CreateScaledJacobian()";
+    return anObj._retn();
+  }
 
   MaxElementLength2D_ptr FilterManager_i::CreateMaxElementLength2D()
   {
@@ -3049,6 +3093,9 @@ namespace SMESH {
         case SMESH::FT_Warping:
           aFunctor = aFilterMgr->CreateWarping();
           break;
+        case SMESH::FT_Warping3D:
+          aFunctor = aFilterMgr->CreateWarping3D();
+          break;
         case SMESH::FT_MinimumAngle:
           aFunctor = aFilterMgr->CreateMinimumAngle();
           break;
@@ -3075,6 +3122,9 @@ namespace SMESH {
           break;
         case SMESH::FT_NodeConnectivityNumber:
           aFunctor = aFilterMgr->CreateNodeConnectivityNumber();
+          break;
+        case SMESH::FT_ScaledJacobian:
+          aFunctor = aFilterMgr->CreateScaledJacobian();
           break;
 
         // Predicates
@@ -3507,11 +3557,13 @@ namespace SMESH {
     {
       case FT_AspectRatio           : return "Aspect ratio";
       case FT_Warping               : return "Warping";
+      case FT_Warping3D             : return "Warping 3D";
       case FT_MinimumAngle          : return "Minimum angle";
       case FT_Taper                 : return "Taper";
       case FT_Skew                  : return "Skew";
       case FT_Area                  : return "Area";
       case FT_Volume3D              : return "Volume3D";
+      case FT_ScaledJacobian        : return "ScaledJacobian";
       case FT_MaxElementLength2D    : return "Max element length 2D";
       case FT_MaxElementLength3D    : return "Max element length 3D";
       case FT_BelongToMeshGroup     : return "Belong to Mesh Group";
@@ -3563,11 +3615,13 @@ namespace SMESH {
   {
     if      ( theStr.equals( "Aspect ratio"                 ) ) return FT_AspectRatio;
     else if ( theStr.equals( "Warping"                      ) ) return FT_Warping;
+    else if ( theStr.equals( "Warping 3D"                   ) ) return FT_Warping3D;
     else if ( theStr.equals( "Minimum angle"                ) ) return FT_MinimumAngle;
     else if ( theStr.equals( "Taper"                        ) ) return FT_Taper;
     else if ( theStr.equals( "Skew"                         ) ) return FT_Skew;
     else if ( theStr.equals( "Area"                         ) ) return FT_Area;
     else if ( theStr.equals( "Volume3D"                     ) ) return FT_Volume3D;
+    else if ( theStr.equals( "ScaledJacobian"               ) ) return FT_ScaledJacobian;
     else if ( theStr.equals( "Max element length 2D"        ) ) return FT_MaxElementLength2D;
     else if ( theStr.equals( "Max element length 3D"        ) ) return FT_MaxElementLength3D;
     else if ( theStr.equals( "Belong to Mesh Group"         ) ) return FT_BelongToMeshGroup;
@@ -4136,11 +4190,13 @@ namespace SMESH {
       "FT_AspectRatio",
       "FT_AspectRatio3D",
       "FT_Warping",
+      "FT_Warping3D",
       "FT_MinimumAngle",
       "FT_Taper",
       "FT_Skew",
       "FT_Area",
       "FT_Volume3D",
+      "FT_ScaledJacobian",
       "FT_MaxElementLength2D",
       "FT_MaxElementLength3D",
       "FT_FreeBorders",
