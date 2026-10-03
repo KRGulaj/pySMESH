@@ -115,3 +115,16 @@ Since the SALOME stack moved from `V9_9_0` to `V9_16_0`, a capture differs from 
 `V9_16_0` also stopped `Cartesian_3D` from seeing a cancel during its run (SMESH
 `9f7d4a55e`). `patches/smesh/StdMeshers_Cartesian_3D_cancel.patch` restores the `V9_9_0`
 behaviour. That patch changes no probe value: a run without a cancel builds the same mesh.
+
+## Explained differences since the Adaptive1D patches
+
+`patches/smesh/StdMeshers_Adaptive1D_deflection.patch` makes `Adaptive1D` hold its
+documented deflection. One probe changes:
+
+| Probe | Before the patch | With the patch | Cause |
+|---|---|---|---|
+| `1d/adaptive_circle` | 28 segments, chords 0.332348 to 0.352196, sum 9.404985 | 29 segments, chords 0.307501 to 0.331708, sum 9.406311 | On the radius-1.5 rim the longest chord had the sagitta 0.0103727, 1.037 times the deflection 0.01. Now the largest sagitta is 0.009198 (0.920 times), every chord lies in [0.05, 1.0], and neighbours differ by at most 1.058 times. |
+
+`patches/smesh/StdMeshers_Adaptive1D_bounds.patch` (the size bounds and the factor 2 on every
+edge) and `patches/smesh/StdMeshers_Cartesian_VL_cancel.patch` (a cancel during the viscous
+layer steps of `Cartesian_3D`) change no probe value.
