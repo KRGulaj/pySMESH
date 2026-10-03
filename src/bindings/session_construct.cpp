@@ -133,6 +133,43 @@ std::string loft_cap_refusal(const TopoDS_Shape& result, const TopoDS_Shape& fir
   return text + " Nothing is committed; the session is unchanged.";
 }
 
+// The refusal of a solid loft whose two end caps lie in one plane and meet (report V4), or
+// empty. A loft closed by a copy of its first section gets two coincident caps: a solid
+// with a slit of zero thickness through it, which BRepCheck_Analyzer accepts. Caps in one
+// plane that stay apart, as at the two ends of a U, are fine.
+std::string coincident_caps_refusal(const TopoDS_Shape& first_cap, const TopoDS_Shape& last_cap) {
+  if (first_cap.IsNull() || last_cap.IsNull()) {
+    return std::string();
+  }
+  const BRepAdaptor_Surface a(TopoDS::Face(first_cap), false);
+  const BRepAdaptor_Surface b(TopoDS::Face(last_cap), false);
+  if (a.GetType() != GeomAbs_Plane || b.GetType() != GeomAbs_Plane) {
+    return std::string();
+  }
+  const double tol = shape_checks::max_tolerance({first_cap, last_cap});
+  const gp_Pln pa = a.Plane();
+  const gp_Pln pb = b.Plane();
+  if (!pa.Axis().IsParallel(pb.Axis(), Precision::Angular()) ||
+      pa.Distance(pb.Location()) > tol) {
+    return std::string();
+  }
+  BRepExtrema_DistShapeShape gap(first_cap, last_cap);
+  if (!gap.IsDone() || gap.Value() > tol) {
+    return std::string();
+  }
+  std::ostringstream s;
+  s << "Session.thru_sections: the caps of the first and the last section lie in one plane "
+       "and meet (gap "
+    << gap.Value() << ", tolerance " << tol
+    << "), so the solid has a slit of zero thickness between them. Nothing is committed; the "
+       "session is unchanged.";
+  return s.str();
+}
+
+constexpr const char* kSlitHint =
+    "To close a loft round onto itself, name the first section again as the last: that is a "
+    "closed loft, with no caps. A copy of the first section makes two caps.";
+
 }  // namespace
 
 // ---- construction operations ------------------------------------------------------ //
@@ -938,6 +975,7 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
   Handle(BRepTools_History) hist;
   std::optional<EnclosedVolume> hollow;
   std::string cap_refusal;
+  std::string slit_refusal;
   std::string interference;
   {
     py::gil_scoped_release release;
@@ -1000,7 +1038,11 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
             break;
           }
         }
-        if (solid && cap_refusal.empty() && !hollow.has_value()) {
+        if (solid && !closed && cap_refusal.empty() && !hollow.has_value()) {
+          stage = "checking the end caps of the lofted solid for a slit failed";
+          slit_refusal = coincident_caps_refusal(mk.FirstShape(), mk.LastShape());
+        }
+        if (solid && cap_refusal.empty() && slit_refusal.empty() && !hollow.has_value()) {
           stage = "checking the lofted solid for self-interference failed";
           interference =
               shape_checks::self_interference_refusal("Session.thru_sections", result);
@@ -1036,6 +1078,9 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
                        "Space or align the sections so that consecutive ones do not cross "
                        "each other's path.",
                        {});
+  }
+  if (!slit_refusal.empty()) {
+    throw PysmeshError(slit_refusal, kSlitHint, {});
   }
   refuse_self_interference(interference, kLoftHint);
   return commit(concat(survivors, result), hist, "thru_sections", result);

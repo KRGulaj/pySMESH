@@ -19,6 +19,11 @@ Each claim is asserted against an oracle the operation under test does not produ
   section, and a section bowed out of its plane gave an invalid cap and a message that
   named nothing. The oracle is the bow itself: ``w sin(pi x)`` spreads the section's
   points exactly ``w`` across its best-fit plane.
+* **C3, a closed loft.** A ring of circles could not be lofted round onto itself. The
+  oracles are a construction without the closed path (two half lofts, sewn) and the
+  torus ``2 pi^2 R r^2`` with a stated distance bound.
+* **V4, a slit.** A ring closed by a copy of its first section committed two coincident
+  caps inside the solid. It must be refused, naming the closed loft as the cure.
 """
 
 from __future__ import annotations
@@ -425,3 +430,23 @@ def test_a_section_named_again_other_than_first_as_last_is_refused(repeat: int) 
 
     with pytest.raises(PysmeshError, match=rf"sections \({repeat + 1} and 5\)"):
         s.thru_sections(sections, solid=True, ruled=True)
+
+
+# ---- V4: a loft closed by a copy of its first section ------------------------------ #
+
+
+@pytest.mark.parametrize("ruled", [True, False], ids=["ruled", "smooth"])
+def test_a_ring_closed_by_a_copied_section_is_refused_pointing_to_the_closed_loft(
+    ruled: bool,
+) -> None:
+    """Two coincident caps make a slit of zero thickness; the refusal names the cure."""
+    s = Session()
+    stations = _ring(s)[:-1]
+    copy = _copy_of(s, stations[0])
+    before = _state(s)
+
+    with pytest.raises(PysmeshError, match="lie in one plane and meet") as info:
+        s.thru_sections([*stations, copy], solid=True, ruled=ruled)
+
+    assert "name the first section again as the last" in info.value.details
+    assert _state(s) == before

@@ -756,7 +756,11 @@ class _ConstructOps(_SessionBase):
                 missing or invalid: the section is not planar to its edge tolerance
                 (1e-7). The message names the section and how far its points spread
                 across the plane that fits them best. A bow in a middle section needs no
-                cap. Also, with ``solid``, if the lofted solid encloses no more than
+                cap. Also, with ``solid``, if the caps of the first and the last section
+                lie in one plane and meet, which leaves a slit of zero thickness in the
+                solid: a copy of the first section named as the last does this, and
+                naming the first section itself closes the loft instead. Also, with
+                ``solid``, if the lofted solid encloses no more than
                 ``Precision::Confusion()`` times its area. A loft whose surface folds
                 through itself comes back that way, and OCCT's validity check accepts
                 it: a ruled loft through sections tilted towards each other is the
