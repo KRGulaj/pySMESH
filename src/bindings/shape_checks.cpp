@@ -75,11 +75,14 @@ namespace {
 
 using ShapeMap = NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>;
 
-// Candidate points per solid, across all its faces, before the edge midpoints and vertices.
-// The witness search runs only on a result that is already suspect, so its cost is paid
-// rarely; the budget keeps it bounded on a solid of hundreds of faces.
-constexpr int kGridBudget = 1024;
+// Grid points per solid, across all its faces, and the cap on all its candidates (grid
+// points, edge midpoints, vertices). The witness search runs only on a result that is already
+// suspect, but a correct empty result tests every candidate: a cut of 20 parts of the
+// production assembly by a box that holds them all made 40 s of it before the caps and the
+// order of the tests below.
+constexpr int kGridBudget = 256;
 constexpr int kMaxGrid = 7;
+constexpr std::size_t kCandidateCap = 512;
 
 // The parameters of the candidates on one face: a grid over its parameter box, kept where
 // the face's own 2-D classifier places them inside, then the midpoint of every edge and every
@@ -119,10 +122,12 @@ std::vector<gp_Pnt2d> face_parameters(const TopoDS_Face& face, int grid) {
   return out;
 }
 
-// Points near the boundary of `solid`, moved into it by `depth` along the face normal, and
-// kept where the solid itself classifies them IN at `tol`. Both normal directions are tried,
-// so the answer does not depend on the face orientation being right.
-std::vector<gp_Pnt> interior_candidates(const TopoDS_Shape& solid, double depth, double tol) {
+// Points near the boundary of `solid`, moved by `depth` against the outward normal of their
+// face (the surface normal, reversed on a REVERSED face), at most kCandidateCap of them. On a
+// solid whose faces point out these lie inside it. They are not classified here: a candidate
+// becomes a witness only once its own solid classifies it IN (Solid::inside), which is tested
+// last because it is the dear test on a solid of many faces.
+std::vector<gp_Pnt> interior_candidates(const TopoDS_Shape& solid, double depth) {
   ShapeMap faces;
   TopExp::MapShapes(solid, TopAbs_FACE, faces);
   std::vector<gp_Pnt> out;
@@ -132,10 +137,10 @@ std::vector<gp_Pnt> interior_candidates(const TopoDS_Shape& solid, double depth,
   const int grid = std::clamp(
       static_cast<int>(std::sqrt(static_cast<double>(kGridBudget) / faces.Extent())), 1,
       kMaxGrid);
-  BRepClass3d_SolidClassifier own(solid);
-  for (int f = 1; f <= faces.Extent(); ++f) {
+  for (int f = 1; f <= faces.Extent() && out.size() < kCandidateCap; ++f) {
     const TopoDS_Face& face = TopoDS::Face(faces.FindKey(f));
     const BRepAdaptor_Surface surface(face);
+    const double outward = face.Orientation() == TopAbs_REVERSED ? -1.0 : 1.0;
     for (const gp_Pnt2d& uv : face_parameters(face, grid)) {
       gp_Pnt p;
       gp_Vec du, dv;
@@ -145,41 +150,66 @@ std::vector<gp_Pnt> interior_candidates(const TopoDS_Shape& solid, double depth,
         continue;
       }
       normal.Normalize();
-      for (const double side : {1.0, -1.0}) {
-        const gp_Pnt c = p.Translated(side * depth * normal);
-        own.Perform(c, tol);
-        if (own.State() == TopAbs_IN) {
-          out.push_back(c);
-          break;
-        }
+      out.push_back(p.Translated(-outward * depth * normal));
+      if (out.size() >= kCandidateCap) {
+        break;
       }
     }
   }
   return out;
 }
 
-// One classifier per solid, each loaded once.
-std::vector<std::unique_ptr<BRepClass3d_SolidClassifier>> classifiers(
-    const std::vector<TopoDS_Shape>& solids) {
-  std::vector<std::unique_ptr<BRepClass3d_SolidClassifier>> out;
-  out.reserve(solids.size());
-  for (const TopoDS_Shape& s : solids) {
-    out.push_back(std::make_unique<BRepClass3d_SolidClassifier>(s));
+// One solid of an operand group: its box, grown by the tolerance, and its classifier, built on
+// first use.
+class Solid {
+ public:
+  Solid(const TopoDS_Shape& shape, double tol) : shape_(shape), tol_(tol) {
+    BRepBndLib::Add(shape_, box_);
+    box_.Enlarge(tol_);
+  }
+
+  const TopoDS_Shape& shape() const { return shape_; }
+
+  // The state of `p` at the tolerance; OUT without classifying when `p` is outside the box.
+  TopAbs_State state(const gp_Pnt& p) {
+    if (box_.IsOut(p)) {
+      return TopAbs_OUT;
+    }
+    if (!classifier_) {
+      classifier_ = std::make_unique<BRepClass3d_SolidClassifier>(shape_);
+    }
+    classifier_->Perform(p, tol_);
+    return classifier_->State();
+  }
+
+  bool inside(const gp_Pnt& p) { return state(p) == TopAbs_IN; }
+
+ private:
+  TopoDS_Shape shape_;
+  double tol_;
+  Bnd_Box box_;
+  std::unique_ptr<BRepClass3d_SolidClassifier> classifier_;
+};
+
+std::vector<Solid> solids_with_boxes(const std::vector<TopoDS_Shape>& shapes, double tol) {
+  std::vector<Solid> out;
+  for (const TopoDS_Shape& s : solids_of(shapes)) {
+    out.emplace_back(s, tol);
   }
   return out;
 }
 
-// A candidate of `from` that a solid of `against` classifies IN.
-std::optional<gp_Pnt> inside_any(const std::vector<TopoDS_Shape>& from,
-                                 const std::vector<TopoDS_Shape>& against, double depth,
-                                 double tol) {
-  const auto others = classifiers(against);
-  for (const TopoDS_Shape& s : from) {
-    for (const gp_Pnt& p : interior_candidates(s, depth, tol)) {
-      for (const auto& c : others) {
-        c->Perform(p, tol);
-        if (c->State() == TopAbs_IN) {
-          return p;
+// A candidate of `from` that a solid of `against` classifies IN, and its own solid too.
+std::optional<gp_Pnt> inside_any(std::vector<Solid>& from, std::vector<Solid>& against,
+                                 double depth) {
+  for (Solid& s : from) {
+    for (const gp_Pnt& p : interior_candidates(s.shape(), depth)) {
+      for (Solid& other : against) {
+        if (other.inside(p)) {
+          if (s.inside(p)) {
+            return p;
+          }
+          break;
         }
       }
     }
@@ -220,29 +250,29 @@ std::vector<TopoDS_Shape> solids_of(const std::vector<TopoDS_Shape>& shapes) {
 std::optional<gp_Pnt> point_inside_both(const std::vector<TopoDS_Shape>& a,
                                         const std::vector<TopoDS_Shape>& b, double depth,
                                         double tol) {
-  const std::vector<TopoDS_Shape> sa = solids_of(a);
-  const std::vector<TopoDS_Shape> sb = solids_of(b);
-  if (std::optional<gp_Pnt> p = inside_any(sa, sb, depth, tol)) {
+  std::vector<Solid> sa = solids_with_boxes(a, tol);
+  std::vector<Solid> sb = solids_with_boxes(b, tol);
+  if (std::optional<gp_Pnt> p = inside_any(sa, sb, depth)) {
     return p;
   }
-  return inside_any(sb, sa, depth, tol);
+  return inside_any(sb, sa, depth);
 }
 
 std::optional<gp_Pnt> point_inside_first_outside_second(const std::vector<TopoDS_Shape>& a,
                                                         const std::vector<TopoDS_Shape>& b,
                                                         double depth, double tol) {
-  const auto others = classifiers(solids_of(b));
-  for (const TopoDS_Shape& s : solids_of(a)) {
-    for (const gp_Pnt& p : interior_candidates(s, depth, tol)) {
+  std::vector<Solid> sa = solids_with_boxes(a, tol);
+  std::vector<Solid> sb = solids_with_boxes(b, tol);
+  for (Solid& s : sa) {
+    for (const gp_Pnt& p : interior_candidates(s.shape(), depth)) {
       bool outside = true;
-      for (const auto& c : others) {
-        c->Perform(p, tol);
-        if (c->State() != TopAbs_OUT) {
+      for (Solid& other : sb) {
+        if (other.state(p) != TopAbs_OUT) {
           outside = false;
           break;
         }
       }
-      if (outside) {
+      if (outside && s.inside(p)) {
         return p;
       }
     }

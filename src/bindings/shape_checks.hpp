@@ -38,11 +38,12 @@ std::vector<TopoDS_Shape> solids_of(const std::vector<TopoDS_Shape>& shapes);
 // overlap by more than `tol`, so their common cannot be empty.
 //
 // The candidates sit on the boundary of each solid of both groups — a parameter grid on
-// every face, the midpoint of every edge on it and every vertex — moved into the solid along
-// the face normal by `depth`, which must exceed `tol`. A candidate counts only where
-// BRepClass3d_SolidClassifier places it IN its own solid at `tol`, and then IN a solid of
-// the other group at `tol`. The classifier is OCCT's point classifier, independent of the
-// Boolean Component whose answer is under test. Finding no witness proves nothing.
+// every face, the midpoint of every edge on it and every vertex, at most 512 per solid —
+// moved into the solid against the outward face normal by `depth`, which must exceed `tol`.
+// A candidate counts only where BRepClass3d_SolidClassifier places it IN a solid of the other
+// group at `tol`, and then IN its own solid at `tol`. The classifier is OCCT's point
+// classifier, independent of the Boolean Component whose answer is under test. Finding no
+// witness proves nothing.
 std::optional<gp_Pnt> point_inside_both(const std::vector<TopoDS_Shape>& a,
                                         const std::vector<TopoDS_Shape>& b, double depth,
                                         double tol);
