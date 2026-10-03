@@ -503,6 +503,11 @@ class _ConstructOps(_SessionBase):
         delta says which. Edges that already share vertices, such as those from
         :meth:`add_polyline` or from :meth:`section`, keep their ids.
 
+        Ends that coincide within their tolerances but not exactly, such as an arc that
+        ends at ``r sin(pi)`` = 1.8e-16 beside a line that starts at 0, are joined at the
+        end of the edge named first (each edge's first vertex before its last), with a
+        tolerance that covers both. The result depends only on the input.
+
         Args:
             edge_ids: Edges to join. Each must belong to a loose-edge or wire body, never to
                 a solid, because the operation consumes the bodies it is given.
@@ -552,7 +557,9 @@ class _ConstructOps(_SessionBase):
         """Build a planar face bounded by the named edges, consuming them.
 
         A non-planar boundary raises rather than being approximated; :meth:`make_filling`
-        is the operation for that case.
+        is the operation for that case. Ends that coincide within their tolerances but not
+        exactly are joined as :meth:`make_wire` joins them: at the end of the edge named
+        first.
 
         Args:
             edge_ids: Edges bounding the face, forming one closed planar loop.

@@ -566,7 +566,7 @@ py::dict Session::make_wire(const std::vector<EntityId>& edge_ids) {
     py::gil_scoped_release release;
     BRepBuilderAPI_MakeWire mk;
     NCollection_List<TopoDS_Shape> list;
-    for (const TopoDS_Shape& e : edges) {
+    for (const TopoDS_Shape& e : weld_near_ends(edges)) {
       list.Append(e);
     }
     mk.Add(list);

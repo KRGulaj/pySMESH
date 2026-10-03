@@ -1427,6 +1427,17 @@ class Session {
   static TopoDS_Wire wire_over(const char* op, const std::vector<TopoDS_Shape>& edges,
                                const std::vector<TopoDS_Shape>& owners);
 
+  // The edges with their near-coincident ends welded, for BRepBuilderAPI_MakeWire's list
+  // form (report M2). That form joins end vertices within the sum of their tolerances and
+  // puts each group's new vertex at BRepLib::BoundingVertex of the group, which for ends at
+  // two different points is the end that comes first in an order keyed by TShape address
+  // (BRepLib_MakeWire_1.cxx, CollectCoincidentVertices): the face differed from process to
+  // process. Here each group whose ends are not all at one point is joined first, at the end
+  // that comes first in the given edge order (each edge's first vertex before its last),
+  // with a tolerance that covers every end of the group. Ends that share a vertex or lie at
+  // one point are left alone, so those edges reach OCCT unchanged.
+  static std::vector<TopoDS_Shape> weld_near_ends(const std::vector<TopoDS_Shape>& edges);
+
   // A wire over a whole body, for the operations that sweep along or across one.
   static TopoDS_Wire wire_of_body(const char* op, const char* argname,
                                   const TopoDS_Shape& body);

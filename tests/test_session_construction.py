@@ -24,18 +24,26 @@ Each claim is asserted against an oracle the operation under test does not produ
   torus ``2 pi^2 R r^2`` with a stated distance bound.
 * **V4, a slit.** A ring closed by a copy of its first section committed two coincident
   caps inside the solid. It must be refused, naming the closed loft as the cure.
+* **M2, a face that depends on the process.** ``make_face`` joined two ends 1.8e-16
+  apart at either end, run to run. The oracle is five fresh processes and the stated
+  rule.
 """
 
 from __future__ import annotations
 
 import math
+import os
 import re
+import subprocess
+import sys
 from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+import pysmesh as ps
 from pysmesh import (
     EntityId,
     EntityKind,
@@ -450,3 +458,78 @@ def test_a_ring_closed_by_a_copied_section_is_refused_pointing_to_the_closed_lof
 
     assert "name the first section again as the last" in info.value.details
     assert _state(s) == before
+
+
+# ---- M2: make_face on two near-coincident ends ------------------------------------- #
+
+# The B-spline arc of a radius-1.5 half disk ends at (-1.5, 1.5 sin(pi)), which is
+# (-1.5, 1.8e-16); the closing line starts at (-1.5, 0). make_face joins the two ends.
+M2_RUNS: int = 5
+M2_CHILD_TIMEOUT_S: float = 120.0
+_M2_CHILD: str = """
+import hashlib, math, os, sys
+occt = os.environ.get("PYSMESH_OCCT_BIN")
+if occt:
+    os.add_dll_directory(occt)
+lib = os.path.join(sys.prefix, "Library", "bin")
+if os.path.isdir(lib):
+    os.add_dll_directory(lib)
+sys.path.insert(0, sys.argv[1])
+import numpy as np
+import pysmesh as ps
+
+r = 1.5
+s = ps.Session()
+t = np.linspace(0.0, math.pi, 13)
+s.add_spline(np.c_[r * np.cos(t), r * np.sin(t), 0.0 * t])
+s.add_line((-r, 0.0, 0.0), (r, 0.0, 0.0))
+arc, line = sorted(int(i) for i in s.entities(ps.EntityKind.EDGE))
+s.make_face([arc, line] if sys.argv[2] == "arc_first" else [line, arc])
+brep = s.brep()
+corner = [v.xyz for v in ps.load_brep(brep).vertices() if v.xyz[0] < 0.0]
+sha = hashlib.sha256(brep).hexdigest()
+print("M2-RESULT", sha, repr(float(corner[0][1])), len(corner))
+"""
+
+
+def _m2_child(order: str) -> tuple[str, float, int]:
+    """Build the half disk in a fresh process; its BREP hash and the kept corner's y.
+
+    Raises:
+        AssertionError: The child crashed or reported no result.
+    """
+    package_root = str(Path(ps.__file__).resolve().parent.parent)
+    proc = subprocess.run(
+        [sys.executable, "-c", _M2_CHILD, package_root, order],
+        capture_output=True,
+        text=True,
+        timeout=M2_CHILD_TIMEOUT_S,
+        env=dict(os.environ),
+        check=False,
+    )
+    lines = [ln for ln in proc.stdout.splitlines() if ln.startswith("M2-RESULT ")]
+    assert proc.returncode == 0 and lines, proc.stderr[-2000:]
+    _, sha, y, count = lines[0].split()
+    return sha, float(y), int(count)
+
+
+@pytest.mark.parametrize(
+    ("order", "kept_y"),
+    [("arc_first", 1.5 * math.sin(math.pi)), ("line_first", 0.0)],
+)
+def test_make_face_on_near_coincident_ends_is_the_same_in_every_process(
+    order: str, kept_y: float
+) -> None:
+    """Five processes give one BREP; the joined corner sits on the end named first.
+
+    The rule: ends that coincide within their tolerances but not exactly are joined at
+    the end of the edge named first (each edge's first vertex before its last). The two
+    candidates are 1.8e-16 apart; the arc's end is its B-spline evaluated at its last
+    parameter, which may differ from 1.5 sin(pi) in the last bit, so 1e-24 separates
+    them.
+    """
+    runs = [_m2_child(order) for _ in range(M2_RUNS)]
+
+    assert len({sha for sha, _, _ in runs}) == 1
+    assert {count for _, _, count in runs} == {1}
+    assert runs[0][1] == pytest.approx(kept_y, abs=1e-24)

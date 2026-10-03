@@ -470,7 +470,7 @@ TopoDS_Wire Session::wire_over(const char* op, const std::vector<TopoDS_Shape>& 
   }
   BRepBuilderAPI_MakeWire mk;
   NCollection_List<TopoDS_Shape> list;
-  for (const TopoDS_Shape& e : edges) {
+  for (const TopoDS_Shape& e : weld_near_ends(edges)) {
     list.Append(e);
   }
   mk.Add(list);
@@ -479,6 +479,87 @@ TopoDS_Wire Session::wire_over(const char* op, const std::vector<TopoDS_Shape>& 
                        ": the named edges do not form a connected wire.");
   }
   return mk.Wire();
+}
+
+std::vector<TopoDS_Shape> Session::weld_near_ends(const std::vector<TopoDS_Shape>& edges) {
+  // The distinct end vertices, in the order the edges give them.
+  std::vector<TopoDS_Vertex> ends;
+  for (const TopoDS_Shape& e : edges) {
+    TopoDS_Vertex first, last;
+    TopExp::Vertices(TopoDS::Edge(e), first, last);
+    for (const TopoDS_Vertex& v : {first, last}) {
+      bool seen = v.IsNull();
+      for (const TopoDS_Vertex& w : ends) {
+        seen = seen || w.IsSame(v);
+      }
+      if (!seen) {
+        ends.push_back(v);
+      }
+    }
+  }
+  // Groups by BRepLib_MakeWire's own test, distance <= the sum of the two tolerances,
+  // closed transitively. Each group is labelled by its first end.
+  const std::size_t n = ends.size();
+  std::vector<std::size_t> group(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    group[i] = i;
+  }
+  const auto root = [&](std::size_t i) {
+    while (group[i] != i) {
+      i = group[i];
+    }
+    return i;
+  };
+  for (std::size_t i = 0; i < n; ++i) {
+    const gp_Pnt pi = BRep_Tool::Pnt(ends[i]);
+    const double ti = BRep_Tool::Tolerance(ends[i]);
+    for (std::size_t j = i + 1; j < n; ++j) {
+      const double reach = ti + BRep_Tool::Tolerance(ends[j]);
+      if (pi.SquareDistance(BRep_Tool::Pnt(ends[j])) <= reach * reach) {
+        const std::size_t a = root(i);
+        const std::size_t b = root(j);
+        group[std::max(a, b)] = std::min(a, b);
+      }
+    }
+  }
+  BRepTools_ReShape reshape;
+  bool welded = false;
+  for (std::size_t g = 0; g < n; ++g) {
+    if (root(g) != g) {
+      continue;
+    }
+    const gp_Pnt keep = BRep_Tool::Pnt(ends[g]);
+    bool apart = false;
+    double tol = BRep_Tool::Tolerance(ends[g]);
+    for (std::size_t i = g + 1; i < n; ++i) {
+      if (root(i) != g) {
+        continue;
+      }
+      const gp_Pnt p = BRep_Tool::Pnt(ends[i]);
+      apart = apart || !(p.X() == keep.X() && p.Y() == keep.Y() && p.Z() == keep.Z());
+      tol = std::max(tol, keep.Distance(p) + BRep_Tool::Tolerance(ends[i]));
+    }
+    if (!apart) {
+      continue;
+    }
+    TopoDS_Vertex joined = BRepBuilderAPI_MakeVertex(keep).Vertex();
+    BRep_Builder().UpdateVertex(joined, tol);
+    for (std::size_t i = g; i < n; ++i) {
+      if (root(i) == g) {
+        reshape.Replace(ends[i].Oriented(TopAbs_FORWARD), joined);
+      }
+    }
+    welded = true;
+  }
+  if (!welded) {
+    return edges;
+  }
+  std::vector<TopoDS_Shape> out;
+  out.reserve(edges.size());
+  for (const TopoDS_Shape& e : edges) {
+    out.push_back(reshape.Apply(e));
+  }
+  return out;
 }
 
 // A wire over a whole body, for the operations that sweep along or across one.
