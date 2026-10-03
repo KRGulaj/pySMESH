@@ -1,0 +1,224 @@
+pySMESH: make StdMeshers_Adaptive1D keep its size bounds and the factor 2 on every EDGE
+(SMESH V9_16_0; applies after StdMeshers_Adaptive1D_deflection.patch).
+
+Defect: the Adaptive hypothesis documents that the segment length "is limited by Min. Size
+and Max Size" and that adjacent segments "can't differ more than twice"
+(doc/gui/input/1d_meshing_hypo.rst). The algorithm breaks both on EDGEs where the
+deflection holds, so the deflection patch, which only acts where a segment misses the
+deflection, leaves them broken.
+
+Symptom (min 0.05, max 1, deflection as given): on a B-spline prism neighbouring segments
+differ by up to 3.23 times (d 0.03) and a segment is 0.049888 long (d 0.003); a B-spline bump
+up to 3.15, a B-spline arc up to 2.74, the golden cone 2.16 (its seam) and 2.06 (its radius-2
+circle), an ellipse 2 x 1.5 at d 0.03 2.51. With min 0.2 and d 1e-4 the straight EDGEs of the
+B-spline prism get segments of 0.194143.
+
+Root cause: the grading lives only in the size field. SegSizeTree::SetSize gives the six
+neighbouring octree cells at most size + boxSize * 0.7 (grading 0.7 in AdaptiveAlgo::Compute),
+so a neighbour cell holds at most 1.7 times the size; the size is clamped below by the min
+size only in the tree. makeSegments() then reads the field at the probe points and at the
+tree leaves, interpolates it in parameter, places the nodes on the integral of 1 / size and
+rounds the count with the factor fact. Nothing checks the final segments: a jump between two
+probe points or two leaves gives neighbours that differ more than twice, and fact > 1 shrinks
+segments that sit at the min size below it. The code is unchanged since the hypothesis was
+added (SMESH 7b33bc39f, 2013-11-11, "22355: EDF SMESH: New 1D hypothesis Adaptive"; the
+count rounding is from 831ca6c82, 2015-11-19); upstream master at 83f8bf482 (2026-09-14)
+has the same code.
+
+Change, in StdMeshers_Adaptive1D.cxx only, on top of the deflection patch:
+* holdDeflection() becomes holdRules(), called by makeSegments() for every EDGE, straight
+  EDGEs included (they meet the deflection, so only the size rules are checked on them).
+* New AdaptiveAlgo::breaksBounds(): true if a segment is shorter than min size or longer
+  than max size (relative tolerance 1e-9), or if two neighbours on the EDGE differ more than
+  twice, the two ends of a closed EDGE included.
+* holdRules(): if no segment misses the deflection and breaksBounds() is false, the
+  parameters stay as they are, bit for bit. Otherwise the EDGE is placed again by the code of
+  the deflection patch (graded field, slope 0.5, so neighbours differ by at most
+  e^0.5 = 1.65; count kept within the bounds; field scaled within [floor, max size]; floor
+  raised where a floor-sized arc gives a chord below min size). After each placement, the
+  larger of two neighbours that differ more than twice gets its field lowered to
+  0.9 x min( 2 x the smaller, its field ), as a segment that misses the deflection does.
+
+Order of the rules when they conflict: min size and max size first; then the factor 2,
+resolved by grading the larger neighbour down, which never makes a segment longer and so
+never breaks the deflection or max size, and never goes below the smaller neighbour, so never
+below min size; then the deflection, which gives way to min size. Where the field is at its
+floor, min size wins and the larger neighbour is not lowered further. In the cases measured
+for this patch no EDGE needed that exception. An EDGE shorter than min size (one segment), or
+a closed EDGE shorter than three min sizes, cannot meet the bounds; it keeps the count the
+bounds allow.
+
+Scope of the factor 2: upstream grades the size in space (the octree is 3-D), so its intent
+covers neighbours across a VERTEX and EDGEs that pass close to each other. This patch checks
+and enforces the factor 2 only along each EDGE and across the two ends of a closed EDGE;
+behaviour across VERTEXes is unchanged.
+
+Not changed: an EDGE whose segments meet all three rules keeps the segments of
+makeSegments(); the size tree, the other EDGEs and Evaluate() are untouched. If the rules are
+still broken after 200 refinements, the EDGE fails with a compute error.
+
+diff --git a/src/StdMeshers/StdMeshers_Adaptive1D.cxx b/src/StdMeshers/StdMeshers_Adaptive1D.cxx
+--- a/src/StdMeshers/StdMeshers_Adaptive1D.cxx
++++ b/src/StdMeshers/StdMeshers_Adaptive1D.cxx
+@@ -165,8 +165,10 @@
+   private:
+ 
+     bool makeSegments();
+-    // pySMESH: hold the deflection on the segments of one EDGE
+-    bool   holdDeflection( EdgeData& eData, vector< double >& params );
++    // pySMESH: hold the three rules of the hypothesis on the segments of one EDGE
++    bool   holdRules     ( EdgeData& eData, vector< double >& params );
++    bool   breaksBounds  ( const EdgeData& eData, const vector< double >& nodeU,
++                           bool isClosed ) const;
+     double probeFieldMax ( const EdgeData& eData, double u1, double u2 ) const;
+     void   lowerProbeSize( EdgeData& eData, double u1, double u2, double size ) const;
+     void   buildGrid     ( const EdgeData& eData, double floorSize, bool isClosed,
+@@ -1554,9 +1556,9 @@
+       else
+         break;
+     }
+-    // pySMESH: the segments follow the size field without a check of the deflection;
+-    // check it, and recompute the EDGE where a segment misses it
+-    if ( !holdDeflection( eData, params ))
++    // pySMESH: the segments follow the size field without a check of the three rules
++    // of the hypothesis; check them, and recompute the EDGE where a segment breaks one
++    if ( !holdRules( eData, params ))
+       return false;
+ 
+     // get nodes on VERTEXes
+@@ -1821,25 +1823,56 @@
+ 
+ //================================================================================
+ /*!
+- * \brief pySMESH: hold the deflection on the segments of one EDGE.
++ * \brief pySMESH: whether the segments between the given nodes break a size bound
++ *        (min size, max size; relative tolerance 1e-9) or the factor 2 between two
++ *        neighbours of the EDGE, the two ends of a closed EDGE included
++ */
++//================================================================================
++
++bool AdaptiveAlgo::breaksBounds( const EdgeData& eData, const vector< double >& nodeU,
++                                 bool isClosed ) const
++{
++  const double theTol  = 1e-9;
++  const double minSize = myHyp->GetMinSize(), maxSize = myHyp->GetMaxSize();
++  vector< double > len( nodeU.size() - 1 );
++  for ( size_t k = 0; k < len.size(); ++k )
++  {
++    len[k] = eData.myC3d.Value( nodeU[k] ).Distance( eData.myC3d.Value( nodeU[k+1] ));
++    if ( len[k] < minSize * ( 1. - theTol ) || len[k] > maxSize * ( 1. + theTol ))
++      return true;
++  }
++  for ( size_t k = 0; k + 1 < len.size(); ++k )
++    if ( Max( len[k], len[k+1] ) > 2. * Min( len[k], len[k+1] ) * ( 1. + theTol ))
++      return true;
++  if ( isClosed && len.size() > 1 &&
++       Max( len[0], len.back() ) > 2. * Min( len[0], len.back() ) * ( 1. + theTol ))
++    return true;
++  return false;
++}
++
++//================================================================================
++/*!
++ * \brief pySMESH: hold the three rules of the hypothesis on the segments of one EDGE.
+  *
+- * makeSegments() places the segments on a size field that the deflection only seeds;
+- * no segment is checked against the deflection. This checks each segment. If every
+- * segment meets the deflection, the parameters stay as they are. Otherwise the field
+- * is lowered over each segment that misses the deflection where the field is above its
+- * floor (the min size), graded, and the nodes are placed again, until every segment
+- * meets the deflection or lies where the field is at the floor (min size wins).
++ * makeSegments() places the segments on a size field that the deflection only seeds
++ * and the grading only limits; no segment is checked against the three rules of the
++ * hypothesis: the min and max size, the factor 2 between neighbours, the deflection.
++ * This checks each segment. If every segment meets the three rules, the parameters
++ * stay as they are. Otherwise the field is graded and the nodes are placed again;
++ * the field is lowered over each segment that misses the deflection, and over the
++ * larger of two neighbours that differ more than twice, where the field is above its
++ * floor (the min size); until every segment meets the rules or lies where the field
++ * is at the floor (min size wins).
+  *  \param [in,out] eData - the EDGE; its probe sizes are lowered
+  *  \param [in,out] params - the parameters of the inner nodes
+- *  \retval bool - false if canceled or if the deflection is not met in theMaxIter steps
++ *  \retval bool - false if canceled or if the rules are not met in theMaxIter steps
+  */
+ //================================================================================
+ 
+-bool AdaptiveAlgo::holdDeflection( EdgeData& eData, vector< double >& params )
+-{
+-  if ( eData.myC3d.GetType() == GeomAbs_Line )
+-    return true;
+-
++bool AdaptiveAlgo::holdRules( EdgeData& eData, vector< double >& params )
++{
++  // a straight EDGE meets the deflection; it is checked for the size rules only
++  const bool   isLine      = ( eData.myC3d.GetType() == GeomAbs_Line );
+   const int    theMaxIter  = 200;
+   const double theMargin   = 0.9;  // aim below the deflection, and below the size there
+   const double theFloorTol = 1e-9; // relative: a size this close to the floor is the floor
+@@ -1859,7 +1892,7 @@
+   vector< size_t > toFix;
+   vector< double > fixSize;
+   bool isMissed = false;
+-  for ( size_t k = 0; k + 1 < nodeU.size(); ++k )
++  for ( size_t k = 0; k + 1 < nodeU.size() && !isLine; ++k )
+   {
+     const double sag = segmentSagitta( eData.myC3d, nodeU[k], nodeU[k+1] );
+     if ( sag <= deflection )
+@@ -1872,7 +1905,7 @@
+     toFix.push_back( k );
+     fixSize.push_back( Max( floorSize, theMargin * Min( len * sqrt( deflection / sag ), fieldMax )));
+   }
+-  if ( !isMissed )
++  if ( !isMissed && !breaksBounds( eData, nodeU, isClosed ))
+     return true; // the segments of makeSegments() stay as they are
+ 
+   EdgeGrid grid;
+@@ -1881,8 +1914,9 @@
+     if ( _computeCanceled )
+       return false;
+     if ( iter == theMaxIter )
+-      return error( SMESH_Comment( "Adaptive1D: the deflection " ) << deflection
+-                    << " is not met after " << theMaxIter << " refinements of EDGE #"
++      return error( SMESH_Comment( "Adaptive1D: the size rules (deflection " )
++                    << deflection << ", factor 2) are not met after " << theMaxIter
++                    << " refinements of EDGE #"
+                     << myMesh->GetMeshDS()->ShapeToIndex( eData.Edge() ));
+ 
+     for ( size_t j = 0; j < toFix.size(); ++j )
+@@ -1906,7 +1940,7 @@
+     // check the new segments
+     toFix.clear();
+     fixSize.clear();
+-    for ( size_t k = 0; k + 1 < nodeU.size(); ++k )
++    for ( size_t k = 0; k + 1 < nodeU.size() && !isLine; ++k )
+     {
+       const double sag = segmentSagitta( eData.myC3d, nodeU[k], nodeU[k+1] );
+       if ( sag <= deflection )
+@@ -1918,6 +1952,26 @@
+       toFix.push_back( k );
+       fixSize.push_back( Max( floorSize, theMargin * Min( len * sqrt( deflection / sag ), hMax )));
+     }
++    // grade the larger of two neighbours that differ more than twice down to twice the
++    // smaller one; it never goes below the smaller one, so never below the min size
++    const size_t nbSeg = nodeU.size() - 1;
++    vector< double > segLen( nbSeg );
++    for ( size_t k = 0; k < nbSeg; ++k )
++      segLen[k] = eData.myC3d.Value( nodeU[k] ).Distance( eData.myC3d.Value( nodeU[k+1] ));
++    const size_t nbPairs = ( isClosed && nbSeg > 1 ) ? nbSeg : nbSeg - 1;
++    for ( size_t k = 0; k < nbPairs; ++k )
++    {
++      const size_t k2 = ( k + 1 ) % nbSeg;
++      const size_t kBig   = ( segLen[k] > segLen[k2] ) ? k : k2;
++      const size_t kSmall = ( kBig == k ) ? k2 : k;
++      if ( segLen[ kBig ] <= 2. * segLen[ kSmall ] * ( 1. + 1e-9 ))
++        continue;
++      const double hMax = grid.SpanMax( grid.myH, nodeU[ kBig ], nodeU[ kBig + 1 ] );
++      if ( hMax <= floorSize * ( 1. + theFloorTol ))
++        continue;
++      toFix.push_back( kBig );
++      fixSize.push_back( Max( floorSize, theMargin * Min( 2. * segLen[ kSmall ], hMax )));
++    }
+     if ( toFix.empty() )
+       break;
+   }

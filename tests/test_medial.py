@@ -27,6 +27,7 @@ rectangle, never a unit square.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator
 
 import numpy as np
@@ -292,18 +293,68 @@ def test_only_the_l_shape_has_two_branches_that_are_junction_to_junction(
     assert between_junctions(l_shape) == 2
 
 
+# The L's spine (its axis without the corner arms) in closed form. Along each leg it
+# is the leg's centre line, 4 long: y = 2 for x in [4, 8], and x = 2 for y in [4, 8].
+# Round the corner it is equidistant from an outer edge and the reflex vertex (4, 4):
+# the parabola y = 2 + (x - 4)^2 / 8, from x = 4 to the junction on the bisector
+# y = x, at x = 8 - sqrt(32). With t = (x - 4) / 4 one arc is 4 times the integral of
+# sqrt(1 + t^2) over [0, sqrt(2) - 1]. The other arc is its mirror image in y = x.
+_L_ARC_SLOPE: float = math.sqrt(2.0) - 1.0
+L_SPINE_ARCS: float = 4.0 * (
+    _L_ARC_SLOPE * math.sqrt(1.0 + _L_ARC_SLOPE**2) + math.asinh(_L_ARC_SLOPE)
+)
+L_SPINE_LENGTH: float = 8.0 + L_SPINE_ARCS
+# Both legs of the L are 4 wide, so each centre line is 2 from the outer edges.
+L_CENTRE_LINE: float = 2.0
+
+# The boundary discretisation step of the spine tests, and the integer grid that SMESH
+# snaps the boundary to for these two faces (SMESH_MAT2d.cxx:676-683).
+SPINE_STEP: float = 0.1
+SPINE_GRID: float = 1e-5
+
+
 def test_the_l_shapes_spine_bends_where_a_rectangles_runs_straight(
     l_shape: ps.Shape, rectangle: ps.Shape
 ) -> None:
-    l_spine = medial_axis(l_shape, 1, 0.1, ignore_corners=True).longest
-    straight = medial_axis(rectangle, 1, 0.1, ignore_corners=True).longest
+    """With the corner arms dropped, both shapes come down to one branch, so the
+    branch count stops telling them apart and the branch's geometry has to.
 
-    # With the corner arms dropped, both shapes come down to one branch — so the branch
-    # *count* stops telling them apart and its shape has to. The rectangle's is two points;
-    # the L's turns through its own corner.
-    assert straight.uv.shape[0] == 2
-    assert l_spine.uv.shape[0] > 2
-    assert l_spine.length == pytest.approx(11.384, abs=0.01)
+    The rectangle's spine is its centre line: every point at y = h/2 = 2, from
+    x = h/2 = 2 to x = w - h/2 = 8, length 6, width h = 4 all along. The L's spine
+    leaves the centre line of each leg by more than one boundary step (a straight
+    spine stays within the 1e-5 grid of its line), and its length is the closed form
+    above: 8 + 3.406165 = 11.406165.
+
+    Tolerance of the L length. SMESH builds the axis on the boundary cut into pieces
+    shorter than ``SPINE_STEP`` (SMESH_MAT2d.cxx:590, theDiscrCoef 0.5). So each arc
+    is an inscribed polyline, and each chord spans at most
+    SPINE_STEP * sqrt(1 + a^2) of arc, a = sqrt(2) - 1 being the largest slope of the
+    arc. On a curve of curvature at most k, a chord of arc length s is shorter than
+    its arc by at most k^2 s^3 / 24. With k = 1/4 for this parabola, the two arcs lose
+    at most SPINE_STEP^2 (1 + a^2) L_SPINE_ARCS / 384 = 1.04e-4. The grid snap moves
+    each axis point by at most sqrt(2) * SPINE_GRID. To first order this changes the
+    length by at most sqrt(2) * SPINE_GRID * (2 + pi/2): one share per end, and one
+    per radian of total turning. Sum: 1.54e-4. ``samples`` places only the width
+    probes. The length is summed over the branch's own points, so ``samples`` does
+    not enter the tolerance. The 9.9 sampling (one chord per arc, 11.384010) misses
+    the exact length by 140 times the tolerance.
+    """
+    l_spine = medial_axis(l_shape, 1, SPINE_STEP, ignore_corners=True).longest
+    straight = medial_axis(rectangle, 1, SPINE_STEP, ignore_corners=True).longest
+
+    assert np.allclose(straight.uv[:, 1], RECT_H / 2.0, atol=1e-9)
+    assert float(straight.uv[:, 0].min()) == pytest.approx(RECT_H / 2.0, abs=1e-9)
+    assert float(straight.uv[:, 0].max()) == pytest.approx(
+        RECT_W - RECT_H / 2.0, abs=1e-9
+    )
+    assert straight.length == pytest.approx(RECT_W - RECT_H, abs=1e-9)
+    assert np.allclose(straight.widths, RECT_H, atol=1e-9)
+
+    assert float(np.abs(l_spine.uv[:, 1] - L_CENTRE_LINE).max()) > SPINE_STEP
+    assert float(np.abs(l_spine.uv[:, 0] - L_CENTRE_LINE).max()) > SPINE_STEP
+    chords = SPINE_STEP**2 * (1.0 + _L_ARC_SLOPE**2) * L_SPINE_ARCS / 384.0
+    snap = math.sqrt(2.0) * SPINE_GRID * (2.0 + math.pi / 2.0)
+    assert l_spine.length == pytest.approx(L_SPINE_LENGTH, abs=chords + snap)
 
 
 def test_the_l_shapes_spine_reports_the_leg_width_along_both_legs(

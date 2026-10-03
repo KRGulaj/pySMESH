@@ -15,9 +15,12 @@ discretisation, so the answer is a construction rather than a sampled approximat
 Three properties of the result decide how to read it, and none is what a first reading would
 assume:
 
-* **A branch is not a dense polyline.** It carries one point per medial-axis edge plus one,
-  so a straight branch is exactly two points. The axis of a rectangle is a spine plus four
-  corner arms — five branches — not one line.
+* **The boundary discretisation decides how many points a branch has.** A branch
+  carries one point per medial-axis edge, plus one. SMESH cuts every boundary edge into
+  at least 9 pieces, each shorter than ``min_segment_length``, before it builds the
+  axis. So a straight branch is a polyline of collinear points, not its two end points,
+  and a smaller ``min_segment_length`` gives more of them. The axis of a rectangle is a
+  spine plus four corner arms — five branches — not one line.
 * **Branch 0 is not the spine.** Branches come out in construction order, so a thickness
   query has to pick the branch it means. :attr:`MedialAxis.longest` is the usual pick.
 * **Width comes from the boundary, not from the axis.** Each sample carries the two nearest

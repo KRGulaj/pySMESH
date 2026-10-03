@@ -1,0 +1,538 @@
+pySMESH: make StdMeshers_Adaptive1D hold its deflection (SMESH V9_16_0).
+
+Defect: the Adaptive hypothesis documents three rules (doc/gui/input/1d_meshing_hypo.rst):
+the segment length "is limited by Min. Size and Max Size", adjacent segments "can't differ
+more than twice", and the "Deflection parameter gives maximal distance of a segment from a
+curved edge". The algorithm can break the third rule.
+
+Symptom: on a curved EDGE next to a curved FACE, segments are longer than the deflection
+allows. Radius-1.5 rims of a cylinder, deflection 0.01: 28 segments, the longest 0.352196,
+sagitta 0.0103727 = 1.037 x the deflection (1.093 x at deflection 0.003). The same on an
+ellipse 2 x 1.5 (1.042 x) and on radius-4 rims at deflection 0.02 (1.025 x). The lone circle
+(no FACE) gives 28 equal chords of 0.335893, sagitta 0.00943, within the deflection.
+
+Root cause: the deflection only seeds the size field. SegSizeTree::SetSize(p1, p2) stores
+the size of a deflection chord at its two ends and its middle; the octree leaves around them
+keep the size that SetSize propagates, size + boxSize * grading (0.3359 + 0.7 * 0.2532 =
+0.5131 on the rim above). The loop that limits the size by the distance to the FACEs
+(AdaptiveAlgo::Compute) inserts probe points at the middles of probe intervals with the tree
+size there; on the rim 6 of 44 probes carry 0.5131 instead of 0.3359. makeSegments()
+interpolates the probe sizes, places the nodes on the integral of 1 / size and rounds the
+count; around those probes the segments grow to 0.352. No segment is checked against the
+deflection. The code is unchanged since the hypothesis was added (SMESH 7b33bc39f,
+2013-11-11, "22355: EDF SMESH: New 1D hypothesis Adaptive"); upstream master at 83f8bf482
+(2026-09-14) has the same code.
+
+Sagitta of a segment, as used here: the largest distance from the EDGE curve, between the
+segment's two end parameters, to the chord (16 samples, then a golden-section search next
+to the largest one).
+
+Change, in StdMeshers_Adaptive1D.cxx only:
+* makeSegments(): after the parameters of an EDGE are computed, call holdDeflection().
+* AdaptiveAlgo::holdDeflection() (new): if every segment meets the deflection, the
+  parameters stay as they are, bit for bit. Otherwise, over each segment that misses it
+  where the size field is above its floor (the min size), lower the probe sizes to
+  0.9 x min( L sqrt( deflection / sagitta ), field size ); sample the field on a parameter
+  grid (buildGrid: at least 10 grid steps per segment) and grade it (a size grows by at most
+  0.5 x the distance, so adjacent segments differ by at most e^0.5 = 1.65); take the count
+  ceil( integral of 1 / size ), kept within the counts that min size and max size allow; scale
+  the field so that its integral is that count, kept within [floor, max size]; place the
+  nodes (distribute). Repeat until every segment meets the deflection or lies where the field
+  is at the floor. If an arc of the floor size gives a chord shorter than the min size, the
+  floor is raised by the shortfall, so that no chord is shorter than the min size.
+* New helpers: segmentSagitta(), EdgeGrid, probeFieldMax(), lowerProbeSize(), buildGrid(),
+  distribute().
+
+Order of the rules when they conflict: min size and max size are hard bounds. The deflection
+holds unless meeting it would need a segment shorter than the min size; there the min size
+wins: those segments lie where the field is at the floor, at least min size long. Where the
+whole EDGE is in that case, the count is the largest whose segments are not below min size;
+on a closed circle of radius R the chords are then equal, 2 R sin(pi / n) with
+n = floor(pi / asin(min size / 2 R)), and equal to min size only if that ratio is whole.
+The size tree's own floor, 2e-6 x the shape's box, stays the smallest size.
+
+Not changed: an EDGE whose segments all meet the deflection keeps the segments of
+makeSegments(), including where they break the min size or the factor 2 (seen upstream on
+B-spline and cone EDGEs). The size tree, the other EDGEs and Evaluate() are untouched. If the
+deflection is still missed after 200 refinements, the EDGE fails with a compute error.
+
+diff --git a/src/StdMeshers/StdMeshers_Adaptive1D.cxx b/src/StdMeshers/StdMeshers_Adaptive1D.cxx
+--- a/src/StdMeshers/StdMeshers_Adaptive1D.cxx
++++ b/src/StdMeshers/StdMeshers_Adaptive1D.cxx
+@@ -148,6 +148,7 @@
+     const BBox* GetBox() const { return (BBox*) getBox(); }
+     double GetMinSize() { return getData()->myMinSize; }
+   };
++  struct EdgeGrid; // pySMESH: size field of one EDGE on a parameter grid
+   //================================================================================
+   /*!
+    * \brief Adaptive wire discertizator.
+@@ -164,6 +165,14 @@
+   private:
+ 
+     bool makeSegments();
++    // pySMESH: hold the deflection on the segments of one EDGE
++    bool   holdDeflection( EdgeData& eData, vector< double >& params );
++    double probeFieldMax ( const EdgeData& eData, double u1, double u2 ) const;
++    void   lowerProbeSize( EdgeData& eData, double u1, double u2, double size ) const;
++    void   buildGrid     ( const EdgeData& eData, double floorSize, bool isClosed,
++                           EdgeGrid& grid ) const;
++    void   distribute    ( EdgeGrid& grid, double floorSize, bool isClosed,
++                           vector< double >& nodeU ) const;
+ 
+     const StdMeshers_Adaptive1D* myHyp;
+     SMESH_Mesh*                  myMesh;
+@@ -912,6 +921,104 @@
+ 
+     return dist2;
+   }
++
++  //================================================================================
++  /*!
++   * \brief pySMESH: sagitta of a segment of a curve. It is the largest distance from
++   *        the curve, between the two end parameters, to the chord: 16 samples, then
++   *        a golden-section search between the two samples next to the largest one.
++   */
++  //================================================================================
++
++  double segmentSagitta( const BRepAdaptor_Curve& theCurve,
++                         const double             theU1,
++                         const double             theU2 )
++  {
++    const gp_XYZ p1    = theCurve.Value( theU1 ).XYZ();
++    const gp_XYZ chord = theCurve.Value( theU2 ).XYZ() - p1;
++    const double len2  = chord.SquareModulus();
++    auto distToChord = [&]( const double u ) -> double
++    {
++      const gp_XYZ v = theCurve.Value( u ).XYZ() - p1;
++      const double t = len2 > 0. ? Max( 0., Min( 1., ( v * chord ) / len2 )) : 0.;
++      return ( v - chord * t ).Modulus();
++    };
++    const int    nbSamples = 16;
++    const double du        = ( theU2 - theU1 ) / nbSamples;
++    double maxDist = 0.;
++    int    iMax    = 1;
++    for ( int i = 1; i < nbSamples; ++i )
++    {
++      const double d = distToChord( theU1 + i * du );
++      if ( d > maxDist )
++      {
++        maxDist = d;
++        iMax    = i;
++      }
++    }
++    const double golden = 0.5 * ( sqrt( 5. ) - 1. );
++    double a = theU1 + ( iMax - 1 ) * du, b = theU1 + ( iMax + 1 ) * du;
++    double c = b - golden * ( b - a ),    d = a + golden * ( b - a );
++    double fc = distToChord( c ),         fd = distToChord( d );
++    const double uTol = 1e-12 * Abs( theU2 - theU1 );
++    for ( int it = 0; it < 200 && b - a > uTol; ++it )
++    {
++      if ( fc > fd )
++      {
++        b = d; d = c; fd = fc;
++        c = b - golden * ( b - a );
++        fc = distToChord( c );
++      }
++      else
++      {
++        a = c; c = d; fc = fd;
++        d = a + golden * ( b - a );
++        fd = distToChord( d );
++      }
++    }
++    return Max( maxDist, Max( fc, fd ));
++  }
++
++  //================================================================================
++  /*!
++   * \brief pySMESH: size field of one EDGE on a uniform parameter grid
++   */
++  //================================================================================
++
++  struct EdgeGrid
++  {
++    vector< double > myU;  // grid parameters, from first to last, uniform
++    vector< double > myDs; // chord length of each grid step, myDs[0] = 0
++    vector< double > myH;  // graded segment size at each grid point
++    vector< double > myF;  // size of the final distribution at each grid point
++
++    // index i of the grid step [ i-1, i ] that holds the parameter u
++    size_t Step( const double u ) const
++    {
++      const size_t nbSteps = myU.size() - 1;
++      const double r = ( u - myU[0] ) / ( myU[ nbSteps ] - myU[0] ) * double( nbSteps );
++      const size_t i = r <= 1. ? 1 : size_t( ceil( r ));
++      return i > nbSteps ? nbSteps : i;
++    }
++    // value of a grid array at the parameter u, interpolated linearly
++    double At( const vector< double >& values, const double u ) const
++    {
++      const size_t i = Step( u );
++      const double r = ( u - myU[i-1] ) / ( myU[i] - myU[i-1] );
++      return values[i-1] + r * ( values[i] - values[i-1] );
++    }
++    // largest value of a grid array on [ u1, u2 ]: at both ends and at the grid points
++    // strictly between them
++    double SpanMax( const vector< double >& values, const double u1, const double u2 ) const
++    {
++      double maxValue = Max( At( values, u1 ), At( values, u2 ));
++      const size_t iEnd = Step( u2 );
++      for ( size_t i = Step( u1 ); i < iEnd; ++i )
++        if ( myU[i] > u1 )
++          maxValue = Max( maxValue, values[i] );
++      return maxValue;
++    }
++  };
+ 
+ } // namespace
+ 
+@@ -1447,6 +1554,11 @@
+       else
+         break;
+     }
++    // pySMESH: the segments follow the size field without a check of the deflection;
++    // check it, and recompute the EDGE where a segment misses it
++    if ( !holdDeflection( eData, params ))
++      return false;
++
+     // get nodes on VERTEXes
+     TopoDS_Vertex vf = helper.IthVertex( 0, eData.Edge(), false );
+     TopoDS_Vertex vl = helper.IthVertex( 1, eData.Edge(), false );
+@@ -1485,6 +1597,336 @@
+ 
+ //================================================================================
+ /*!
++ * \brief pySMESH: largest size of the field of makeSegments() on [u1, u2]: the probe
++ *        sizes interpolated in parameter and limited by the size tree, at the two
++ *        ends and 15 points between them
++ */
++//================================================================================
++
++double AdaptiveAlgo::probeFieldMax( const EdgeData& eData, double u1, double u2 ) const
++{
++  const double maxSize = myHyp->GetMaxSize();
++  double fieldMax = 0.;
++  list< EdgeData::ProbePnt >::const_iterator p2 = eData.myPoints.begin(), p1 = p2++;
++  const int nbSamples = 16;
++  for ( int i = 0; i <= nbSamples; ++i )
++  {
++    const double u = u1 + ( u2 - u1 ) * i / nbSamples;
++    while ( p2 != eData.myPoints.end() && p2->myU < u )
++      ++p1, ++p2;
++    double size = Min( p1->mySegSize, maxSize );
++    if ( p2 != eData.myPoints.end() && p2->myU > p1->myU )
++    {
++      const double r = Max( 0., ( u - p1->myU ) / ( p2->myU - p1->myU ));
++      size = ( 1 - r ) * size + r * Min( p2->mySegSize, maxSize );
++    }
++    size = Min( size, mySizeTree->GetSize( eData.myC3d.Value( u )));
++    fieldMax = Max( fieldMax, size );
++  }
++  return fieldMax;
++}
++
++//================================================================================
++/*!
++ * \brief pySMESH: limit the probe sizes of an EDGE to a size all over [u1, u2]
++ */
++//================================================================================
++
++void AdaptiveAlgo::lowerProbeSize( EdgeData& eData, double u1, double u2, double size ) const
++{
++  EdgeData::TPntIter p = eData.myPoints.begin();
++  for ( ; p != eData.myPoints.end(); ++p )
++    if ( u1 <= p->myU && p->myU <= u2 )
++      p->mySegSize = Min( p->mySegSize, size );
++
++  // probe points at both ends and the middle, so that the interpolated size is at
++  // most the given one all over [u1, u2]
++  const double us[3] = { u1, 0.5 * ( u1 + u2 ), u2 };
++  for ( int i = 0; i < 3; ++i )
++  {
++    EdgeData::TPntIter p2 = eData.myPoints.begin();
++    while ( p2 != eData.myPoints.end() && p2->myU < us[i] )
++      ++p2;
++    if ( p2 != eData.myPoints.end() && p2->myU == us[i] )
++    {
++      p2->mySegSize = Min( p2->mySegSize, size );
++      continue;
++    }
++    double sizeHere = size;
++    if ( p2 != eData.myPoints.end() && p2 != eData.myPoints.begin() )
++    {
++      EdgeData::TPntIter p1 = p2;
++      --p1;
++      const double r = ( us[i] - p1->myU ) / ( p2->myU - p1->myU );
++      sizeHere = Min( size, ( 1 - r ) * p1->mySegSize + r * p2->mySegSize );
++    }
++    eData.myPoints.insert( p2, EdgeData::ProbePnt( eData.myC3d.Value( us[i] ), us[i], sizeHere ));
++  }
++}
++
++//================================================================================
++/*!
++ * \brief pySMESH: sample the size field of an EDGE on a uniform parameter grid and
++ *        grade it. The size is the probe sizes interpolated in parameter, limited by
++ *        the size tree and kept within [floorSize, maxSize], as makeSegments() reads
++ *        it. Grading: a size grows by at most theGrading times the distance, so that
++ *        two adjacent segments differ by at most exp( theGrading ) < 2.
++ */
++//================================================================================
++
++void AdaptiveAlgo::buildGrid( const EdgeData& eData, double floorSize, bool isClosed,
++                              EdgeGrid& grid ) const
++{
++  const double theGrading  = 0.5;
++  const double theSubSteps = 10;     // grid steps per segment, at least
++  const size_t theMaxSteps = 1000000;
++  const double maxSize = myHyp->GetMaxSize();
++  const double f = eData.myC3d.FirstParameter(), l = eData.myC3d.LastParameter();
++
++  double sizeMin = maxSize;
++  list< EdgeData::ProbePnt >::const_iterator p = eData.myPoints.begin();
++  for ( ; p != eData.myPoints.end(); ++p )
++    sizeMin = Min( sizeMin, p->mySegSize );
++  sizeMin = Max( sizeMin, floorSize );
++  const double nbStart = Max( 16., ceil( theSubSteps * eData.myLength / sizeMin ));
++  size_t nbSteps = size_t( Min( nbStart, double( theMaxSteps )));
++
++  while ( true )
++  {
++    grid.myU.resize( nbSteps + 1 );
++    grid.myDs.resize( nbSteps + 1 );
++    grid.myH.resize( nbSteps + 1 );
++    list< EdgeData::ProbePnt >::const_iterator p2 = eData.myPoints.begin(), p1 = p2++;
++    gp_Pnt pPrev;
++    for ( size_t i = 0; i <= nbSteps; ++i )
++    {
++      const double u = ( i == nbSteps ) ? l : f + ( l - f ) * double( i ) / double( nbSteps );
++      while ( p2 != eData.myPoints.end() && p2->myU < u )
++        ++p1, ++p2;
++      double size = Min( p1->mySegSize, maxSize );
++      if ( p2 != eData.myPoints.end() && p2->myU > p1->myU )
++      {
++        const double r = Max( 0., ( u - p1->myU ) / ( p2->myU - p1->myU ));
++        size = ( 1 - r ) * size + r * Min( p2->mySegSize, maxSize );
++      }
++      const gp_Pnt pu = eData.myC3d.Value( u );
++      size = Min( size, mySizeTree->GetSize( pu ));
++      grid.myU [i] = u;
++      grid.myDs[i] = ( i == 0 ) ? 0. : pu.Distance( pPrev );
++      grid.myH [i] = Min( maxSize, Max( floorSize, size ));
++      pPrev = pu;
++    }
++    // grading, both ways; twice round a closed EDGE, whose ends are one point
++    vector< double >& h = grid.myH;
++    for ( int iRound = 0; iRound < ( isClosed ? 2 : 1 ); ++iRound )
++    {
++      if ( isClosed )
++        h[0] = h[ nbSteps ] = Min( h[0], h[ nbSteps ]);
++      for ( size_t i = 1; i <= nbSteps; ++i )
++        h[i] = Min( h[i], h[i-1] + theGrading * grid.myDs[i] );
++      if ( isClosed )
++        h[0] = h[ nbSteps ] = Min( h[0], h[ nbSteps ]);
++      for ( size_t i = nbSteps; i > 0; --i )
++        h[i-1] = Min( h[i-1], h[i] + theGrading * grid.myDs[i] );
++    }
++    // refine the grid until every step is at most 1/theSubSteps of its sizes
++    double maxStepRatio = 0.;
++    for ( size_t i = 1; i <= nbSteps; ++i )
++      maxStepRatio = Max( maxStepRatio, grid.myDs[i] / Min( h[i-1], h[i] ));
++    if ( maxStepRatio * theSubSteps <= 1. + 1e-9 || 2 * nbSteps > theMaxSteps )
++      break;
++    nbSteps = size_t( ceil( nbSteps * maxStepRatio * theSubSteps ));
++    if ( nbSteps > theMaxSteps )
++      nbSteps = theMaxSteps;
++  }
++}
++
++//================================================================================
++/*!
++ * \brief pySMESH: place the nodes of an EDGE on the graded size field of a grid.
++ *        The number of segments is the integral of 1 / size, rounded up, so that no
++ *        segment is longer than its size; it is then kept within the counts that the
++ *        size bounds allow. The field is scaled by the factor c that makes its integral
++ *        exactly that count, and kept within [floorSize, maxSize]: where the scaled size
++ *        would be below floorSize, the segments are floorSize long (min size wins).
++ */
++//================================================================================
++
++void AdaptiveAlgo::distribute( EdgeGrid& grid, double floorSize, bool isClosed,
++                               vector< double >& nodeU ) const
++{
++  const double maxSize = myHyp->GetMaxSize();
++  const size_t nbSteps = grid.myU.size() - 1;
++  const vector< double >& h = grid.myH;
++
++  double length = 0., hMin = maxSize, hMax = floorSize;
++  for ( size_t i = 0; i <= nbSteps; ++i )
++  {
++    length += grid.myDs[i];
++    hMin = Min( hMin, h[i] );
++    hMax = Max( hMax, h[i] );
++  }
++  auto sizeAt = [&]( double c, size_t i ) -> double
++  {
++    return Min( maxSize, Max( floorSize, c * h[i] ));
++  };
++  auto integral = [&]( double c ) -> double
++  {
++    double nb = 0.;
++    for ( size_t i = 1; i <= nbSteps; ++i )
++      nb += grid.myDs[i] * 0.5 * ( 1. / sizeAt( c, i-1 ) + 1. / sizeAt( c, i ));
++    return nb;
++  };
++
++  double nbSeg = ceil( integral( 1. ) - 1e-9 );
++  nbSeg = Min( nbSeg, floor( length / floorSize + 1e-9 ));
++  nbSeg = Max( nbSeg, ceil( length / maxSize - 1e-9 ));
++  nbSeg = Max( nbSeg, isClosed ? 3. : 1. );
++
++  // the integral decreases with c: from length / floorSize, all at floorSize, at
++  // cLo = floorSize / hMax, to length / maxSize, all at maxSize, at cHi = maxSize / hMin
++  double cLo = floorSize / hMax, cHi = maxSize / hMin;
++  for ( int it = 0; it < 200 && cHi - cLo > 1e-15 * cHi; ++it )
++  {
++    const double c = sqrt( cLo * cHi );
++    if ( integral( c ) > nbSeg )
++      cLo = c;
++    else
++      cHi = c;
++  }
++  const double c = sqrt( cLo * cHi );
++
++  grid.myF.resize( nbSteps + 1 );
++  vector< double > cumul( nbSteps + 1, 0. );
++  for ( size_t i = 0; i <= nbSteps; ++i )
++  {
++    grid.myF[i] = sizeAt( c, i );
++    if ( i > 0 )
++      cumul[i] = cumul[i-1] + grid.myDs[i] * 0.5 * ( 1. / grid.myF[i-1] + 1. / grid.myF[i] );
++  }
++  const int nb = int( nbSeg );
++  nodeU.resize( nb + 1 );
++  nodeU[0]  = grid.myU[0];
++  nodeU[nb] = grid.myU[ nbSteps ];
++  size_t i = 1;
++  for ( int k = 1; k < nb; ++k )
++  {
++    const double target = cumul[ nbSteps ] * k / nb;
++    while ( i < nbSteps && cumul[i] < target )
++      ++i;
++    const double r = ( target - cumul[i-1] ) / ( cumul[i] - cumul[i-1] );
++    nodeU[k] = grid.myU[i-1] + r * ( grid.myU[i] - grid.myU[i-1] );
++  }
++}
++
++//================================================================================
++/*!
++ * \brief pySMESH: hold the deflection on the segments of one EDGE.
++ *
++ * makeSegments() places the segments on a size field that the deflection only seeds;
++ * no segment is checked against the deflection. This checks each segment. If every
++ * segment meets the deflection, the parameters stay as they are. Otherwise the field
++ * is lowered over each segment that misses the deflection where the field is above its
++ * floor (the min size), graded, and the nodes are placed again, until every segment
++ * meets the deflection or lies where the field is at the floor (min size wins).
++ *  \param [in,out] eData - the EDGE; its probe sizes are lowered
++ *  \param [in,out] params - the parameters of the inner nodes
++ *  \retval bool - false if canceled or if the deflection is not met in theMaxIter steps
++ */
++//================================================================================
++
++bool AdaptiveAlgo::holdDeflection( EdgeData& eData, vector< double >& params )
++{
++  if ( eData.myC3d.GetType() == GeomAbs_Line )
++    return true;
++
++  const int    theMaxIter  = 200;
++  const double theMargin   = 0.9;  // aim below the deflection, and below the size there
++  const double theFloorTol = 1e-9; // relative: a size this close to the floor is the floor
++  const double deflection  = myHyp->GetDeflection();
++  const bool   isClosed    = SMESH_MesherHelper::IsClosedEdge( eData.Edge() );
++  // the min size as asked, but not below the smallest size the size tree keeps
++  const double minSize     = Max( myHyp->GetMinSize(), mySizeTree->GetMinSize() );
++  double floorSize = minSize;
++
++  vector< double > nodeU;
++  nodeU.push_back( eData.myC3d.FirstParameter() );
++  nodeU.insert( nodeU.end(), params.begin(), params.end() );
++  nodeU.push_back( eData.myC3d.LastParameter() );
++
++  // segments that miss the deflection; those where the field is above the floor can be
++  // shorter. Where the field is at the floor, min size wins.
++  vector< size_t > toFix;
++  vector< double > fixSize;
++  bool isMissed = false;
++  for ( size_t k = 0; k + 1 < nodeU.size(); ++k )
++  {
++    const double sag = segmentSagitta( eData.myC3d, nodeU[k], nodeU[k+1] );
++    if ( sag <= deflection )
++      continue;
++    isMissed = true;
++    const double fieldMax = probeFieldMax( eData, nodeU[k], nodeU[k+1] );
++    if ( fieldMax <= floorSize * ( 1. + theFloorTol ))
++      continue;
++    const double len = eData.myC3d.Value( nodeU[k] ).Distance( eData.myC3d.Value( nodeU[k+1] ));
++    toFix.push_back( k );
++    fixSize.push_back( Max( floorSize, theMargin * Min( len * sqrt( deflection / sag ), fieldMax )));
++  }
++  if ( !isMissed )
++    return true; // the segments of makeSegments() stay as they are
++
++  EdgeGrid grid;
++  for ( int iter = 0; ; ++iter )
++  {
++    if ( _computeCanceled )
++      return false;
++    if ( iter == theMaxIter )
++      return error( SMESH_Comment( "Adaptive1D: the deflection " ) << deflection
++                    << " is not met after " << theMaxIter << " refinements of EDGE #"
++                    << myMesh->GetMeshDS()->ShapeToIndex( eData.Edge() ));
++
++    for ( size_t j = 0; j < toFix.size(); ++j )
++      lowerProbeSize( eData, nodeU[ toFix[j] ], nodeU[ toFix[j] + 1 ], fixSize[j] );
++
++    // place the nodes; where an arc of the floor size gives a chord shorter than the
++    // min size, raise the floor by the shortfall
++    for ( int iFloor = 0; iFloor < 10; ++iFloor )
++    {
++      buildGrid( eData, floorSize, isClosed, grid );
++      distribute( grid, floorSize, isClosed, nodeU );
++      double minChord = 1e100;
++      for ( size_t k = 0; k + 1 < nodeU.size(); ++k )
++        minChord = Min( minChord,
++                        eData.myC3d.Value( nodeU[k] ).Distance( eData.myC3d.Value( nodeU[k+1] )));
++      if ( minChord >= minSize * ( 1. - 1e-12 ) || nodeU.size() <= 2 )
++        break;
++      floorSize *= minSize / minChord;
++    }
++
++    // check the new segments
++    toFix.clear();
++    fixSize.clear();
++    for ( size_t k = 0; k + 1 < nodeU.size(); ++k )
++    {
++      const double sag = segmentSagitta( eData.myC3d, nodeU[k], nodeU[k+1] );
++      if ( sag <= deflection )
++        continue;
++      const double hMax = grid.SpanMax( grid.myH, nodeU[k], nodeU[k+1] );
++      if ( hMax <= floorSize * ( 1. + theFloorTol ))
++        continue;
++      const double len = eData.myC3d.Value( nodeU[k] ).Distance( eData.myC3d.Value( nodeU[k+1] ));
++      toFix.push_back( k );
++      fixSize.push_back( Max( floorSize, theMargin * Min( len * sqrt( deflection / sag ), hMax )));
++    }
++    if ( toFix.empty() )
++      break;
++  }
++  params.assign( nodeU.begin() + 1, nodeU.end() - 1 );
++  return true;
++}
++
++//================================================================================
++/*!
+  * \brief Predict number of segments on all given EDGEs
+  */
+ //================================================================================

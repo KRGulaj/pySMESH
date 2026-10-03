@@ -1283,6 +1283,87 @@ void probe_meshing_binding_behaviour() {
     check(!ok && volumes == 0 && elapsed_ms < 1500.0, msg);
   }
 
+  // With a ViscousLayers hypothesis Cartesian_3D first builds an offset shape (one OCCT
+  // offset, which cannot be stopped inside), then meshes it by calling itself, then adds the
+  // layers. The inner call used to clear the cancel flag, so a cancel during the offset step
+  // was lost and the run went on to its end (pySMESH patch StdMeshers_Cartesian_VL_cancel).
+  // The block carries 8 x 8 square pockets, so its offset takes about 0.5 s and the cancel
+  // at 150 ms lands inside it. The layers grow on the bottom face, the one wall that stays a
+  // whole grid-aligned rectangle when it is offset. A run without a cancel takes 4.4 s.
+  {
+    const double side = 12.0;
+    const double height = 4.0;
+    const double pitch = side / 8.0;
+    const TopoDS_Shape block =
+        BRepPrimAPI_MakeBox(gp_Pnt(-side / 2, -side / 2, 0.0), side, side, height).Shape();
+    NCollection_List<TopoDS_Shape> args;
+    args.Append(block);
+    NCollection_List<TopoDS_Shape> tools;
+    for (int i = 0; i < 8; ++i) {
+      for (int j = 0; j < 8; ++j) {
+        const gp_Pnt corner(-side / 2 + pitch * (i + 0.25), -side / 2 + pitch * (j + 0.25),
+                            height / 2);
+        tools.Append(BRepPrimAPI_MakeBox(corner, pitch / 2, pitch / 2, height).Shape());
+      }
+    }
+    BRepAlgoAPI_Cut cut;
+    cut.SetArguments(args);
+    cut.SetTools(tools);
+    cut.Build();
+
+    Session s(cut.Shape());
+    StdMeshers_Cartesian_3D* algo = s.make<StdMeshers_Cartesian_3D>();
+    StdMeshers_CartesianParameters3D* params = s.make<StdMeshers_CartesianParameters3D>();
+    std::vector<std::string> spacing(1, std::string("0.1"));
+    std::vector<double> internal_points;
+    for (int axis = 0; axis < 3; ++axis) {
+      params->SetGridSpacing(spacing, internal_points, axis);
+    }
+    StdMeshers_ViscousLayers* vl = s.make<StdMeshers_ViscousLayers>();
+    vl->SetTotalThickness(0.3);
+    vl->SetNumberLayers(3);
+    vl->SetStretchFactor(1.2);
+    std::vector<int> wall;
+    for (TopExp_Explorer f(s.shape(), TopAbs_FACE); f.More(); f.Next()) {
+      bool bottom = true;
+      for (TopExp_Explorer v(f.Current(), TopAbs_VERTEX); v.More(); v.Next()) {
+        bottom = bottom && std::fabs(BRep_Tool::Pnt(TopoDS::Vertex(v.Current())).Z()) < 1e-9;
+      }
+      if (bottom) {
+        wall.push_back(s.meshDS()->ShapeToIndex(f.Current()));
+      }
+    }
+    vl->SetBndShapes(wall, /*toIgnore=*/false);
+    s.assign(s.shape(), algo);
+    s.assign(s.shape(), params);
+    s.assign(s.shape(), vl);
+
+    std::atomic<bool> stop{false};
+    std::thread canceller([&] {
+      std::this_thread::sleep_for(std::chrono::milliseconds(150));
+      if (!stop.load()) {
+        s.gen().CancelCompute(s.mesh(), s.shape());
+      }
+    });
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool ok = s.compute();
+    const double elapsed_ms =
+        std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0)
+            .count();
+    stop.store(true);
+    canceller.join();
+
+    // A cancel that stopped the run in its offset step leaves no volume: the grid step and
+    // the layer step never start.
+    const int volumes = static_cast<int>(s.meshDS()->NbVolumes());
+    char msg[260];
+    std::snprintf(msg, sizeof(msg),
+                  "MESHBIND Cartesian_3D + ViscousLayers honours a cancel in its offset step "
+                  "(%d wall, returned %s after %.0f ms with %d volumes)",
+                  static_cast<int>(wall.size()), ok ? "true" : "false", elapsed_ms, volumes);
+    check(wall.size() == 1 && !ok && volumes == 0 && elapsed_ms < 1500.0, msg);
+  }
+
   // ---- Two 3-D algorithms on one model, and whether they meet ----------------------- //
   // The gate's real question: a mixed assignment must be conforming at the internal
   // boundary. An algorithm that consumes the 2-D boundary mesh conforms by construction; one

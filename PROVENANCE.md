@@ -99,8 +99,9 @@ compile against the `V9_16_0` API with no change beyond the two that already app
 `patches/{kernel,geom,smesh,occt8}/*.patch`, applied by `prepare.py` in that order. Most come
 from looooo/SMESH's own patch set (Windows/MSVC fixes, the MED strip); the `occt8/` pair comes
 from conda-forge's `smesh-feedstock` recipe, which is the only place we found a working OCCT
-8.0 compatibility pass for this codebase. Three are pySMESH's own, for code that is new in
-`V9_16_0`. NETGEN-related patches are left out — we don't build NETGEN.
+8.0 compatibility pass for this codebase. Six are pySMESH's own: four for code that is new
+in `V9_16_0`, and two that make `Adaptive1D` keep the rules its documentation states.
+NETGEN-related patches are left out — we don't build NETGEN.
 
 `patches/occt801/` is a different kind: it patches OCCT itself, not SMESH, and
 `ci/build_occt.py` applies it, not `prepare.py`. See
@@ -137,6 +138,9 @@ MinGW/gcc-only patches are no-ops under our MSVC build.
 | `smesh/SMESH_File_mingw.patch` | L | unchanged | MinGW file I/O fix (no-op under MSVC). |
 | `smesh/StdMeshers_Quadrangle_2D_msvc.patch` | L | unchanged | `<windows.h>` `#define near` collision in the 2D mesher. |
 | `smesh/StdMeshers_Cartesian_3D_cancel.patch` | P | new | A cancel stops `Cartesian_3D` again, as in `V9_9_0`. SMESH `9f7d4a55e` passes `_computeCanceled` by value into `Grid::GridInitAndInterserctWithShape`, so its three cancel checks test a copy, and `Compute` ignores the result. The flag now goes by `volatile bool&`, and `Compute` returns false on a cancel. A run without a cancel builds the same mesh. |
+| `smesh/StdMeshers_Cartesian_VL_cancel.patch` | P | new | A cancel stops `Cartesian_3D` with viscous layers (SMESH `c9294ee68`, `d3c3260cd`). `Compute` builds the offset shape, then calls itself; the inner call reset `_computeCanceled`, so a cancel during the offset step was lost, and `ViscousBuilder::MakeViscousLayers` had no check. The inner call keeps the flag, `Compute` returns false after the offset step on a cancel, and the layer step reads the flag at its phase boundaries. A run without a cancel builds the same mesh. |
+| `smesh/StdMeshers_Adaptive1D_deflection.patch` | P | new | `Adaptive1D` holds its documented deflection. The deflection only seeded the size field, and next to a curved face the final segments missed it (1.037 times on a radius-1.5 rim; code unchanged since SMESH `7b33bc39f`). Each edge's segments are checked; an edge with a miss is placed again on a lowered, graded size field. Where the deflection would need segments shorter than min size, min size wins. An edge whose segments meet the deflection keeps them bit for bit. |
+| `smesh/StdMeshers_Adaptive1D_bounds.patch` | P | new | Applies after the deflection patch. `Adaptive1D` keeps min size, max size and the factor 2 between neighbours on every edge, where it broke them (neighbours up to 3.23 times apart, segments at 0.998 times min size). The factor 2 holds along each edge and across the ends of a closed edge; across vertices nothing changes. An edge that meets all three rules keeps its segments bit for bit. |
 | `occt8/0003-boost-regex-str-enum.patch` | C | unchanged | Boost regex `str(ENUM)` → `str(int(ENUM))`. |
 | `occt8/0004-occt-8.0-compat.patch` | C | re-ported | The OCCT-8.0 pass (streams, `::Raise()`→`throw`, NCollection), extended to the code that is new in `V9_16_0`; the NETGEN and MeshVSLink sections, never staged, are dropped. |
 
