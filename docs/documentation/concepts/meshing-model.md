@@ -165,11 +165,24 @@ report.edges     # 1-D element count
 report.faces     # 2-D element count
 report.volumes   # 3-D element count
 report.meshed    # one SubMeshCount per sub-shape that received elements
+report.warnings  # one ComputeWarning per sub-shape meshed with a warning
 ```
 
 `report.meshed` is what tells "meshed by the algorithm I put there" from "meshed by an
 enclosing all-dimensional algorithm that hid it". Read it whenever a mixed assignment is in
 play.
+
+**A warning is not a failure.** SMESH marks a sub-mesh computed when its algorithm reports a
+warning: the algorithm met a problem, and it meshed the sub-shape anyway. `compute()` then
+succeeds, and `report.warnings` lists each such sub-shape with its kind, its ordinal, the
+algorithm and SMESH's own words. `Quadrangle2D` asked for `QuadType.REDUCED` on a face whose
+opposite sides have different segment counts is an example: it warns that it used the
+standard transition, and the mesh is the `QuadType.STANDARD` mesh.
+
+```python
+for w in report.warnings:
+    print(w.kind, w.ordinal, w.algorithm, w.text)
+```
 
 **A failure names every failed sub-shape.** `compute()` raises `PysmeshError` if any
 sub-mesh failed. The message carries SMESH's own reason plus the algorithm that reported it,

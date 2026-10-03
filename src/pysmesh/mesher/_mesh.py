@@ -118,7 +118,8 @@ class _MeshOps(_MesherBase):
                 flag set beforehand is honoured even by a mesh that finishes quickly.
 
         Returns:
-            What the run produced, and which sub-shapes received elements.
+            What the run produced, which sub-shapes received elements, and which were
+            meshed with a warning from their algorithm (a warning is not a failure).
 
         Raises:
             PysmeshCancelled: If ``cancel`` returned True or ``progress`` raised. The mesh is

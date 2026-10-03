@@ -537,8 +537,14 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
   // SMESH_ComputeError is attached to the sub-mesh that actually failed, not to the
   // top-level one. A Quadrangle_2D failure on a cylinder is reported on the two circular
   // FACEs while the enclosing SOLID reports nothing, so every dimension has to be walked.
+  //
+  // A COMPERR_WARNING is not a failure: SMESH defines it as "algo reports error but sub-mesh
+  // is computed anyway" (SMESH_ComputeError.hxx:55) and marks the sub-mesh COMPUTE_OK for it
+  // (SMESH_subMesh.cxx, ComputeStateEngine). IsOK() is false for a warning and IsKO() is not,
+  // so IsKO() decides, and a warning goes on the report instead (report A1).
   std::vector<std::string> failures;
   std::vector<int> failed_faces;
+  py::list warnings;
   for (std::size_t k = 0; k < 4; ++k) {
     for (TopExp_Explorer ex(data_->shape, kKindTypes[k]); ex.More(); ex.Next()) {
       SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
@@ -551,13 +557,21 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
       }
       const int index = meshDS_->ShapeToIndex(ex.Current());
       const std::pair<const char*, int> at = ordinal_of_shape_index(index);
-      std::string line = std::string(at.first[0] ? at.first : kKindNames[k]) + " " +
-                         std::to_string(at.second) + ": ";
+      const char* algorithm = err->myAlgo != nullptr && err->myAlgo->GetName() != nullptr
+                                  ? err->myAlgo->GetName()
+                                  : "";
+      const std::string kind = at.first[0] ? at.first : kKindNames[k];
+      if (!err->IsKO()) {
+        warnings.append(py::make_tuple(kind, at.second, std::string(algorithm),
+                                       err->myComment));
+        continue;
+      }
+      std::string line = kind + " " + std::to_string(at.second) + ": ";
       line += err->myComment.empty() ? std::string("no message") : err->myComment;
       // myAlgo is the algorithm object, not its name — naming it is what makes the message
       // actionable, because the failure is nearly always the algorithm rather than the shape.
-      if (err->myAlgo != nullptr && err->myAlgo->GetName() != nullptr) {
-        line += std::string(" (algorithm ") + err->myAlgo->GetName() + ")";
+      if (algorithm[0] != '\0') {
+        line += std::string(" (algorithm ") + algorithm + ")";
       }
       bool seen = false;
       for (const std::string& s : failures) {
@@ -610,6 +624,7 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
     }
   }
   out["meshed"] = meshed;
+  out["warnings"] = warnings;
   return out;
 }
 

@@ -353,6 +353,29 @@ class SubMeshCount:
 
 
 @dataclass(frozen=True)
+class ComputeWarning:
+    """A sub-shape that was meshed with a warning from its algorithm.
+
+    SMESH marks such a sub-mesh computed (``COMPERR_WARNING``: the algorithm reports an
+    error, but the sub-mesh is computed anyway), so the compute succeeds and the mesh is
+    there. Quadrangle_2D, for example, warns when it falls back from the transition it
+    was asked for to the standard one.
+
+    Attributes:
+        kind: Which per-kind traversal the ordinal indexes.
+        ordinal: 1-based rank within that traversal.
+        algorithm: The name of the algorithm that warned, e.g. ``"Quadrangle_2D"``, or
+            empty when SMESH did not record one.
+        text: SMESH's own words.
+    """
+
+    kind: SubShapeKind
+    ordinal: int
+    algorithm: str
+    text: str
+
+
+@dataclass(frozen=True)
 class ComputeReport:
     """What one successful compute produced.
 
@@ -364,6 +387,8 @@ class ComputeReport:
         meshed: One entry per sub-shape that received elements. A caller driving a mixed
             assignment reads this to tell "meshed by the algorithm I put there" from "meshed
             by an enclosing one".
+        warnings: One entry per sub-shape an algorithm meshed with a warning. Empty when
+            no algorithm warned.
     """
 
     nodes: int
@@ -371,6 +396,7 @@ class ComputeReport:
     faces: int
     volumes: int
     meshed: tuple[SubMeshCount, ...]
+    warnings: tuple[ComputeWarning, ...] = ()
 
 
 def _mesh_data(raw: dict[str, object]) -> MeshData:
@@ -417,10 +443,19 @@ def _report(raw: dict[str, object]) -> ComputeReport:
         meshed.append(
             SubMeshCount(kind=SubShapeKind[kind], ordinal=ordinal, elements=count)
         )
+    warnings: list[ComputeWarning] = []
+    for entry in cast("Sequence[object]", raw["warnings"]):
+        kind, ordinal, algorithm, text = cast("tuple[str, int, str, str]", entry)
+        warnings.append(
+            ComputeWarning(
+                kind=SubShapeKind[kind], ordinal=ordinal, algorithm=algorithm, text=text
+            )
+        )
     return ComputeReport(
         nodes=cast("int", raw["nodes"]),
         edges=cast("int", raw["edges"]),
         faces=cast("int", raw["faces"]),
         volumes=cast("int", raw["volumes"]),
         meshed=tuple(meshed),
+        warnings=tuple(warnings),
     )
