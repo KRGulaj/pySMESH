@@ -148,3 +148,47 @@ def test_the_wall_cell_of_a_table_distribution_equals_its_closed_form(
 
     assert wall_forward == pytest.approx(wall_exact, rel=WALL_CELL_RTOL, abs=0.0)
     assert wall_mirrored == pytest.approx(wall_exact, rel=WALL_CELL_RTOL, abs=0.0)
+
+
+EXPRESSION_OFFSETS: tuple[float, ...] = (0.03, 3e-3, 3e-4, 3e-5)
+EXPRESSION_COUNT: int = 100
+
+
+@pytest.mark.parametrize("a", EXPRESSION_OFFSETS)
+def test_an_expression_distribution_puts_every_node_at_its_closed_form(
+    a: float,
+) -> None:
+    """Density ``1 / (a + t)``: node k sits at ``a (((1 + a) / a)^(k / N) - 1)``."""
+    n = EXPRESSION_COUNT
+    hyp = NumberOfSegments(
+        count=n, distribution=Distribution.EXPRESSION, expression=f"1/({a!r}+t)"
+    )
+    k = np.arange(n + 1, dtype=np.float64)
+    exact = EDGE_LENGTH * a * (((1.0 + a) / a) ** (k / n) - 1.0)
+
+    nodes = _line_nodes(hyp)
+    error = float(np.abs(nodes - exact).max())
+
+    assert nodes.size == n + 1
+    assert error <= NODE_TOLERANCE, (a, error)
+
+
+def test_an_expression_whose_integral_does_not_converge_is_refused_naming_the_edge() -> (
+    None
+):
+    """``1 / (t - c)^2`` passes SMESH's 501-point check but has no finite integral.
+
+    The pole at ``c = 0.3001`` lies between the sample points ``0.300`` and ``0.302`` that
+    ``CheckExpressionFunction`` evaluates, so the hypothesis is accepted. Its integral over
+    ``[0, 1]`` diverges, so the adaptive rule cannot converge, and the compute must fail
+    with the edge named instead of placing nodes from a wrong total.
+    """
+    hyp = NumberOfSegments(
+        count=10, distribution=Distribution.EXPRESSION, expression="1/(t-0.3001)^2"
+    )
+
+    with pytest.raises(ps.PysmeshError) as info:
+        _line_nodes(hyp)
+
+    assert "EDGE 1" in info.value.details
+    assert "did not converge" in info.value.details
