@@ -192,3 +192,34 @@ byte for byte those of the reference. One `defect` probe changes:
 The probe bows the first section by w sin(pi x) with w = 1e-5. That bow spreads the section's
 points exactly w across the plane z = const, so the reported 1.02355e-05 is w within 2.4 %:
 the least-squares plane of the samples tilts a little from z = const.
+
+## Explained differences since the geometry query fixes (Phase 4, group 5)
+
+The query fixes of report §5 (D1, D2, D3) and §4 (C5) change three `geometry` probes and
+two `defect` probes. C5 adds an argument and a query; with the default `distinct=False`,
+no result changes. The two OCCT patches of finding F2 change no probe: the old and the
+patched OCCT, on one commit, gave a golden capture with 0 differences at rtol 0.
+
+| Probe | Before | Now | Issue |
+|---|---|---|---|
+| `exchange/production_step.volume_fixed_rule` | 3.3671561379855857 | 3.3684720794880767 | D3 |
+| `query/bbox_and_distance.bbox0_xmin` | -1e-07 | 0.0 | D1 |
+| `query/bbox_and_distance.bbox0_xmax` | 3.0000001 | 3.0 | D1 |
+| `query/bbox_and_distance.bbox1_xmin` | 4.9999999 | 5.0 | D1 |
+| `D1_D2/bbox_padding_and_spline.line_xmin` | -1e-07 | 0.0 | D1 |
+| `D1_D2/bbox_padding_and_spline.spline_xmin` | 4.99718766183329 | 4.999912477096879 | D2 |
+| `D3/fixed_rule_wing_volume.fixed` | 0.10610073921072888 | 0.13290856218656688 | D3 |
+
+- `production_step` sums the `Shape.solids()` volumes. D3 makes them adaptive at the
+  default relative precision 1e-6; the key keeps its old name. `mass_properties` at 1e-9
+  gives 3.368472869988658, within 2.3e-7 relative of the new value. The fixed rule was
+  3.9e-4 low.
+- `bbox_and_distance` bounds a 3 x 7 x 11 box at the origin and a unit sphere centred at
+  x = 6. The boxes no longer carry the shape tolerance 1e-7: they are the extents of the
+  geometry, 0 and 3 for the box, 5 for the sphere.
+- `bbox_padding_and_spline`: the line's box is its end points. The spline's new minimum is
+  the minimum of 200 001 curve samples, 4.99991258, less OCCT's pad of 1e-7 for a B-spline
+  (`Precision::Confusion()`). The old minimum was the control polygon, 2.72 mm outside.
+- `fixed_rule_wing_volume.fixed` calls `mass_properties` without a precision, which is now
+  the adaptive rule at 1e-6. The section integral of the wing is 0.132908562138116; the new
+  value is 3.6e-10 relative above it.
