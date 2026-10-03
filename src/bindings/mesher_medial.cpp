@@ -12,8 +12,12 @@
 //
 // Four properties of the upstream class decide the shape of this binding, all measured:
 //
-//   * **A branch is not a dense polyline.** `getPoints` returns one point per medial-axis edge
-//     plus one, so a straight branch is exactly two points. The axis of a rectangle is a spine
+//   * **The boundary discretisation decides how many points a branch has.** `getPoints`
+//     returns one point per medial-axis edge, plus one. SMESH cuts every boundary edge into
+//     at least 9 pieces, each shorter than `min_segment_length` (SMESH_MAT2d.cxx:557-597,
+//     SMESH 27c8af8c6). So a straight branch is a polyline of collinear points, not its two
+//     end points. Measured on the 10 x 4 rectangle of tests/test_medial.py at
+//     `min_segment_length` 0.1, the spine has 121 points. The axis of a rectangle is a spine
 //     plus four corner arms, not one line.
 //   * **The points come back in the face's own UV space**, scaled by a factor chosen when the
 //     axis was built and kept private. `MedialAxis::getPoints` is the entry point that undoes

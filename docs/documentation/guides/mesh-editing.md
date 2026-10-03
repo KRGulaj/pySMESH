@@ -244,8 +244,12 @@ spine.widths              # local width, sampled along the branch
 spine.boundary1_edge       # which EDGE ordinal each width sample's boundary point lies on
 ```
 
-A branch is not a dense polyline: it carries one point per medial-axis edge plus one, so a
-straight branch is exactly two points. Branch 0 is not necessarily the spine; `axis.longest`
+A branch is a polyline with one point per medial-axis edge, plus one. The boundary
+discretisation decides how many points that is: SMESH cuts every boundary edge into at least
+9 pieces, each shorter than `min_segment_length`. A smaller `min_segment_length` therefore
+gives more points. A straight branch is a polyline of collinear points, not its two end
+points. For example, the spine of the 10 x 4 rectangle in `tests/test_medial.py` has 121
+points at `min_segment_length=0.1`. Branch 0 is not necessarily the spine; `axis.longest`
 is the reliable pick for a thin region. Pass `ignore_corners=True` to drop the arms that run
 into a boundary's convex corners and keep only the axis proper.
 
