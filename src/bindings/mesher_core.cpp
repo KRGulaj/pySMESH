@@ -9,6 +9,7 @@
 
 #include "mesher/mesher.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <map>
 #include <set>
@@ -88,6 +89,27 @@ const char* status_text(SMESH_Hypothesis::Hypothesis_Status status) {
     default:
       return "refused for an unknown reason";
   }
+}
+
+// Whether `shape` needs an algorithm of its own: an algorithm of an enclosing sub-shape
+// needs the mesh of `shape` as its boundary (NeedDiscreteBoundary()), and no enclosing
+// algorithm meshes all dimensions itself, as Cartesian_3D does. Otherwise a NO_ALGO state is
+// not a fault: a solid with no 3-D algorithm under a surface mesh, or a face under an
+// all-dimensional one.
+bool needs_own_algorithm(SMESH_Mesh& mesh, const TopoDS_Shape& shape) {
+  bool needed = false;
+  for (const TopoDS_Shape& above : mesh.GetAncestors(shape)) {
+    SMESH_subMesh* sub = mesh.GetSubMeshContaining(above);
+    const SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
+    if (algo == nullptr) {
+      continue;
+    }
+    if (!algo->NeedDiscreteBoundary()) {
+      return false;
+    }
+    needed = true;
+  }
+  return needed;
 }
 
 std::string where(const std::string& kind, int ordinal) {
@@ -587,6 +609,50 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
   }
 
   if (!ok || !failures.empty()) {
+    // A missing algorithm, or an algorithm without the hypothesis it needs, is an algorithm
+    // state of the sub-mesh, not a compute error: SMESH_Gen::Compute returns false and no
+    // sub-mesh carries an error text (report A6: "failed on 0 sub-shape(s)"). So each
+    // sub-mesh that was not computed is asked for its state. A VERTEX takes no algorithm of
+    // its own, and NO_ALGO counts only where an enclosing algorithm needs this mesh.
+    std::vector<std::pair<std::pair<std::size_t, int>, std::string>> states;
+    for (std::size_t k = 0; k < 3; ++k) {
+      for (TopExp_Explorer ex(data_->shape, kKindTypes[k]); ex.More(); ex.Next()) {
+        SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
+        if (sub == nullptr || sub->IsMeshComputed() ||
+            sub->GetAlgoState() == SMESH_subMesh::HYP_OK) {
+          continue;
+        }
+        const std::pair<const char*, int> at =
+            ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current()));
+        bool seen = false;
+        for (const auto& s : states) {
+          seen = seen || (s.first.first == k && s.first.second == at.second);
+        }
+        if (seen || at.second <= 0) {
+          continue;
+        }
+        std::string line = std::string(kKindNames[k]) + " " + std::to_string(at.second) + ": ";
+        if (sub->GetAlgoState() == SMESH_subMesh::NO_ALGO) {
+          if (!needs_own_algorithm(*mesh_, ex.Current())) {
+            continue;
+          }
+          line += "no algorithm is assigned to it (algorithm state NO_ALGO)";
+        } else {
+          const SMESH_Algo* algo = sub->GetAlgo();
+          line += std::string(algo != nullptr && algo->GetName() != nullptr ? algo->GetName()
+                                                                            : "its algorithm") +
+                  " is missing a hypothesis it needs (algorithm state MISSING_HYP)";
+        }
+        states.push_back({{k, at.second}, line});
+      }
+    }
+    std::sort(states.begin(), states.end());
+    for (const auto& s : states) {
+      failures.push_back(s.second);
+      if (kKindTypes[s.first.first] == TopAbs_FACE) {
+        failed_faces.push_back(s.first.second);
+      }
+    }
     std::string details;
     for (std::size_t i = 0; i < failures.size(); ++i) {
       details += (i ? "\n" : "") + failures[i];
