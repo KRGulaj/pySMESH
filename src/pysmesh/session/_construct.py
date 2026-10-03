@@ -58,10 +58,10 @@ class _ConstructOps(_SessionBase):
 
         Args:
             data: A shape as BREP bytes (any OCCT ``BRepTools::Write`` output).
-            inside_out: What to do with an inside-out solid. ``"raise"`` refuses the import
-                and names the solids by their 1-based ordinal in the BREP. ``"reverse"``
-                reverses each one, so its matter is inside, and lists it on the delta's
-                ``warnings``.
+            inside_out: What to do with an inside-out solid. ``"raise"`` refuses the
+                import and names the solids by their 1-based ordinal in the BREP.
+                ``"reverse"`` reverses each one, so its matter is inside, and lists it
+                on the delta's ``warnings``.
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the read runs. ``None`` reports nothing.
             cancel: Called with no arguments; return ``True`` to stop the read. It then
@@ -71,8 +71,9 @@ class _ConstructOps(_SessionBase):
             The delta; every entity of the imported shape is newly issued.
 
         Raises:
-            PysmeshError: On a malformed BREP, a null shape, an unknown ``inside_out``, or,
-                with ``inside_out="raise"``, an inside-out solid. The session is unchanged.
+            PysmeshError: On a malformed BREP, a null shape, an unknown ``inside_out``,
+                or, with ``inside_out="raise"``, an inside-out solid. The session is
+                unchanged.
         """
         return _delta(self._s.add_brep(data, inside_out, progress, cancel))
 
@@ -707,11 +708,12 @@ class _ConstructOps(_SessionBase):
             The delta for this operation.
 
         Raises:
-            PysmeshError: If either selection spans two bodies, if they name the same body,
-                if either body is not a wire or edge, if ``solid`` is asked for on a shell
-                that does not close, if OCCT cannot sweep, or if the swept solid's boundary
-                crosses itself. A Frenet sweep of a profile that is not perpendicular to the
-                spine's start tangent can do that; the message names the faces and where.
+            PysmeshError: If either selection spans two bodies, if they name the same
+                body, if either body is not a wire or edge, if ``solid`` is asked for on
+                a shell that does not close, if OCCT cannot sweep, or if the swept
+                solid's boundary crosses itself. A Frenet sweep of a profile that is not
+                perpendicular to the spine's start tangent can do that; the message
+                names the faces and where.
         """
         return _delta(
             self._s.pipe_shell(_ids(spine), _ids(profile), frenet, solid, progress, cancel)
@@ -745,14 +747,15 @@ class _ConstructOps(_SessionBase):
 
         Raises:
             PysmeshError: On fewer than two sections, a repeated body, a section that is
-                not a wire or edge, or a loft OCCT cannot build. Also, with ``solid``, if
-                the lofted solid encloses no more than ``Precision::Confusion()`` times its
-                area. A loft whose surface folds through itself comes back that way, and
-                OCCT's validity check accepts it: a ruled loft through sections tilted
-                towards each other is the measured case. And, with ``solid``, if the lofted
-                solid's boundary crosses itself, naming the faces and where; a face that
-                closes through a sharp seam, as a one-edge airfoil section gives, is not a
-                crossing. Nothing is committed, and the session is left exactly as it was.
+                not a wire or edge, or a loft OCCT cannot build. Also, with ``solid``,
+                if the lofted solid encloses no more than ``Precision::Confusion()``
+                times its area. A loft whose surface folds through itself comes back
+                that way, and OCCT's validity check accepts it: a ruled loft through
+                sections tilted towards each other is the measured case. And, with
+                ``solid``, if the lofted solid's boundary crosses itself, naming the
+                faces and where; a face that closes through a sharp seam, as a one-edge
+                airfoil section gives, is not a crossing. Nothing is committed, and the
+                session is left exactly as it was.
         """
         return _delta(
             self._s.thru_sections(

@@ -288,9 +288,10 @@ class HistoryDelta:
             operations useless on exactly the shapes they exist for. There, ``False`` is the
             answer to act on, not an error.
         warnings: What the operation reported without failing, one entry per warning.
-            For a boolean these are OCCT's warning keys (``BOPAlgo_Options::DumpWarnings``),
-            for example ``BOPAlgo_AlertAcquiredSelfIntersection``. Empty when there is
-            nothing to report.
+            For a boolean these are OCCT's warning keys
+            (``BOPAlgo_Options::DumpWarnings``), for example
+            ``BOPAlgo_AlertAcquiredSelfIntersection``. Empty when there is nothing to
+            report.
     """
 
     op_index: int

@@ -147,3 +147,16 @@ integrated by one 20-point Gauss rule (S2). The `defect` probes `S1/table_15m_fi
 `S2/expression_15m_1_over_0.0003_plus_t` now give the exact wall cells (3.1085 um, 306.56 um,
 380.26 um) instead of "no message" and cells up to 50 % off. No other probe changes, and no
 Cartesian grid changes: Cartesian spacing functions call `FunctionExpr::value` only.
+
+## Explained differences since the validity guards (Phase 4, group 2)
+
+The guards of report §6 (V1, V2, V3, V5), the sign check of P2, the refusal of A8 and the
+statuses of A7 change no `geometry` or `mesh` probe: every committed result they accept is
+bit for bit. Four `defect` probes change, each to a refusal or to a named reason:
+
+| Probe | Before | Now | Issue |
+|---|---|---|---|
+| `V1/sphere_near_coincident_grid` | 40 empty cells | 40 cells raise "OCCT returned no solid although the operands overlap" | V1 |
+| `V2/wing_cut_free_edges` | a solid with 2 free edges | raises "the result has 2 free boundary edge(s)", naming both (lengths 1.5 and 0.866012) | V2 |
+| `V3/inside_out_box_import` | imported at volume -1 | raises "the BREP holds 1 solid(s) that are inside out: solid 1 (volume -1)" | V3 |
+| `O4/bowed_end_section` | "invalid shape", no details | the same refusal, details "SHELL 1 of the result: BRepCheck_NotClosed on SOLID 1" | A7 |

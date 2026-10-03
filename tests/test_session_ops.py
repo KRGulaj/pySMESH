@@ -907,13 +907,14 @@ def test_a_folded_ruled_loft_is_refused_and_changes_nothing(
 def test_a_smooth_loft_through_the_same_sections_crosses_itself_and_is_refused(
     folded_loft: Callable[[Session], list[list[EntityId]]],
 ) -> None:
-    """The smooth loft through the folded sections passes through itself too (report V5).
+    """The smooth loft through the folded sections crosses itself too (report V5).
 
-    Before the self-interference check it was committed with a positive volume, 11.598759,
-    and this test accepted it. OCCT's point classifier disagrees with that volume: 200 000
-    seeded samples of its bounding box count 27.28 +- 0.11 inside, 150 standard errors away.
-    A solid whose boundary does not cross itself gives the same volume both ways. The
-    lateral face crosses itself 0.204 from its edges, and it meets a cap.
+    Before the self-interference check it was committed with a positive volume,
+    11.598759, and this test accepted it. OCCT's point classifier disagrees with that
+    volume: 200 000 seeded samples of its bounding box count 27.28 +- 0.11 inside, 150
+    standard errors away. A solid whose boundary does not cross itself gives the same
+    volume both ways. The lateral face crosses itself 0.204 from its edges, and it meets
+    a cap.
     """
     s = Session()
     sections = folded_loft(s)

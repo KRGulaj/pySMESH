@@ -30,11 +30,12 @@ from ._types import (
 class _BooleanOps(_SessionBase):
     """The boolean family, fillet and chamfer.
 
-    Every boolean but :meth:`section` checks OCCT's answer before it commits it. A result
-    that holds no solid where one must exist is refused (see each method), and so is a
-    result solid with a free boundary edge, an edge that borders one face only: such a
-    solid is not watertight, and the error names each free edge by its end points and
-    length. OCCT's warnings on a committed result are on :attr:`HistoryDelta.warnings`.
+    Every boolean but :meth:`section` checks OCCT's answer before it commits it. A
+    result that holds no solid where one must exist is refused (see each method), and so
+    is a result solid with a free boundary edge, an edge that borders one face only:
+    such a solid is not watertight, and the error names each free edge by its end points
+    and length. OCCT's warnings on a committed result are on
+    :attr:`HistoryDelta.warnings`.
     """
 
     __slots__ = ()
@@ -68,9 +69,9 @@ class _BooleanOps(_SessionBase):
             The delta for this operation.
 
         Raises:
-            PysmeshError: If an id is dead or is not a solid, if ``fuzzy`` is negative, if
-                OCCT reports the boolean as failed, or if OCCT returns no solid, which a
-                fuse of solids never is. No partial result is ever returned.
+            PysmeshError: If an id is dead or is not a solid, if ``fuzzy`` is negative,
+                if OCCT reports the boolean as failed, or if OCCT returns no solid,
+                which a fuse of solids never is. No partial result is ever returned.
         """
         return _delta(
             self._s.fuse(_ids(targets), _ids(tools), fuzzy, parallel, progress, cancel)
@@ -103,10 +104,11 @@ class _BooleanOps(_SessionBase):
             The delta for this operation.
 
         Raises:
-            PysmeshError: If an id is dead or is not a solid, if ``fuzzy`` is negative, if
-                OCCT reports the boolean as failed, or if OCCT returns no solid although a
-                point inside a target lies outside every tool, farther than the operands'
-                tolerance plus ``fuzzy`` from both. No partial result is ever returned.
+            PysmeshError: If an id is dead or is not a solid, if ``fuzzy`` is negative,
+                if OCCT reports the boolean as failed, or if OCCT returns no solid
+                although a point inside a target lies outside every tool, farther than
+                the operands' tolerance plus ``fuzzy`` from both. No partial result is
+                ever returned.
         """
         return _delta(
             self._s.cut(_ids(targets), _ids(tools), fuzzy, parallel, progress, cancel)
@@ -142,11 +144,11 @@ class _BooleanOps(_SessionBase):
             The delta for this operation.
 
         Raises:
-            PysmeshError: If an id is dead or is not a solid, if ``fuzzy`` is negative, if
-                OCCT reports the boolean as failed, or if OCCT returns no solid although a
-                point lies inside a target and inside a tool, deeper than the operands'
-                tolerance plus ``fuzzy`` in both. An empty common of operands that only
-                touch, or do not meet, is accepted.
+            PysmeshError: If an id is dead or is not a solid, if ``fuzzy`` is negative,
+                if OCCT reports the boolean as failed, or if OCCT returns no solid
+                although a point lies inside a target and inside a tool, deeper than the
+                operands' tolerance plus ``fuzzy`` in both. An empty common of operands
+                that only touch, or do not meet, is accepted.
         """
         return _delta(
             self._s.common(_ids(targets), _ids(tools), fuzzy, parallel, progress, cancel)
@@ -221,9 +223,9 @@ class _BooleanOps(_SessionBase):
             The delta for this operation.
 
         Raises:
-            PysmeshError: If an id is dead or is not a solid, if ``fuzzy`` is negative, if
-                OCCT reports the boolean as failed, or if OCCT returns no solid for solid
-                targets.
+            PysmeshError: If an id is dead or is not a solid, if ``fuzzy`` is negative,
+                if OCCT reports the boolean as failed, or if OCCT returns no solid for
+                solid targets.
         """
         return _delta(
             self._s.split(_ids(targets), _ids(tools), fuzzy, parallel, progress, cancel)

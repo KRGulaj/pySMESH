@@ -279,8 +279,8 @@ def test_sewing_a_closed_shell_can_close_it_into_a_solid() -> None:
 def test_sewing_refuses_to_fake_a_solid_from_an_open_shell() -> None:
     """An open shell bounds no volume, so ``make_solid`` raises rather than invent one.
 
-    Two abutting rectangles sew into one open shell with 6 free edges. Before report A8 the
-    shell was committed with no signal; the caller asked for a solid and got none.
+    Two abutting rectangles sew into one open shell with 6 free edges. Before report A8
+    the shell was committed with no signal; the caller asked for a solid and got none.
     """
     s = Session()
     s.add_rectangle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), BOX_DX, BOX_DY)
@@ -1209,7 +1209,7 @@ def test_a_repair_reports_its_verdict_even_in_an_unvalidated_session() -> None:
     assert s.add_box(1.0, 2.0, 3.0, origin=(30.0, 0.0, 0.0)).valid is None
 
 
-# ============================================ The cost of closing a sewn shell (report P2) ==
+# ====================================== The cost of closing a sewn shell (report P2) ==
 
 
 def _production_solid_25(industrial_step_brep: bytes) -> bytes:
@@ -1251,8 +1251,8 @@ def test_closing_the_production_solid_costs_less_than_three_sews(
     assert solid < 3.0 * shell, (solid, shell)
 
 
-def test_closing_a_sewn_shell_leaves_no_triangulation_on_the_model_or_a_snapshot() -> None:
-    """The sign check tessellates a copy, so no face of the session carries triangles."""
+def test_closing_a_sewn_shell_leaves_no_triangulation_on_model_or_snapshot() -> None:
+    """The sign check tessellates a copy, so no face of the session gets triangles."""
     s = Session()
     faces = loose_box_faces(s, (BOX_DX, BOX_DY, BOX_DZ), (0.0, 0.0, 0.0))
     mark = s.snapshot()
@@ -1266,7 +1266,7 @@ def test_closing_a_sewn_shell_leaves_no_triangulation_on_the_model_or_a_snapshot
     assert b"Triangulations 0" in before
 
 
-# ======================================== make_solid that cannot make a solid (report A8) ==
+# =================================== make_solid that cannot make a solid (report A8) ==
 
 
 def _wrap_around_face_with_circle_caps(s: Session) -> list[EntityId]:
@@ -1274,8 +1274,8 @@ def _wrap_around_face_with_circle_caps(s: Session) -> list[EntityId]:
 
     The loft interpolates 13 straight generators round a unit circle, the last a copy of
     the first, so its rims are B-spline interpolants of the circle. The caps are exact
-    circles. Rims and caps differ by more than 1e-6, so at that tolerance the sew joins the
-    two generators of the lateral face and nothing else (report A8: 4 free edges).
+    circles. Rims and caps differ by more than 1e-6, so at that tolerance the sew joins
+    the two generators of the lateral face and nothing else (report A8: 4 free edges).
     """
     sections = []
     for p in np.linspace(0.0, 2.0 * np.pi, 13)[:-1]:
@@ -1294,7 +1294,7 @@ def _wrap_around_face_with_circle_caps(s: Session) -> list[EntityId]:
     return ids_of(s, EntityKind.FACE)
 
 
-def test_make_solid_refuses_a_sew_that_leaves_a_shell_open_naming_its_free_edges() -> None:
+def test_make_solid_refuses_a_sew_leaving_an_open_shell_naming_free_edges() -> None:
     """The capped wrap-around face sews into an open shell: 4 free edges, no solid."""
     s = Session()
     faces = _wrap_around_face_with_circle_caps(s)

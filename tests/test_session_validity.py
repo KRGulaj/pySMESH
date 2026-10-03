@@ -4,23 +4,26 @@
 
 """Gates for the results a session commits: a committed shape is the shape asked for.
 
-``BRepCheck_Analyzer`` tests the local consistency of the topology only. These tests assert
-the properties a mesher needs, each against an oracle that does not depend on the operation
-under test (report ``defect_sweep_4.2.2.md`` §6):
+``BRepCheck_Analyzer`` tests the local consistency of the topology only. These tests
+assert the properties a mesher needs, each against an oracle that does not depend on the
+operation under test (report ``defect_sweep_4.2.2.md`` §6):
 
 * **V1, an empty boolean result.** ``common`` and ``cut`` near a coincident face could
   return nothing for operands that overlap. Each cell of the near-coincident grids must
   now raise or give the closed-form volume.
-* **V2, a solid that is not watertight.** A ``cut`` grazing the wing's nose committed a
-  solid with an edge on one face only. ``free_boundary_edges`` on the BREP is the oracle.
-* **V3, an inside-out solid on import.** A box whose solid names its shell reversed loaded
-  at volume -1. The oracle is the box's own volume and the point classifier.
-* **V5, a sweep that crosses itself.** A Frenet sweep of a profile tilted from the spine's
-  start tangent committed a surface that passes through itself. With the profile
+* **V2, a solid that is not watertight.** A ``cut`` grazing the wing's nose committed
+  a solid with an edge on one face only. ``free_boundary_edges`` on the BREP is the
+  oracle.
+* **V3, an inside-out solid on import.** A box whose solid names its shell reversed
+  loaded at volume -1. The oracle is the box's own volume and the point classifier.
+* **V5, a sweep that crosses itself.** A Frenet sweep of a profile tilted from the
+  spine's start tangent committed a surface that passes through itself. With the profile
   perpendicular to the spine the tube is exact, and its volume is ``pi r^2 L`` (Pappus).
+* **A7, an invalid result names nothing.** A near-coincident ``common`` raised "invalid
+  shape" with empty details. It must name a ``BRepCheck`` status and the faces.
 
-Volumes are integrated adaptively on a fresh session read from the BREP, so that one solid
-carries one id (report §4 C5) and the rule is the adaptive one (report §5 D3).
+Volumes are integrated adaptively on a fresh session read from the BREP, so that one
+solid carries one id (report §4 C5) and the rule is the adaptive one (report §5 D3).
 """
 
 from __future__ import annotations
@@ -60,9 +63,9 @@ OFFSETS: tuple[float, ...] = (
 HALF_SPACE_SIZE: float = 3.0
 HALF_SPACE_LOW: float = -1.5
 
-# A fuzzy boolean may treat two features closer than fuzzy plus the shape tolerance as one,
-# so a correct result is the closed form at an offset within that distance of d. The loft's
-# own tolerance stays below this bound; the primitives carry 1e-7.
+# A fuzzy boolean may treat two features closer than fuzzy plus the shape tolerance as
+# one, so a correct result is the closed form at an offset within that distance of d.
+# The loft's own tolerance stays below this bound; the primitives carry 1e-7.
 SHAPE_TOLERANCE_BOUND: float = 2e-6
 VOLUME_PRECISION: float = 1e-8
 
@@ -73,8 +76,8 @@ WING_POINTS: int = 60
 WING_THICKNESS: float = 0.12
 # Inside the half-space box (z in [0, 1.5]) the wing's chord plane covers
 # int_0^1.5 (1 - 0.1 z) dz = 1.3875. At height y the trailing edge recedes by
-# y / 0.14535 (the NACA 00xx closed-TE slope at x = c), so the section area at height y is
-# 1.3875 - 1.5 |y| / 0.14535 to first order.
+# y / 0.14535 (the NACA 00xx closed-TE slope at x = c), so the section area at height
+# y is 1.3875 - 1.5 |y| / 0.14535 to first order.
 WING_PLANFORM_IN_BOX: float = 1.3875
 WING_TE_RECESSION: float = 1.5 / 0.14535
 
@@ -164,7 +167,7 @@ def _volume(s: Session) -> float:
 def _half_space_boolean(
     body: Callable[[Session], list[EntityId]], op: str, d: float, fuzzy: float
 ) -> float | None:
-    """``op`` of the body with the box y > d; the result's volume, or None on a raise."""
+    """``op`` of the body with the box y > d: the result's volume, None on a raise."""
     s = Session()
     a = body(s)
     before = set(s.entities(EntityKind.SOLID))
@@ -183,7 +186,7 @@ def _half_space_boolean(
 
 
 def _sphere_cap(d: float) -> float:
-    """Volume of the unit sphere above the plane y = d: pi h^2 (3 - h) / 3, h = 1 - d."""
+    """Volume of the unit sphere above y = d: pi h^2 (3 - h) / 3, h = 1 - d."""
     h = 1.0 - d
     return math.pi * h * h * (3.0 - h) / 3.0
 
@@ -202,8 +205,8 @@ def _bad_cells(
 ) -> list[str]:
     """The cells of one row whose volume is no closed form within fuzzy of d.
 
-    The closed form decreases as d grows, so a result within fuzzy plus the shape tolerance
-    of d lies between the closed forms at the two ends of that interval.
+    The closed form decreases as d grows, so a result within fuzzy plus the shape
+    tolerance of d lies between the closed forms at the two ends of that interval.
     """
     bad = []
     for fuzzy, volume in volumes.items():
@@ -213,7 +216,9 @@ def _bad_cells(
         low, high = exact(d + reach), exact(d - reach)
         margin = VOLUME_PRECISION * high
         if not low - margin <= volume <= high + margin:
-            bad.append(f"fuzzy={fuzzy:g}: volume {volume:.9g} not in [{low:.9g}, {high:.9g}]")
+            bad.append(
+                f"fuzzy={fuzzy:g}: volume {volume:.9g} not in [{low:.9g}, {high:.9g}]"
+            )
     return bad
 
 
@@ -252,7 +257,7 @@ def test_common_of_the_wing_and_a_near_coincident_half_space_is_correct_or_refus
 def test_cut_of_the_wing_by_a_near_coincident_half_space_is_correct_or_refused(
     wing_above_chord_plane: float,
 ) -> None:
-    """The cut keeps the wing below y = d: its volume minus the part above (d = -1e-6)."""
+    """The cut keeps the wing below y = d (d = -1e-6): its volume less the rest."""
     s = Session()
     _wing(s)
     wing_volume = _volume(s)
@@ -269,7 +274,7 @@ def test_cut_of_the_wing_by_a_near_coincident_half_space_is_correct_or_refused(
 
 
 def test_a_boolean_reports_occts_warnings_on_the_delta() -> None:
-    """OCCT warns while it builds the sphere's cap at y = -1e-7; the delta carries it."""
+    """OCCT warns while it builds the sphere's cap at y = -1e-7; the delta has it."""
     s = Session()
     a = _sphere(s)
     before = set(s.entities(EntityKind.SOLID))
@@ -283,7 +288,7 @@ def test_a_boolean_reports_occts_warnings_on_the_delta() -> None:
 
 
 def test_a_clean_boolean_reports_no_warning() -> None:
-    """Two overlapping boxes: the common is the overlap box and OCCT warns of nothing."""
+    """Two overlapping boxes: the common is their overlap, and OCCT warns of nothing."""
     s = Session()
     s.add_box(2.0, 2.0, 2.0)
     a = list(s.entities(EntityKind.SOLID))
@@ -323,7 +328,7 @@ def test_the_common_of_two_boxes_touching_on_a_face_is_accepted() -> None:
 
 
 def test_the_empty_cut_of_a_solid_inside_its_tool_is_accepted() -> None:
-    """A box inside a larger box: cutting it by the larger one leaves nothing, correctly."""
+    """A box inside a larger box: cutting it by the larger one leaves nothing."""
     s = Session()
     s.add_box(1.0, 1.0, 1.0, origin=(1.0, 1.0, 1.0))
     a = list(s.entities(EntityKind.SOLID))
@@ -341,7 +346,7 @@ def test_the_empty_cut_of_a_solid_inside_its_tool_is_accepted() -> None:
 def test_a_cut_that_leaves_a_free_boundary_edge_is_refused_naming_the_edges(
     body: Callable[[Session], list[EntityId]], free_edges: int
 ) -> None:
-    """The wing cut by the box y > 1e-4 at fuzzy 1e-4 left 2 (1-edge) or 1 free edges."""
+    """The wing cut by the box y > 1e-4 at fuzzy 1e-4 left 2 (1-edge) or 1 free edge."""
     s = Session()
     a = body(s)
     before = set(s.entities(EntityKind.SOLID))
@@ -360,11 +365,11 @@ def test_a_cut_that_leaves_a_free_boundary_edge_is_refused_naming_the_edges(
     assert s.brep() == brep
 
 
-# ---- V3: an inside-out solid on import ------------------------------------------------- #
+# ---- V3: an inside-out solid on import --------------------------------------------- #
 
 
 def _inside_out_box() -> bytes:
-    """A unit box whose solid record names its shell reversed (``+`` to ``-``, report V3)."""
+    """A unit box whose solid names its shell reversed (``+`` to ``-``, report V3)."""
     s = Session()
     s.add_box(1.0, 1.0, 1.0)
     text = s.brep().decode()
@@ -415,7 +420,7 @@ def test_load_brep_reverses_an_inside_out_solid_on_request() -> None:
     assert shape.solids()[0].volume == pytest.approx(1.0, rel=1e-12)
 
 
-# ---- V5: a sweep that crosses itself ----------------------------------------------------- #
+# ---- V5: a sweep that crosses itself ----------------------------------------------- #
 
 SWEEP_SPINE: list[tuple[float, float, float]] = [
     (0.0, 0.0, 0.0),
@@ -424,19 +429,24 @@ SWEEP_SPINE: list[tuple[float, float, float]] = [
     (2.0, 2.0, 9.0),
 ]
 SWEEP_RADIUS: float = 0.5
-# The profile normal of report V5: the chord to the second spine point, 31.7 degrees from the
-# spline's own start tangent.
-SWEEP_TILTED_NORMAL: tuple[float, float, float] = (1.0 / math.sqrt(10.0), 0.0, 3.0 / math.sqrt(10.0))
-# The swept surface approximates the exact tube: its volume is within 7.5e-8 relative of
-# pi r^2 L when the profile is perpendicular to the spine, so 1e-6 leaves a margin of 13.
+# The profile normal of report V5: the chord to the second spine point, 31.7 degrees
+# from the spline's own start tangent.
+SWEEP_TILTED_NORMAL: tuple[float, float, float] = (
+    1.0 / math.sqrt(10.0),
+    0.0,
+    3.0 / math.sqrt(10.0),
+)
+# The swept surface approximates the exact tube: its volume is within 7.5e-8 relative
+# of pi r^2 L when the profile is perpendicular to the spine; 1e-6 leaves a margin of
+# 13.
 SWEEP_VOLUME_RTOL: float = 1e-6
 
 
 def _sweep(perpendicular: bool, frenet: bool) -> tuple[Session, float]:
     """Sweep the circle along the spline; return the session and the spine's length.
 
-    The profile is perpendicular to the spine's start tangent, or tilted as in report V5.
-    The sweep is not run here: the caller does it, so that it can expect a raise.
+    The profile is perpendicular to the spine's start tangent, or tilted as in report
+    V5. The sweep runs here, so a refusal raises from this call.
     """
     s = Session()
     s.add_spline(SWEEP_SPINE)
@@ -469,7 +479,9 @@ def test_a_frenet_sweep_of_a_perpendicular_profile_is_the_exact_tube() -> None:
 
     volume = _volume(s)
 
-    assert volume == pytest.approx(math.pi * SWEEP_RADIUS**2 * length, rel=SWEEP_VOLUME_RTOL)
+    assert volume == pytest.approx(
+        math.pi * SWEEP_RADIUS**2 * length, rel=SWEEP_VOLUME_RTOL
+    )
 
 
 def test_a_corrected_frenet_sweep_of_the_tilted_profile_is_accepted() -> None:
@@ -480,7 +492,7 @@ def test_a_corrected_frenet_sweep_of_the_tilted_profile_is_accepted() -> None:
     assert _volume(s) > 0.0
 
 
-# ---- A7: "invalid shape" names the reason and the faces --------------------------------- #
+# ---- A7: "invalid shape" names the reason and the faces --------------------------- #
 
 
 @pytest.mark.parametrize(
@@ -494,7 +506,7 @@ def test_a_corrected_frenet_sweep_of_the_tilted_profile_is_accepted() -> None:
 def test_an_invalid_boolean_result_names_the_brepcheck_status_and_the_faces(
     body: Callable[[Session], object], origin: tuple[float, float, float], fuzzy: float
 ) -> None:
-    """Report A7: the near-coincident commons raised "invalid shape" with nothing named."""
+    """Report A7: the near-coincident commons raised "invalid shape", naming nothing."""
     s = Session()
     body(s)
     a = list(s.entities(EntityKind.SOLID))
