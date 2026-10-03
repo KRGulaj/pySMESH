@@ -260,6 +260,8 @@ is part of the input set, so it is part of the CI cache key.
 | Patch | Defect | OCCT file and function | What it changes |
 |---|---|---|---|
 | `0001-thrusections-generated-seam-edge.patch` | O1 | `BRepOffsetAPI_ThruSections.cxx`, `BRepOffsetAPI_ThruSections::Generated()` | A ruled loft through sections of one closed edge each: the walk along the longitudinal edges picked the next edge by list position, and a seam edge is listed twice. `Generated()` of a section vertex threw `FindFromKey` with 4+ sections, and returned a section edge with 3. The next edge is now the face's edge at the vertex that is not degenerated and not a section edge. |
+| `0002-chamfer-three-corner-plane-line.patch` | F2 | `ChFi3d_ChBuilder_C3.cxx`, `ChFi3d_ChBuilder::PerformThreeCorner()` | A chamfer of three edges that meet at a corner: the curve where the corner plane cuts the end face is set only when the intersection gives one line. On a sphere wedge of 1.5 pi it gives two arcs, and the code read through the null curve: the process died. A null curve now throws `StdFail_NotDone`, which `ChFi3d_Builder::Compute()` turns into a faulty vertex, so the chamfer reports not done. A clean failure, not a computed corner. |
+| `0003-pipe-unbuilt-sweep-face.patch` | F2 | `BRepFill_Pipe.cxx`, `BRepFill_Pipe::MakeShape()` | A face profile swept along a spine: `MakeShape()` never asks the sweep whether it is done, and read the shape type of a face the failed sweep left null: the process died. A null face now throws `StdFail_NotDone` from the `BRepOffsetAPI_MakePipe` constructor. A clean failure, not a computed pipe. |
 
 The CMake options are the script's `CMAKE_OPTIONS`:
 
