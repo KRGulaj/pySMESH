@@ -1,0 +1,100 @@
+pySMESH: make the TABLE distribution of StdMeshers_NumberOfSegments place every node at the
+inverse of its own integral (SMESH V9_16_0).
+
+Defect: NumberOfSegments with DT_TabFunc places node k of N where the integral of the density
+table, from the start of the EDGE, reaches k/N of its total. The nodes miss that position by an
+error that does not scale with the local segment length, and that grows along the EDGE.
+
+Symptom (15 m straight EDGE; the table is the density 1/h sampled at every node of a geometric
+target with first segment h0): h0 = 3 um or 30 um, N = 100 or 200: the compute fails with an
+empty error ("no message"); the mirrored table gives a wall segment of 0.000 um to 0.069 um for
+an exact 3.05 um to 30.9 um. h0 = 300 um: nodes up to 2.0 m (N = 100) and 2.8 m (N = 200) from
+the exact position. h0 = 3 mm, N = 200: 14 mm.
+
+Root cause:
+* StdMeshers_Regular_1D.cxx:370 (computeParamByFunc) gives buildDistribution the bisection
+  tolerance eps = Min(1e-4, 0.01/nbSeg), absolute in the normalised parameter. On a 15 m EDGE
+  with N = 200 that is 0.75 mm, 250 times a 3 um wall segment. The tolerance is from SMESH
+  1f0895c06 (2020-03-19, "IPAL54630: Wire discretization error"); before it, it was 1e-4.
+* StdMeshers_Distribution.cxx:320-323 (buildDistribution) solves each node from the previous,
+  already rounded node: F(data[i-1], t) = J. The error of each node carries into the next one,
+  and data[nbSeg] = end puts the whole residual into the last segment. When the overshoot
+  leaves less than J of the integral, dihotomySolve finds no sign change, sets ok = false, and
+  the EDGE fails with no compute error text. This code is unchanged since SMESH 6b471bcc5
+  (2005-12-28); upstream master at 83f8bf482 (2026-09-14) has it, and both lines, unchanged.
+* StdMeshers_Distribution.cxx:132-141 (FunctionTable::integral(i, d)) reads f1 and f2
+  uninitialised when value() fails, that is when x + d lies outside the table.
+
+Change:
+* buildDistribution: one FunctionIntegral from 'start'; node i solves F(start, t) = i*J in
+  [data[i-1], end]. The target is the running total, so no node inherits an earlier error.
+* computeParamByFunc: eps = 1e-14 in the normalised parameter, about 100 times the spacing of
+  doubles near 1, so the bisection still ends (47 halvings).
+* FunctionTable::integral(i, d): f1 and f2 start at 0, and the segment integral is 0 when
+  value() fails.
+
+Not changed: the REGULAR, SCALE and BETA_LAW distributions (they do not call
+buildDistribution); the bisection itself; FunctionExpr::integral, which the separate
+StdMeshers_Distribution_expression.patch replaces. The EXPRESSION distribution goes through the
+same buildDistribution, so it also solves against the running total from here on.
+StdMeshers_NumberOfSegments::BuildDistributionExpr and BuildDistributionTab (the GUI preview,
+not used by pySMESH) keep their own 1e-4 tolerance.
+
+diff --git a/src/StdMeshers/StdMeshers_Distribution.cxx b/src/StdMeshers/StdMeshers_Distribution.cxx
+--- a/src/StdMeshers/StdMeshers_Distribution.cxx
++++ b/src/StdMeshers/StdMeshers_Distribution.cxx
+@@ -131,14 +131,15 @@
+ 
+ double FunctionTable::integral( const int i, const double d ) const
+ {
+-  double f1,f2, res = 0.0;
+-  if( value( myData[2*i]+d, f1 ) )
+-    if(!value(myData[2*i], f2)) {
+-      f2 = myData[2*i+1];
+-      Function::value( 1, f2 );
+-    }
+-  res = (f2+f1) * d / 2.0;
+-  return res;
++  // pySMESH: f1 and f2 were read uninitialised when value() failed (x+d outside the table).
++  double f1 = 0.0, f2 = 0.0;
++  if( !value( myData[2*i]+d, f1 ) )
++    return 0.0;
++  if(!value(myData[2*i], f2)) {
++    f2 = myData[2*i+1];
++    Function::value( 1, f2 );
++  }
++  return (f2+f1) * d / 2.0;
+ }
+ 
+ double FunctionTable::integral( const double a, const double b ) const
+@@ -317,10 +318,13 @@
+   bool ok;
+   //MESSAGE( "distribution:" );
+   //char buf[1024];
++  // pySMESH: node i solves F(start, t) = i*J, the running total from 'start'. Solving
++  // F(data[i-1], t) = J from the previous node carried each node's bisection error into the
++  // next one and left the whole residual in the last segment.
++  FunctionIntegral f_int( &func, start );
+   for( smIdType i = 1; i < nbSeg; i++ )
+   {
+-    FunctionIntegral f_int( &func, data[i-1] );
+-    data[i] = dihotomySolve( f_int, J, data[i-1], end, eps, ok );
++    data[i] = dihotomySolve( f_int, double( i ) * J, data[i-1], end, eps, ok );
+     //sprintf( buf, "%f\n", float( data[i] ) );
+     //MESSAGE( buf );
+     if( !ok )
+diff --git a/src/StdMeshers/StdMeshers_Regular_1D.cxx b/src/StdMeshers/StdMeshers_Regular_1D.cxx
+--- a/src/StdMeshers/StdMeshers_Regular_1D.cxx
++++ b/src/StdMeshers/StdMeshers_Regular_1D.cxx
+@@ -367,7 +367,10 @@
+   vector<double> x( nbPnt, 0. );
+ 
+ 
+-  const double eps = Min( 1E-4, 0.01 / double( nbSeg ));
++  // pySMESH: the bisection tolerance is absolute in the normalised parameter. Min(1e-4,
++  // 0.01/nbSeg) is 0.75 mm on a 15 m edge with 200 segments, coarser than a 3 um wall cell.
++  // 1e-14 is about 100 times the spacing of doubles near 1, so the bisection still ends.
++  const double eps = 1e-14;
+ 
+   if ( !buildDistribution( func, 0.0, 1.0, nbSeg, x, eps ))
+      return false;
