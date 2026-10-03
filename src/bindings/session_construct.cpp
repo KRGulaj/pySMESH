@@ -839,11 +839,28 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
     py::gil_scoped_release release;
     // The history query once threw here outside the try (report A2, through O1), and a raw
     // RuntimeError reached the caller. Every OCCT call now runs inside it.
-    const char* stage = "BRepOffsetAPI_ThruSections failed";
+    const char* stage = "copying the sections failed";
     try {
+      // The builder writes pcurves, surfaces and continuity onto the edges it lofts through,
+      // even when it then fails (report A3). Those edges are the session's own, and every
+      // retained snapshot shares them, so it lofts deep copies. Not SetMutableInput(false):
+      // OCCT then lofts copies of its own and reports no map from a section edge to its
+      // copy (ThruSections has no Modified()), so every section edge and vertex id of a
+      // ruled loft died. The copier's map carries them instead, as modified.
+      TopoDS_Compound originals;
+      BRep_Builder builder;
+      builder.MakeCompound(originals);
+      for (const TopoDS_Wire& w : wires) {
+        builder.Add(originals, w);
+      }
+      BRepBuilderAPI_Copy copier(originals, /*copyGeom=*/true, /*copyMesh=*/false);
+      NCollection_List<TopoDS_Shape> copies;
+      stage = "BRepOffsetAPI_ThruSections failed";
       BRepOffsetAPI_ThruSections mk(solid, ruled);
       for (const TopoDS_Wire& w : wires) {
-        mk.AddWire(w);
+        const TopoDS_Wire copy = TopoDS::Wire(copier.ModifiedShape(w));
+        copies.Append(copy);
+        mk.AddWire(copy);
       }
       mk.Build(driver.range());
       if (mk.IsDone()) {
@@ -853,7 +870,9 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
         for (const TopoDS_Shape& b : bodies) {
           args.Append(b);
         }
-        hist = new BRepTools_History(args, mk);
+        // Each section's own sub-shapes -> their copies -> what the loft made of them.
+        hist = new BRepTools_History(args, copier);
+        hist->Merge(BRepTools_History(copies, mk));
         // OCCT orients the lofted solid itself, and on a loft that folds through itself its
         // answer is arbitrary. Measured over 30 seeded random ruled lofts through three
         // tilted sections, two came back with volumes -7.85 and -8.51 and
