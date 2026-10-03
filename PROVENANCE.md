@@ -99,7 +99,7 @@ compile against the `V9_16_0` API with no change beyond the two that already app
 `patches/{kernel,geom,smesh,occt8}/*.patch`, applied by `prepare.py` in that order. Most come
 from looooo/SMESH's own patch set (Windows/MSVC fixes, the MED strip); the `occt8/` pair comes
 from conda-forge's `smesh-feedstock` recipe, which is the only place we found a working OCCT
-8.0 compatibility pass for this codebase. Two are pySMESH's own, for code that is new in
+8.0 compatibility pass for this codebase. Three are pySMESH's own, for code that is new in
 `V9_16_0`. NETGEN-related patches are left out — we don't build NETGEN.
 
 `patches/occt801/` is a different kind: it patches OCCT itself, not SMESH, and
@@ -136,6 +136,7 @@ MinGW/gcc-only patches are no-ops under our MSVC build.
 | `smesh/SMESH_occt781.patch` | L | re-ported | OCCT 7.8.1 API deltas; at `V9_16_0` only `DriverGMF.cxx` (`boost::filesystem::extension`) and `SMESHDS_DataMapOfShape.hxx` (`::HashCode`) remain. |
 | `smesh/SMESH_File_mingw.patch` | L | unchanged | MinGW file I/O fix (no-op under MSVC). |
 | `smesh/StdMeshers_Quadrangle_2D_msvc.patch` | L | unchanged | `<windows.h>` `#define near` collision in the 2D mesher. |
+| `smesh/StdMeshers_Cartesian_3D_cancel.patch` | P | new | A cancel stops `Cartesian_3D` again, as in `V9_9_0`. SMESH `9f7d4a55e` passes `_computeCanceled` by value into `Grid::GridInitAndInterserctWithShape`, so its three cancel checks test a copy, and `Compute` ignores the result. The flag now goes by `volatile bool&`, and `Compute` returns false on a cancel. A run without a cancel builds the same mesh. |
 | `occt8/0003-boost-regex-str-enum.patch` | C | unchanged | Boost regex `str(ENUM)` → `str(int(ENUM))`. |
 | `occt8/0004-occt-8.0-compat.patch` | C | re-ported | The OCCT-8.0 pass (streams, `::Raise()`→`throw`, NCollection), extended to the code that is new in `V9_16_0`; the NETGEN and MeshVSLink sections, never staged, are dropped. |
 

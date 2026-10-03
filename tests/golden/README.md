@@ -111,3 +111,7 @@ Since the SALOME stack moved from `V9_9_0` to `V9_16_0`, a capture differs from 
 | `1d/adaptive_circle` | `crash: exit code 0xC0000005` | 28 segments | The crash (report B2) came from a vendored patch, which the upgrade dropped. The values equal SMESH 9.9 with the one-line fix. |
 | `2d/quad_from_medial_axis_strip` | min angle 90 - 8e-13 deg | min angle 90 - 4.5e-6 deg | SMESH `27c8af8c6` discretises straight boundary edges for the medial axis, whose points are rounded to an integer Voronoi grid. |
 | `B1/prism_unequal_edge_counts` (defect) | `Adaptor3d_Surface::EvalD0` | "Composite 'horizontal' edges are not supported" | The OCCT 8 `EvalD0` override of `TSideFace` removes the B1 exception; the case now meets an older SMESH refusal. |
+
+`V9_16_0` also stopped `Cartesian_3D` from seeing a cancel during its run (SMESH
+`9f7d4a55e`). `patches/smesh/StdMeshers_Cartesian_3D_cancel.patch` restores the `V9_9_0`
+behaviour. That patch changes no probe value: a run without a cancel builds the same mesh.
