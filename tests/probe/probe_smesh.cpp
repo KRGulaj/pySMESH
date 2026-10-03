@@ -1270,13 +1270,17 @@ void probe_meshing_binding_behaviour() {
     stop.store(true);
     canceller.join();
 
+    // Compute() returning false proves only that SMESH_Gen saw the cancel; it also does so
+    // after a complete Cartesian_3D run that ignored it. Cartesian_3D polls the flag only in
+    // its grid step, before it builds a single volume, so a cancel that stopped the
+    // algorithm leaves no volume. A run without a cancel builds 872 320 volumes here.
+    const int volumes = static_cast<int>(s.meshDS()->NbVolumes());
     char msg[260];
     std::snprintf(msg, sizeof(msg),
                   "MESHBIND Cartesian_3D honours a cancel mid-algorithm (returned %s after "
                   "%.0f ms with %d volumes) — it is one of the three that poll the flag",
-                  ok ? "true" : "false", elapsed_ms,
-                  static_cast<int>(s.meshDS()->NbVolumes()));
-    check(!ok && elapsed_ms < 1500.0, msg);
+                  ok ? "true" : "false", elapsed_ms, volumes);
+    check(!ok && volumes == 0 && elapsed_ms < 1500.0, msg);
   }
 
   // ---- Two 3-D algorithms on one model, and whether they meet ----------------------- //
