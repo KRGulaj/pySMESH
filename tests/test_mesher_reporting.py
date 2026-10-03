@@ -15,6 +15,8 @@ Each claim is asserted against an oracle the report itself does not produce (rep
   algorithm that lacks its hypothesis, holds an algorithm state, not a compute error
   (``SMESH_subMesh::GetAlgoState``). The failure must name each such sub-shape with its
   state. The oracle is the assignment the test made.
+* **M1, a raising hook leaves no partial mesh.** The hook's exception must reach the
+  caller with its own type, and the mesh must be empty afterwards, as for a cancel.
 """
 
 from __future__ import annotations
@@ -176,3 +178,38 @@ def test_the_degenerate_pole_edges_of_a_sphere_are_named_missing_a_hypothesis() 
     named = [line.split(":")[0] for line in _missing_lines(info.value)]
     assert poles == [1, 3]
     assert named == ["EDGE 1", "EDGE 3"]
+
+
+# ---- M1: a hook that raises leaves no mesh ----------------------------------------------- #
+
+# A structured box of 50 segments a side takes long enough (about 0.2 s) for the progress
+# hook to run several times. It is not a Cartesian mesh, whose own cancel path clears it.
+HOOKED_SEGMENTS: int = 50
+
+
+class _HookStop(RuntimeError):
+    """Raised by the progress hook under test."""
+
+
+def test_a_progress_hook_that_raises_half_way_leaves_no_mesh() -> None:
+    """The hook's own exception reaches the caller, and the mesh is cleared (report M1)."""
+    calls: list[float] = []
+
+    def hook(fraction: float) -> None:
+        calls.append(fraction)
+        if len(calls) == 2:
+            raise _HookStop("half-way")
+
+    s = Session()
+    s.add_box(3.0, 7.0, 11.0)
+    with Mesher(ps.load_brep(s.brep())) as m:
+        m.assign(Regular1D())
+        m.assign(NumberOfSegments(count=HOOKED_SEGMENTS))
+        m.assign(Quadrangle2D())
+        m.assign(Hexa3D())
+
+        with pytest.raises(_HookStop):
+            m.compute(progress=hook)
+
+        assert len(calls) == 2
+        assert m.mesh().element_count == 0

@@ -542,7 +542,15 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
     py::gil_scoped_release release;
     ok = gen_->Compute(*mesh_, data_->shape);
   }
-  driver.finish();
+  // finish() re-raises an exception a hook threw, with its own type. A raising hook is a
+  // cancel, so the mesh is cleared first: a cancel leaves no partial mesh, and before this
+  // the re-raise skipped the clear below (report M1).
+  try {
+    driver.finish();
+  } catch (...) {
+    clear_mesh();
+    throw;
+  }
 
   // The driver's own flag decides a cancellation, never Compute()'s return value: a cancel
   // landing late gives a complete mesh and the same `false`, and an ordinary failure gives
