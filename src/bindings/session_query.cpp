@@ -1148,6 +1148,8 @@ py::array_t<std::int64_t> Session::entities_in_box(const std::string& kind, doub
                                                    double ymin, double zmin, double xmax,
                                                    double ymax, double zmax,
                                                    bool strict) const {
+  finite_arg("entities_in_box", "minimum", xmin, ymin, zmin);
+  finite_arg("entities_in_box", "maximum", xmax, ymax, zmax);
   if (xmax < xmin || ymax < ymin || zmax < zmin) {
     throw PysmeshError("Session.entities_in_box: every max must be >= its min.");
   }
@@ -1179,6 +1181,7 @@ py::array_t<std::int64_t> Session::entities_in_box(const std::string& kind, doub
 
 py::array_t<bool> Session::contains(const std::vector<EntityId>& solid_ids,
                                     const PointArray& points, double tol) const {
+  finite_arg("contains", "tol", tol);
   if (solid_ids.empty()) {
     throw PysmeshError("Session.contains: solid_ids must name at least one solid.");
   }

@@ -226,6 +226,10 @@ py::dict Session::add_brep(const py::bytes& data, const std::string& inside_out,
 }
 
 py::dict Session::add_box(double dx, double dy, double dz, double ox, double oy, double oz) {
+  finite_arg("add_box", "dx", dx);
+  finite_arg("add_box", "dy", dy);
+  finite_arg("add_box", "dz", dz);
+  finite_arg("add_box", "origin", ox, oy, oz);
   OpGuard guard(in_op_);
   require_positive("dx", dx);
   require_positive("dy", dy);
@@ -238,6 +242,10 @@ py::dict Session::add_box(double dx, double dy, double dz, double ox, double oy,
 
 py::dict Session::add_cylinder(double radius, double height, double ox, double oy, double oz,
                         double ax, double ay, double az) {
+  finite_arg("add_cylinder", "radius", radius);
+  finite_arg("add_cylinder", "height", height);
+  finite_arg("add_cylinder", "origin", ox, oy, oz);
+  finite_arg("add_cylinder", "axis", ax, ay, az);
   OpGuard guard(in_op_);
   require_positive("radius", radius);
   require_positive("height", height);
@@ -254,6 +262,12 @@ py::dict Session::add_cylinder(double radius, double height, double ox, double o
 
 py::dict Session::add_cone(double radius1, double radius2, double height, double ox, double oy,
                     double oz, double ax, double ay, double az, double angle_rad) {
+  finite_arg("add_cone", "radius1", radius1);
+  finite_arg("add_cone", "radius2", radius2);
+  finite_arg("add_cone", "height", height);
+  finite_arg("add_cone", "origin", ox, oy, oz);
+  finite_arg("add_cone", "axis", ax, ay, az);
+  finite_arg("add_cone", "angle_rad", angle_rad);
   OpGuard guard(in_op_);
   require_non_negative("radius1", radius1);
   require_non_negative("radius2", radius2);
@@ -276,6 +290,10 @@ py::dict Session::add_cone(double radius1, double radius2, double height, double
 
 py::dict Session::add_sphere(double radius, double cx, double cy, double cz, double ax,
                              double ay, double az, double angle_rad) {
+  finite_arg("add_sphere", "radius", radius);
+  finite_arg("add_sphere", "centre", cx, cy, cz);
+  finite_arg("add_sphere", "axis", ax, ay, az);
+  finite_arg("add_sphere", "angle_rad", angle_rad);
   OpGuard guard(in_op_);
   require_positive("radius", radius);
   require_sweep_angle("add_sphere", angle_rad);
@@ -288,6 +306,11 @@ py::dict Session::add_sphere(double radius, double cx, double cy, double cz, dou
 
 py::dict Session::add_torus(double radius1, double radius2, double ox, double oy, double oz,
                      double ax, double ay, double az, double angle_rad) {
+  finite_arg("add_torus", "radius1", radius1);
+  finite_arg("add_torus", "radius2", radius2);
+  finite_arg("add_torus", "origin", ox, oy, oz);
+  finite_arg("add_torus", "axis", ax, ay, az);
+  finite_arg("add_torus", "angle_rad", angle_rad);
   OpGuard guard(in_op_);
   require_positive("radius1", radius1);
   require_positive("radius2", radius2);
@@ -309,6 +332,12 @@ py::dict Session::add_torus(double radius1, double radius2, double ox, double oy
 // ltx along x. ltx == dx is a plain box; ltx == 0 is a wedge with a knife edge.
 py::dict Session::add_wedge(double dx, double dy, double dz, double ltx, double ox, double oy,
                      double oz, double ax, double ay, double az) {
+  finite_arg("add_wedge", "dx", dx);
+  finite_arg("add_wedge", "dy", dy);
+  finite_arg("add_wedge", "dz", dz);
+  finite_arg("add_wedge", "ltx", ltx);
+  finite_arg("add_wedge", "origin", ox, oy, oz);
+  finite_arg("add_wedge", "axis", ax, ay, az);
   OpGuard guard(in_op_);
   require_positive("dx", dx);
   require_positive("dy", dy);
@@ -331,6 +360,7 @@ py::dict Session::add_wedge(double dx, double dy, double dz, double ltx, double 
 // A standalone vertex body. The only construction that adds a point to the model as an
 // entity in its own right rather than as the boundary of something else.
 py::dict Session::add_vertex(double x, double y, double z) {
+  finite_arg("add_vertex", "point", x, y, z);
   OpGuard guard(in_op_);
   const TopoDS_Shape vertex = build_shape(
       "add_vertex", [&] { return BRepBuilderAPI_MakeVertex(gp_Pnt(x, y, z)).Vertex(); });
@@ -338,6 +368,8 @@ py::dict Session::add_vertex(double x, double y, double z) {
 }
 
 py::dict Session::add_line(double x1, double y1, double z1, double x2, double y2, double z2) {
+  finite_arg("add_line", "start", x1, y1, z1);
+  finite_arg("add_line", "end", x2, y2, z2);
   OpGuard guard(in_op_);
   const gp_Pnt a(x1, y1, z1);
   const gp_Pnt b(x2, y2, z2);
@@ -352,6 +384,9 @@ py::dict Session::add_line(double x1, double y1, double z1, double x2, double y2
 // Three-point arc: through p1, ending at p3, passing through p2.
 py::dict Session::add_arc(double x1, double y1, double z1, double x2, double y2, double z2,
                    double x3, double y3, double z3) {
+  finite_arg("add_arc", "start", x1, y1, z1);
+  finite_arg("add_arc", "through", x2, y2, z2);
+  finite_arg("add_arc", "end", x3, y3, z3);
   OpGuard guard(in_op_);
   const TopoDS_Shape edge = try_build("add_arc", [&]() -> TopoDS_Shape {
     GC_MakeArcOfCircle mk(gp_Pnt(x1, y1, z1), gp_Pnt(x2, y2, z2), gp_Pnt(x3, y3, z3));
@@ -370,6 +405,9 @@ py::dict Session::add_arc(double x1, double y1, double z1, double x2, double y2,
 
 py::dict Session::add_circle(double cx, double cy, double cz, double nx, double ny, double nz,
                       double radius) {
+  finite_arg("add_circle", "centre", cx, cy, cz);
+  finite_arg("add_circle", "normal", nx, ny, nz);
+  finite_arg("add_circle", "radius", radius);
   OpGuard guard(in_op_);
   require_positive("radius", radius);
   const gp_Ax2 frame = frame_of("add_circle", cx, cy, cz, nx, ny, nz);
@@ -389,6 +427,13 @@ py::dict Session::add_circle(double cx, double cy, double cz, double nx, double 
 py::dict Session::add_ellipse(double cx, double cy, double cz, double nx, double ny,
                               double nz, double rx, double ry,
                               const std::optional<std::array<double, 3>>& x_dir) {
+  finite_arg("add_ellipse", "centre", cx, cy, cz);
+  finite_arg("add_ellipse", "normal", nx, ny, nz);
+  finite_arg("add_ellipse", "rx", rx);
+  finite_arg("add_ellipse", "ry", ry);
+  if (x_dir.has_value()) {
+    finite_arg("add_ellipse", "x_dir", (*x_dir)[0], (*x_dir)[1], (*x_dir)[2]);
+  }
   OpGuard guard(in_op_);
   require_positive("rx", rx);
   require_positive("ry", ry);
@@ -447,6 +492,7 @@ py::dict Session::add_polyline(const PointArray& points, bool closed) {
 // points" construction; add_bspline takes control points instead.
 py::dict Session::add_spline(const PointArray& points, int degree_min, int degree_max,
                              double tol) {
+  finite_arg("add_spline", "tol", tol);
   OpGuard guard(in_op_);
   const std::vector<gp_Pnt> pts = points_of("add_spline", "points", points, 2);
   require_positive("tol", tol);
@@ -509,6 +555,12 @@ py::dict Session::add_bspline(const PointArray& poles, int degree) {
 // whose deviation from the exact helix is bounded by tol.
 py::dict Session::add_helix(double cx, double cy, double cz, double ax, double ay, double az,
                      double diameter, double pitch, double turns, double tol) {
+  finite_arg("add_helix", "centre", cx, cy, cz);
+  finite_arg("add_helix", "axis", ax, ay, az);
+  finite_arg("add_helix", "diameter", diameter);
+  finite_arg("add_helix", "pitch", pitch);
+  finite_arg("add_helix", "turns", turns);
+  finite_arg("add_helix", "tol", tol);
   OpGuard guard(in_op_);
   require_positive("diameter", diameter);
   require_positive("pitch", pitch);
@@ -542,6 +594,10 @@ py::dict Session::add_helix(double cx, double cy, double cz, double ax, double a
 // A planar rectangular face, dx by dy in the frame's own x/y directions.
 py::dict Session::add_rectangle(double ox, double oy, double oz, double nx, double ny,
                                 double nz, double dx, double dy) {
+  finite_arg("add_rectangle", "origin", ox, oy, oz);
+  finite_arg("add_rectangle", "normal", nx, ny, nz);
+  finite_arg("add_rectangle", "dx", dx);
+  finite_arg("add_rectangle", "dy", dy);
   OpGuard guard(in_op_);
   require_positive("dx", dx);
   require_positive("dy", dy);
@@ -751,6 +807,7 @@ py::dict Session::make_filling(const std::vector<EntityId>& edge_ids,
 
 py::dict Session::extrude(const std::vector<EntityId>& entity_ids, double vx, double vy,
                    double vz) {
+  finite_arg("extrude", "vector", vx, vy, vz);
   OpGuard guard(in_op_);
   const gp_Vec vec(vx, vy, vz);
   if (vec.Magnitude() <= 0.0) {
@@ -789,6 +846,9 @@ py::dict Session::extrude(const std::vector<EntityId>& entity_ids, double vx, do
 
 py::dict Session::revolve(const std::vector<EntityId>& entity_ids, double ox, double oy,
                           double oz, double ax, double ay, double az, double angle_rad) {
+  finite_arg("revolve", "origin", ox, oy, oz);
+  finite_arg("revolve", "axis", ax, ay, az);
+  finite_arg("revolve", "angle_rad", angle_rad);
   OpGuard guard(in_op_);
   require_sweep_angle("revolve", angle_rad);
   const gp_Ax1 axis(gp_Pnt(ox, oy, oz), direction_of("revolve", "axis", ax, ay, az));

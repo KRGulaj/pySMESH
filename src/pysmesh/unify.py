@@ -67,9 +67,10 @@ class UnifyParams:
             raise PysmeshError(
                 f"UnifyParams.linear_tol must be > 0 (got {self.linear_tol})."
             )
-        if self.angular_tol_deg < 0.0:
+        if not (math.isfinite(self.angular_tol_deg) and self.angular_tol_deg >= 0.0):
             raise PysmeshError(
-                f"UnifyParams.angular_tol_deg must be >= 0 (got {self.angular_tol_deg})."
+                "UnifyParams.angular_tol_deg must be a finite number >= 0 "
+                f"(got {self.angular_tol_deg})."
             )
         if not (self.unify_faces or self.unify_edges):
             raise PysmeshError(

@@ -808,6 +808,17 @@ def _ids(values: Sequence[EntityId]) -> list[int]:
     return out
 
 
+def _finite(where: str, name: str, value: float) -> float:
+    """Refuse a NaN or an infinity, as the native argument checks do (report F1).
+
+    For an argument the wrapper converts before the native call, such as an angle in
+    degrees, so that the refusal names the argument the caller gave.
+    """
+    if not math.isfinite(value):
+        raise PysmeshError(f"{where}: {name} must be a finite number (got {value}).")
+    return value
+
+
 def _points(name: str, values: Points) -> NDArray[np.float64]:
     """Normalise a caller's point list to a C-contiguous (N, 3) float64 array."""
     arr = np.ascontiguousarray(values, dtype=np.float64)

@@ -473,6 +473,8 @@ inline std::vector<gp_Pnt> points_of(const char* op, const char* argname,
                        std::to_string(a.shape(0)) + ").");
   }
   const double* p = a.data();
+  require_finite(std::string("Session.") + op, argname, p,
+                 static_cast<std::size_t>(a.shape(0)), 3);
   std::vector<gp_Pnt> out;
   out.reserve(static_cast<std::size_t>(a.shape(0)));
   for (py::ssize_t i = 0; i < a.shape(0); ++i) {
@@ -490,6 +492,8 @@ inline std::vector<double> scalars_of(const char* op, const char* argname,
                        " must be a (N,) array of parameters.");
   }
   const double* p = a.data();
+  require_finite(std::string("Session.") + op, argname, p,
+                 static_cast<std::size_t>(a.shape(0)), 1);
   std::vector<double> out;
   out.reserve(static_cast<std::size_t>(a.shape(0)));
   for (py::ssize_t i = 0; i < a.shape(0); ++i) {
@@ -501,7 +505,18 @@ inline std::vector<double> scalars_of(const char* op, const char* argname,
 // A direction from raw components, rejecting the zero vector loudly. gp_Dir's own
 // constructor raises Standard_ConstructionError, which would surface as an opaque OCCT
 // exception rather than a message naming the argument.
+// The F1 rule (common.hpp, require_finite) for a session operation's float argument, named
+// as the Python API names it.
+inline void finite_arg(const char* op, const char* name, double v) {
+  require_finite(std::string("Session.") + op, name, v);
+}
+
+inline void finite_arg(const char* op, const char* name, double x, double y, double z) {
+  require_finite(std::string("Session.") + op, name, x, y, z);
+}
+
 inline gp_Dir direction_of(const char* op, const char* argname, double x, double y, double z) {
+  require_finite(std::string("Session.") + op, argname, x, y, z);
   const gp_Vec v(x, y, z);
   if (v.Magnitude() <= 0.0) {
     throw PysmeshError(std::string("Session.") + op + ": " + argname +

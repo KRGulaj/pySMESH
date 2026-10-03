@@ -31,6 +31,7 @@ from ._types import (
     _DEFAULT_LINEAR_TOL,
     _DEFAULT_SEW_TOLERANCE,
     _delta,
+    _finite,
     _ids,
 )
 
@@ -250,7 +251,11 @@ class _HealOps(_SessionBase):
                 unify_edges,
                 concat_bsplines,
                 linear_tol,
-                math.radians(angular_tol_deg),
+                math.radians(
+                    _finite(
+                        "Session.unify_same_domain", "angular_tol_deg", angular_tol_deg
+                    )
+                ),
             )
         )
 

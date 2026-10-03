@@ -84,6 +84,8 @@ TopoDS_Shape read_brep(const py::bytes& data) {
 // GeomLProp_SLProps. Nodes at degenerate surface points (poles, singular UV) carry a zero
 // normal — the caller should handle or filter these.
 py::dict tessellate(const py::bytes& brep, double lin_defl, double ang_defl, bool relative) {
+  require_finite("tessellate", "lin_defl", lin_defl);
+  require_finite("tessellate", "ang_defl", ang_defl);
   static constexpr double kPi = 3.14159265358979323846;
 
   if (!(lin_defl > 0.0)) {

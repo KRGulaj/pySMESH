@@ -61,6 +61,8 @@ constexpr double kPi = 3.14159265358979323846;
 py::dict Session::tessellate(double deflection, double angle_rad, bool relative, bool parallel,
                              bool incremental, const py::object& progress,
                              const py::object& cancel) {
+  finite_arg("tessellate", "deflection", deflection);
+  finite_arg("tessellate", "angle_rad", angle_rad);
   OpGuard guard(in_op_);
 
   // OCCT throws Standard_NumericError below its own floors rather than clamping, and that

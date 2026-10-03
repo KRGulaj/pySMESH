@@ -161,13 +161,22 @@ py::object Params::take(const char* key) {
 
 bool Params::has(const char* key) const { return values_.contains(key); }
 
-double Params::number(const char* key) { return take(key).cast<double>(); }
+// A NaN or an infinity in a numeric field is refused here, for every hypothesis and every
+// quality or selection parameter, before any setter passes it to SMESH (report F1).
+double Params::number(const char* key) {
+  const double v = take(key).cast<double>();
+  require_finite(std::string("Mesher: ") + owner_, key, v);
+  return v;
+}
+
 int Params::integer(const char* key) { return take(key).cast<int>(); }
 bool Params::flag(const char* key) { return take(key).cast<bool>(); }
 std::string Params::text(const char* key) { return take(key).cast<std::string>(); }
 
 std::vector<double> Params::numbers(const char* key) {
-  return take(key).cast<std::vector<double>>();
+  std::vector<double> v = take(key).cast<std::vector<double>>();
+  require_finite(std::string("Mesher: ") + owner_, key, v.data(), v.size(), 1);
+  return v;
 }
 
 std::vector<int> Params::integers(const char* key) {

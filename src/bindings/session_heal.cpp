@@ -342,6 +342,9 @@ Closure close_into_solids(const TopoDS_Shape& sewn, const std::vector<TopoDS_She
 py::dict Session::heal(const std::optional<std::vector<EntityId>>& entity_ids,
                        double precision, double min_tolerance, double max_tolerance,
                        const py::object& progress, const py::object& cancel) {
+  finite_arg("heal", "precision", precision);
+  finite_arg("heal", "min_tolerance", min_tolerance);
+  finite_arg("heal", "max_tolerance", max_tolerance);
   OpGuard guard(in_op_);
   require_positive("precision", precision);
   require_positive("min_tolerance", min_tolerance);
@@ -372,6 +375,7 @@ py::dict Session::heal(const std::optional<std::vector<EntityId>>& entity_ids,
 py::dict Session::sew(const std::vector<EntityId>& entity_ids, double tolerance,
                       bool make_solid, bool non_manifold, const py::object& progress,
                       const py::object& cancel) {
+  finite_arg("sew", "tolerance", tolerance);
   OpGuard guard(in_op_);
   require_positive("tolerance", tolerance);
   if (entity_ids.empty()) {
@@ -497,6 +501,7 @@ py::dict Session::sew(const std::vector<EntityId>& entity_ids, double tolerance,
 py::dict Session::remove_internal_wires(
     const std::optional<std::vector<EntityId>>& entity_ids, double min_area,
     bool remove_faces) {
+  finite_arg("remove_internal_wires", "min_area", min_area);
   OpGuard guard(in_op_);
   require_positive("min_area", min_area);
   // No hooks: ShapeUpgrade_RemoveInternalWires::Perform takes no Message_ProgressRange in
@@ -517,6 +522,8 @@ py::dict Session::remove_internal_wires(
 py::dict Session::unify_same_domain(const std::optional<std::vector<EntityId>>& entity_ids,
                                     bool unify_faces, bool unify_edges, bool concat_bsplines,
                                     double linear_tol, double angular_tol_rad) {
+  finite_arg("unify_same_domain", "linear_tol", linear_tol);
+  finite_arg("unify_same_domain", "angular_tol_rad", angular_tol_rad);
   OpGuard guard(in_op_);
   if (!unify_faces && !unify_edges) {
     throw PysmeshError(

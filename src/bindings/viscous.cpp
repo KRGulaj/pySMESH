@@ -115,6 +115,8 @@ py::dict compute_viscous_layers(const py::object& mesh_obj, const std::vector<in
                                 bool is_ignore, double total_thickness, int n_layers,
                                 double stretch_factor, int method,
                                 const std::string& group_name) {
+  require_finite("compute_viscous_layers", "total_thickness", total_thickness);
+  require_finite("compute_viscous_layers", "stretch_factor", stretch_factor);
   SMESH_Mesh& mesh = mesh_smesh(mesh_obj);
   SMESH_Gen& gen = mesh_gen(mesh_obj);
   const std::shared_ptr<ShapeData> data = mesh_shape_data(mesh_obj);

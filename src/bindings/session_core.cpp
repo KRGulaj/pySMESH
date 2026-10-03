@@ -1004,6 +1004,8 @@ std::vector<std::pair<double, double>> Session::pairs_of(const char* op, const c
                        " must be an (N, 2) array of parameter pairs.");
   }
   const double* p = a.data();
+  require_finite(std::string("Session.") + op, argname, p,
+                 static_cast<std::size_t>(a.shape(0)), 2);
   std::vector<std::pair<double, double>> out;
   out.reserve(static_cast<std::size_t>(a.shape(0)));
   for (py::ssize_t i = 0; i < a.shape(0); ++i) {

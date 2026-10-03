@@ -188,6 +188,16 @@ returns, and raises rather than handing back a map that has quietly lost some of
 caller's names: a same-domain merge leaves several live ids on one face, and a split leaves
 one live id on several, and either makes the pairing ambiguous.
 
+## Non-finite arguments
+
+Every float argument of a session operation must be finite. A NaN or an infinity raises
+`PysmeshError` before any OCCT call. The message names the operation, the argument and
+the value, for example `Session.extrude: vector must be finite (got (nan, 0, 1))`. The
+session is left exactly as it was. The standalone functions (`offset_shape`,
+`make_thick_solid`, `point_in_solid`, `tessellate`, `unify_same_domain`,
+`compute_viscous_layers`, the `Shape` and `Mesh` methods) and every numeric field of a
+mesher hypothesis follow the same rule.
+
 ## Thread contract
 
 A `Session` is **not** thread-safe. Use one session per thread. Sessions are independent,

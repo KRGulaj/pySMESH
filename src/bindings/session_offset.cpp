@@ -404,6 +404,7 @@ void Session::require_non_zero(const char* op, const char* name, double v) {
 py::dict Session::make_thick_solid(const std::vector<EntityId>& face_ids, double thickness,
                                    double tol, const py::object& progress,
                                    const py::object& cancel) {
+  finite_arg("make_thick_solid", "tol", tol);
   OpGuard guard(in_op_);
   require_non_zero("make_thick_solid", "thickness", thickness);
   require_positive("tol", tol);
@@ -574,6 +575,7 @@ py::dict Session::make_thick_solid(const std::vector<EntityId>& face_ids, double
 
 py::dict Session::offset(const std::vector<EntityId>& entity_ids, double distance,
                          double tol, const py::object& progress, const py::object& cancel) {
+  finite_arg("offset", "tol", tol);
   OpGuard guard(in_op_);
   require_non_zero("offset", "distance", distance);
   require_positive("tol", tol);

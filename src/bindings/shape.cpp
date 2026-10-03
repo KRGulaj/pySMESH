@@ -180,7 +180,7 @@ class Shape {
   // Exists for the host application's gmsh-tag <-> OCCT-face tie-break (Phase 2 §5). GIL released.
   py::array_t<double> face_distance(int face_id, const py::object& points_obj) const {
     const TopoDS_Face face = data_->face(face_id);  // validates face_id
-    Array2d points = as_2d_f64(points_obj, "points", 3);
+    Array2d points = as_2d_f64(points_obj, "Shape.face_distance", "points", 3);
     const py::ssize_t n = points.shape(0);
     py::array_t<double> out(n);
 
@@ -245,10 +245,11 @@ class Shape {
   // already exposes (report §4.5 persistent-naming fallback, §8.2 marker remap). GIL released
   // for the numeric sweep.
   py::array_t<std::int32_t> match_faces(const py::object& centroids_obj, double tol) const {
+    require_finite("Shape.match_faces", "tol", tol);
     if (!(tol > 0.0)) {
       throw PysmeshError("match_faces: tol must be > 0 (got " + std::to_string(tol) + ").");
     }
-    Array2d centroids = as_2d_f64(centroids_obj, "centroids", 3);
+    Array2d centroids = as_2d_f64(centroids_obj, "Shape.match_faces", "centroids", 3);
     const py::ssize_t q = centroids.shape(0);
 
     // Precompute face centroids (OCCT calls stay under the GIL, ahead of the numeric loop).

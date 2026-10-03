@@ -214,6 +214,8 @@ static offset_guard::ShapeSet rims_of(BRepOffsetAPI_MakeThickSolid& mk,
 
 py::dict make_thick_solid(const py::bytes& brep, const std::vector<int>& remove_face_ids,
                            double thickness, double tol) {
+  require_finite("make_thick_solid", "thickness", thickness);
+  require_finite("make_thick_solid", "tol", tol);
   if (remove_face_ids.empty()) {
     throw PysmeshError("make_thick_solid: remove_face_ids must not be empty");
   }
@@ -372,6 +374,8 @@ py::dict make_thick_solid(const py::bytes& brep, const std::vector<int>& remove_
 // ---- offset_shape --------------------------------------------------------------------
 
 py::dict offset_shape(const py::bytes& brep, double offset, double tol) {
+  require_finite("offset_shape", "offset", offset);
+  require_finite("offset_shape", "tol", tol);
   if (offset == 0.0) {
     throw PysmeshError(
         "offset_shape: offset must be non-zero "

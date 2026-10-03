@@ -58,7 +58,7 @@ class Mesh {
   // Insert N nodes; return their SMESH ids as an int64 (N,) array.
   Array1i add_nodes(const py::object& coords_obj) {
     ensure_open();
-    Array2d coords = as_2d_f64(coords_obj, "coords", 3);
+    Array2d coords = as_2d_f64(coords_obj, "Mesh.add_nodes", "coords", 3);
     const py::ssize_t n = coords.shape(0);
     Array1i ids(n);
     const double* c = coords.data();
@@ -73,7 +73,7 @@ class Mesh {
   void classify_on_face(const Array1i& node_ids, int face_id, const py::object& uv_obj) {
     ensure_open();
     const TopoDS_Face& face = data_->face(face_id);  // validates face_id
-    Array2d uv = as_2d_f64(uv_obj, "uv", 2);
+    Array2d uv = as_2d_f64(uv_obj, "Mesh.classify_on_face", "uv", 2);
     const py::ssize_t n = node_ids.shape(0);
     if (uv.shape(0) != n) {
       throw PysmeshError("node_ids and uv must have matching length");
@@ -93,6 +93,8 @@ class Mesh {
     if (t.ndim() != 1 || t.shape(0) != node_ids.shape(0)) {
       throw PysmeshError("t must be 1-D with the same length as node_ids");
     }
+    require_finite("Mesh.classify_on_edge", "t", t.data(), static_cast<std::size_t>(t.shape(0)),
+                   1);
     const std::int64_t* ids = node_ids.data();
     const double* tv = t.data();
     for (py::ssize_t i = 0; i < node_ids.shape(0); ++i) {
