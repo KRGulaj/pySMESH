@@ -128,11 +128,12 @@ class Projection1D(Algorithm):
 class Quadrangle2D(Algorithm):
     """Mapped quadrangle meshing of a face bounded by four logical sides.
 
-    Refuses a face it cannot read as four sides — a full disk is one side, not four — and
-    the compute error names the face. A face with no algorithm, or an edge of it with no 1-D
-    hypothesis, is named by its algorithm state instead (``NO_ALGO``, ``MISSING_HYP``).
-    :class:`QuadrangleParams` names a base vertex for a three-sided face;
-    :class:`QuadranglePreference` changes what happens where the sides do not match.
+    Refuses a face it cannot read as four sides — a full disk is one side, not four —
+    and the compute error names the face. A face with no algorithm, or an edge of it
+    with no 1-D hypothesis, is named by its algorithm state instead (``NO_ALGO``,
+    ``MISSING_HYP``). :class:`QuadrangleParams` names a base vertex for a three-sided
+    face; :class:`QuadranglePreference` changes what happens where the sides do not
+    match.
     """
 
     native_name: ClassVar[str] = "Quadrangle_2D"

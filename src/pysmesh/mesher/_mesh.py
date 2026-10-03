@@ -122,10 +122,11 @@ class _MeshOps(_MesherBase):
             meshed with a warning from their algorithm (a warning is not a failure).
 
         Raises:
-            PysmeshCancelled: If ``cancel`` returned True. The mesh is cleared, so nothing
-                partial survives.
-            Exception: Whatever ``progress`` or ``cancel`` raised, re-raised with its own
-                type and traceback. That too stops the compute, and the mesh is cleared.
+            PysmeshCancelled: If ``cancel`` returned True. The mesh is cleared, so
+                nothing partial survives.
+            Exception: Whatever ``progress`` or ``cancel`` raised, re-raised with its
+                own type and traceback. That too stops the compute, and the mesh is
+                cleared.
             PysmeshError: If any sub-mesh failed. The message names every failed sub-shape
                 with SMESH's own reason and the algorithm that reported it, and ``.face_ids``
                 carries the ordinals of the failed faces. The partial mesh is **kept** here
