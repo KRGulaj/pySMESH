@@ -103,6 +103,7 @@ PATCH_MANIFEST: Final[tuple[tuple[str, str], ...]] = (
     ("smesh/StdMeshers_Quadrangle_2D_msvc.patch", "src/SMESH"),
     # --- SMESH (pySMESH) : root staged/src/SMESH ---
     ("smesh/StdMeshers_Cartesian_3D_cancel.patch", "src/SMESH"),
+    ("smesh/StdMeshers_Cartesian_VL_cancel.patch", "src/SMESH"),
     ("smesh/StdMeshers_Adaptive1D_deflection.patch", "src/SMESH"),
     # --- OCCT 8.0 layer (conda) : root staged/ ---
     ("occt8/0003-boost-regex-str-enum.patch", "."),

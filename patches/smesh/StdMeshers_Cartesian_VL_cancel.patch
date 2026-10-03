@@ -1,0 +1,160 @@
+pySMESH: make StdMeshers_Cartesian_3D with viscous layers stop on a cancel (SMESH V9_16_0).
+
+Symptom: with a ViscousLayers hypothesis, a cancel (SMESH_Gen::CancelCompute, or a progress
+hook that cancels) that arrives while the offset shape is built is lost: the grid step and
+the layer step run to their end, and the compute reports the cancel only after the complete
+mesh is built. A cancel during the layer step is not seen before the step ends either.
+
+Upstream commits: the viscous layers path of StdMeshers_Cartesian_3D::Compute and
+StdMeshers_Cartesian_VL came with SMESH c9294ee68 (2022-06-17, bos #17015, "Body fitting
+with Viscous Layers for CFD meshing") and was reworked by d3c3260cd (2023-07-25, bos #35147,
+"Decompose Viscous Layer API"). Upstream master at 83f8bf482 (2026-09-14) has the same code.
+
+Root cause: with a ViscousLayers hypothesis, Compute builds the offset shape
+(ViscousBuilder::MakeOffsetShape), then calls itself on it. The inner call resets the member
+flag _computeCanceled at its start, as Compute without viscous layers does, so a cancel that
+came during the offset step is cleared before the grid step can read it. The layer step,
+ViscousBuilder::MakeViscousLayers, has no access to the flag and no check.
+
+Change (the cancel path only; a run without a cancel builds the same mesh):
+* StdMeshers_Cartesian_3D.cxx, StdMeshers_Cartesian_3D::Compute: return false when the flag
+  is set after the offset step; the inner call (_isComputeOffset) does not reset the flag,
+  which was reset before the outer call (SMESH_Algo::InitComputeError); pass the flag to
+  MakeViscousLayers.
+* StdMeshers_Cartesian_VL.hxx and .cxx, ViscousBuilder::MakeViscousLayers: a new last
+  parameter, volatile bool* theComputeCanceled (default 0, so that the other caller,
+  StdMeshers_ViscousLayerBuilder::AddLayers, is unchanged). The flag is read at the phase
+  boundaries: before the main mesh is cleared, after each shape type of the projection
+  loop, after the prisms, before and after the offset mesh is copied to the main one, after
+  the boundary elements are set to sub-meshes, and after the coincident nodes are merged.
+  When it is set, the function returns false and builds nothing more.
+
+Not changed: ViscousBuilder::MakeOffsetShape is one OCCT offset (BRepOffset_MakeOffset) and
+cannot be stopped inside; the cancel is read when it returns. copyMesh() and the node merge
+(SMESH_MeshEditor) have no check inside; the latency is bounded by the longest of these
+phases.
+
+diff --git a/src/StdMeshers/StdMeshers_Cartesian_3D.cxx b/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
+--- a/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
++++ b/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
+@@ -152,6 +152,8 @@
+     TopoDS_Shape offsetShape = builder.MakeOffsetShape( theShape, theMesh, error );
+     if ( offsetShape.IsNull() )
+       throw SALOME_Exception( error );
++    if ( _computeCanceled ) // pySMESH: canceled during the offset step
++      return false;
+ 
+     SMESH_Mesh* offsetMesh = new TmpMesh(); 
+     offsetMesh->ShapeToMesh( offsetShape );
+@@ -161,7 +163,7 @@
+     if ( ! this->Compute( *offsetMesh, offsetShape ))
+       return false;
+ 
+-    return builder.MakeViscousLayers( *offsetMesh, theMesh, theShape );
++    return builder.MakeViscousLayers( *offsetMesh, theMesh, theShape, &_computeCanceled );
+   }
+ 
+   // The algorithm generates the mesh in following steps:
+@@ -177,7 +179,10 @@
+   // - add a hexahedron in the mesh, if all nodes are inside
+   // - add a polyhedron in the mesh, if some nodes are inside and some outside
+ 
+-  _computeCanceled = false;
++  // pySMESH: the inner call of the viscous layers path keeps a cancel that came
++  // during the offset step; the flag was reset before the outer call
++  if ( !_isComputeOffset )
++    _computeCanceled = false;
+ 
+   SMESH_MesherHelper helper( theMesh );
+   SMESHDS_Mesh* meshDS = theMesh.GetMeshDS();
+diff --git a/src/StdMeshers/StdMeshers_Cartesian_VL.hxx b/src/StdMeshers/StdMeshers_Cartesian_VL.hxx
+--- a/src/StdMeshers/StdMeshers_Cartesian_VL.hxx
++++ b/src/StdMeshers/StdMeshers_Cartesian_VL.hxx
+@@ -57,7 +57,10 @@
+ 
+     bool         MakeViscousLayers( SMESH_Mesh &         offsetMesh,
+                                     SMESH_Mesh &         theMesh,
+-                                    const TopoDS_Shape & theShape );                 
++                                    const TopoDS_Shape & theShape,
++                                    // pySMESH: the algorithm's cancel flag, read at
++                                    // the phase boundaries; 0 reads none
++                                    volatile bool*       theComputeCanceled = 0 );                 
+     
+   private:
+     
+diff --git a/src/StdMeshers/StdMeshers_Cartesian_VL.cxx b/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
+--- a/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
++++ b/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
+@@ -1106,14 +1106,18 @@
+  *  \remark Build the viscous layer from the iteration of shrink geometry
+  *  \param [out] theMesh - mesh to fill in
+  *  \param [in] theShape - initial shape
++ *  \param [in] theComputeCanceled - pySMESH: the algorithm's cancel flag, read at the
++ *         phase boundaries; when it is set, return false and build nothing more
+  *  \return bool - is Ok
+  */
+ //================================================================================
+ 
+ bool StdMeshers_Cartesian_VL::ViscousBuilder::MakeViscousLayers( SMESH_Mesh &        offsetMesh,
+                                                                  SMESH_Mesh &         theMesh,
+-                                                                 const TopoDS_Shape & theShape )
++                                                                 const TopoDS_Shape & theShape,
++                                                                 volatile bool*       theComputeCanceled )
+ {
++  auto isCanceled = [&]() { return theComputeCanceled && *theComputeCanceled; };
+   SMESHDS_Mesh* offsetMDS       = offsetMesh.GetMeshDS();
+   SMESHDS_Mesh*   initMDS       = theMesh.GetMeshDS();
+   TopoDS_Shape shrinkGeomToMesh = offsetMDS->ShapeToMesh();  
+@@ -1124,6 +1128,7 @@
+     throw SALOME_Exception("The shrink geometry does not match or respect the original topology.The viscous layer can't be build");
+ 
+   
++  if ( isCanceled() ) return false; // pySMESH: canceled
+   initMDS->ClearMesh(); // avoid mesh superposition on multiple calls of addLayers
+   offsetMDS->SetAllCellsNotMarked();
+ 
+@@ -1207,6 +1212,7 @@
+         }
+       } // loop on generated shrink shape
+     }//loop on original shape
++    if ( isCanceled() ) return false; // pySMESH: canceled
+   } // loop on shape types
+   
+   // create prisms
+@@ -1220,6 +1226,7 @@
+         prismsOk = false;
+     }
+   }
++  if ( isCanceled() ) return false; // pySMESH: canceled
+ 
+   if ( prismsOk )
+   {
+@@ -1260,12 +1267,14 @@
+     }
+   }
+ 
++  if ( isCanceled() ) return false; // pySMESH: canceled
+    // copy offset mesh to the main one
+   initMDS->Modified();
+   initMDS->CompactMesh();
+   smIdType nShift = initMDS->NbNodes();
+   TGeomID solidID = initMDS->ShapeToIndex( theShape );
+   copyMesh( & offsetMesh, & theMesh, solidID );
++  if ( isCanceled() ) return false; // pySMESH: canceled
+ 
+   if ( !prismsOk )
+   {
+@@ -1289,11 +1298,13 @@
+       setBnd2FVWL( EOS, &theMesh, &offsetMesh, nShift );
+   }
+ 
++  if ( isCanceled() ) return false; // pySMESH: canceled
+   // merge coincident nodes
+   SMESH_MeshEditor editor( &theMesh );
+   SMESH_MeshEditor::TListOfListOfNodes nodesToMerge;
+   editor.FindCoincidentNodes( nodesToCheckCoinc, vlH[0]/50., nodesToMerge, false );
+   editor.MergeNodes( nodesToMerge );
++  if ( isCanceled() ) return false; // pySMESH: canceled
+ 
+   // create a group
+   if ( !_hyp->GetGroupName().empty() )

@@ -59,6 +59,7 @@ from pysmesh import (
     Session,
     SubShape,
     SubShapeKind,
+    ViscousLayers,
 )
 
 BOX_DX: float = 3.0
@@ -70,6 +71,12 @@ BOX_DZ: float = 11.0
 BLOCK_SIZE: float = 8.0
 BLOCK_HEIGHT: float = 6.0
 BORE_RADIUS: float = 1.5
+
+# The block the viscous-layer cancel gate meshes: 8 x 8 square pockets in its top make
+# the offset shape that the layers need take a measurable time to build.
+POCKET_BLOCK_SIZE: float = 12.0
+POCKET_BLOCK_HEIGHT: float = 4.0
+POCKETS_PER_SIDE: int = 8
 
 
 # ---- Fixtures and helpers ------------------------------------------------------------- #
@@ -92,6 +99,37 @@ def _bored_block_shape() -> ps.Shape:
     session.add_cylinder(BORE_RADIUS, BLOCK_HEIGHT)
     bore = [e for e in session.entities(EntityKind.SOLID) if e not in block]
     session.cut(block, bore)
+    return ps.load_brep(session.brep())
+
+
+def _pocketed_block_shape() -> ps.Shape:
+    """A 12 x 12 x 4 block with 8 x 8 square pockets, 0.75 wide and 2 deep, in its top.
+
+    Every face is planar and axis-aligned. The bottom face stays a whole rectangle when
+    the solid is offset, which is what Cartesian_3D needs to grow layers on it.
+    """
+    session = Session()
+    half = POCKET_BLOCK_SIZE / 2.0
+    session.add_box(
+        POCKET_BLOCK_SIZE,
+        POCKET_BLOCK_SIZE,
+        POCKET_BLOCK_HEIGHT,
+        origin=(-half, -half, 0.0),
+    )
+    block = list(session.entities(EntityKind.SOLID))
+    pitch = POCKET_BLOCK_SIZE / POCKETS_PER_SIDE
+    for i in range(POCKETS_PER_SIDE):
+        for j in range(POCKETS_PER_SIDE):
+            corner = (
+                -half + pitch * (i + 0.25),
+                -half + pitch * (j + 0.25),
+                POCKET_BLOCK_HEIGHT / 2.0,
+            )
+            session.add_box(
+                pitch / 2.0, pitch / 2.0, POCKET_BLOCK_HEIGHT, origin=corner
+            )
+    pockets = [e for e in session.entities(EntityKind.SOLID) if e not in block]
+    session.cut(block, pockets)
     return ps.load_brep(session.brep())
 
 
@@ -863,6 +901,54 @@ def test_a_cancel_mid_algorithm_stops_a_long_cartesian_run_in_budget() -> None:
             mesher.compute(cancel=cancel_after_a_moment)
         latency = time.perf_counter() - requested[0]
 
+        assert mesher.mesh().element_count == 0
+
+    assert latency < 2.0, f"the cancel took {latency * 1000:.0f} ms to land"
+
+
+@pytest.mark.slow
+def test_a_cancel_in_the_viscous_layer_offset_stops_a_cartesian_run_in_budget() -> None:
+    """Cancellation latency of Cartesian_3D with viscous layers.
+
+    With a ViscousLayers hypothesis the algorithm first builds an offset shape, then
+    meshes it by calling itself, then adds the layers. Before the pySMESH patch
+    StdMeshers_Cartesian_VL_cancel the second step cleared a cancel that came during the
+    first, and the run went on to its end. On the pocketed block the offset takes about
+    0.5 s and a run without a cancel about 4.4 s (reference machine). The cancel lands
+    0.15 s in, inside the offset step. The offset is one OCCT call that cannot be
+    stopped inside, so the latency is what is left of it: 0.37 s. Budget 2 s, as for
+    the run without viscous layers; without the patch the latency is 4.3 s.
+    """
+    shape = _pocketed_block_shape()
+    bottom = tuple(f.id for f in shape.faces() if abs(float(f.centroid[2])) < 1e-9)
+    started: list[float] = []
+    requested: list[float] = []
+
+    def cancel_after_a_moment() -> bool:
+        if time.perf_counter() - started[0] < 0.15:
+            return False
+        if not requested:
+            requested.append(time.perf_counter())
+        return True
+
+    with Mesher(shape) as mesher:
+        _slow_cartesian(mesher, spacing="0.1")
+        mesher.assign(
+            ViscousLayers(
+                total_thickness=0.3,
+                layer_count=3,
+                stretch_factor=1.2,
+                boundary=bottom,
+                group_name="layers",
+            )
+        )
+        started.append(time.perf_counter())
+
+        with pytest.raises(PysmeshCancelled):
+            mesher.compute(cancel=cancel_after_a_moment)
+        latency = time.perf_counter() - requested[0]
+
+        assert len(bottom) == 1
         assert mesher.mesh().element_count == 0
 
     assert latency < 2.0, f"the cancel took {latency * 1000:.0f} ms to land"
