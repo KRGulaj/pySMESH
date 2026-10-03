@@ -160,3 +160,21 @@ bit for bit. Four `defect` probes change, each to a refusal or to a named reason
 | `V2/wing_cut_free_edges` | a solid with 2 free edges | raises "the result has 2 free boundary edge(s)", naming both (lengths 1.5 and 0.866012) | V2 |
 | `V3/inside_out_box_import` | imported at volume -1 | raises "the BREP holds 1 solid(s) that are inside out: solid 1 (volume -1)" | V3 |
 | `O4/bowed_end_section` | "invalid shape", no details | the same refusal, details "SHELL 1 of the result: BRepCheck_NotClosed on SOLID 1" | A7 |
+
+## Explained differences since the mesher reporting fixes (Phase 4, group 3)
+
+The reporting fixes of report §2 (A1, A6), §17.2 (M1), N1 and §18.1 (R1) change no
+`geometry` or `mesh` probe. Two `defect` probes change:
+
+| Probe | Before | Now | Issue |
+|---|---|---|---|
+| `A1/reduced_quad_warning` | raises "meshing failed on 1 sub-shape(s)" with SMESH's warning text | meshed: 461 nodes, 398 quadrangles, 24 triangles, 100 edges; one warning on `ComputeReport.warnings` | A1 |
+| `A6/missing_hypothesis_message` | "failed on 0 sub-shape(s)", "SMESH reported no per-sub-shape error text" | "failed on 12 sub-shape(s)", each of EDGE 1-12 named "Regular_1D is missing a hypothesis it needs (algorithm state MISSING_HYP)" | A6 |
+
+The A1 oracle is the STANDARD mesh of the same face: the REDUCED request falls back to it,
+and SMESH says so. The new counts equal the STANDARD counts, and `kept_faces` (422) is the
+face count the reference kept when it raised. Node coordinates and connectivity equal the
+STANDARD mesh, with one limit. Two builds of this four-spline NACA face in one process can
+differ by 4.2e-17 in node coordinates, for STANDARD alone too (report §18.1, M2), so the
+equality is bit for bit only between meshes of one build of the face
+(`docs/reports/agents/phase4_fixes/g3/a1_golden_oracle.txt`, gitignored).
