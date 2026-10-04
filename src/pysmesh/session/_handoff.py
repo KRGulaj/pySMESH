@@ -137,4 +137,4 @@ class _HandoffOps(_SessionBase):
                 + "; ".join(clashes)
                 + ". Give those ids one name, or name only one of them."
             )
-        return write_step_xde(self.brep(), unit=unit, name=name, face_names=by_ordinal)
+        return write_step_xde(self._s.brep(), unit=unit, name=name, face_names=by_ordinal)
