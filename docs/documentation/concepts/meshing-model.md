@@ -113,7 +113,7 @@ those. No triangle stays below 5 degrees, and 4 stay below 20.
 | Algorithm | What it does | Needs beneath | Hypotheses it reads |
 |---|---|---|---|
 | `Cartesian3D` | Body-fitted Cartesian volume meshing: a regular grid, cut against the geometry at the boundary. Hexahedra inside, polyhedra at every cut cell. Meshes every dimension itself; hides any lower-dimension algorithm. Its polyhedra cannot be written to Inria `.mesh`. | Nothing | `CartesianParameters3D` |
-| `Hexa3D` | Structured hexahedral meshing of a block: a solid bounded by six logical faces. Consumes the 2-D mesh below it. | A conforming quadrangle mesh on its six logical faces | None |
+| `Hexa3D` | Structured hexahedral meshing of a block: a solid bounded by six logical faces. Consumes the 2-D mesh below it. | A conforming quadrangle mesh on its six logical faces | `BlockRenumber` (hexahedra and nodes in i, j, k order; axes global by default, or set per block by two vertices) |
 | `CompositeHexa3D` | Structured hexahedral meshing of a solid whose six logical sides are each split into more faces. The counterpart of `Hexa3D` for such an import. | The same conforming quadrangle mesh `Hexa3D` needs, split across more faces | None |
 | `HexaFromSkin3D` | Fills a solid with hexahedra derived from an existing all-quadrangle surface mesh. | An existing all-quadrangle mesh on the solid's skin | None |
 | `Prism3D` | Extrudes a source face's mesh through a prismatic solid. Meshes the lateral faces and edges itself. | A 1-D and 2-D algorithm on the source face only | None of its own |

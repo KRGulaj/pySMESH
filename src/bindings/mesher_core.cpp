@@ -119,6 +119,45 @@ std::string where(const std::string& kind, int ordinal) {
   return kind + " " + std::to_string(ordinal);
 }
 
+// Resolves the entry strings that a hypothesis stores instead of shapes. Upstream they are
+// study entries resolved by the CORBA layer; here an entry is "KIND:ordinal", built by the
+// catalogue from the caller's ordinals (BlockRenumber's explicit form, report W1.6). The
+// other callbacks are hooks of the SALOME study, which a Mesher does not have: they do
+// nothing, and IsLoaded() is true, so SMESH_Mesh::NotifySubMeshesHypothesisModification
+// skips its reload branch (SMESH_Mesh.cxx:1276). SMESH_Mesh owns and deletes the object.
+class EntryCallUp : public SMESH_Mesh::TCallUp {
+ public:
+  explicit EntryCallUp(std::shared_ptr<ShapeData> data) : data_(std::move(data)) {}
+
+  void RemoveGroup(const int) override {}
+  void HypothesisModified(int, bool) override {}
+  void Load() override {}
+  bool IsLoaded() override { return true; }
+
+  // A null shape for an entry that names nothing, which upstream reports as a bad
+  // parameter (StdMeshers_BlockRenumber::CheckHypothesis). Never throws into SMESH.
+  TopoDS_Shape GetShapeByEntry(const std::string& entry) override {
+    const std::size_t colon = entry.find(':');
+    if (colon == std::string::npos) {
+      return TopoDS_Shape();
+    }
+    const std::string kind = entry.substr(0, colon);
+    try {
+      const int ordinal = std::stoi(entry.substr(colon + 1));
+      if (kind == "SOLID") return data_->solid(ordinal);
+      if (kind == "FACE") return data_->face(ordinal);
+      if (kind == "EDGE") return data_->edge(ordinal);
+      if (kind == "VERTEX") return data_->vertex(ordinal);
+    } catch (const std::exception&) {
+      return TopoDS_Shape();
+    }
+    return TopoDS_Shape();
+  }
+
+ private:
+  std::shared_ptr<ShapeData> data_;
+};
+
 }  // namespace
 
 // ---- Shared value helpers -------------------------------------------------------------- //
@@ -181,6 +220,10 @@ std::vector<double> Params::numbers(const char* key) {
 
 std::vector<int> Params::integers(const char* key) {
   return take(key).cast<std::vector<int>>();
+}
+
+std::vector<std::vector<int>> Params::integer_rows(const char* key) {
+  return take(key).cast<std::vector<std::vector<int>>>();
 }
 
 std::vector<std::int64_t> Params::ids(const char* key) {
@@ -346,6 +389,7 @@ Mesher::Mesher(const py::object& shape_obj) {
   if (!shape_obj.is_none()) {
     data_ = shape_data_of(shape_obj);
     mesh_->ShapeToMesh(data_->shape);
+    mesh_->SetCallUp(new EntryCallUp(data_));
   }
   meshDS_ = mesh_->GetMeshDS();
   if (data_ != nullptr) {

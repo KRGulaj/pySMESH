@@ -615,6 +615,28 @@ class QuadraticMesh(Hypothesis):
 
 
 @dataclass(frozen=True)
+class BlockRenumber(Hypothesis):
+    """Number the hexahedra and nodes of :class:`Hexa3D` like a structured grid.
+
+    Each block gets local axes: vertex (0, 0, 0) at the origin, and the k axis from
+    there to vertex (0, 0, 1). The i and j axes follow by the right-hand rule. The
+    hexahedra then come in i, j, k order with i fastest, and so do the nodes. A block
+    not named in ``blocks`` takes axes parallel to the global ones, with its origin at
+    the corner of least x + y + z; a block with no edge parallel to a global axis is
+    then left as it is.
+
+    Attributes:
+        blocks: Per block with explicit axes, ``(solid, vertex_000, vertex_001)``: the
+            ordinals of the solid, of its vertex at the local origin, and of its vertex
+            at the end of the k axis. The two vertices must share an edge of the block.
+    """
+
+    native_name: ClassVar[str] = "BlockRenumber"
+
+    blocks: tuple[tuple[int, int, int], ...] = ()
+
+
+@dataclass(frozen=True)
 class NotConformAllowed(Hypothesis):
     """Allow a non-conformal mesh between local algorithms that mesh their own boundary.
 

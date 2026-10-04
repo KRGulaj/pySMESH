@@ -375,11 +375,34 @@ SMESH_Hypothesis* make_area_hypothesis(const std::string& name, Params& p, Facto
     }
     return h;
   }
-  // Renumbers the hexahedra and nodes of Hexa_3D like a structured i, j, k grid. Only the
-  // parameter-free form is built: for a block with edges parallel to the global axes the
-  // local axes default to the global ones (SMESH 3d_meshing_hypo.rst). The explicit form
-  // names its vertices by study entry strings, which need a SMESH_Mesh::TCallUp to resolve.
-  if (name == "BlockRenumber") return f.make<StdMeshers_BlockRenumber>();
+  // Renumbers the hexahedra and nodes of Hexa_3D like a structured i, j, k grid. For a block
+  // with edges parallel to the global axes the local axes default to the global ones (SMESH
+  // 3d_meshing_hypo.rst). The explicit form names, per block, the solid and its vertices at
+  // (0,0,0) and (0,0,1) by entry strings; the Mesher's TCallUp resolves "KIND:ordinal"
+  // (report W1.6). `blocks` is read only when sent, so the parameter-free call keeps the
+  // behaviour it had.
+  if (name == "BlockRenumber") {
+    StdMeshers_BlockRenumber* h = f.make<StdMeshers_BlockRenumber>();
+    if (p.has("blocks")) {
+      std::vector<StdMeshers_BlockCS> blocks;
+      for (const std::vector<int>& row : p.integer_rows("blocks")) {
+        if (row.size() != 3) {
+          throw PysmeshError("BlockRenumber: each block is (solid, vertex_000, vertex_001); "
+                             "got " + std::to_string(row.size()) + " ordinals.");
+        }
+        m.sub_shape("SOLID", row[0]);  // validates each ordinal, naming a bad one
+        m.sub_shape("VERTEX", row[1]);
+        m.sub_shape("VERTEX", row[2]);
+        StdMeshers_BlockCS cs;
+        cs._solid = "SOLID:" + std::to_string(row[0]);
+        cs._vertex000 = "VERTEX:" + std::to_string(row[1]);
+        cs._vertex001 = "VERTEX:" + std::to_string(row[2]);
+        blocks.push_back(cs);
+      }
+      h->SetBlocksOrientation(blocks);
+    }
+    return h;
+  }
   // Lets local algorithms that mesh their own boundary sit side by side on adjacent
   // sub-shapes, which gives a non-conformal mesh. Global only (SMESH_Mesh.cxx:658-668).
   if (name == "NotConformAllowed") return f.make<StdMeshers_NotConformAllowed>();

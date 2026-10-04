@@ -20,6 +20,7 @@ from numpy.typing import NDArray
 import pysmesh as ps
 from pysmesh import (
     Arithmetic1D,
+    BlockRenumber,
     Distribution,
     ElementType,
     Hexa3D,
@@ -311,3 +312,80 @@ def test_not_conform_allowed_globally_keeps_a_conformal_mesh() -> None:
     np.testing.assert_array_equal(
         np.sort(allowed.node_coords, axis=0), np.sort(plain.node_coords, axis=0)
     )
+
+
+# ---- W1.6 BlockRenumber ----------------------------------------------------------- #
+
+
+def _structured_order(
+    mesh: ps.MeshData, origin: NDArray[np.float64], axes: NDArray[np.float64]
+) -> tuple[NDArray[np.int64], NDArray[np.int64]]:
+    """Grid index ``i + n (j + n k)`` of each hexahedron and node, in mesh id order.
+
+    ``axes`` holds the unit i, j, k directions as rows, ``origin`` the local origin.
+    The box has 3 cells along each edge, so a cell spans a third of each edge.
+    """
+    dims = np.abs(axes @ np.array([BOX_DX, BOX_DY, BOX_DZ], dtype=np.float64))
+    step = dims / 3.0
+    hexa = np.flatnonzero(mesh.element_type == int(ElementType.HEXAHEDRON))
+    hexa = hexa[np.argsort(mesh.element_id[hexa])]
+    centres = np.array([mesh.node_coords[mesh.nodes_of(i)].mean(axis=0) for i in hexa])
+    cell = np.floor(((centres - origin) @ axes.T) / step).astype(np.int64)
+    order = np.argsort(mesh.node_id)
+    point = np.rint(((mesh.node_coords[order] - origin) @ axes.T) / step)
+    point = point.astype(np.int64)
+    cells = cell[:, 0] + 3 * (cell[:, 1] + 3 * cell[:, 2])
+    nodes = point[:, 0] + 4 * (point[:, 1] + 4 * point[:, 2])
+    return np.asarray(cells, dtype=np.int64), np.asarray(nodes, dtype=np.int64)
+
+
+def test_block_renumber_numbers_a_box_along_the_global_axes() -> None:
+    """Hexahedra and nodes in i, j, k = x, y, z order from the origin, i fastest.
+
+    Spec (SMESH ``3d_meshing_hypo.rst``, "Renumber hypothesis"): it gives "hexahedra
+    and nodes ordered like in a structured grid"; a block with edges parallel to the
+    global axes takes them as its axes. The origin is the corner of least x + y + z
+    (``StdMeshers_RenumberHelper::GetVertex000``): (0, 0, 0).
+    """
+    mesh = _hexa_box(BlockRenumber())
+
+    cells, nodes = _structured_order(mesh, np.zeros(3), np.eye(3))
+    np.testing.assert_array_equal(cells, np.arange(27))
+    np.testing.assert_array_equal(nodes, np.arange(64))
+
+
+def test_block_renumber_takes_the_axes_of_the_named_vertices() -> None:
+    """k from (3, 7, 11) to (3, 7, 0): i = -y and j = -x by the right-hand rule.
+
+    Spec (``3d_meshing_hypo.rst``): vertex (0,0,0) is the origin, vertex (0,0,1) the
+    end of the k axis, and "axes i and j are found automatically using the right-hand
+    rule". The two other edges at (3, 7, 11) run along -x and -y; i x j = k = -z holds
+    for i = -y, j = -x (``StdMeshers_Hexa_3D.cxx``, ``arrangeForRenumber``).
+    """
+    shape = _box_shape()
+    origin = _vertex_at(shape, (BOX_DX, BOX_DY, BOX_DZ))
+    k_end = _vertex_at(shape, (BOX_DX, BOX_DY, 0.0))
+
+    mesh = _hexa_box(BlockRenumber(blocks=((1, origin, k_end),)))
+
+    axes = np.array([[0.0, -1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, -1.0]])
+    corner = np.array([BOX_DX, BOX_DY, BOX_DZ])
+    cells, nodes = _structured_order(mesh, corner, axes)
+    np.testing.assert_array_equal(cells, np.arange(27))
+    np.testing.assert_array_equal(nodes, np.arange(64))
+
+
+def test_block_renumber_refuses_vertices_that_share_no_edge() -> None:
+    """Opposite corners cannot set a k axis: the compute fails and says why.
+
+    Spec (``StdMeshers_BlockRenumber::CheckHypothesis``): for a block of 8 vertices the
+    two vertices must be "connected by an edge".
+    """
+    shape = _box_shape()
+    origin = _vertex_at(shape, (0.0, 0.0, 0.0))
+    far = _vertex_at(shape, (BOX_DX, BOX_DY, BOX_DZ))
+
+    with pytest.raises(PysmeshError, match="meshing failed") as caught:
+        _hexa_box(BlockRenumber(blocks=((1, origin, far),)))
+
+    assert "not connected by an edge" in caught.value.details

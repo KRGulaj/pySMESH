@@ -49,6 +49,7 @@ from pysmesh import (
     Algorithm,
     Arithmetic1D,
     AutomaticLength,
+    BlockRenumber,
     Cartesian3D,
     CartesianParameters3D,
     CompositeHexa3D,
@@ -277,6 +278,8 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
     (LayerDistribution(distribution=NumberOfSegments(count=3)), None),
     (LayerDistribution2D(distribution=NumberOfSegments(count=3)), None),
     (QuadraticMesh(), None),
+    (BlockRenumber(), None),
+    (BlockRenumber(blocks=((1, 1, 2),)), None),
     (NotConformAllowed(), None),
     # 2-D and 3-D hypotheses
     (MaxElementArea(max_area=4.0), None),

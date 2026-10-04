@@ -140,6 +140,10 @@ class Params {
   std::vector<double> numbers(const char* key);
   std::vector<int> integers(const char* key);
 
+  // A list of equal-length integer rows, for a parameter that names several sub-shapes per
+  // entry (the blocks of BlockRenumber: solid, vertex, vertex).
+  std::vector<std::vector<int>> integer_rows(const char* key);
+
   // Mesh ids, which are wider than an int by construction: SMDS numbers every node and
   // element in one 64-bit sequence.
   std::vector<std::int64_t> ids(const char* key);
