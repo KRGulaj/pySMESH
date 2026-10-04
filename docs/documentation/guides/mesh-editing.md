@@ -418,8 +418,9 @@ mesh.release()
   face wire.
 - `ViscousLayers2D` takes no extrusion method; only the 3-D hypothesis has one.
 - `Cartesian3D` with layers: a stack too thick for the shape, so that one shrunk surface
-  meets another, fails the compute on the solid with no message from SMESH, and leaves no
-  cell. At an edge between two walls with layers, the corner cells have warped faces where
+  meets another, is not supported. The compute fails on the solid with the reason ("the
+  solid offset inward by the total thickness ... is empty ... the layers are too thick for
+  the shape"), and leaves no cell. At an edge between two walls with layers, the corner cells have warped faces where
   the grid lines on a wall cross that edge at an angle other than 90 degrees (the caps of a
   hexagonal prism). The mesh there is conforming, but the `Volume` control
   splits each warped cell on its own, so its sum can differ from the shape's volume by about

@@ -877,6 +877,24 @@ def test_a_failed_cartesian_layer_compute_leaves_no_cell() -> None:
         assert mesher.mesh().element_count == 0
 
 
+def test_layers_too_thick_for_the_shape_fail_naming_the_reason() -> None:
+    """Layers of 0.3 in the bored block: the compute fails and says why.
+
+    Offset by 0.3, the bore (radius 0.4) reaches radius 0.7 and the walls come to 0.7
+    from its axis, so the offset surfaces touch. BRepOffset_MakeOffset then reports
+    success with an empty solid, which used to reach the caller as "SOLID 1: no
+    message".
+    """
+    with Mesher(_shape_of("bored")) as mesher:
+        _assign_cartesian_layers(mesher, "0.25", (), 0.3)
+
+        with pytest.raises(PysmeshError, match="meshing failed") as raised:
+            mesher.compute()
+
+    assert "no message" not in raised.value.details
+    assert "too thick for the shape" in raised.value.details
+
+
 # ---- L6 the algorithms that build viscous layers ----------------------------------- #
 
 # Group sizes of a stack of STACK[1] layers on one wall: 4 x 4 quadrangles on the box
