@@ -31,11 +31,13 @@
 
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRep_Builder.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_BuilderAlgo.hxx>
 #include <NCollection_List.hxx>
 #include <TopExp.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
@@ -2549,6 +2551,43 @@ void probe_p4_distributions() {
   }
 }
 
+// SMESH_Mesh_hypothesis_status.patch: AddHypothesis returns the HYP_CONCURRENT it finds.
+// SMESH_subMesh::CheckConcurrentHypothesis looks for two different similar hypotheses on two
+// ancestors of one level, leaving out the one being added (getSimilarAttached). So the
+// conflict is two NumberOfSegments already on two faces that share an edge; adding a third
+// 1-D hypothesis to the solid around them, which is not the main shape, reports it. Before
+// the patch the last check of AddHypothesis overwrote the status with HYP_OK.
+void probe_p4_hypothesis_status() {
+  section("P4HYP", "AddHypothesis keeps the worst status of its checks");
+  BRep_Builder builder;
+  TopoDS_Compound two;
+  builder.MakeCompound(two);
+  builder.Add(two, BRepPrimAPI_MakeBox(3.0, 7.0, 11.0).Shape());
+  builder.Add(two, BRepPrimAPI_MakeBox(gp_Pnt(10.0, 0.0, 0.0), 3.0, 7.0, 11.0).Shape());
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces, solids;
+  TopExp::MapShapes(two, TopAbs_FACE, faces);
+  TopExp::MapShapes(two, TopAbs_SOLID, solids);
+  // MakeBox lists its faces as x = 0, x = max, y = 0, y = max, z = 0, z = max: faces 1 and 3
+  // of the first box share an edge.
+  Session s(two);
+  StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+  StdMeshers_NumberOfSegments* three = s.make<StdMeshers_NumberOfSegments>();
+  StdMeshers_NumberOfSegments* five = s.make<StdMeshers_NumberOfSegments>();
+  StdMeshers_NumberOfSegments* seven = s.make<StdMeshers_NumberOfSegments>();
+  three->SetNumberOfSegments(3);
+  five->SetNumberOfSegments(5);
+  seven->SetNumberOfSegments(7);
+  const bool before = s.assign(s.shape(), a1) && s.assign(faces.FindKey(1), three) &&
+                      s.assign(faces.FindKey(3), five);
+  const SMESH_Hypothesis::Hypothesis_Status status = s.assign_status(solids.FindKey(1), seven);
+  char msg[200];
+  std::snprintf(msg, sizeof(msg),
+                "P4HYP 3 and 5 segments on faces sharing an edge, then 7 on their solid: "
+                "HYP_CONCURRENT (got %d; HYP_OK = 0 before the patch)",
+                static_cast<int>(status));
+  check(before && status == SMESH_Hypothesis::HYP_CONCURRENT, msg);
+}
+
 }  // namespace
 
 void run_smesh_probe() {
@@ -2567,4 +2606,5 @@ void run_smesh_probe() {
   probe_cat916_2d_additions();
   probe_cat916_3d_additions();
   probe_p4_distributions();
+  probe_p4_hypothesis_status();
 }
