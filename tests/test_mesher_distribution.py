@@ -29,7 +29,20 @@ import pytest
 from numpy.typing import NDArray
 
 import pysmesh as ps
-from pysmesh import Distribution, Mesher, NumberOfSegments, Regular1D, Session
+from pysmesh import (
+    Arithmetic1D,
+    Distribution,
+    FixedPoints1D,
+    Geometric1D,
+    Hypothesis,
+    LayerDistribution,
+    Mesher,
+    NumberOfSegments,
+    PysmeshError,
+    Regular1D,
+    Session,
+    StartEndLength,
+)
 
 EDGE_LENGTH: float = 15.0
 NODE_TOLERANCE: float = 1e-10 * EDGE_LENGTH
@@ -191,3 +204,91 @@ def test_an_expression_with_no_finite_integral_is_refused_naming_the_edge() -> N
 
     assert "EDGE 1" in info.value.details
     assert "did not converge" in info.value.details
+
+
+# ------------------------------------------------ Reversed edges (report §4 C1) --- #
+
+# A straight chain A-B-C of two unit edges, the second defined from C to B. On each
+# edge, a distribution measured from the edge's own start places nodes at the fractions
+# below (StdMeshers_Regular_1D.cxx). The parameters are chosen so that each progression
+# fits the edge exactly, which leaves compensateError() and distributeError() nothing
+# to move:
+# * NumberOfSegments SCALE, n = 4, factor 8: alpha = 8^(1/3) = 2, node i at
+#   (1 - alpha^i) / (1 - alpha^n) = (2^i - 1) / 15 (:1026-1045);
+# * Arithmetic1D 0.1 to 0.3: n = int(2 / 0.4 + 0.5) = 5 segments of 0.1, 0.15, 0.2,
+#   0.25 and 0.3;
+# * StartEndLength 1/7 to 4/7, and Geometric1D 1/7 with ratio 2: segments 1/7, 2/7, 4/7;
+# * FixedPoints1D at 0.25 with 1 and 2 segments: 0.25, then 0.625.
+# With the second edge reversed, both edges grade the same way from A towards C.
+CHAIN_TOL: float = 1e-12
+REVERSED_CASES: dict[str, tuple[float, ...]] = {
+    "NumberOfSegments": tuple((2.0**i - 1.0) / 15.0 for i in range(5)),
+    "Arithmetic1D": (0.0, 0.1, 0.25, 0.45, 0.7, 1.0),
+    "StartEndLength": (0.0, 1.0 / 7.0, 3.0 / 7.0, 1.0),
+    "Geometric1D": (0.0, 1.0 / 7.0, 3.0 / 7.0, 1.0),
+    "FixedPoints1D": (0.0, 0.25, 0.625, 1.0),
+}
+
+
+def _reversible(name: str, reversed_edges: tuple[int, ...]) -> Hypothesis:
+    """The C1 hypothesis of one kind, with the given edges reversed."""
+    if name == "NumberOfSegments":
+        return NumberOfSegments(
+            count=4,
+            distribution=Distribution.SCALE,
+            scale_factor=8.0,
+            reversed_edges=reversed_edges,
+        )
+    if name == "Arithmetic1D":
+        return Arithmetic1D(0.1, 0.3, reversed_edges=reversed_edges)
+    if name == "StartEndLength":
+        return StartEndLength(1.0 / 7.0, 4.0 / 7.0, reversed_edges=reversed_edges)
+    if name == "Geometric1D":
+        return Geometric1D(1.0 / 7.0, 2.0, reversed_edges=reversed_edges)
+    return FixedPoints1D((0.25,), (1, 2), reversed_edges=reversed_edges)
+
+
+def _chain() -> tuple[ps.Shape, int]:
+    """The chain A-B-C and the ordinal of its second edge, defined from C to B."""
+    s = Session()
+    s.add_line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    s.add_line((2.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    shape = ps.load_brep(s.brep())
+    second = [e.id for e in shape.edges() if e.bbox[3] > 1.5]
+    assert len(second) == 1
+    return shape, second[0]
+
+
+@pytest.mark.parametrize("name", sorted(REVERSED_CASES))
+def test_a_reversed_edge_grades_both_edges_of_a_chain_from_the_same_end(
+    name: str,
+) -> None:
+    """Edge 1 from A and the reversed edge 2 from B follow one closed form (C1)."""
+    shape, second = _chain()
+
+    with Mesher(shape) as m:
+        m.assign(Regular1D())
+        m.assign(_reversible(name, (second,)))
+        m.compute()
+        x = np.unique(m.mesh().node_coords[:, 0])
+
+    expected = REVERSED_CASES[name]
+    assert x[x <= 1.0 + CHAIN_TOL] == pytest.approx(expected, abs=CHAIN_TOL)
+    assert x[x >= 1.0 - CHAIN_TOL] - 1.0 == pytest.approx(expected, abs=CHAIN_TOL)
+
+
+def test_reversed_edges_naming_no_edge_are_refused() -> None:
+    """An ordinal beyond the edges of the shape raises PysmeshError (C1)."""
+    shape, _ = _chain()
+
+    with Mesher(shape) as m, pytest.raises(PysmeshError, match="99"):
+        m.assign(_reversible("Arithmetic1D", (99,)))
+
+
+def test_reversed_edges_inside_a_layer_distribution_are_refused() -> None:
+    """A layer distribution spaces layers, not edge nodes: refused by name (C1)."""
+    shape, _ = _chain()
+    inner = NumberOfSegments(count=3, reversed_edges=(1,))
+
+    with Mesher(shape) as m, pytest.raises(PysmeshError, match="reversed_edges"):
+        m.assign(LayerDistribution(distribution=inner))

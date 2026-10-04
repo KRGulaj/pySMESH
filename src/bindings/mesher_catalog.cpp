@@ -85,6 +85,7 @@
 #include <StdMeshers_QuadranglePreference.hxx>
 #include <StdMeshers_QuadrangleParams.hxx>
 #include <StdMeshers_QuadraticMesh.hxx>
+#include <StdMeshers_Reversible1D.hxx>
 #include <StdMeshers_SegmentLengthAroundVertex.hxx>
 #include <StdMeshers_StartEndLength.hxx>
 #include <StdMeshers_ViscousLayers.hxx>
@@ -162,8 +163,24 @@ SMESH_Hypothesis* make_algorithm(const std::string& name, Factory& f) {
   return nullptr;
 }
 
+// The edges a reversible 1-D distribution runs from their last vertex to their first, sent
+// as SMESHDS indices (report C1). StdMeshers_Regular_1D compares each edge's index with this
+// list (StdMeshers_Regular_1D.cxx:202-279). Read only when sent, so a caller that never sends
+// `reversed_edges` keeps the behaviour it had.
+void set_reversed_edges(StdMeshers_Reversible1D* h, Params& p, const Mesher& m) {
+  if (!p.has("reversed_edges")) {
+    return;
+  }
+  std::vector<int> indices;
+  for (const int ordinal : p.integers("reversed_edges")) {
+    indices.push_back(m.meshDS().ShapeToIndex(m.sub_shape("EDGE", ordinal)));
+  }
+  h->SetReversedEdges(indices);
+}
+
 // The 1-D distribution family, plus the two hypotheses that carry no sub-shape reference.
-SMESH_Hypothesis* make_1d_hypothesis(const std::string& name, Params& p, Factory& f) {
+SMESH_Hypothesis* make_1d_hypothesis(const std::string& name, Params& p, Factory& f,
+                                     const Mesher& m) {
   if (name == "NumberOfSegments") {
     StdMeshers_NumberOfSegments* h = f.make<StdMeshers_NumberOfSegments>();
     h->SetNumberOfSegments(static_cast<smIdType>(p.integer("count")));
@@ -200,24 +217,28 @@ SMESH_Hypothesis* make_1d_hypothesis(const std::string& name, Params& p, Factory
       p.numbers("table");
       p.text("expression");
     }
+    set_reversed_edges(h, p, m);
     return h;
   }
   if (name == "Arithmetic1D") {
     StdMeshers_Arithmetic1D* h = f.make<StdMeshers_Arithmetic1D>();
     h->SetLength(p.number("start_length"), true);
     h->SetLength(p.number("end_length"), false);
+    set_reversed_edges(h, p, m);
     return h;
   }
   if (name == "StartEndLength") {
     StdMeshers_StartEndLength* h = f.make<StdMeshers_StartEndLength>();
     h->SetLength(p.number("start_length"), true);
     h->SetLength(p.number("end_length"), false);
+    set_reversed_edges(h, p, m);
     return h;
   }
   if (name == "Geometric1D") {
     StdMeshers_Geometric1D* h = f.make<StdMeshers_Geometric1D>();
     h->SetStartLength(p.number("start_length"));
     h->SetCommonRatio(p.number("common_ratio"));
+    set_reversed_edges(h, p, m);
     return h;
   }
   if (name == "FixedPoints1D") {
@@ -227,6 +248,7 @@ SMESH_Hypothesis* make_1d_hypothesis(const std::string& name, Params& p, Factory
     const std::vector<int> counts = p.integers("segment_counts");
     std::vector<smIdType> wide(counts.begin(), counts.end());
     h->SetNbSegments(wide);
+    set_reversed_edges(h, p, m);
     return h;
   }
   if (name == "Adaptive1D") {
@@ -439,7 +461,7 @@ SMESH_Hypothesis* Mesher::build(const std::string& name, const py::dict& values)
   try {
     SMESH_Hypothesis* hyp = make_algorithm(name, factory);
     if (hyp == nullptr) {
-      hyp = make_1d_hypothesis(name, p, factory);
+      hyp = make_1d_hypothesis(name, p, factory, *this);
     }
     if (hyp == nullptr) {
       hyp = make_area_hypothesis(name, p, factory, *this);
@@ -453,6 +475,15 @@ SMESH_Hypothesis* Mesher::build(const std::string& name, const py::dict& values)
       // form, for RadialQuadrangle_1D2D, is the same class under its own name.
       if (name == "LayerDistribution" || name == "LayerDistribution2D") {
         const py::dict spec = p.nested("distribution");
+        // A layer distribution spaces the layers between two shells, not the nodes of an
+        // edge of the model, so an edge to reverse names nothing there (report C1).
+        const py::dict inner_params = spec["params"].cast<py::dict>();
+        if (inner_params.contains("reversed_edges") &&
+            py::len(inner_params["reversed_edges"]) > 0) {
+          throw PysmeshError(name + ": its distribution sets reversed_edges, which a layer "
+                             "distribution cannot use: it spaces the layers between two "
+                             "shells, not the nodes of an edge. Leave reversed_edges empty.");
+        }
         SMESH_Hypothesis* inner = nullptr;
         try {
           inner = build(spec["name"].cast<std::string>(), spec["params"].cast<py::dict>());

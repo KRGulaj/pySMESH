@@ -345,6 +345,10 @@ class NumberOfSegments(Hypothesis):
             :attr:`Distribution.EXPRESSION`.
         conversion_mode: 0 to treat the density as exponential, 1 to cut it at zero. Read
             only by the table and expression forms.
+        reversed_edges: Ordinals of the edges on which the distribution runs from
+            the edge's last vertex to its first. Use it to make a graded chain of
+            edges, some defined the other way round, grow the same way along every
+            edge.
     """
 
     native_name: ClassVar[str] = "NumberOfSegments"
@@ -355,6 +359,7 @@ class NumberOfSegments(Hypothesis):
     table: tuple[float, ...] = ()
     expression: str = ""
     conversion_mode: int = 1
+    reversed_edges: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -364,12 +369,17 @@ class Arithmetic1D(Hypothesis):
     Attributes:
         start_length: Length of the first segment.
         end_length: Length of the last segment.
+        reversed_edges: Ordinals of the edges on which the distribution runs from
+            the edge's last vertex to its first. Use it to make a graded chain of
+            edges, some defined the other way round, grow the same way along every
+            edge.
     """
 
     native_name: ClassVar[str] = "Arithmetic1D"
 
     start_length: float
     end_length: float
+    reversed_edges: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -379,12 +389,17 @@ class StartEndLength(Hypothesis):
     Attributes:
         start_length: Length of the first segment.
         end_length: Length of the last segment.
+        reversed_edges: Ordinals of the edges on which the distribution runs from
+            the edge's last vertex to its first. Use it to make a graded chain of
+            edges, some defined the other way round, grow the same way along every
+            edge.
     """
 
     native_name: ClassVar[str] = "StartEndLength"
 
     start_length: float
     end_length: float
+    reversed_edges: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -394,12 +409,17 @@ class Geometric1D(Hypothesis):
     Attributes:
         start_length: Length of the first segment.
         common_ratio: Ratio between one segment and the next.
+        reversed_edges: Ordinals of the edges on which the distribution runs from
+            the edge's last vertex to its first. Use it to make a graded chain of
+            edges, some defined the other way round, grow the same way along every
+            edge.
     """
 
     native_name: ClassVar[str] = "Geometric1D"
 
     start_length: float
     common_ratio: float
+    reversed_edges: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -409,12 +429,17 @@ class FixedPoints1D(Hypothesis):
     Attributes:
         points: Normalised positions in ``(0, 1)``, ascending. The edge ends are implicit.
         segment_counts: Segments per interval — one more entry than ``points``.
+        reversed_edges: Ordinals of the edges on which the distribution runs from
+            the edge's last vertex to its first. Use it to make a graded chain of
+            edges, some defined the other way round, grow the same way along every
+            edge.
     """
 
     native_name: ClassVar[str] = "FixedPoints1D"
 
     points: tuple[float, ...]
     segment_counts: tuple[int, ...]
+    reversed_edges: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
