@@ -131,18 +131,20 @@ py::dict Session::export_handoff(bool allow_aliases) const {
     std::ostringstream detail;
     if (!ambiguous.empty()) {
       detail << ambiguous.size()
-             << " id(s) share a sub-shape with another id, which a same-domain merge "
-                "produces: the merged entity is denoted by all of them and the handoff "
-                "cannot choose one. ";
+             << " id(s) share a sub-shape with another id, which a same-domain merge or "
+                "a boolean on coincident sub-shapes produces: the shared entity is denoted "
+                "by all of them and the handoff cannot choose one. ";
     }
     if (!split.empty()) {
       detail << split.size()
              << " id(s) denote more than one sub-shape, which a split produces: the "
                 "entity is no longer one thing to name. ";
     }
-    detail << "Resolve the ambiguity before handing off — a merge is settled by exporting "
-              "after the ids the caller no longer needs have been dropped, a split by "
-              "treating the pieces as the new entities they are. The ids, by kind:";
+    detail << "export_handoff(allow_aliases=True) returns a many-to-one map instead: each "
+              "sub-shape carries its lowest live id, and Handoff.aliases maps every other "
+              "id to it. Or resolve the ambiguity before handing off — a merge is settled "
+              "by exporting after the ids the caller no longer needs have been dropped, a "
+              "split by treating the pieces as the new entities they are. The ids, by kind:";
     std::vector<EntityId> faces;
     for (const auto& [kind, ids] : blamed_by_kind) {
       detail << " " << kind_name(kind);

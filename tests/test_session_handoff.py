@@ -561,6 +561,17 @@ def test_without_aliases_a_boolean_that_shares_sub_shapes_is_still_refused() -> 
         s.export_handoff()
 
 
+def test_a_boolean_refusal_names_the_boolean_cause_and_the_alias_way_out() -> None:
+    """After a common, the refusal names a boolean and allow_aliases (C2)."""
+    s = _c2_session("common_overlapping")
+
+    with pytest.raises(PysmeshError, match="not a bijection") as caught:
+        s.export_handoff()
+
+    assert "boolean" in caught.value.details
+    assert "allow_aliases=True" in caught.value.details
+
+
 def test_a_bijective_export_has_no_aliases() -> None:
     """A cut that shares nothing gives the same map either way, and no aliases (C2)."""
     s = _c2_session("cut_overlapping")
