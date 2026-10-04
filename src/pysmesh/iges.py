@@ -19,9 +19,12 @@ metre part" defect comes from; this one never rescales behind the caller's back.
 that unit and the coordinates are written unchanged, so the file cannot come out labelled in
 one unit while holding numbers in another.
 
-OCCT has no IGES stream reader (``IGESSelect_WorkLibrary`` does not override
-``IFSelect_WorkLibrary::ReadStream``), so :func:`read_iges` takes a path, not bytes.
-:func:`write_iges` returns bytes, matching :func:`write_step_xde`.
+:func:`read_iges` takes the IGES content as bytes or a filesystem path, as
+:func:`read_step_xde` does, and :func:`write_iges` returns bytes, matching
+:func:`write_step_xde`, so the two compose: ``read_iges(write_iges(brep, unit="MM"))``.
+OCCT 8.0.1 has no IGES stream reader: no IGES work library overrides
+``IFSelect_WorkLibrary::ReadStream``, which returns 1. So bytes are written to a file in
+a temporary directory, read, and removed.
 
 Importing an IGES file makes OCCT print one line to stdout ("Total number of loaded
 entities N."). It is an unconditional info-level message inside ``IGESFile_Read``; OCCT
@@ -31,15 +34,19 @@ exposes no switch for it.
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final, Mapping, Union, cast
 
 from ._core import read_iges as _read_iges
 from ._core import write_iges as _write_iges
 
-# An IGES source: a filesystem path (str / os.PathLike). Bytes are not accepted — see the
-# module docstring.
-IgesPath = Union[str, "os.PathLike[str]"]
+# An IGES source: the content as bytes, or a filesystem path (str / os.PathLike).
+IgesSource = Union[bytes, bytearray, str, "os.PathLike[str]"]
+
+# The name of the file that holds bytes content while OCCT reads it.
+_TEMP_IGES_NAME: Final[str] = "model.igs"
 
 # The ten length units an IGES global section can declare, as metres per unit. The names are
 # OCCT's (``IGESData_BasicEditor::UnitFlagName``) and are what :attr:`IgesImport.unit_name`
@@ -76,11 +83,14 @@ class IgesImport:
     unit_name: str
 
 
-def read_iges(path: IgesPath) -> IgesImport:
-    """Import an IGES file via OCCT's IGESControl_Reader, preserving the declared unit.
+def read_iges(data_or_path: IgesSource) -> IgesImport:
+    """Import IGES via OCCT's IGESControl_Reader, preserving the declared unit.
 
     Args:
-        path: Filesystem path to the ``.igs`` / ``.iges`` file.
+        data_or_path: The IGES source: the content as bytes (for example what
+            :func:`write_iges` returns), or a filesystem path (``str`` / ``Path``) to
+            the ``.igs`` / ``.iges`` file. Bytes are read through a temporary file,
+            which is removed before this returns.
 
     Returns:
         An :class:`IgesImport` with the native-unit BREP, the metres-per-unit
@@ -90,7 +100,13 @@ def read_iges(path: IgesPath) -> IgesImport:
         PysmeshError: On a missing or malformed file, a file whose global section declares a
             unit IGES has no value for, or a file holding no transferable geometry.
     """
-    raw = _read_iges(os.fspath(path))
+    if isinstance(data_or_path, (bytes, bytearray)):
+        with tempfile.TemporaryDirectory(prefix="pysmesh-iges-") as tmp:
+            path = Path(tmp) / _TEMP_IGES_NAME
+            path.write_bytes(bytes(data_or_path))
+            raw = _read_iges(str(path))
+    else:
+        raw = _read_iges(os.fspath(data_or_path))
     return IgesImport(
         brep=cast("bytes", raw["brep"]),
         length_unit=float(cast("float", raw["length_unit"])),

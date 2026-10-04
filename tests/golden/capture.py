@@ -576,7 +576,7 @@ def _step() -> dict[str, Value]:
 def _iges() -> dict[str, Value]:
     s = Session()
     s.add_box(*_BOX)
-    # read_iges takes a path, not bytes (write_iges returns bytes), so round-trip via a file.
+    # The file round trip of 4.2.2, kept for comparison; read_iges takes bytes too (C7).
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "box.igs"
         path.write_bytes(ps.write_iges(s.brep(), unit="M"))

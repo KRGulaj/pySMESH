@@ -46,7 +46,7 @@ never rescales them. Passing `imported.unit_name` makes the export a round trip.
 ## IGES: `read_iges` / `write_iges`
 
 ```python
-igs = pysmesh.read_iges("housing.igs")   # a path, not bytes
+igs = pysmesh.read_iges("housing.igs")   # a path, or the bytes write_iges returns
 igs.length_unit    # 0.001 for an MM file, 0.0254 for an INCH file
 igs.unit_name       # "MM", "INCH", "M", ...
 
@@ -55,8 +55,8 @@ pysmesh.write_iges(igs.brep, unit=igs.unit_name)   # re-export, unit-exact
 
 `write_iges` takes the unit of the coordinates as an explicit argument and declares it in
 the header without rescaling, exactly as `write_step_xde` does. Both accept the same ten
-names. See [Units](../concepts/units.md) for the full contract, including why `read_iges`
-takes a path and not bytes.
+names. See [Units](../concepts/units.md) for the full contract, including how `read_iges`
+reads bytes.
 
 ## Tessellation: `tessellate`
 

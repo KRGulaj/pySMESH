@@ -305,8 +305,8 @@ igs.length_unit                              # 0.001 for an MM file, 0.0254 for 
 pysmesh.write_iges(igs.brep, unit=igs.unit_name)
 ```
 
-`read_iges` takes a path, not bytes. OCCT ships no IGES stream reader
-(`IGESSelect_WorkLibrary` does not override `IFSelect_WorkLibrary::ReadStream`).
+`read_iges` takes the content as bytes or a path, like `read_step_xde`. OCCT
+ships no IGES stream reader, so bytes go through a temporary file.
 Reading one also makes OCCT print `Total number of loaded entities N.` to
 stdout. That is an unconditional info-level message inside `IGESFile_Read`,
 and OCCT gives no switch to silence it.
