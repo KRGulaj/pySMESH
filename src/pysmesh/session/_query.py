@@ -110,9 +110,13 @@ class _QueryOps(_SessionBase):
     def bounding_boxes(self, kind: EntityKind) -> BoundsTable:
         """Bounding box of every live entity of one kind.
 
-        The cheap bulk query. :meth:`entity_table` also returns boxes, but pays for mass
-        properties to do it — on a large assembly that is seconds rather than milliseconds.
-        Use this one for culling, spatial indexing and picking.
+        The cheaper bulk query. :meth:`entity_table` also returns boxes, but pays
+        for mass properties to do it. Use this one for culling, spatial indexing and
+        picking. Each box is the box of the geometry, as :class:`BoundsTable` states.
+        To bound a B-spline surface by its own points takes an optimisation per face,
+        computed in parallel. On a model of 117 solids and 5 606 faces, the boxes of
+        every face or every solid take about 1 s; :meth:`entity_table` takes 3 to 5
+        times as long.
 
         Args:
             kind: The entity kind to bound.
@@ -137,14 +141,12 @@ class _QueryOps(_SessionBase):
         properties of a *solid* visit every edge once per owning face, so a total edge length
         taken that way comes out doubled.
 
-        **The rule.** Without ``precision``, OCCT's fixed Gauss rule integrates, exactly as
-        before 4.2.2. It is exact on analytic geometry. It is not exact on a face trimmed by
-        an intersection curve, or on a free-form face or edge. It reads a fused pipe tee
-        1.39e-6 high and a parabolic edge 4.4e-4 long. On a production STEP assembly it read
-        one face 26 % off and one solid 8.5 % off.
-
-        With ``precision``, every measure is integrated adaptively to that relative
-        precision, and its centroid follows the same rule:
+        **The rule.** Every measure is integrated adaptively, to ``precision`` or,
+        without one, to the default relative precision 1e-6, and its centroid follows
+        the same rule. OCCT's fixed Gauss rule, which earlier releases used by default,
+        is not used: it read a wing lofted through one-edge sections 20 % low, a fused
+        pipe tee 1.39e-6 high, a parabolic edge 4.4e-4 long, and one face of a
+        production STEP assembly 26 % off. The rule is:
 
         * a solid's volume and a face's area by GProp's adaptive rule, which refines each face
           until two steps agree to ``precision``;
@@ -159,10 +161,14 @@ class _QueryOps(_SessionBase):
         largest solid of the production assembly, 436 faces, 5.0 times at 1e-6 and 8.5 times
         at 1e-9. Edges cost less than with the fixed rule.
 
+        Each id is measured: two ids of one merged shape (aliases, see
+        :meth:`entities`) give that shape's measure twice. Name each shape once, for
+        example from ``entities(kind, distinct=True)``, before summing.
+
         Args:
             entities: Entity ids, of any kinds.
             precision: The relative precision of the adaptive rule, in ``(0, 1e-3]``.
-                ``None`` keeps the fixed rule. Above 1e-3 GProp's rule is no longer
+                ``None`` is the default, 1e-6. Above 1e-3 GProp's rule is no longer
                 adaptive, so such a value is refused rather than answered by the fixed rule.
 
         Returns:
@@ -465,7 +471,17 @@ class _QueryOps(_SessionBase):
 
         A bounding-box test, so it over-selects: an entity whose box overlaps but whose
         geometry does not is returned. That is the useful contract for a broad phase — narrow
-        it with an exact test on the far smaller result.
+        it with an exact test on the far smaller result. The entity's box is the box
+        of its geometry, the numbers :meth:`bounding_boxes` reports for it. It meets
+        the query box when every interval shares a point with the query's. It lies
+        inside it when every interval lies within the query's. The intervals are
+        closed, so under ``strict`` an entity that fits the query box exactly is inside.
+
+        The test runs in two levels with the same answer. A cheap box, proven to
+        contain the box of each face, free edge and free vertex of the entity, decides
+        first: if it misses the query box, that part cannot help; if it lies inside,
+        that part needs nothing more. Only the parts it cannot decide pay for the box
+        of their geometry.
 
         Args:
             kind: The entity kind to search.

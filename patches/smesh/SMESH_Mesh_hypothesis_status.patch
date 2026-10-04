@@ -1,0 +1,45 @@
+pySMESH: SMESH_Mesh::AddHypothesis keeps the worst status it found (SMESH V9_16_0; applies
+after SMESH_Mesh.patch).
+
+Defect: AddHypothesis checks the sub-shapes of the shape a hypothesis is added to, then the
+ancestors of those sub-shapes for concurrent hypotheses, and keeps the worst status of each
+check (ret2 > ret). Its last check, CheckHypothesesOnSubMeshes, assigns its result to ret
+outright (SMESH_Mesh.cxx:719 at V9_16_0) and so throws away what the checks before it found.
+
+Symptom: two different NumberOfSegments on two faces of a box that share an edge give
+HYP_CONCURRENT on the shared edge (SMESH_subMesh::CheckConcurrentHypothesis). AddHypothesis
+returns HYP_OK for the second one: the concurrency warning that the status exists for never
+reaches the caller. A fatal status found on the sub-shapes is worse: AddHypothesis removes
+the hypothesis for it and then returns HYP_OK, so the caller believes it attached.
+
+Root cause: CheckHypothesesOnSubMeshes was added by SMESH 9dd9f7684 (2024-11-08, bos #43370,
+"Propagation" on sub-meshes) as `ret = CheckHypothesesOnSubMeshes(...)`, below the two
+checks that use `if (ret2 > ret) ret = ret2;`. It returns HYP_OK unless a Propagation
+hypothesis on a sub-mesh gives a worse status.
+
+Change, in SMESH_Mesh.cxx only: the result goes to ret2 and is kept only if it is worse,
+like the checks above it.
+
+Not changed: what CheckHypothesesOnSubMeshes computes, and every case where it was the worst
+status already. The fatal case needs a sub-mesh that refuses the father's algorithm
+(HYP_NEED_SHAPE, HYP_NOTCONFORM in SMESH_subMesh::AlgoStateEngine); no combination of the
+pySMESH catalogue is known to reach it. pySMESH refuses fatal statuses only, so it refuses
+such an assignment now instead of recording it as attached; a HYP_CONCURRENT is returned to
+the caller again.
+diff --git a/src/SMESH/SMESH_Mesh.cxx b/src/SMESH/SMESH_Mesh.cxx
+--- a/src/SMESH/SMESH_Mesh.cxx
++++ b/src/SMESH/SMESH_Mesh.cxx
+@@ -722,7 +722,12 @@
+       }
+     }
+ 
+-    ret = CheckHypothesesOnSubMeshes(subMesh, anHyp, event);
++    // pySMESH: keep the worst status, as the checks above do. A plain assignment here
++    // threw away a fatal status found on the sub-shapes (after anHyp had been removed for
++    // it) and a HYP_CONCURRENT found on the ancestors.
++    ret2 = CheckHypothesesOnSubMeshes(subMesh, anHyp, event);
++    if (ret2 > ret)
++      ret = ret2;
+   }
+   HasModificationsToDiscard(); // to reset _isModified flag if a mesh becomes empty
+   GetMeshDS()->Modified();

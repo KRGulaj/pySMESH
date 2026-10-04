@@ -10,6 +10,7 @@ The host application runs ``mypy --strict`` against these; keep signatures exact
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -34,28 +35,28 @@ class PysmeshCancelled(PysmeshError):
 
 class FaceInfo:
     id: int
-    area: float
+    area: float  # adaptive, relative precision 1e-6, as Session.mass_properties
     surface_type: str  # Plane/Cylinder/Cone/Sphere/Torus/BSpline/...
     @property
     def centroid(self) -> NDArray[np.float64]: ...  # (3,)
     @property
-    def bbox(self) -> NDArray[np.float64]: ...  # (6,) xmin,ymin,zmin,xmax,ymax,zmax
+    def bbox(self) -> NDArray[np.float64]: ...  # (6,) xmin..zmax, as BoundsTable
     @property
     def uv_bounds(self) -> NDArray[np.float64]: ...  # (4,) umin,umax,vmin,vmax
 
 class SolidInfo:
     id: int
-    volume: float
+    volume: float  # adaptive, relative precision 1e-6, as Session.mass_properties
     @property
     def centroid(self) -> NDArray[np.float64]: ...  # (3,)
     @property
-    def bbox(self) -> NDArray[np.float64]: ...  # (6,) xmin,ymin,zmin,xmax,ymax,zmax
+    def bbox(self) -> NDArray[np.float64]: ...  # (6,) xmin..zmax, as BoundsTable
 
 class EdgeInfo:
     id: int
-    length: float
+    length: float  # adaptive, relative precision 1e-6, as Session.mass_properties
     @property
-    def bbox(self) -> NDArray[np.float64]: ...  # (6,)
+    def bbox(self) -> NDArray[np.float64]: ...  # (6,) xmin..zmax, as BoundsTable
     @property
     def t_bounds(self) -> NDArray[np.float64]: ...  # (2,) first,last
 
@@ -82,7 +83,7 @@ class Session:
 
     def __init__(self, validate: bool) -> None: ...
     def add_brep(
-        self, data: bytes, progress: object, cancel: object
+        self, data: bytes, inside_out: str, progress: object, cancel: object
     ) -> dict[str, object]: ...
     def add_box(
         self, dx: float, dy: float, dz: float, ox: float, oy: float, oz: float
@@ -489,13 +490,15 @@ class Session:
     def restore(self, mark: int) -> None: ...
     def discard_snapshot(self, mark: int) -> None: ...
     def snapshot_count(self) -> int: ...
-    def entities(self, kind: str) -> NDArray[np.int64]: ...
+    def entities(self, kind: str, distinct: bool = False) -> NDArray[np.int64]: ...
+    def alias_groups(self, kind: str) -> list[NDArray[np.int64]]: ...
+    def ordinal_ids(self, kind: str) -> list[NDArray[np.int64]]: ...
     def entity_kind(self, entity_id: int) -> str: ...
     def entity_state(self, entity_id: int) -> str: ...
     def shape_count(self, entity_id: int) -> int: ...
     def entity_table(self, kind: str) -> dict[str, object]: ...
     def brep(self) -> bytes: ...
-    def export_handoff(self) -> dict[str, object]: ...
+    def export_handoff(self, allow_aliases: bool = False) -> dict[str, object]: ...
     def name_of(self, entity_id: int) -> dict[str, object]: ...
     def origin(self, entity_id: int) -> dict[str, object]: ...
     def resolve(self, op_index: int, role: int, ordinal: int) -> dict[str, object]: ...
@@ -529,7 +532,20 @@ class Mesh:
     def __enter__(self) -> Mesh: ...
     def __exit__(self, *args: object) -> None: ...
 
-def load_brep(data: bytes) -> Shape: ...
+def load_brep(
+    data: bytes, inside_out: Literal["raise", "reverse"] = "raise"
+) -> Shape:
+    """Read a BREP shape from in-memory bytes.
+
+    Every solid is checked for its inside: one whose matter is outside its boundary (the
+    point at infinity classifies inside it, and its volume is negative) is refused with
+    ``inside_out="raise"``, naming its 1-based ordinal, and reversed with
+    ``inside_out="reverse"``.
+
+    Raises:
+        PysmeshError: On a parse failure, a null shape, an unknown ``inside_out``, or an
+            inside-out solid under ``"raise"``.
+    """
 def make_thick_solid(
     brep: bytes,
     remove_face_ids: list[int],
@@ -562,6 +578,9 @@ def tessellate(
     ang_defl: float,
     relative: bool = ...,
 ) -> dict[str, object]: ...
+def first_layer_thickness(
+    total_thickness: float, stretch_factor: float, layer_count: int
+) -> float: ...
 def compute_viscous_layers(
     mesh: Mesh,
     face_ids: list[int],
@@ -584,8 +603,16 @@ def unify_same_domain(
 class Mesher:
     def __init__(self, shape: Shape | None) -> None: ...
     def has_shape(self) -> bool: ...
-    def add_nodes(self, coords: object) -> NDArray[np.int64]: ...
-    def add_elements(self, type: int, connectivity: object) -> NDArray[np.int64]: ...
+    def add_nodes(
+        self,
+        coords: object,
+        kind: str = "",
+        ordinal: int = 0,
+        parameters: object | None = None,
+    ) -> NDArray[np.int64]: ...
+    def add_elements(
+        self, type: int, connectivity: object, kind: str = "", ordinal: int = 0
+    ) -> NDArray[np.int64]: ...
     def fill_from_mesh(self, mesh: dict[str, object]) -> None: ...
     def assign(
         self, name: str, params: dict[str, object], kind: str, ordinal: int
@@ -609,8 +636,24 @@ class Mesher:
     def convert_to_quadratic(self, force_3d: bool, bi_quadratic: bool) -> None: ...
     def convert_from_quadratic(self) -> bool: ...
     def split_volumes(
-        self, method: int, nx: float, ny: float, nz: float
+        self,
+        method: int,
+        nx: float,
+        ny: float,
+        nz: float,
+        avoid_over_constrained: bool = False,
     ) -> dict[str, object]: ...
+    def shrink_geometry(self, params: dict[str, object]) -> Shape: ...
+    def add_layers(
+        self, params: dict[str, object], inner: Mesher
+    ) -> dict[str, object]: ...
+    def make_boundary_mesh(
+        self,
+        dimension: int,
+        elements: Sequence[int],
+        around_elements: bool,
+        all_elements: bool,
+    ) -> NDArray[np.int64]: ...
     def split_quadratic_into_linear(
         self, elements: Sequence[int]
     ) -> dict[str, object]: ...
@@ -723,6 +766,9 @@ class Mesher:
     ) -> dict[str, object]: ...
     def ray_hits(
         self, origin: Sequence[float], direction: Sequence[float], tolerance: float
+    ) -> dict[str, object]: ...
+    def ray_volumes(
+        self, origin: Sequence[float], direction: Sequence[float], length: float
     ) -> dict[str, object]: ...
     def sharp_edges(self, angle: float, add_existing: bool) -> dict[str, object]: ...
     def separate_faces_by_edges(

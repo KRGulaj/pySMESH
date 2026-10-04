@@ -154,20 +154,12 @@ Handle(BRepTools_History) offset_history(const TopoDS_Shape& argument,
   return hist;
 }
 
-// Faces of the result that BRepCheck_Analyzer rejects on their own.
-//
-// Reached only when the whole-shape check has already failed, so the per-face pass costs
-// nothing on a healthy result. Geometric controls stay on — the same setting commit() uses —
-// so the two verdicts cannot disagree about what "invalid" means.
-std::vector<TopoDS_Shape> invalid_faces(const TopoDS_Shape& result) {
-  std::vector<TopoDS_Shape> out;
-  for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next()) {
-    if (!BRepCheck_Analyzer(ex.Current()).IsValid()) {
-      out.push_back(ex.Current());
-    }
-  }
-  return out;
-}
+// Faces of the result that BRepCheck_Analyzer rejects on their own: shared with commit()
+// (shape_checks::invalid_faces). Reached only when the whole-shape check has already failed,
+// so the per-face pass costs nothing on a healthy result. Geometric controls stay on — the
+// same setting commit() uses — so the two verdicts cannot disagree about what "invalid"
+// means.
+using shape_checks::invalid_faces;
 
 
 // A body of the algorithm's own, so that a refusal cannot reach the caller's.
@@ -412,6 +404,7 @@ void Session::require_non_zero(const char* op, const char* name, double v) {
 py::dict Session::make_thick_solid(const std::vector<EntityId>& face_ids, double thickness,
                                    double tol, const py::object& progress,
                                    const py::object& cancel) {
+  finite_arg("make_thick_solid", "tol", tol);
   OpGuard guard(in_op_);
   require_non_zero("make_thick_solid", "thickness", thickness);
   require_positive("tol", tol);
@@ -582,6 +575,7 @@ py::dict Session::make_thick_solid(const std::vector<EntityId>& face_ids, double
 
 py::dict Session::offset(const std::vector<EntityId>& entity_ids, double distance,
                          double tol, const py::object& progress, const py::object& cancel) {
+  finite_arg("offset", "tol", tol);
   OpGuard guard(in_op_);
   require_non_zero("offset", "distance", distance);
   require_positive("tol", tol);

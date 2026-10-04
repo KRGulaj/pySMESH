@@ -40,6 +40,7 @@
 #include <SMDS_Mesh.hxx>
 #include <SMDS_MeshElement.hxx>
 #include <SMDS_MeshNode.hxx>
+#include <SMDS_VolumeTool.hxx>
 #include <SMESHDS_GroupBase.hxx>
 #include <SMESHDS_Mesh.hxx>
 #include <SMESH_ControlsDef.hxx>
@@ -78,6 +79,41 @@ void walk(const SMDS_Mesh& mesh, SMDSAbs_ElementType type, Visit visit) {
   }
 }
 
+// Warping3D (SMESH 9.16, 66c7e4a32, report W3.4) is the largest Warping of a volume's facets.
+// Warping reads 0 on a facet that does not have exactly 4 nodes (SMESH_Controls.cxx,
+// Warping::ComputeValue), so a volume with no such facet, a tetrahedron, would read as
+// perfectly flat. Upstream applies it to every volume; here such a volume is skipped.
+class Warping3DOnQuadFacets : public ctl::Warping3D {
+ public:
+  bool IsApplicable(const SMDS_MeshElement* element) const override {
+    if (!ctl::Warping3D::IsApplicable(element)) {
+      return false;
+    }
+    SMDS_VolumeTool tool(element);
+    for (int facet = 0; facet < tool.NbFaces(); ++facet) {
+      if (tool.NbFaceNodes(facet) == 4) {
+        return true;
+      }
+    }
+    return false;
+  }
+};
+
+// ScaledJacobian (SMESH 9.16, 9ac965c0e, report W3.5): SMDS_VolumeTool::GetScaledJacobian,
+// not VTK. It reads 0 for a cell type it has no formula for, a polyhedron, and 0 is a real
+// value of the measure (a degenerate cell); such a cell is skipped instead.
+class ScaledJacobianOnKnownCells : public ctl::ScaledJacobian {
+ public:
+  bool IsApplicable(const SMDS_MeshElement* element) const override {
+    if (!ctl::ScaledJacobian::IsApplicable(element)) {
+      return false;
+    }
+    SMDS_VolumeTool tool(element);
+    const SMDS_VolumeTool::VolumeType type = tool.GetVolumeType();
+    return type != SMDS_VolumeTool::POLYHEDA && type != SMDS_VolumeTool::UNKNOWN;
+  }
+};
+
 }  // namespace
 
 // ---- The numerical controls ------------------------------------------------------------ //
@@ -99,6 +135,10 @@ ctl::NumericalFunctorPtr build_functor(const std::string& name, const py::dict& 
     functor.reset(new ctl::AspectRatio3D());
   } else if (name == "Warping") {
     functor.reset(new ctl::Warping());
+  } else if (name == "Warping3D") {
+    functor.reset(new Warping3DOnQuadFacets());
+  } else if (name == "ScaledJacobian") {
+    functor.reset(new ScaledJacobianOnKnownCells());
   } else if (name == "Taper") {
     functor.reset(new ctl::Taper());
   } else if (name == "Skew") {

@@ -16,8 +16,143 @@
 
 #include "session/session.hpp"
 
+#include "shape_checks.hpp"
+
 namespace pysmesh {
 namespace session {
+namespace {
+
+// The tools of a boolean, for the two OCCT types that have them. A general fuse has none.
+std::vector<TopoDS_Shape> tools_of(BRepAlgoAPI_BuilderAlgo& op) {
+  std::vector<TopoDS_Shape> out;
+  const NCollection_List<TopoDS_Shape>* tools = nullptr;
+  if (const auto* bop = dynamic_cast<const BRepAlgoAPI_BooleanOperation*>(&op)) {
+    tools = &bop->Tools();
+  } else if (const auto* splitter = dynamic_cast<const BRepAlgoAPI_Splitter*>(&op)) {
+    tools = &splitter->Tools();
+  }
+  if (tools != nullptr) {
+    for (const TopoDS_Shape& s : *tools) {
+      out.push_back(s);
+    }
+  }
+  return out;
+}
+
+// Why a result with no solid is wrong, or an empty string when it may be right.
+//
+// It runs only when the result holds no solid although the targets hold one, so a normal
+// result pays nothing. A fuse, a split, a fragment and an imprint never remove a solid, so
+// for them no solid is always wrong. A common and a cut can be empty, so they are refused
+// only on a witness: a point proven inside both operands of a common, or inside a target
+// and outside every tool of a cut, each by more than the tolerance (shape_checks.hpp). The
+// tolerance is the operands' largest one plus the fuzzy value, because a fuzzy boolean may
+// treat two features closer than that as one.
+std::string empty_result_refusal(const std::string& op, BRepAlgoAPI_BuilderAlgo& builder,
+                                 const TopoDS_Shape& result, double fuzzy) {
+  if (op == "section" || !shape_checks::solids_of({result}).empty()) {
+    return std::string();
+  }
+  std::vector<TopoDS_Shape> targets;
+  for (const TopoDS_Shape& s : builder.Arguments()) {
+    targets.push_back(s);
+  }
+  const std::size_t solids = shape_checks::solids_of(targets).size();
+  if (solids == 0) {
+    return std::string();
+  }
+  const std::string head = "Session." + op + ": OCCT returned no solid ";
+  if (op == "fuse" || op == "split" || op == "fragment" || op == "imprint") {
+    return head + "for " + std::to_string(solids) +
+           " solid target(s); this operation never removes a solid.";
+  }
+  const std::vector<TopoDS_Shape> tools = tools_of(builder);
+  std::vector<TopoDS_Shape> operands = targets;
+  operands.insert(operands.end(), tools.begin(), tools.end());
+  const double tol = shape_checks::max_tolerance(operands) + fuzzy;
+  const double depth = 4.0 * tol;
+  char tol_text[32];
+  std::snprintf(tol_text, sizeof(tol_text), "%.3g", tol);
+  if (op == "common") {
+    if (const std::optional<gp_Pnt> p =
+            shape_checks::point_inside_both(targets, tools, depth, tol)) {
+      return head + "although the operands overlap: the point " + shape_checks::point_text(*p) +
+             " lies inside a target and inside a tool, deeper than " + tol_text +
+             " from both boundaries.";
+    }
+  } else if (op == "cut") {
+    if (const std::optional<gp_Pnt> p =
+            shape_checks::point_inside_first_outside_second(targets, tools, depth, tol)) {
+      return head + "although the targets reach outside the tools: the point " +
+             shape_checks::point_text(*p) + " lies inside a target and outside every tool, " +
+             "farther than " + tol_text + " from both boundaries.";
+    }
+  }
+  return std::string();
+}
+
+// Why a result solid that is not watertight is refused, with the details that name its
+// free edges; an empty message when every solid of the result is closed.
+//
+// Each solid is checked on its own, so an edge shared by two solids of one result (two
+// fragments meeting along it) still needs two faces in each. If the operands already had
+// free edges, the details say so: then the leak may have come in with the input.
+std::pair<std::string, std::string> leaky_solid_refusal(const std::string& op,
+                                                        BRepAlgoAPI_BuilderAlgo& builder,
+                                                        const TopoDS_Shape& result) {
+  std::vector<TopoDS_Shape> leaks;
+  for (const TopoDS_Shape& solid : shape_checks::solids_of({result})) {
+    for (const TopoDS_Shape& e : shape_checks::free_boundary_edges(solid)) {
+      leaks.push_back(e);
+    }
+  }
+  if (leaks.empty()) {
+    return {};
+  }
+  std::string message = "Session." + op + ": the result has " +
+                        std::to_string(leaks.size()) +
+                        " free boundary edge(s), each bordered by one face only, so a solid "
+                        "of it is not watertight. The session is unchanged.";
+  std::string details;
+  for (std::size_t i = 0; i < leaks.size(); ++i) {
+    details += "Free edge " + std::to_string(i + 1) + ": " + shape_checks::edge_text(leaks[i]) +
+               ". ";
+  }
+  std::vector<TopoDS_Shape> operands;
+  for (const TopoDS_Shape& s : builder.Arguments()) {
+    operands.push_back(s);
+  }
+  for (const TopoDS_Shape& s : tools_of(builder)) {
+    operands.push_back(s);
+  }
+  std::size_t inherited = 0;
+  for (const TopoDS_Shape& solid : shape_checks::solids_of(operands)) {
+    inherited += shape_checks::free_boundary_edges(solid).size();
+  }
+  details += inherited == 0
+                 ? std::string("Every operand solid was watertight, so OCCT made the leak.")
+                 : "The operand solids already had " + std::to_string(inherited) +
+                       " free boundary edge(s); heal or sew them first.";
+  return {message, details};
+}
+
+// The non-empty lines of OCCT's warning dump.
+std::vector<std::string> warning_lines(const std::string& dump) {
+  std::vector<std::string> out;
+  std::istringstream in(dump);
+  std::string line;
+  while (std::getline(in, line)) {
+    if (!line.empty() && line.back() == '\r') {
+      line.pop_back();
+    }
+    if (!line.empty()) {
+      out.push_back(line);
+    }
+  }
+  return out;
+}
+
+}  // namespace
 
 // ---- modelling operations --------------------------------------------------------- //
 
@@ -111,6 +246,10 @@ py::dict Session::fragment(const std::vector<EntityId>& entity_ids, double fuzzy
 py::dict Session::fillet(const std::vector<EntityId>& edge_ids, double radius,
                   const std::optional<double>& radius_end, const py::object& progress,
                   const py::object& cancel) {
+  finite_arg("fillet", "radius", radius);
+  if (radius_end.has_value()) {
+    finite_arg("fillet", "radius_end", *radius_end);
+  }
   OpGuard guard(in_op_);
   require_positive("radius", radius);
   if (radius_end.has_value()) {
@@ -131,27 +270,29 @@ py::dict Session::fillet(const std::vector<EntityId>& edge_ids, double radius,
   std::vector<TopoDS_Shape> faulty;
   {
     py::gil_scoped_release release;
-    BRepFilletAPI_MakeFillet mk(owner);
-    for (const TopoDS_Shape& e : edges) {
-      if (radius_end.has_value()) {
-        mk.Add(radius, *radius_end, TopoDS::Edge(e));
-      } else {
-        mk.Add(radius, TopoDS::Edge(e));
-      }
-    }
+    // Every OCCT call runs inside the try, the history query included (report A2).
+    const char* stage = "BRepFilletAPI_MakeFillet::Add failed";
     try {
+      BRepFilletAPI_MakeFillet mk(owner);
+      for (const TopoDS_Shape& e : edges) {
+        if (radius_end.has_value()) {
+          mk.Add(radius, *radius_end, TopoDS::Edge(e));
+        } else {
+          mk.Add(radius, TopoDS::Edge(e));
+        }
+      }
+      stage = "BRepFilletAPI_MakeFillet::Build failed";
       mk.Build(driver.range());
+      if (mk.IsDone()) {
+        stage = "reading the history of BRepFilletAPI_MakeFillet failed";
+        result = mk.Shape();
+        hist = history_of(owner, mk);
+      } else {
+        faulty = faulty_edges(mk);
+      }
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
-      throw PysmeshError(
-          std::string("Session.fillet: BRepFilletAPI_MakeFillet::Build failed: ") +
-          e.what());
-    }
-    if (mk.IsDone()) {
-      result = mk.Shape();
-      hist = history_of(owner, mk);
-    } else {
-      faulty = faulty_edges(mk);
+      throw PysmeshError(std::string("Session.fillet: ") + stage + ": " + e.what());
     }
   }
   driver.finish();
@@ -178,6 +319,10 @@ py::dict Session::chamfer(const std::vector<EntityId>& edge_ids, double distance
                    const std::optional<double>& distance_end,
                    const std::optional<EntityId>& face_id, const py::object& progress,
                    const py::object& cancel) {
+  finite_arg("chamfer", "distance", distance);
+  if (distance_end.has_value()) {
+    finite_arg("chamfer", "distance_end", *distance_end);
+  }
   OpGuard guard(in_op_);
   require_positive("distance", distance);
   if (distance_end.has_value()) {
@@ -217,25 +362,26 @@ py::dict Session::chamfer(const std::vector<EntityId>& edge_ids, double distance
   std::vector<TopoDS_Shape> faulty;
   {
     py::gil_scoped_release release;
-    BRepFilletAPI_MakeChamfer mk(owner);
-    for (const TopoDS_Shape& e : edges) {
-      if (reference.IsNull()) {
-        mk.Add(distance, TopoDS::Edge(e));
-      } else {
-        mk.Add(distance, *distance_end, TopoDS::Edge(e), reference);
-      }
-    }
+    const char* stage = "BRepFilletAPI_MakeChamfer::Add failed";
     try {
+      BRepFilletAPI_MakeChamfer mk(owner);
+      for (const TopoDS_Shape& e : edges) {
+        if (reference.IsNull()) {
+          mk.Add(distance, TopoDS::Edge(e));
+        } else {
+          mk.Add(distance, *distance_end, TopoDS::Edge(e), reference);
+        }
+      }
+      stage = "BRepFilletAPI_MakeChamfer::Build failed";
       mk.Build(driver.range());
+      if (mk.IsDone()) {
+        stage = "reading the history of BRepFilletAPI_MakeChamfer failed";
+        result = mk.Shape();
+        hist = history_of(owner, mk);
+      }
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
-      throw PysmeshError(
-          std::string("Session.chamfer: BRepFilletAPI_MakeChamfer::Build failed: ") +
-          e.what());
-    }
-    if (mk.IsDone()) {
-      result = mk.Shape();
-      hist = history_of(owner, mk);
+      throw PysmeshError(std::string("Session.chamfer: ") + stage + ": " + e.what());
     }
   }
   driver.finish();
@@ -319,6 +465,9 @@ py::dict Session::run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   std::string errors;
+  std::string warnings;
+  std::string refusal;
+  std::pair<std::string, std::string> leak;
   {
     py::gil_scoped_release release;
     // The history IS the naming substrate, not a diagnostic: without it every id in the
@@ -349,6 +498,17 @@ py::dict Session::run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
     } else {
       result = op.Shape();
       hist = op.History();
+      std::ostringstream w;
+      op.DumpWarnings(w);
+      warnings = w.str();
+      try {
+        refusal = empty_result_refusal(op_name, op, result, fuzzy);
+        leak = leaky_solid_refusal(op_name, op, result);
+      } catch (const std::exception& e) {
+        py::gil_scoped_acquire acquire;
+        throw PysmeshError(std::string("Session.") + op_name +
+                           ": the check of OCCT's result threw: " + e.what());
+      }
     }
   }
   driver.finish();
@@ -364,7 +524,27 @@ py::dict Session::run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
                            ": the boolean failed; no partial result is returned.",
                        errors, {});
   }
-  return commit(concat(survivors, result), hist, op_name, result);
+  const std::vector<std::string> warning_list = warning_lines(warnings);
+  if (!refusal.empty()) {
+    std::string details =
+        "BRepAlgoAPI reported no error. Faces that nearly coincide with an edge, a seam or a "
+        "pole of the other operand (3e-7 to 1e-4 apart) are the known trigger; build the "
+        "operands so that those features coincide exactly. Raising fuzzy is not monotone: a "
+        "value that fails can work with a larger and with a smaller fuzzy value. OCCT "
+        "warnings:";
+    if (warning_list.empty()) {
+      details += " none.";
+    }
+    for (const std::string& w : warning_list) {
+      details += " " + w;
+    }
+    throw PysmeshError(refusal + " The session is unchanged.", details, {});
+  }
+  if (!leak.first.empty()) {
+    throw PysmeshError(leak.first, leak.second, {});
+  }
+  return commit(concat(survivors, result), hist, op_name, result, Validation::Strict,
+                warning_list);
 }
 
 // The edges of every contour OCCT could not build a fillet on. This is the diagnostic

@@ -11,8 +11,10 @@
 
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -136,12 +138,75 @@ using Array2d = py::array_t<double, py::array::c_style | py::array::forcecast>;
 using Array1i = py::array_t<std::int64_t, py::array::c_style | py::array::forcecast>;
 using Array2i = py::array_t<std::int64_t, py::array::c_style | py::array::forcecast>;
 
-inline Array2d as_2d_f64(const py::object& obj, const char* name, int ncols) {
+// ---- Finite arguments ------------------------------------------------------------- //
+// A NaN passes every `<=` and `<` test, and an infinity passed most of the range checks,
+// so neither was caught before it reached OCCT or SMESH, which then crashed the process
+// or built garbage that was committed (report F1). Every public float argument goes
+// through one of these before any OCCT or SMESH call. `where` is the operation as the
+// caller names it ("Session.extrude", "tessellate"), `name` the argument.
+
+// A number for a message: "nan", "inf" or "-inf" for the non-finite values.
+// TopTools_ShapeSet::Read writes "File was not written with this version of the topology"
+// to std::cout and returns a null shape when BREP data holds no version line
+// (TopTools_ShapeSet.cxx:698). Every BREP reader checks for that line first and raises the
+// message it gives a null shape, so no line reaches stdout before the error (report A4).
+inline void require_brep_header(const std::string& data, const std::string& null_message) {
+  if (data.find("CASCADE Topology V") == std::string::npos) {
+    throw PysmeshError(null_message);
+  }
+}
+
+inline std::string number_text(double v) {
+  if (std::isnan(v)) {
+    return "nan";
+  }
+  if (std::isinf(v)) {
+    return v > 0.0 ? "inf" : "-inf";
+  }
+  std::ostringstream s;
+  s << v;
+  return s.str();
+}
+
+inline void require_finite(const std::string& where, const char* name, double v) {
+  if (!std::isfinite(v)) {
+    throw PysmeshError(where + ": " + name + " must be a finite number (got " +
+                       number_text(v) + ").");
+  }
+}
+
+inline void require_finite(const std::string& where, const char* name, double x, double y,
+                           double z) {
+  if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) {
+    throw PysmeshError(where + ": " + name + " must be finite (got (" + number_text(x) +
+                       ", " + number_text(y) + ", " + number_text(z) + ")).");
+  }
+}
+
+// Every value of an array argument of `rows` rows of `width` values; the first value that
+// is not finite is named with its row.
+inline void require_finite(const std::string& where, const char* name, const double* data,
+                           std::size_t rows, std::size_t width) {
+  for (std::size_t i = 0; i < rows * width; ++i) {
+    if (!std::isfinite(data[i])) {
+      throw PysmeshError(where + ": " + name + " must be finite (row " +
+                         std::to_string(i / width) + " holds " + number_text(data[i]) +
+                         ").");
+    }
+  }
+}
+
+// A float64 (N, ncols) array whose every value is finite, named `name` of `where` in a
+// refusal.
+inline Array2d as_2d_f64(const py::object& obj, const char* where, const char* name,
+                         int ncols) {
   Array2d arr = obj.cast<Array2d>();
   if (arr.ndim() != 2 || arr.shape(1) != ncols) {
-    throw PysmeshError(std::string(name) + " must have shape (N, " +
-                        std::to_string(ncols) + ")");
+    throw PysmeshError(std::string(where) + ": " + name + " must have shape (N, " +
+                       std::to_string(ncols) + ")");
   }
+  require_finite(where, name, arr.data(), static_cast<std::size_t>(arr.shape(0)),
+                 static_cast<std::size_t>(ncols));
   return arr;
 }
 

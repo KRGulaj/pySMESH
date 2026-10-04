@@ -1,0 +1,134 @@
+pySMESH: MaxElementArea bounds the triangles of MEFISTO_2D, and a bound the boundary cannot
+meet is reported (SMESH V9_9_0 MEFISTO carried forward; applies after mefisto.patch).
+
+Defect: MaxElementArea had no effect on MEFISTO_2D below the size of the boundary segments,
+and a looser bound could give a finer mesh than a tighter one. The compute reported success
+either way.
+
+Symptom: the 4 x 4 square with 8 segments per side (boundary edges 0.5). max_area 4, 1 and
+0.0625 all gave the same 134 triangles; with 0.0625 the largest has area 0.176, 2.8 times
+the bound, and 134 is below the 16 / 0.0625 = 256 the bound needs. max_area 0.25 gave 96
+triangles, fewer than max_area 1. A 3 x 7 x 11 box with LocalLength(1.0): MaxElementArea(1.0)
+gave 440 triangles, the largest of area 1.77, with 0.187 degree slivers, while
+MaxElementArea(4.0) and no 2-D hypothesis gave 1136 triangles, the largest of area 0.573.
+
+Root cause, measured with an instrumented build: StdMeshers_MEFISTO_2D turns max_area A into
+the edge bound aretmx = 1.5 sqrt(2 A / sqrt 3) (StdMeshers_MEFISTO_2D.cxx:170, :248), and
+aptrte clamps it (extern/mefisto2/aptrte.cxx:346-354) before it stores it for areteideale
+(:357), which sizes every vertex of the triangulation (tehote, trte.c:2105):
+* a bound below the shortest boundary edge goes back up to that edge, and below half of it,
+  on an uneven boundary, to (aremin + 2 aremax) / 3, so a tighter bound has no effect;
+* a bound over 2.05 x the longest boundary edge goes down to that edge, while one just below
+  2.05 x is kept, so the interior grew coarser than the boundary for 1.0 x .. 2.05 x and
+  fell back to the boundary size above it.
+Two other suspects change no mesh (identical meshes in an instrumented build): the line of
+mefisto.patch that sets mnpxyd[ns1].z for mnpxyd[ns].z (aptrte.cxx:305 after that patch),
+and the boundary loop reading aretemaxface_ before :357 sets it for this face. Both only
+touch the vertex sizes in mnpxyd, which tehote sets again from areteideale for nutysu = 1,
+the value MEFISTO_2D passes.
+
+Change:
+* aptrte.h, aptrte.cxx: aptrte takes a trailing aretmxIsBound (default false). When it is
+  true, the three clamps become aretmx = Min( aretmx, aremax ): the bound refines the face
+  below the boundary edges where it asks for that, and never coarsens it past the longest
+  boundary edge.
+* StdMeshers_MEFISTO_2D.cxx: passes aretmxIsBound when MaxElementArea applies. After the
+  triangles are stored, a face whose largest triangle exceeds max_area (relative 1e-9) gets a
+  COMPERR_WARNING that names both areas. That happens where the boundary edges are too long
+  for the bound.
+
+Not changed: a face with no 2-D hypothesis or with LengthFromEdges keeps the clamps. There
+aretmx is the mean 3-D boundary edge, and on a curved face aremin and aremax are measured on
+the scaled UV boundary, so the clamps do act and shape those meshes (a radius-4 sphere with
+24 segments: 1816 triangles with the clamps, 7112 with the bound). Every other algorithm.
+diff --git a/src/MEFISTO2/aptrte.cxx b/src/MEFISTO2/aptrte.cxx
+--- a/src/MEFISTO2/aptrte.cxx
++++ b/src/MEFISTO2/aptrte.cxx
+@@ -91,7 +91,8 @@
+               Z   nbpti,  R2 *   uvpti,
+               Z & nbst,   R2 * & uvst,
+               Z & nbt,    Z  * & nust,
+-              Z & ierr )
++              Z & ierr,
++              bool aretmxIsBound )
+ //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ // but : appel de la triangulation par un arbre-4 recouvrant
+ // ----- de triangles equilateraux
+@@ -346,6 +347,18 @@
+ //debut ajout  9/11/2006  ................................................
+   // devenu un commentaire aretmx = Min( aretmx, aremax ); //pour homogeneiser
+ 
++  if ( aretmxIsBound )
++  {
++    // pySMESH: aretmx comes from MaxElementArea, a bound. It refines the face below the
++    // boundary edges where it asks for that, and it never coarsens the face past the
++    // longest boundary edge. The clamps below raised a bound under the shortest
++    // boundary edge back to that edge, so MaxElementArea had no effect there, and set
++    // a bound over 2.05 x the longest edge to that edge, so a looser bound could give a
++    // finer mesh than a tighter one. Sizing from the boundary keeps them.
++    aretmx = Min( aretmx, aremax );
++  }
++  else
++  {
+   // protection contre une arete max desiree trop grande ou trop petite
+   if( aretmx > aremax*2.05 ) aretmx = aremax;
+ 
+@@ -355,6 +368,7 @@
+ 
+   if( aretmx < aremin  && aremin > 0 )
+     aretmx = aremin;
++  }
+ 
+   //sauvegarde pour la fonction areteideale_
+   aretemaxface_ = aretmx;
+diff --git a/src/MEFISTO2/aptrte.h b/src/MEFISTO2/aptrte.h
+--- a/src/MEFISTO2/aptrte.h
++++ b/src/MEFISTO2/aptrte.h
+@@ -63,7 +63,8 @@
+               Z nblf,   Z *nudslf, R2 *uvslf,
+               Z nbpti,  R2 *uvpti,
+               Z & nbst, R2 * & uvst, Z & nbt, Z * & nust,
+-              Z & ierr );
++              Z & ierr,
++              bool aretmxIsBound = false ); // pySMESH: aretmx comes from MaxElementArea
+ //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ // but : appel de la triangulation par un arbre-4 recouvrant
+ // ----- de triangles equilateraux
+diff --git a/src/StdMeshers/StdMeshers_MEFISTO_2D.cxx b/src/StdMeshers/StdMeshers_MEFISTO_2D.cxx
+--- a/src/StdMeshers/StdMeshers_MEFISTO_2D.cxx
++++ b/src/StdMeshers/StdMeshers_MEFISTO_2D.cxx
+@@ -276,12 +276,33 @@
+   {
+     // Compute
+     aptrte(nutysu, aretmx,
+-           nblf, nudslf, uvslf, nbpti, uvpti, nbst, uvst, nbt, nust, ierr);
++           nblf, nudslf, uvslf, nbpti, uvpti, nbst, uvst, nbt, nust, ierr,
++           /*aretmxIsBound=*/_hypMaxElementArea != NULL); // pySMESH
+ 
+     if (ierr == 0)
+     {
+       StoreResult(nbst, uvst, nbt, nust, mefistoToDS, scalex, scaley);
+       isOk = true;
++
++      // pySMESH: MaxElementArea bounds the triangle area. Along boundary edges too long
++      // for the bound the triangles stay larger; report that instead of returning a
++      // mesh that breaks the bound with no word.
++      if ( _hypMaxElementArea )
++      {
++        double maxArea = 0;
++        if ( SMESHDS_SubMesh* sm = aMesh.GetMeshDS()->MeshElements( F ))
++          for ( SMDS_ElemIteratorPtr fIt = sm->GetElements(); fIt->more(); )
++          {
++            const SMDS_MeshElement* f = fIt->next();
++            SMESH_NodeXYZ p0( f->GetNode( 0 )), p1( f->GetNode( 1 )), p2( f->GetNode( 2 ));
++            const double area = 0.5 * (( p1 - p0 ) ^ ( p2 - p0 )).Modulus();
++            maxArea = area > maxArea ? area : maxArea;
++          }
++        if ( maxArea > _maxElementArea * ( 1. + 1e-9 ))
++          error( COMPERR_WARNING, SMESH_Comment( "MaxElementArea " ) << _maxElementArea
++                 << " is not met: the largest triangle has area " << maxArea
++                 << "; the boundary edges are too long for this bound" );
++      }
+     }
+     else
+     {

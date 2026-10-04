@@ -16,23 +16,187 @@
 
 #include "session/session.hpp"
 
+#include <BRepBuilderAPI_FindPlane.hxx>
+
+#include "shape_checks.hpp"
+
 namespace pysmesh {
 namespace session {
+namespace {
+
+// Throw the self-interference refusal of a swept or lofted result, if there is one. The
+// message is the first line of the refusal; the details are the pairs it names and `hint`.
+void refuse_self_interference(const std::string& refusal, const char* hint) {
+  if (refusal.empty()) {
+    return;
+  }
+  const std::size_t cut = refusal.find('\n');
+  throw PysmeshError(refusal.substr(0, cut), refusal.substr(cut + 1) + hint, {});
+}
+
+constexpr const char* kSweepHint =
+    "A Frenet frame turns with the spine's curvature, so a profile that is not perpendicular "
+    "to the spine's start tangent can sweep through itself; use frenet=False, or a "
+    "perpendicular profile. A profile larger than the spine's radius of curvature does the "
+    "same.";
+constexpr const char* kLoftHint =
+    "Sections that meet each other, such as circles through one common point, pinch the "
+    "boundary there: keep them apart where they would meet (a wedge of 0.1-radius circles "
+    "lofts and cuts cleanly with the circles 1e-4 from the common point). Sections whose loft "
+    "has to twist or bend sharply between them make the surface pass through itself: space "
+    "or align them, or add sections between them.";
+
+// BRepOffsetAPI_ThruSections' default pres3d, the tolerance its end caps are planed at.
+constexpr double kLoftPres3d = 1.0e-6;
+
+constexpr const char* kCapHint =
+    "Make each end section planar, every point within its edge tolerance of one plane. A bow "
+    "in a middle section needs no cap and is accepted. Or loft with solid=False and close the "
+    "ends yourself.";
+
+// Whether OCCT's end cap on `wire` fails: the face PerformPlan (BRepOffsetAPI_ThruSections.cxx)
+// builds on it, a plane found at kLoftPres3d or else any face MakeFace finds, is missing or
+// rejected by BRepCheck_Analyzer. Built on a copy, so that the section keeps no pcurve.
+bool planar_cap_fails(const TopoDS_Wire& wire) {
+  const TopoDS_Wire copy = TopoDS::Wire(BRepBuilderAPI_Copy(wire).Shape());
+  TopoDS_Face face;
+  BRepBuilderAPI_FindPlane finder(copy, kLoftPres3d);
+  if (finder.Found()) {
+    face = BRepBuilderAPI_MakeFace(finder.Plane(), copy);
+  } else {
+    BRepBuilderAPI_MakeFace any(copy);
+    if (any.IsDone()) {
+      face = any.Face();
+    }
+  }
+  return face.IsNull() || !BRepCheck_Analyzer(face).IsValid();
+}
+
+// One end section of a solid loft whose cap fails, in words: its index, how far it is from
+// planar, and what became of its cap.
+std::string cap_fault_text(std::size_t index, std::size_t count, const TopoDS_Wire& wire,
+                           const std::string& what) {
+  std::ostringstream s;
+  s << "section " << index + 1 << " of " << count << " (" << (index == 0 ? "first" : "last")
+    << ") is not planar: ";
+  const std::optional<double> spread = shape_checks::out_of_plane_spread(wire);
+  if (spread.has_value()) {
+    s << "its points spread " << *spread << " across the plane that fits them best";
+  } else {
+    s << "its points define no plane";
+  }
+  s << ", and " << what << ".";
+  return s.str();
+}
+
+// The refusal of a solid loft whose end cap is missing or invalid (report O4), or empty.
+//
+// OCCT closes a solid loft with a planar face on the first and on the last section. If a
+// section is not planar within its edge tolerance (1e-7), the face it gets is invalid; if it
+// is not planar within kLoftPres3d, it gets none, and the solid keeps an open shell. Each
+// cap OCCT built is checked as it is. A missing cap counts only while the shell is open (a
+// closed loft needs none). OCCT stops at the first section it cannot cap, so when the first
+// cap is missing, the last section is judged by building its cap the same way on a copy.
+std::string loft_cap_refusal(const TopoDS_Shape& result, const TopoDS_Shape& first_cap,
+                             const TopoDS_Shape& last_cap, const std::vector<TopoDS_Wire>& wires) {
+  bool open = true;
+  for (TopExp_Explorer ex(result, TopAbs_SHELL); ex.More(); ex.Next()) {
+    open = !ex.Current().Closed();
+  }
+  const std::size_t count = wires.size();
+  std::vector<std::string> faults;
+  const auto judge = [&](std::size_t index, const TopoDS_Shape& cap, bool missing_counts) {
+    const TopoDS_Wire& wire = wires[index];
+    if (!cap.IsNull()) {
+      const std::vector<shape_checks::CheckFinding> findings = shape_checks::check_findings(cap);
+      if (!findings.empty()) {
+        faults.push_back(cap_fault_text(index, count, wire,
+                                        "the planar face OCCT closed the solid with on it is "
+                                        "invalid (" +
+                                            findings.front().status + ")"));
+      }
+    } else if (open && missing_counts) {
+      faults.push_back(cap_fault_text(index, count, wire,
+                                      "OCCT could not close the solid with a planar face on it"));
+    }
+  };
+  judge(0, first_cap, true);
+  const bool first_missing = first_cap.IsNull() && open;
+  judge(count - 1, last_cap, !first_missing || planar_cap_fails(wires[count - 1]));
+  if (faults.empty()) {
+    return std::string();
+  }
+  std::string text = "Session.thru_sections: the solid loft has no valid cap: ";
+  for (std::size_t i = 0; i < faults.size(); ++i) {
+    text += (i == 0 ? "" : " Also ") + faults[i];
+  }
+  return text + " Nothing is committed; the session is unchanged.";
+}
+
+// The refusal of a solid loft whose two end caps lie in one plane and meet (report V4), or
+// empty. A loft closed by a copy of its first section gets two coincident caps: a solid
+// with a slit of zero thickness through it, which BRepCheck_Analyzer accepts. Caps in one
+// plane that stay apart, as at the two ends of a U, are fine.
+std::string coincident_caps_refusal(const TopoDS_Shape& first_cap, const TopoDS_Shape& last_cap) {
+  if (first_cap.IsNull() || last_cap.IsNull()) {
+    return std::string();
+  }
+  const BRepAdaptor_Surface a(TopoDS::Face(first_cap), false);
+  const BRepAdaptor_Surface b(TopoDS::Face(last_cap), false);
+  if (a.GetType() != GeomAbs_Plane || b.GetType() != GeomAbs_Plane) {
+    return std::string();
+  }
+  const double tol = shape_checks::max_tolerance({first_cap, last_cap});
+  const gp_Pln pa = a.Plane();
+  const gp_Pln pb = b.Plane();
+  if (!pa.Axis().IsParallel(pb.Axis(), Precision::Angular()) ||
+      pa.Distance(pb.Location()) > tol) {
+    return std::string();
+  }
+  BRepExtrema_DistShapeShape gap(first_cap, last_cap);
+  if (!gap.IsDone() || gap.Value() > tol) {
+    return std::string();
+  }
+  std::ostringstream s;
+  s << "Session.thru_sections: the caps of the first and the last section lie in one plane "
+       "and meet (gap "
+    << gap.Value() << ", tolerance " << tol
+    << "), so the solid has a slit of zero thickness between them. Nothing is committed; the "
+       "session is unchanged.";
+  return s.str();
+}
+
+constexpr const char* kSlitHint =
+    "To close a loft round onto itself, name the first section again as the last: that is a "
+    "closed loft, with no caps. A copy of the first section makes two caps.";
+
+}  // namespace
 
 // ---- construction operations ------------------------------------------------------ //
 
-py::dict Session::add_brep(const py::bytes& data, const py::object& progress,
-                           const py::object& cancel) {
+// An imported solid is checked for its inside (report V3): BRepCheck_Analyzer accepts a
+// solid whose shell bounds its complement, so the import used to commit a unit box at
+// volume -1 with every point test inverted. `inside_out` decides what happens to one:
+// "raise" refuses the import, "reverse" reverses it and says so on the delta.
+py::dict Session::add_brep(const py::bytes& data, const std::string& inside_out,
+                           const py::object& progress, const py::object& cancel) {
   OpGuard guard(in_op_);
+  const bool reverse = shape_checks::reverse_inside_out("Session.add_brep", inside_out);
   const std::string buffer = data;
+  require_brep_header(
+      buffer, "Session.add_brep: BREP read produced a null shape (empty or malformed data).");
   ProgressDriver driver("add_brep", hooks_of("add_brep", progress, cancel));
   TopoDS_Shape imported;
+  std::vector<shape_checks::InsideOutSolid> wrong;
   {
     py::gil_scoped_release release;
     std::istringstream stream(buffer);
     BRep_Builder builder;
     try {
       BRepTools::Read(imported, stream, builder, driver.range());
+      if (!imported.IsNull()) {
+        wrong = shape_checks::inside_out_solids(imported);
+      }
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(std::string("Session.add_brep: BREP read failed: ") + e.what());
@@ -48,10 +212,26 @@ py::dict Session::add_brep(const py::bytes& data, const py::object& progress,
     throw PysmeshError(
         "Session.add_brep: BREP read produced a null shape (empty or malformed data).");
   }
-  return add_bodies(imported, "add_brep");
+  if (wrong.empty()) {
+    return add_bodies(imported, "add_brep");
+  }
+  if (!reverse) {
+    throw PysmeshError(shape_checks::inside_out_refusal("Session.add_brep", wrong));
+  }
+  std::vector<std::string> warnings;
+  for (const shape_checks::InsideOutSolid& s : wrong) {
+    warnings.push_back(shape_checks::inside_out_reversed(s));
+  }
+  const TopoDS_Shape fixed = shape_checks::reverse_solids(imported, wrong);
+  return commit(concat(root_bodies(state_.root), fixed), Handle(BRepTools_History)(),
+                "add_brep", fixed, Validation::Strict, warnings);
 }
 
 py::dict Session::add_box(double dx, double dy, double dz, double ox, double oy, double oz) {
+  finite_arg("add_box", "dx", dx);
+  finite_arg("add_box", "dy", dy);
+  finite_arg("add_box", "dz", dz);
+  finite_arg("add_box", "origin", ox, oy, oz);
   OpGuard guard(in_op_);
   require_positive("dx", dx);
   require_positive("dy", dy);
@@ -64,6 +244,10 @@ py::dict Session::add_box(double dx, double dy, double dz, double ox, double oy,
 
 py::dict Session::add_cylinder(double radius, double height, double ox, double oy, double oz,
                         double ax, double ay, double az) {
+  finite_arg("add_cylinder", "radius", radius);
+  finite_arg("add_cylinder", "height", height);
+  finite_arg("add_cylinder", "origin", ox, oy, oz);
+  finite_arg("add_cylinder", "axis", ax, ay, az);
   OpGuard guard(in_op_);
   require_positive("radius", radius);
   require_positive("height", height);
@@ -80,6 +264,12 @@ py::dict Session::add_cylinder(double radius, double height, double ox, double o
 
 py::dict Session::add_cone(double radius1, double radius2, double height, double ox, double oy,
                     double oz, double ax, double ay, double az, double angle_rad) {
+  finite_arg("add_cone", "radius1", radius1);
+  finite_arg("add_cone", "radius2", radius2);
+  finite_arg("add_cone", "height", height);
+  finite_arg("add_cone", "origin", ox, oy, oz);
+  finite_arg("add_cone", "axis", ax, ay, az);
+  finite_arg("add_cone", "angle_rad", angle_rad);
   OpGuard guard(in_op_);
   require_non_negative("radius1", radius1);
   require_non_negative("radius2", radius2);
@@ -102,6 +292,10 @@ py::dict Session::add_cone(double radius1, double radius2, double height, double
 
 py::dict Session::add_sphere(double radius, double cx, double cy, double cz, double ax,
                              double ay, double az, double angle_rad) {
+  finite_arg("add_sphere", "radius", radius);
+  finite_arg("add_sphere", "centre", cx, cy, cz);
+  finite_arg("add_sphere", "axis", ax, ay, az);
+  finite_arg("add_sphere", "angle_rad", angle_rad);
   OpGuard guard(in_op_);
   require_positive("radius", radius);
   require_sweep_angle("add_sphere", angle_rad);
@@ -114,6 +308,11 @@ py::dict Session::add_sphere(double radius, double cx, double cy, double cz, dou
 
 py::dict Session::add_torus(double radius1, double radius2, double ox, double oy, double oz,
                      double ax, double ay, double az, double angle_rad) {
+  finite_arg("add_torus", "radius1", radius1);
+  finite_arg("add_torus", "radius2", radius2);
+  finite_arg("add_torus", "origin", ox, oy, oz);
+  finite_arg("add_torus", "axis", ax, ay, az);
+  finite_arg("add_torus", "angle_rad", angle_rad);
   OpGuard guard(in_op_);
   require_positive("radius1", radius1);
   require_positive("radius2", radius2);
@@ -135,6 +334,12 @@ py::dict Session::add_torus(double radius1, double radius2, double ox, double oy
 // ltx along x. ltx == dx is a plain box; ltx == 0 is a wedge with a knife edge.
 py::dict Session::add_wedge(double dx, double dy, double dz, double ltx, double ox, double oy,
                      double oz, double ax, double ay, double az) {
+  finite_arg("add_wedge", "dx", dx);
+  finite_arg("add_wedge", "dy", dy);
+  finite_arg("add_wedge", "dz", dz);
+  finite_arg("add_wedge", "ltx", ltx);
+  finite_arg("add_wedge", "origin", ox, oy, oz);
+  finite_arg("add_wedge", "axis", ax, ay, az);
   OpGuard guard(in_op_);
   require_positive("dx", dx);
   require_positive("dy", dy);
@@ -157,6 +362,7 @@ py::dict Session::add_wedge(double dx, double dy, double dz, double ltx, double 
 // A standalone vertex body. The only construction that adds a point to the model as an
 // entity in its own right rather than as the boundary of something else.
 py::dict Session::add_vertex(double x, double y, double z) {
+  finite_arg("add_vertex", "point", x, y, z);
   OpGuard guard(in_op_);
   const TopoDS_Shape vertex = build_shape(
       "add_vertex", [&] { return BRepBuilderAPI_MakeVertex(gp_Pnt(x, y, z)).Vertex(); });
@@ -164,6 +370,8 @@ py::dict Session::add_vertex(double x, double y, double z) {
 }
 
 py::dict Session::add_line(double x1, double y1, double z1, double x2, double y2, double z2) {
+  finite_arg("add_line", "start", x1, y1, z1);
+  finite_arg("add_line", "end", x2, y2, z2);
   OpGuard guard(in_op_);
   const gp_Pnt a(x1, y1, z1);
   const gp_Pnt b(x2, y2, z2);
@@ -178,6 +386,9 @@ py::dict Session::add_line(double x1, double y1, double z1, double x2, double y2
 // Three-point arc: through p1, ending at p3, passing through p2.
 py::dict Session::add_arc(double x1, double y1, double z1, double x2, double y2, double z2,
                    double x3, double y3, double z3) {
+  finite_arg("add_arc", "start", x1, y1, z1);
+  finite_arg("add_arc", "through", x2, y2, z2);
+  finite_arg("add_arc", "end", x3, y3, z3);
   OpGuard guard(in_op_);
   const TopoDS_Shape edge = try_build("add_arc", [&]() -> TopoDS_Shape {
     GC_MakeArcOfCircle mk(gp_Pnt(x1, y1, z1), gp_Pnt(x2, y2, z2), gp_Pnt(x3, y3, z3));
@@ -196,6 +407,9 @@ py::dict Session::add_arc(double x1, double y1, double z1, double x2, double y2,
 
 py::dict Session::add_circle(double cx, double cy, double cz, double nx, double ny, double nz,
                       double radius) {
+  finite_arg("add_circle", "centre", cx, cy, cz);
+  finite_arg("add_circle", "normal", nx, ny, nz);
+  finite_arg("add_circle", "radius", radius);
   OpGuard guard(in_op_);
   require_positive("radius", radius);
   const gp_Ax2 frame = frame_of("add_circle", cx, cy, cz, nx, ny, nz);
@@ -215,6 +429,13 @@ py::dict Session::add_circle(double cx, double cy, double cz, double nx, double 
 py::dict Session::add_ellipse(double cx, double cy, double cz, double nx, double ny,
                               double nz, double rx, double ry,
                               const std::optional<std::array<double, 3>>& x_dir) {
+  finite_arg("add_ellipse", "centre", cx, cy, cz);
+  finite_arg("add_ellipse", "normal", nx, ny, nz);
+  finite_arg("add_ellipse", "rx", rx);
+  finite_arg("add_ellipse", "ry", ry);
+  if (x_dir.has_value()) {
+    finite_arg("add_ellipse", "x_dir", (*x_dir)[0], (*x_dir)[1], (*x_dir)[2]);
+  }
   OpGuard guard(in_op_);
   require_positive("rx", rx);
   require_positive("ry", ry);
@@ -273,6 +494,7 @@ py::dict Session::add_polyline(const PointArray& points, bool closed) {
 // points" construction; add_bspline takes control points instead.
 py::dict Session::add_spline(const PointArray& points, int degree_min, int degree_max,
                              double tol) {
+  finite_arg("add_spline", "tol", tol);
   OpGuard guard(in_op_);
   const std::vector<gp_Pnt> pts = points_of("add_spline", "points", points, 2);
   require_positive("tol", tol);
@@ -335,6 +557,12 @@ py::dict Session::add_bspline(const PointArray& poles, int degree) {
 // whose deviation from the exact helix is bounded by tol.
 py::dict Session::add_helix(double cx, double cy, double cz, double ax, double ay, double az,
                      double diameter, double pitch, double turns, double tol) {
+  finite_arg("add_helix", "centre", cx, cy, cz);
+  finite_arg("add_helix", "axis", ax, ay, az);
+  finite_arg("add_helix", "diameter", diameter);
+  finite_arg("add_helix", "pitch", pitch);
+  finite_arg("add_helix", "turns", turns);
+  finite_arg("add_helix", "tol", tol);
   OpGuard guard(in_op_);
   require_positive("diameter", diameter);
   require_positive("pitch", pitch);
@@ -368,6 +596,10 @@ py::dict Session::add_helix(double cx, double cy, double cz, double ax, double a
 // A planar rectangular face, dx by dy in the frame's own x/y directions.
 py::dict Session::add_rectangle(double ox, double oy, double oz, double nx, double ny,
                                 double nz, double dx, double dy) {
+  finite_arg("add_rectangle", "origin", ox, oy, oz);
+  finite_arg("add_rectangle", "normal", nx, ny, nz);
+  finite_arg("add_rectangle", "dx", dx);
+  finite_arg("add_rectangle", "dy", dy);
   OpGuard guard(in_op_);
   require_positive("dx", dx);
   require_positive("dy", dy);
@@ -392,7 +624,7 @@ py::dict Session::make_wire(const std::vector<EntityId>& edge_ids) {
     py::gil_scoped_release release;
     BRepBuilderAPI_MakeWire mk;
     NCollection_List<TopoDS_Shape> list;
-    for (const TopoDS_Shape& e : edges) {
+    for (const TopoDS_Shape& e : weld_near_ends(edges)) {
       list.Append(e);
     }
     mk.Add(list);
@@ -577,6 +809,7 @@ py::dict Session::make_filling(const std::vector<EntityId>& edge_ids,
 
 py::dict Session::extrude(const std::vector<EntityId>& entity_ids, double vx, double vy,
                    double vz) {
+  finite_arg("extrude", "vector", vx, vy, vz);
   OpGuard guard(in_op_);
   const gp_Vec vec(vx, vy, vz);
   if (vec.Magnitude() <= 0.0) {
@@ -590,17 +823,20 @@ py::dict Session::extrude(const std::vector<EntityId>& entity_ids, double vx, do
   Handle(BRepTools_History) hist;
   {
     py::gil_scoped_release release;
-    BRepPrimAPI_MakePrism mk(profile, vec, /*Copy=*/false);
+    // Every OCCT call runs inside the try, the history query included: whatever throws
+    // after Build() reaches the caller as PysmeshError too (report A2).
+    const char* stage = "BRepPrimAPI_MakePrism failed";
     try {
+      BRepPrimAPI_MakePrism mk(profile, vec, /*Copy=*/false);
       mk.Build();
+      if (mk.IsDone()) {
+        stage = "reading the history of BRepPrimAPI_MakePrism failed";
+        result = mk.Shape();
+        hist = history_of(profile, mk);
+      }
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
-      throw PysmeshError(std::string("Session.extrude: BRepPrimAPI_MakePrism failed: ") +
-                         e.what());
-    }
-    if (mk.IsDone()) {
-      result = mk.Shape();
-      hist = history_of(profile, mk);
+      throw PysmeshError(std::string("Session.extrude: ") + stage + ": " + e.what());
     }
   }
   if (result.IsNull()) {
@@ -612,6 +848,9 @@ py::dict Session::extrude(const std::vector<EntityId>& entity_ids, double vx, do
 
 py::dict Session::revolve(const std::vector<EntityId>& entity_ids, double ox, double oy,
                           double oz, double ax, double ay, double az, double angle_rad) {
+  finite_arg("revolve", "origin", ox, oy, oz);
+  finite_arg("revolve", "axis", ax, ay, az);
+  finite_arg("revolve", "angle_rad", angle_rad);
   OpGuard guard(in_op_);
   require_sweep_angle("revolve", angle_rad);
   const gp_Ax1 axis(gp_Pnt(ox, oy, oz), direction_of("revolve", "axis", ax, ay, az));
@@ -623,17 +862,18 @@ py::dict Session::revolve(const std::vector<EntityId>& entity_ids, double ox, do
   Handle(BRepTools_History) hist;
   {
     py::gil_scoped_release release;
-    BRepPrimAPI_MakeRevol mk(profile, axis, angle_rad, /*Copy=*/false);
+    const char* stage = "BRepPrimAPI_MakeRevol failed";
     try {
+      BRepPrimAPI_MakeRevol mk(profile, axis, angle_rad, /*Copy=*/false);
       mk.Build();
+      if (mk.IsDone()) {
+        stage = "reading the history of BRepPrimAPI_MakeRevol failed";
+        result = mk.Shape();
+        hist = history_of(profile, mk);
+      }
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
-      throw PysmeshError(std::string("Session.revolve: BRepPrimAPI_MakeRevol failed: ") +
-                         e.what());
-    }
-    if (mk.IsDone()) {
-      result = mk.Shape();
-      hist = history_of(profile, mk);
+      throw PysmeshError(std::string("Session.revolve: ") + stage + ": " + e.what());
     }
   }
   if (result.IsNull()) {
@@ -661,19 +901,23 @@ py::dict Session::pipe(const std::vector<EntityId>& spine_ids,
   ProgressDriver driver("pipe", hooks_of("pipe", progress, cancel));
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
+  std::string interference;
   {
     py::gil_scoped_release release;
-    BRepOffsetAPI_MakePipe mk(spine, profile);
+    const char* stage = "BRepOffsetAPI_MakePipe failed";
     try {
+      BRepOffsetAPI_MakePipe mk(spine, profile);
       mk.Build(driver.range());
+      if (mk.IsDone()) {
+        stage = "reading the history of BRepOffsetAPI_MakePipe failed";
+        result = mk.Shape();
+        hist = history_of(profile, mk);
+        stage = "checking the swept shape for self-interference failed";
+        interference = shape_checks::self_interference_refusal("Session.pipe", result);
+      }
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
-      throw PysmeshError(std::string("Session.pipe: BRepOffsetAPI_MakePipe failed: ") +
-                         e.what());
-    }
-    if (mk.IsDone()) {
-      result = mk.Shape();
-      hist = history_of(profile, mk);
+      throw PysmeshError(std::string("Session.pipe: ") + stage + ": " + e.what());
     }
   }
   driver.finish();
@@ -684,6 +928,7 @@ py::dict Session::pipe(const std::vector<EntityId>& spine_ids,
     throw PysmeshError("Session.pipe: OCCT could not sweep the profile along the spine.",
                        "", ids_as_int(profile_ids));
   }
+  refuse_self_interference(interference, kSweepHint);
   return commit(concat(survivors, result), hist, "pipe", result);
 }
 
@@ -706,30 +951,36 @@ py::dict Session::pipe_shell(const std::vector<EntityId>& spine_ids,
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   std::string detail;
+  std::string interference;
   {
     py::gil_scoped_release release;
-    BRepOffsetAPI_MakePipeShell mk(spine);
-    mk.SetMode(frenet);
-    mk.Add(prof);
-    if (!mk.IsReady()) {
-      detail = "BRepOffsetAPI_MakePipeShell::IsReady() is false.";
-    } else {
-      try {
+    const char* stage = "setting up BRepOffsetAPI_MakePipeShell failed";
+    try {
+      BRepOffsetAPI_MakePipeShell mk(spine);
+      mk.SetMode(frenet);
+      mk.Add(prof);
+      if (!mk.IsReady()) {
+        detail = "BRepOffsetAPI_MakePipeShell::IsReady() is false.";
+      } else {
+        stage = "BRepOffsetAPI_MakePipeShell failed";
         mk.Build(driver.range());
-      } catch (const std::exception& e) {
-        py::gil_scoped_acquire acquire;
-        throw PysmeshError(
-            std::string("Session.pipe_shell: BRepOffsetAPI_MakePipeShell failed: ") +
-            e.what());
-      }
-      if (mk.IsDone()) {
-        if (solid && !mk.MakeSolid()) {
-          detail = "MakeSolid() failed: the swept shell is not closed.";
-        } else {
-          result = mk.Shape();
-          hist = history_of(profile, mk);
+        if (mk.IsDone()) {
+          stage = "BRepOffsetAPI_MakePipeShell::MakeSolid failed";
+          if (solid && !mk.MakeSolid()) {
+            detail = "MakeSolid() failed: the swept shell is not closed.";
+          } else {
+            stage = "reading the history of BRepOffsetAPI_MakePipeShell failed";
+            result = mk.Shape();
+            hist = history_of(profile, mk);
+            stage = "checking the swept shape for self-interference failed";
+            interference =
+                shape_checks::self_interference_refusal("Session.pipe_shell", result);
+          }
         }
       }
+    } catch (const std::exception& e) {
+      py::gil_scoped_acquire acquire;
+      throw PysmeshError(std::string("Session.pipe_shell: ") + stage + ": " + e.what());
     }
   }
   driver.finish();
@@ -740,6 +991,7 @@ py::dict Session::pipe_shell(const std::vector<EntityId>& spine_ids,
     throw PysmeshError("Session.pipe_shell: OCCT could not sweep the profile.", detail,
                        ids_as_int(profile_ids));
   }
+  refuse_self_interference(interference, kSweepHint);
   return commit(concat(survivors, result), hist, "pipe_shell", result);
 }
 
@@ -751,18 +1003,32 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
     throw PysmeshError("Session.thru_sections: at least two sections are required (got " +
                        std::to_string(sections.size()) + ").");
   }
+  // The first section named again as the last closes the loft round onto itself (report
+  // C3). OCCT takes its closed path only when the first and the last wire are the same
+  // shape (BRepOffsetAPI_ThruSections.cxx: myWires(1).IsSame(myWires(nbSects))), and
+  // wire_of_body builds a new wire on each call, so the last section reuses the first wire.
+  // A closed loft needs two other sections at least; any other repeat is refused.
   std::vector<TopoDS_Shape> bodies;
   std::vector<TopoDS_Wire> wires;
-  for (const std::vector<EntityId>& ids : sections) {
-    const TopoDS_Shape body = sole_body("thru_sections", ids);
-    for (const TopoDS_Shape& seen : bodies) {
-      if (seen.IsSame(body)) {
-        throw PysmeshError(
-            "Session.thru_sections: the same body was named as two different sections.");
+  bool closed = false;
+  for (std::size_t k = 0; k < sections.size(); ++k) {
+    const TopoDS_Shape body = sole_body("thru_sections", sections[k]);
+    for (std::size_t j = 0; j < bodies.size(); ++j) {
+      if (!bodies[j].IsSame(body)) {
+        continue;
       }
+      if (j == 0 && k + 1 == sections.size() && k >= 3) {
+        closed = true;
+        continue;
+      }
+      throw PysmeshError("Session.thru_sections: the same body was named as two different "
+                         "sections (" +
+                         std::to_string(j + 1) + " and " + std::to_string(k + 1) +
+                         "). Only the first section may be named again, as the last, to "
+                         "close the loft through two other sections at least.");
     }
     bodies.push_back(body);
-    wires.push_back(wire_of_body("thru_sections", "sections", body));
+    wires.push_back(closed ? wires.front() : wire_of_body("thru_sections", "sections", body));
   }
   const std::vector<TopoDS_Shape> survivors = bodies_excluding(bodies);
 
@@ -770,39 +1036,83 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
   TopoDS_Shape result;
   Handle(BRepTools_History) hist;
   std::optional<EnclosedVolume> hollow;
+  std::string cap_refusal;
+  std::string slit_refusal;
+  std::string interference;
   {
     py::gil_scoped_release release;
-    BRepOffsetAPI_ThruSections mk(solid, ruled);
-    for (const TopoDS_Wire& w : wires) {
-      mk.AddWire(w);
-    }
+    // The history query once threw here outside the try (report A2, through O1), and a raw
+    // RuntimeError reached the caller. Every OCCT call now runs inside it.
+    const char* stage = "copying the sections failed";
     try {
-      mk.Build(driver.range());
-    } catch (const std::exception& e) {
-      py::gil_scoped_acquire acquire;
-      throw PysmeshError(
-          std::string("Session.thru_sections: BRepOffsetAPI_ThruSections failed: ") +
-          e.what());
-    }
-    if (mk.IsDone()) {
-      result = mk.Shape();
-      NCollection_List<TopoDS_Shape> args;
-      for (const TopoDS_Shape& b : bodies) {
-        args.Append(b);
-      }
-      hist = new BRepTools_History(args, mk);
-      // OCCT orients the lofted solid itself, and on a loft that folds through itself its
-      // answer is arbitrary. Measured over 30 seeded random ruled lofts through three tilted
-      // sections, two came back with volumes -7.85 and -8.51 and BRepCheck_Analyzer
-      // accepted both, so the solid's own volume is checked before it is committed. It is
-      // not re-oriented: reversing a surface that crosses itself does not give it an inside.
-      for (TopExp_Explorer ex(result, TopAbs_SOLID); ex.More() && solid; ex.Next()) {
-        const EnclosedVolume enclosed = enclosed_volume(ex.Current());
-        if (enclosed.volume <= enclosed.tolerance) {
-          hollow = enclosed;
-          break;
+      // The builder writes pcurves, surfaces and continuity onto the edges it lofts through,
+      // even when it then fails (report A3). Those edges are the session's own, and every
+      // retained snapshot shares them, so it lofts deep copies. Not SetMutableInput(false):
+      // OCCT then lofts copies of its own and reports no map from a section edge to its
+      // copy (ThruSections has no Modified()), so every section edge and vertex id of a
+      // ruled loft died. The copier's map carries them instead, as modified.
+      TopoDS_Compound originals;
+      BRep_Builder builder;
+      builder.MakeCompound(originals);
+      for (std::size_t k = 0; k < wires.size(); ++k) {
+        if (!(closed && k + 1 == wires.size())) {
+          builder.Add(originals, wires[k]);
         }
       }
+      BRepBuilderAPI_Copy copier(originals, /*copyGeom=*/true, /*copyMesh=*/false);
+      NCollection_List<TopoDS_Shape> copies;
+      stage = "BRepOffsetAPI_ThruSections failed";
+      BRepOffsetAPI_ThruSections mk(solid, ruled);
+      for (const TopoDS_Wire& w : wires) {
+        const TopoDS_Wire copy = TopoDS::Wire(copier.ModifiedShape(w));
+        copies.Append(copy);
+        mk.AddWire(copy);
+      }
+      mk.Build(driver.range());
+      if (mk.IsDone()) {
+        stage = "reading the history of BRepOffsetAPI_ThruSections failed";
+        result = mk.Shape();
+        NCollection_List<TopoDS_Shape> args;
+        for (const TopoDS_Shape& b : bodies) {
+          args.Append(b);
+        }
+        // Each section's own sub-shapes -> their copies -> what the loft made of them.
+        hist = new BRepTools_History(args, copier);
+        hist->Merge(BRepTools_History(copies, mk));
+        // The caps first: a solid whose cap is missing has an open shell, and its volume
+        // means nothing. A closed loft has no caps: OCCT closes it round onto itself.
+        if (solid && !closed) {
+          stage = "checking the end caps of the lofted solid failed";
+          cap_refusal = loft_cap_refusal(result, mk.FirstShape(), mk.LastShape(), wires);
+        }
+        // OCCT orients the lofted solid itself, and on a loft that folds through itself its
+        // answer is arbitrary. Measured over 30 seeded random ruled lofts through three
+        // tilted sections, two came back with volumes -7.85 and -8.51 and
+        // BRepCheck_Analyzer accepted both, so the solid's own volume is checked before it
+        // is committed. It is not re-oriented: reversing a surface that crosses itself does
+        // not give it an inside.
+        stage = "measuring the volume of the lofted solid failed";
+        for (TopExp_Explorer ex(result, TopAbs_SOLID); ex.More() && solid && cap_refusal.empty();
+             ex.Next()) {
+          const EnclosedVolume enclosed = enclosed_volume(ex.Current());
+          if (enclosed.volume <= enclosed.tolerance) {
+            hollow = enclosed;
+            break;
+          }
+        }
+        if (solid && !closed && cap_refusal.empty() && !hollow.has_value()) {
+          stage = "checking the end caps of the lofted solid for a slit failed";
+          slit_refusal = coincident_caps_refusal(mk.FirstShape(), mk.LastShape());
+        }
+        if (solid && cap_refusal.empty() && slit_refusal.empty() && !hollow.has_value()) {
+          stage = "checking the lofted solid for self-interference failed";
+          interference =
+              shape_checks::self_interference_refusal("Session.thru_sections", result);
+        }
+      }
+    } catch (const std::exception& e) {
+      py::gil_scoped_acquire acquire;
+      throw PysmeshError(std::string("Session.thru_sections: ") + stage + ": " + e.what());
     }
   }
   driver.finish();
@@ -814,6 +1124,9 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
                        "Sections must all be closed or all be open, and must not "
                        "self-intersect when joined.",
                        {});
+  }
+  if (!cap_refusal.empty()) {
+    throw PysmeshError(cap_refusal, kCapHint, {});
   }
   if (hollow.has_value()) {
     std::ostringstream s;
@@ -828,6 +1141,10 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
                        "each other's path.",
                        {});
   }
+  if (!slit_refusal.empty()) {
+    throw PysmeshError(slit_refusal, kSlitHint, {});
+  }
+  refuse_self_interference(interference, kLoftHint);
   return commit(concat(survivors, result), hist, "thru_sections", result);
 }
 

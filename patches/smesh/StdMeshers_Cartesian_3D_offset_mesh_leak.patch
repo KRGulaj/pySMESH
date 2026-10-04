@@ -1,0 +1,34 @@
+pySMESH: Cartesian_3D with viscous layers frees its offset mesh (SMESH V9_16_0; applies after
+StdMeshers_Cartesian_VL_cancel.patch).
+
+Defect: StdMeshers_Cartesian_3D::Compute with a ViscousLayers hypothesis makes the offset mesh
+with `new TmpMesh()` (StdMeshers_Cartesian_3D.cxx:156) and frees it on no path: not on the two
+early returns (:161, :164), not after MakeViscousLayers.
+
+Symptom: the working set grows with every compute of a solid with viscous layers.
+
+Change, in StdMeshers_Cartesian_3D.cxx only: the offset mesh is held by a std::unique_ptr, so
+every return frees it.
+
+Not changed: what is meshed.
+diff --git a/src/StdMeshers/StdMeshers_Cartesian_3D.cxx b/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
+--- a/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
++++ b/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
+@@ -32,6 +32,7 @@
+ 
+ //STD
+ #include <limits>
++#include <memory>
+ #include <thread>
+ 
+ // BOOST
+@@ -155,7 +156,8 @@
+     if ( _computeCanceled ) // pySMESH: canceled during the offset step
+       return false;
+ 
+-    SMESH_Mesh* offsetMesh = new TmpMesh(); 
++    // pySMESH: owned here, so every return frees it (it leaked on all of them)
++    std::unique_ptr< SMESH_Mesh > offsetMesh( new TmpMesh() );
+     offsetMesh->ShapeToMesh( offsetShape );
+     offsetMesh->GetSubMesh( offsetShape )->DependsOn();
+ 

@@ -57,6 +57,23 @@ class SplitMethod(IntEnum):
     HEXA_TO_4_PRISMS = 5
 
 
+class BoundaryDimension(IntEnum):
+    """Which boundary :meth:`~pysmesh.Mesher.make_boundary_mesh` builds.
+
+    The integer values are SMESH's own (``SMESH_MeshEditor::Bnd_Dimension``); do not
+    reorder.
+
+    Attributes:
+        FACES_OF_VOLUMES: 2-D elements on the facets of volumes.
+        EDGES_OF_VOLUMES: 1-D elements on the edges of the facets of volumes.
+        EDGES_OF_FACES: 1-D elements on the edges of faces.
+    """
+
+    FACES_OF_VOLUMES = 0
+    EDGES_OF_VOLUMES = 1
+    EDGES_OF_FACES = 2
+
+
 class SmoothMethod(IntEnum):
     """How :meth:`~pysmesh.Mesher.smooth` moves each free node.
 
@@ -248,6 +265,8 @@ class _EditOps(_MesherBase):
         self,
         method: SplitMethod = SplitMethod.HEXA_TO_2_PRISMS,
         facet_normal: tuple[float, float, float] = (0.0, 0.0, 1.0),
+        *,
+        avoid_over_constrained: bool = False,
     ) -> EditReport:
         """Split every volume cell of the mesh.
 
@@ -255,11 +274,20 @@ class _EditOps(_MesherBase):
         only. Groups of volumes follow the split: a cell in a group is replaced by the cells
         it became, and all of them are in the group afterwards.
 
+        A tetrahedron is over-constrained when all 4 of its nodes carry a 2-D element:
+        every node lies on the boundary mesh, so the cell has no free node. With
+        ``avoid_over_constrained``, each cell is cut by a standard variant that makes no
+        such tetrahedron. Where no variant qualifies, the cell is cut through its
+        barycentre instead, which adds one node and more tetrahedra.
+
         Args:
             method: How to cut each cell.
             facet_normal: Which facet of each hexahedron is cut into two triangles, chosen as
                 the one this direction points along. Read only by the two prism methods; the
                 tetrahedral ones ignore it.
+            avoid_over_constrained: Choose the cut that makes no over-constrained
+                tetrahedron. Read by :attr:`SplitMethod.HEXA_TO_5` and
+                :attr:`SplitMethod.HEXA_TO_6` only.
 
         Returns:
             The counts either side of the split.
@@ -269,9 +297,50 @@ class _EditOps(_MesherBase):
                 vector, or if the mesher has been released.
         """
         raw = self._m.split_volumes(
-            int(method), facet_normal[0], facet_normal[1], facet_normal[2]
+            int(method),
+            facet_normal[0],
+            facet_normal[1],
+            facet_normal[2],
+            avoid_over_constrained,
         )
         return _report(raw)
+
+    def make_boundary_mesh(
+        self,
+        dimension: BoundaryDimension,
+        *,
+        elements: Iterable[int] = (),
+        around_elements: bool = False,
+        all_elements: bool = False,
+    ) -> NDArray[np.int64]:
+        """Create the missing boundary elements of volumes or of faces.
+
+        By default the boundary is the free one: a facet of a volume that no other
+        volume shares, or an edge of a face that no other face shares. An element that
+        is already there is kept and not made again. On a mesh with a shape, a new
+        element is bound to the face or edge its nodes lie on, where they lie on one.
+
+        Args:
+            dimension: Faces or edges of volumes, or edges of faces.
+            elements: The volumes (or faces) whose boundary to make. Empty means all of
+                them.
+            around_elements: Make the boundary of ``elements`` as a set: a facet shared
+                with an element outside the set is boundary too.
+            all_elements: Make an element on every facet (or edge), shared or free.
+
+        Returns:
+            (K,) int64 — the ids of the elements created, ascending. Pass them to
+            :meth:`~pysmesh.Mesher.add_group` to name them.
+
+        Raises:
+            PysmeshError: If an element of ``elements`` is not a volume (a face, for
+                :attr:`BoundaryDimension.EDGES_OF_FACES`); if the mesh has none to read;
+                or if the mesher has been released.
+        """
+        created = self._m.make_boundary_mesh(
+            int(dimension), [int(i) for i in elements], around_elements, all_elements
+        )
+        return np.asarray(created, dtype=np.int64)
 
     # ---- Coincidence and merging --------------------------------------------------------- #
 
@@ -404,6 +473,9 @@ class _EditOps(_MesherBase):
         moves the boundary. With ``on_shape`` it moves the rest **in the parameter space of
         the face each node sits on**, which keeps every node on the CAD surface — the
         property a mesh smoothed as raw coordinates loses immediately on any curved face.
+        On a periodic face, such as a cylinder's, a neighbour across the seam is taken
+        at its parameter on the near side of the seam (SMESH 9.16, ``42e25f073``), so a
+        node next to the seam is not pulled to the far side of the surface.
 
         Args:
             method: Laplacian or centroidal.
@@ -411,8 +483,10 @@ class _EditOps(_MesherBase):
             target_aspect_ratio: Stop early once the worst element's aspect ratio is at or
                 below this. 1 is a regular element, so the default means "run every pass".
             on_shape: Move nodes in the parameter space of their face rather than in model
-                space. Requires the mesh to be bound to geometry; on a mesh with no CAD it
-                has no effect.
+                space. Requires the mesh to be bound to geometry: on a mesher built
+                without a shape (:meth:`Mesher.from_arrays`, :meth:`Mesher.from_mesh`)
+                it raises, rather than move the nodes in model space and report
+                success. Pass ``on_shape=False`` there.
             elements: The elements whose nodes may move. Empty means the whole mesh.
             fixed_nodes: Extra nodes to hold still, beyond the boundary ones.
 
@@ -422,7 +496,8 @@ class _EditOps(_MesherBase):
 
         Raises:
             PysmeshError: If ``iterations`` is below 1, if ``target_aspect_ratio`` is below
-                1, if an id names nothing, or if the mesher has been released.
+                1, if ``on_shape`` is True on a mesher with no shape, if an id names
+                nothing, or if the mesher has been released.
         """
         return _report(
             self._m.smooth(

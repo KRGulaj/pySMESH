@@ -79,6 +79,7 @@ class SMESHDS_Mesh;
 class SMESH_Gen;
 class SMESH_Hypothesis;
 class SMESH_Mesh;
+class StdMeshers_ViscousLayerBuilder;
 
 namespace pysmesh {
 namespace mesher {
@@ -140,6 +141,13 @@ class Params {
   std::vector<double> numbers(const char* key);
   std::vector<int> integers(const char* key);
 
+  // A list of equal-length integer rows, for a parameter that names several sub-shapes per
+  // entry (the blocks of BlockRenumber: solid, vertex, vertex).
+  std::vector<std::vector<int>> integer_rows(const char* key);
+
+  // A list of number rows (points), every value checked finite like number().
+  std::vector<std::vector<double>> number_rows(const char* key);
+
   // Mesh ids, which are wider than an int by construction: SMDS numbers every node and
   // element in one 64-bit sequence.
   std::vector<std::int64_t> ids(const char* key);
@@ -159,6 +167,9 @@ class Params {
 
   // Raise unless every key has been consumed.
   void done() const;
+
+  // The key read last, or empty: the parameter a setter that throws was given.
+  std::string last() const { return consumed_.empty() ? std::string() : consumed_.back(); }
 
  private:
   py::object take(const char* key);
@@ -238,16 +249,25 @@ class Mesher {
 
   // ---- Filling from arrays (mesher_scratch.cpp) ---------------------------------------- //
   // The injection path: nodes and elements handed in directly rather than produced by an
-  // algorithm. Both work on a shape-backed mesher too, and what they add is bound to no
-  // sub-shape there, because a caller-supplied cell has no geometry to sit on.
+  // algorithm. Both work on a shape-backed mesher too. What they add is bound to no
+  // sub-shape unless the caller names one (`kind` and `ordinal`, report W1.2): then an
+  // algorithm of higher dimension can build on it, which is what UseExisting_1D/2D are for.
 
-  // Insert N nodes given as an (N, 3) table. Returns their new mesh ids.
-  py::array_t<std::int64_t> add_nodes(const py::object& coords);
+  // Insert N nodes given as an (N, 3) table. Returns their new mesh ids. With a sub-shape
+  // named, each node is bound to it: SetNodeOnVertex, SetNodeOnEdge (u), SetNodeOnFace
+  // (u, v) or SetNodeInVolume. `parameters` gives u, (N,), on an edge or (u, v), (N, 2), on
+  // a face; None projects each node onto the sub-shape instead. A node that does not lie on
+  // its sub-shape is refused before anything is added.
+  py::array_t<std::int64_t> add_nodes(const py::object& coords, const std::string& kind,
+                                      int ordinal, const py::object& parameters);
 
   // Insert M elements of one entity type, given as an (M, k) table of **node ids**. Returns
   // their new mesh ids. Polygons and polyhedra are refused: their node count does not
-  // determine their shape, so a rectangular table cannot express one.
-  py::array_t<std::int64_t> add_elements(int type, const py::object& connectivity);
+  // determine their shape, so a rectangular table cannot express one. With a sub-shape
+  // named, each element is bound to it (SetMeshElementOnShape); its dimension must be the
+  // sub-shape's.
+  py::array_t<std::int64_t> add_elements(int type, const py::object& connectivity,
+                                         const std::string& kind, int ordinal);
 
   // Fill an empty mesher from the arrays a harvest produced, keeping every id. This is what
   // turns a mesh read from a file back into a live one. Refuses a mesher that already holds
@@ -302,7 +322,15 @@ class Mesher {
   // mesh", which is upstream's own convention for these calls.
   void convert_to_quadratic(bool force_3d, bool bi_quadratic);
   bool convert_from_quadratic();
-  py::dict split_volumes(int method, double nx, double ny, double nz);
+  py::dict split_volumes(int method, double nx, double ny, double nz,
+                         bool avoid_over_constrained);
+
+  // Create the missing boundary elements of volumes or faces (SMESH_MeshEditor::
+  // MakeBoundaryMesh, report W3.2): faces or edges of volumes, or edges of faces. `elements`
+  // empty means every volume (or face). Returns the ids of the elements it created.
+  py::array_t<std::int64_t> make_boundary_mesh(int dimension,
+                                               const std::vector<std::int64_t>& elements,
+                                               bool around_elements, bool all_elements);
   py::dict split_quadratic_into_linear(const std::vector<std::int64_t>& elements);
   py::dict merge_nodes(double tolerance);
   py::list find_coincident_nodes(double tolerance, const std::vector<std::int64_t>& nodes,
@@ -362,6 +390,10 @@ class Mesher {
                               const std::vector<double>& direction, int family) const;
   py::dict ray_hits(const std::vector<double>& origin, const std::vector<double>& direction,
                     double tolerance) const;
+  // The volume cells a ray passes through, with the ray parameters where it enters and
+  // leaves each (SMESH_MeshAlgos::IntersectRayVolume, report W3.3).
+  py::dict ray_volumes(const std::vector<double>& origin, const std::vector<double>& direction,
+                       double length) const;
   py::dict elements_in_sphere(const std::vector<double>& centre, double radius,
                               int family) const;
   py::dict elements_in_box(const std::vector<double>& minimum,
@@ -381,6 +413,14 @@ class Mesher {
                                    const py::object& medium, const std::string& name_prefix);
   py::dict de_merge(std::int64_t element, const py::list& groups) const;
   py::dict make_slot(double width, const std::vector<std::int64_t>& segments);
+
+  // ---- Viscous layers by the two-step builder (mesher_viscous.cpp, report L4) ---------- //
+  // shrink_geometry offsets this mesher's shape inward and returns the shrunk shape as a
+  // Python Shape. add_layers fills this mesher with the inner mesher's mesh plus the layers.
+  // Both take the builder's parameters; add_layers refuses parameters other than the
+  // shrink's, an inner mesher on another shape, and a call with no shrink before it.
+  py::object shrink_geometry(const py::dict& params);
+  py::dict add_layers(const py::dict& params, Mesher& inner);
 
   // ---- Pattern mapping (mesher_block.cpp) ----------------------------------------------- //
   std::string pattern_from_face(int face_ordinal, bool project);
@@ -421,7 +461,32 @@ class Mesher {
   // rather than failing later on a null shape.
   void ensure_shape(const char* op) const;
 
+  // Raise if a ViscousLayers (ViscousLayers2D) hypothesis reaches a SOLID (FACE) whose
+  // algorithm does not list it among the hypotheses it reads, before anything is computed.
+  void refuse_unread_layers() const;
+
+  // The sub-shape where `hyp`, just assigned on `target`, met two different similar
+  // hypotheses (HYP_CONCURRENT), and those hypotheses with where they are assigned.
+  std::string describe_concurrency(const TopoDS_Shape& target, SMESH_Hypothesis* hyp) const;
+
   void clear_mesh();
+
+  // The counts and the meshed sub-shapes of a successful compute, as compute() returns
+  // them (mesher_core.cpp).
+  py::dict success_report(const py::list& warnings) const;
+
+  // One viscous-layer builder request, as the Python ViscousLayerBuilder sends it.
+  struct LayerRequest {
+    double total_thickness = 0.0;
+    int layer_count = 0;
+    double stretch_factor = 0.0;
+    std::vector<int> boundary;
+    bool ignore = true;
+    std::string group_name;
+    bool operator==(const LayerRequest& other) const;
+  };
+  LayerRequest layer_request(const py::dict& values, const char* op) const;
+  const TopoDS_Shape& layer_shape(const char* op) const;
 
   struct Assignment {
     std::string name;
@@ -436,6 +501,12 @@ class Mesher {
   SMESHDS_Mesh* meshDS_ = nullptr;  // owned by mesh_
   std::vector<std::unique_ptr<SMESH_Hypothesis>> owned_;
   std::vector<Assignment> assigned_;
+
+  // The two-step builder, owned by owned_ (it is an SMESH_Hypothesis), and what the last
+  // shrink_geometry was given and returned.
+  StdMeshers_ViscousLayerBuilder* vl_builder_ = nullptr;
+  LayerRequest vl_request_;
+  TopoDS_Shape vl_shrunk_;
 
   // SMESHDS shape index -> (kind, ordinal), built once from ShapeData so a harvest of a
   // million elements does not do a map lookup per element through OCCT.

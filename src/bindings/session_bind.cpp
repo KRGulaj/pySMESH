@@ -19,7 +19,8 @@ using session::Session;
 void bind_session(py::module_& m) {
   py::class_<Session>(m, "Session")
       .def(py::init<bool>(), py::arg("validate"))
-      .def("add_brep", &Session::add_brep, py::arg("data"), py::arg("progress"),
+      .def("add_brep", &Session::add_brep, py::arg("data"), py::arg("inside_out"),
+           py::arg("progress"),
            py::arg("cancel"))
       .def("add_box", &Session::add_box, py::arg("dx"), py::arg("dy"), py::arg("dz"),
            py::arg("ox"), py::arg("oy"), py::arg("oz"))
@@ -158,13 +159,15 @@ void bind_session(py::module_& m) {
       .def("restore", &Session::restore, py::arg("mark"))
       .def("discard_snapshot", &Session::discard_snapshot, py::arg("mark"))
       .def("snapshot_count", &Session::snapshot_count)
-      .def("entities", &Session::entities, py::arg("kind"))
+      .def("entities", &Session::entities, py::arg("kind"), py::arg("distinct") = false)
+      .def("alias_groups", &Session::alias_groups, py::arg("kind"))
+      .def("ordinal_ids", &Session::ordinal_ids, py::arg("kind"))
       .def("entity_kind", &Session::entity_kind, py::arg("entity_id"))
       .def("entity_state", &Session::entity_state, py::arg("entity_id"))
       .def("shape_count", &Session::shape_count, py::arg("entity_id"))
       .def("entity_table", &Session::entity_table, py::arg("kind"))
       .def("brep", &Session::brep)
-      .def("export_handoff", &Session::export_handoff)
+      .def("export_handoff", &Session::export_handoff, py::arg("allow_aliases") = false)
       .def("name_of", &Session::name_of, py::arg("entity_id"))
       .def("origin", &Session::origin, py::arg("entity_id"))
       .def("resolve", &Session::resolve, py::arg("op_index"), py::arg("role"),

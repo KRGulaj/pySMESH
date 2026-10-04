@@ -57,6 +57,7 @@ struct ClosedShell {
   TopoDS_Solid solid;
   double volume = 0.0;
   double area = 0.0;
+  bool exact = true;  // false: volume and area are the sign check's (enclosed_volume)
   Bnd_Box box;
 };
 
@@ -120,6 +121,7 @@ std::optional<std::string> orient_and_measure(ClosedShell& c) {
   const EnclosedVolume enclosed = enclosed_volume(c.solid);
   c.volume = enclosed.volume;
   c.area = enclosed.area;
+  c.exact = enclosed.exact;
   const double tol = enclosed.tolerance;
   if (c.volume > tol) {
     return std::nullopt;
@@ -133,6 +135,17 @@ std::optional<std::string> orient_and_measure(ClosedShell& c) {
          six_digits(c.volume) +
          ": the classifier and the volume disagree about its inside. A shell that crosses "
          "itself does this";
+}
+
+// Replace the sign check's volume and area of a closed shell by the integrated ones.
+void make_exact(ClosedShell& c) {
+  if (c.exact) {
+    return;
+  }
+  const EnclosedVolume enclosed = enclosed_volume(c.solid, /*precise=*/true);
+  c.volume = enclosed.volume;
+  c.area = enclosed.area;
+  c.exact = true;
 }
 
 // Keep every shape of a sewing result that is not a shell: a face that sewed to nothing,
@@ -277,6 +290,14 @@ Closure close_into_solids(const TopoDS_Shape& sewn, const std::vector<TopoDS_She
     if (containers[i].size() % 2 != 0) {
       continue;
     }
+    // A solid with cavities is decided on its volume less theirs, which the sign check
+    // cannot bound, so those shells are integrated.
+    if (!cavities[i].empty()) {
+      for (std::size_t k : cavities[i]) {
+        make_exact(closed[k]);
+      }
+      make_exact(closed[i]);
+    }
     BRepBuilderAPI_MakeSolid mk(closed[i].shell);
     double volume = closed[i].volume;
     double area = closed[i].area;
@@ -321,6 +342,9 @@ Closure close_into_solids(const TopoDS_Shape& sewn, const std::vector<TopoDS_She
 py::dict Session::heal(const std::optional<std::vector<EntityId>>& entity_ids,
                        double precision, double min_tolerance, double max_tolerance,
                        const py::object& progress, const py::object& cancel) {
+  finite_arg("heal", "precision", precision);
+  finite_arg("heal", "min_tolerance", min_tolerance);
+  finite_arg("heal", "max_tolerance", max_tolerance);
   OpGuard guard(in_op_);
   require_positive("precision", precision);
   require_positive("min_tolerance", min_tolerance);
@@ -351,6 +375,7 @@ py::dict Session::heal(const std::optional<std::vector<EntityId>>& entity_ids,
 py::dict Session::sew(const std::vector<EntityId>& entity_ids, double tolerance,
                       bool make_solid, bool non_manifold, const py::object& progress,
                       const py::object& cancel) {
+  finite_arg("sew", "tolerance", tolerance);
   OpGuard guard(in_op_);
   require_positive("tolerance", tolerance);
   if (entity_ids.empty()) {
@@ -374,30 +399,10 @@ py::dict Session::sew(const std::vector<EntityId>& entity_ids, double tolerance,
                   if (!make_solid || out.IsNull()) {
                     return;
                   }
-                  // Only a closed shell bounds a volume. An open one is left as a shell:
-                  // wrapping it would produce a shape whose interior is undefined, and the
-                  // validity check would then fail for a reason that hides the real one —
-                  // that the faces did not sew into a watertight surface. One open shell
-                  // leaves every shell open, as it always has.
-                  std::vector<TopoDS_Shell> shells;
-                  for (TopExp_Explorer ex(out, TopAbs_SHELL); ex.More(); ex.Next()) {
-                    if (!BRep_Tool::IsClosed(ex.Current())) {
-                      return;
-                    }
-                    shells.push_back(TopoDS::Shell(ex.Current()));
-                  }
-                  if (shells.empty()) {
-                    return;
-                  }
-                  const Closure closure = close_into_solids(out, shells);
-                  if (!closure.refusal.has_value()) {
-                    out = closure.result;
-                    return;
-                  }
                   // A shell's faces are named by the ids of the faces they were sewn from.
                   // Sewing rebuilds a face whose edges it replaced, so a face is matched
                   // either as itself or through the history.
-                  const auto ids_of_shell = [&](const TopoDS_Shell& shell) {
+                  const auto ids_of_shell = [&](const TopoDS_Shape& shell) {
                     ShapeSet in_shell;
                     TopExp::MapShapes(shell, TopAbs_FACE, in_shell);
                     std::vector<EntityId> ids;
@@ -423,6 +428,57 @@ py::dict Session::sew(const std::vector<EntityId>& entity_ids, double tolerance,
                     }
                     return text;
                   };
+                  // Only a closed shell bounds a volume, so a result with an open shell, or
+                  // with no shell at all, cannot become the solid the caller asked for. It
+                  // is refused rather than committed as shells (report A8): the caller could
+                  // otherwise notice only by counting solids afterwards. The free edges are
+                  // where the surface failed to close.
+                  std::vector<TopoDS_Shell> shells;
+                  std::vector<TopoDS_Shape> open;
+                  for (TopExp_Explorer ex(out, TopAbs_SHELL); ex.More(); ex.Next()) {
+                    if (BRep_Tool::IsClosed(ex.Current())) {
+                      shells.push_back(TopoDS::Shell(ex.Current()));
+                    } else {
+                      open.push_back(ex.Current());
+                    }
+                  }
+                  if (!open.empty() || shells.empty()) {
+                    std::vector<TopoDS_Shape> free;
+                    std::vector<EntityId> faces;
+                    for (const TopoDS_Shape& shell : open.empty() ? std::vector<TopoDS_Shape>{out}
+                                                                   : open) {
+                      for (const TopoDS_Shape& e : shape_checks::free_boundary_edges(shell)) {
+                        free.push_back(e);
+                      }
+                      for (EntityId id : ids_of_shell(shell)) {
+                        faces.push_back(id);
+                      }
+                    }
+                    std::sort(faces.begin(), faces.end());
+                    faces.erase(std::unique(faces.begin(), faces.end()), faces.end());
+                    std::string details;
+                    for (std::size_t i = 0; i < free.size(); ++i) {
+                      details += "Free edge " + std::to_string(i + 1) + ": " +
+                                 shape_checks::edge_text(free[i]) + ". ";
+                    }
+                    details +=
+                        "Sew with a tolerance that bridges those gaps, or with "
+                        "make_solid=False to keep the shells.";
+                    const std::string what =
+                        open.empty() ? std::string("no face sewed into a shell")
+                                     : std::to_string(open.size()) + " shell(s) of it are open";
+                    throw PysmeshError("Session.sew: make_solid cannot close the result into "
+                                       "a solid: " + what + ", with " +
+                                       std::to_string(free.size()) +
+                                       " free boundary edge(s), each bordered by one face "
+                                       "only. Nothing is committed; the session is unchanged.",
+                                       details, ids_as_int(faces));
+                  }
+                  const Closure closure = close_into_solids(out, shells);
+                  if (!closure.refusal.has_value()) {
+                    out = closure.result;
+                    return;
+                  }
                   const ShellRefusal& refusal = *closure.refusal;
                   const std::vector<EntityId> faces = ids_of_shell(refusal.shell);
                   std::string reason = refusal.reason;
@@ -445,6 +501,7 @@ py::dict Session::sew(const std::vector<EntityId>& entity_ids, double tolerance,
 py::dict Session::remove_internal_wires(
     const std::optional<std::vector<EntityId>>& entity_ids, double min_area,
     bool remove_faces) {
+  finite_arg("remove_internal_wires", "min_area", min_area);
   OpGuard guard(in_op_);
   require_positive("min_area", min_area);
   // No hooks: ShapeUpgrade_RemoveInternalWires::Perform takes no Message_ProgressRange in
@@ -465,6 +522,8 @@ py::dict Session::remove_internal_wires(
 py::dict Session::unify_same_domain(const std::optional<std::vector<EntityId>>& entity_ids,
                                     bool unify_faces, bool unify_edges, bool concat_bsplines,
                                     double linear_tol, double angular_tol_rad) {
+  finite_arg("unify_same_domain", "linear_tol", linear_tol);
+  finite_arg("unify_same_domain", "angular_tol_rad", angular_tol_rad);
   OpGuard guard(in_op_);
   if (!unify_faces && !unify_edges) {
     throw PysmeshError(

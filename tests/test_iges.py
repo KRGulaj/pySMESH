@@ -104,6 +104,47 @@ def test_read_iges_accepts_path_object(fixtures_dir: Path) -> None:
     assert len(load_brep(result.brep).faces()) == 6
 
 
+# A 3 x 7 x 11 box at the origin, the C7 oracle's input: 6 faces, volume 3 * 7 * 11.
+C7_BOX: tuple[float, float, float] = (3.0, 7.0, 11.0)
+
+
+def _c7_box_brep() -> bytes:
+    """The C7 box as BREP bytes."""
+    s = pysmesh.Session()
+    s.add_box(*C7_BOX)
+    return s.brep()
+
+
+def test_read_iges_reads_the_bytes_write_iges_returns_as_the_same_solid() -> None:
+    """read_iges(write_iges(brep, unit="mm")): one solid, 6 faces, volume 231 (C7)."""
+    data = write_iges(_c7_box_brep(), unit="mm")
+
+    result = read_iges(data)
+
+    solids = load_brep(result.brep).solids()
+    assert result.unit_name == "MM"
+    assert len(solids) == 1
+    assert len(load_brep(result.brep).faces()) == 6
+    assert solids[0].volume == pytest.approx(C7_BOX[0] * C7_BOX[1] * C7_BOX[2])
+
+
+@pytest.mark.parametrize(
+    "as_source", [str, Path, bytearray], ids=["str", "Path", "bytes"]
+)
+def test_read_iges_reads_the_same_solid_from_a_str_a_path_and_a_bytearray(
+    tmp_path: Path, as_source: type
+) -> None:
+    """Every accepted source of one written file gives the same solid (C7)."""
+    path = tmp_path / "box.igs"
+    path.write_bytes(write_iges(_c7_box_brep(), unit="mm"))
+    source = path.read_bytes() if as_source is bytearray else path
+
+    result = read_iges(as_source(source))
+
+    assert len(load_brep(result.brep).faces()) == 6
+    assert load_brep(result.brep).solids()[0].volume == pytest.approx(231.0)
+
+
 # ---------------------------------------------------------------------------
 # read_iges — the declared length unit (the 1000x defect)
 # ---------------------------------------------------------------------------

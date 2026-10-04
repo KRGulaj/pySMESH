@@ -30,7 +30,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ._base import _MesherBase
-from ._types import ElementType, MeshData
+from ._types import ElementType, MeshData, SubShape
 
 
 class _FillOps(_MesherBase):
@@ -38,27 +38,58 @@ class _FillOps(_MesherBase):
 
     __slots__ = ()
 
-    def add_nodes(self, coords: NDArray[np.float64]) -> NDArray[np.int64]:
+    def add_nodes(
+        self,
+        coords: NDArray[np.float64],
+        *,
+        on: SubShape | None = None,
+        parameters: NDArray[np.float64] | None = None,
+    ) -> NDArray[np.int64]:
         """Insert nodes at the given positions.
 
-        The nodes are bound to no sub-shape, on a mesher with a shape as much as on one
-        without: a caller-supplied point has no geometry to sit on, and inventing one would
-        be this binding deciding where it belongs.
+        Without ``on`` the nodes are bound to no sub-shape, on a mesher with a shape as
+        much as on one without: this binding does not decide where a point belongs.
+
+        With ``on`` each node is bound to that sub-shape, as SMESH's own algorithms
+        bind theirs. Then an algorithm of higher dimension builds on it: script-made
+        nodes and segments on an edge under :class:`UseExisting1D` become the edge's
+        mesh, and the faces around it are meshed from them. A node on an edge carries
+        its curve parameter u, and a node on a face its surface parameters (u, v).
 
         Args:
             coords: (N, 3) float64 — model-space position of each new node.
+            on: The sub-shape to bind the nodes to, or None.
+            parameters: The parameters of the nodes on ``on``: (N,) u on an edge, or
+                (N, 2) (u, v) on a face. None finds them by projecting each node onto
+                the sub-shape. Refused for a vertex or a solid, which have none.
 
         Returns:
             (N,) int64 — the new mesh ids, in the same row order. These are what every other
             operation on this mesher addresses a node by.
 
         Raises:
-            PysmeshError: If ``coords`` is not (N, 3), or the mesher has been released.
+            PysmeshError: If ``coords`` is not (N, 3); if a node does not lie on ``on``
+                within the sub-shape's tolerance (at least 1e-7), or lies outside the
+                face or the solid it names, or its given parameter is outside the
+                edge's range (nothing is added then); if ``parameters`` is given without
+                ``on``, or for a vertex or a solid; or if the mesher has been released.
         """
-        return self._m.add_nodes(np.ascontiguousarray(coords, dtype=np.float64))
+        table = np.ascontiguousarray(coords, dtype=np.float64)
+        if on is None:
+            return self._m.add_nodes(table, parameters=parameters)
+        values = (
+            None
+            if parameters is None
+            else np.ascontiguousarray(parameters, dtype=np.float64)
+        )
+        return self._m.add_nodes(table, on.kind.name, on.ordinal, values)
 
     def add_elements(
-        self, element_type: ElementType, connectivity: NDArray[np.int64]
+        self,
+        element_type: ElementType,
+        connectivity: NDArray[np.int64],
+        *,
+        on: SubShape | None = None,
     ) -> NDArray[np.int64]:
         """Insert elements of one type from a table of node ids.
 
@@ -68,6 +99,9 @@ class _FillOps(_MesherBase):
                 than quietly built as a quadrangle.
             connectivity: (M, k) integer — one row per element, holding the **node ids** its
                 corners are, in SMESH's own node order for that type.
+            on: The sub-shape to bind the elements to, or None. Its dimension must be
+                the elements' dimension: segments on an edge, faces on a face, volumes
+                on a solid. See :meth:`add_nodes`.
 
         Returns:
             (M,) int64 — the new mesh ids, in the same row order.
@@ -77,16 +111,22 @@ class _FillOps(_MesherBase):
                 does not determine its shape; if the column count does not match the type; if
                 a row names a node the mesh does not have; if the type is
                 :attr:`ElementType.BALL`, which carries a diameter this path cannot give it;
-                or if the mesher has been released.
+                if the dimension of ``on`` is not the elements' dimension; or if the
+                mesher has been released.
         """
         table = np.ascontiguousarray(connectivity, dtype=np.int64)
-        return self._m.add_elements(int(element_type), table)
+        if on is None:
+            return self._m.add_elements(int(element_type), table)
+        return self._m.add_elements(int(element_type), table, on.kind.name, on.ordinal)
 
-    def add_segments(self, connectivity: NDArray[np.int64]) -> NDArray[np.int64]:
+    def add_segments(
+        self, connectivity: NDArray[np.int64], *, on: SubShape | None = None
+    ) -> NDArray[np.int64]:
         """Insert linear 1-D elements.
 
         Args:
             connectivity: (M, 2) integer — the two node ids of each segment.
+            on: The sub-shape to bind them to, or None (see :meth:`add_elements`).
 
         Returns:
             (M,) int64 — the new mesh ids.
@@ -95,13 +135,16 @@ class _FillOps(_MesherBase):
             PysmeshError: If a row names a node the mesh does not have, or the mesher has been
                 released.
         """
-        return self.add_elements(ElementType.EDGE, connectivity)
+        return self.add_elements(ElementType.EDGE, connectivity, on=on)
 
-    def add_triangles(self, connectivity: NDArray[np.int64]) -> NDArray[np.int64]:
+    def add_triangles(
+        self, connectivity: NDArray[np.int64], *, on: SubShape | None = None
+    ) -> NDArray[np.int64]:
         """Insert linear triangles.
 
         Args:
             connectivity: (M, 3) integer — the three node ids of each triangle.
+            on: The sub-shape to bind them to, or None (see :meth:`add_elements`).
 
         Returns:
             (M,) int64 — the new mesh ids.
@@ -110,13 +153,16 @@ class _FillOps(_MesherBase):
             PysmeshError: If a row names a node the mesh does not have, or the mesher has been
                 released.
         """
-        return self.add_elements(ElementType.TRIANGLE, connectivity)
+        return self.add_elements(ElementType.TRIANGLE, connectivity, on=on)
 
-    def add_quadrangles(self, connectivity: NDArray[np.int64]) -> NDArray[np.int64]:
+    def add_quadrangles(
+        self, connectivity: NDArray[np.int64], *, on: SubShape | None = None
+    ) -> NDArray[np.int64]:
         """Insert linear quadrangles.
 
         Args:
             connectivity: (M, 4) integer — the four node ids of each quadrangle.
+            on: The sub-shape to bind them to, or None (see :meth:`add_elements`).
 
         Returns:
             (M,) int64 — the new mesh ids.
@@ -125,13 +171,16 @@ class _FillOps(_MesherBase):
             PysmeshError: If a row names a node the mesh does not have, or the mesher has been
                 released.
         """
-        return self.add_elements(ElementType.QUADRANGLE, connectivity)
+        return self.add_elements(ElementType.QUADRANGLE, connectivity, on=on)
 
-    def add_tetrahedra(self, connectivity: NDArray[np.int64]) -> NDArray[np.int64]:
+    def add_tetrahedra(
+        self, connectivity: NDArray[np.int64], *, on: SubShape | None = None
+    ) -> NDArray[np.int64]:
         """Insert linear tetrahedra.
 
         Args:
             connectivity: (M, 4) integer — the four node ids of each tetrahedron.
+            on: The sub-shape to bind them to, or None (see :meth:`add_elements`).
 
         Returns:
             (M,) int64 — the new mesh ids.
@@ -140,7 +189,7 @@ class _FillOps(_MesherBase):
             PysmeshError: If a row names a node the mesh does not have, or the mesher has been
                 released.
         """
-        return self.add_elements(ElementType.TETRAHEDRON, connectivity)
+        return self.add_elements(ElementType.TETRAHEDRON, connectivity, on=on)
 
     def fill_from_mesh(self, mesh: MeshData) -> None:
         """Fill an empty mesher from a harvest, keeping every id.

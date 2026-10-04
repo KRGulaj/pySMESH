@@ -110,9 +110,10 @@ each given as metres per unit:
 `write_iges` also accepts `"IN"` as an alias for inches on input, though `unit_name` on a
 read result is always one of the ten names above.
 
-## Why `read_iges` takes a path, not bytes
+## `read_iges` takes bytes or a path
 
-`read_step_xde` accepts either raw bytes or a path. `read_iges` accepts only a path:
+`read_iges`, like `read_step_xde`, accepts the content as bytes or a filesystem path, so
+it reads back what `write_iges` returns:
 
 ```python
 import pathlib
@@ -121,16 +122,16 @@ import pysmesh
 
 pysmesh.read_iges("housing.igs")                       # a str
 pysmesh.read_iges(pathlib.Path("housing.igs"))          # or an os.PathLike
+pysmesh.read_iges(pysmesh.write_iges(brep, unit="MM"))  # or the bytes
 ```
 
-OCCT ships no IGES stream reader: `IGESSelect_WorkLibrary` does not override
-`IFSelect_WorkLibrary::ReadStream`. There is no in-memory entry point to wrap, so the reader
-takes a filesystem path.
+OCCT 8.0.1 ships no IGES stream reader: no IGES work library overrides
+`IFSelect_WorkLibrary::ReadStream`, which returns 1. So `read_iges` writes bytes to a file
+in a temporary directory, reads that file, and removes the directory before it returns.
 
-Reading an IGES file also makes OCCT print one line to standard output,
-`Total number of loaded entities N.`. That is an unconditional info-level message inside
-`IGESFile_Read`, and OCCT gives no switch to silence it. `write_iges` has no such side
-effect and returns bytes, matching `write_step_xde`.
+Neither `read_iges` nor `write_iges` writes to standard output. OCCT sends its transfer
+banners and the IGES entity count, `Total number of loaded entities N.`, to its default
+messenger; pySMESH removes that messenger's console printer from its private copy of OCCT.
 
 ---
 *Author: Kajetan R. Gułaj*

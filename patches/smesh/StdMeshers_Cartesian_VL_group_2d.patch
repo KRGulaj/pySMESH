@@ -1,0 +1,40 @@
+pySMESH: the two-step viscous-layer builder puts the layer cells of a face into its group
+(SMESH V9_16_0; applies after StdMeshers_Cartesian_VL_cancel.patch).
+
+Defect: StdMeshers_ViscousLayerBuilder::AddLayers on a face (the 2-D path of
+StdMeshers_Cartesian_VL::ViscousBuilder::MakeViscousLayers) names a group and leaves it empty.
+
+Symptom: a 1 x 1 square, 2 layers 0.2 thick on its four edges, 3 segments per edge: the
+mesh gains its 24 layer quadrangles, and the group of the hypothesis's name holds 0 elements.
+
+Root cause: the group collects the cells the builder marked (StdMeshers_Cartesian_VL.cxx:
+1298-1309). makeFaces does not mark the quadrangles it makes for a face (:576-590), and the
+group is created as a volume group in every case (:1301), which would refuse a face.
+
+Change, in StdMeshers_Cartesian_VL.cxx only: makeFaces marks a quadrangle it makes on the
+2-D path, and the group is a face group on that path.
+
+Not changed: the 3-D path, where the prisms are marked and the group is a volume group, and
+the faces the 3-D path makes on the layer boundary, which stay out of the group.
+diff --git a/src/StdMeshers/StdMeshers_Cartesian_VL.cxx b/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
+--- a/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
++++ b/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
+@@ -584,6 +584,7 @@
+           }
+           else if ( isMainShape2D )
+           {
++            face->setIsMarked( true ); // pySMESH: a layer cell of a 2-D mesh, for the group
+             gp_XYZ elementNormal;
+             SMESH_MeshAlgos::FaceNormal( face, elementNormal, /*normalized=*/true );
+             if ( elementNormal * refNormalVector < 0.0 /* diff orientation from the ref element */)
+@@ -1309,7 +1310,9 @@
+   // create a group
+   if ( !_hyp->GetGroupName().empty() )
+   {
+-    SMDS_MeshGroup* group = _hyp->CreateGroup( _hyp->GetGroupName(), theMesh, SMDSAbs_Volume );
++    // pySMESH: the layer cells of a face are faces; a volume group holds none of them
++    SMDS_MeshGroup* group = _hyp->CreateGroup( _hyp->GetGroupName(), theMesh,
++                                               isMainShape2D ? SMDSAbs_Face : SMDSAbs_Volume );
+ 
+     for ( SMDS_ElemIteratorPtr it = initMDS->elementsIterator(); it->more(); )
+     {

@@ -1,0 +1,105 @@
+pySMESH: Cartesian_3D with viscous layers binds every node of its offset VERTEXes and EDGEs to
+a layer edge, and a failure leaves no mesh behind (SMESH V9_16_0; applies after
+StdMeshers_Cartesian_VL_group_2d.patch).
+
+Defect: StdMeshers_Cartesian_VL::ViscousBuilder::MakeViscousLayers fails on inclined walls with
+"Viscous layers construction error: bad mesh on offset geometry", and leaves the copied
+offset mesh in the target.
+
+Symptom: a regular hexagonal prism of circumradius 1 and height 1, layers on every face
+(0.2 thick, 3 layers, factor 1.2), grid spacing 0.1: the compute fails. With spacing 0.13 the
+same shape meshes. Rotating the hexagon moves the failing corners with it.
+
+Root cause, measured with an instrumented build: makePrisms returns false on a boundary face
+node that has no layer edge (StdMeshers_Cartesian_VL.cxx:466-467). The node lies on an offset
+VERTEX or EDGE at a corner where the shape touches the grid's bounding box along one vertical
+edge, that is where an end plane of the grid lies. There the Cartesian offset mesh makes two
+nodes at each point of that EDGE and its VERTEXes, a grid node and an intersection node. Then:
+* At a VERTEX both copies survive. The boundary faces use one, and the projection to the
+  initial shape binds the other (SMESH_Algo::VertexNode).
+* Along the EDGE the duplicate grid nodes are removed, but Hexahedron::addSegments found no
+  ordered node chain on the doubled EDGE and made no segment. projectToEdge skips an EDGE with
+  no element (:202), so its nodes, which the boundary faces use, got no layer edge.
+On failure the error goes to the sub-mesh of the compound Cartesian_3D receives (:1269-1278),
+which a caller does not walk, after copyMesh (:1267) has filled the target with the offset
+mesh.
+
+Change, in StdMeshers_Cartesian_VL.cxx only:
+* Before the projection, coincident nodes (within Precision::Confusion) on the offset mesh's
+  VERTEX and EDGE sub-meshes are merged with SMESH_MeshEditor::MergeNodes.
+* projectToEdge skips an EDGE only when it has no node, as setBnd2Sub already does (:669).
+* On a failure of the prisms, the target mesh is cleared and the error is set on every SOLID
+  of the shape too.
+
+Not changed: a node of an offset FACE, and every mesh with no such duplicates and no EDGE
+without segments (bit for bit).
+diff --git a/src/StdMeshers/StdMeshers_Cartesian_VL.cxx b/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
+--- a/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
++++ b/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
+@@ -199,7 +199,10 @@
+   {
+     SMESHDS_SubMesh* sm = theOffsetMDS->MeshElements( theEOS._offsetShape );
+  
+-    if ( !sm || sm->NbElements() == 0 )
++    // pySMESH: test the nodes, which are all this function projects. The Cartesian offset
++    // mesh can leave an EDGE that a grid end plane passes through with nodes but no segment;
++    // skipping it left the boundary faces on those nodes with no layer edge.
++    if ( !sm || sm->NbNodes() == 0 )
+       return;
+ 
+     int addVertexNode = createVertex ? 1 : 0;
+@@ -1132,6 +1135,27 @@
+   if ( isCanceled() ) return false; // pySMESH: canceled
+   initMDS->ClearMesh(); // avoid mesh superposition on multiple calls of addLayers
+   offsetMDS->SetAllCellsNotMarked();
++
++  // pySMESH: the Cartesian offset mesh can carry two nodes at one point of an offset VERTEX
++  // or EDGE, where an end plane of the grid passes through it: the boundary faces use one,
++  // and the projection below binds the other (VertexNode, the EDGE's own nodes), so makePrisms
++  // finds a face node with no layer edge and fails. Merge them first.
++  {
++    TIDSortedNodeSet onVertexOrEdge;
++    TopTools_IndexedMapOfShape offsetVE;
++    TopExp::MapShapes( shrinkGeomToMesh, TopAbs_VERTEX, offsetVE );
++    TopExp::MapShapes( shrinkGeomToMesh, TopAbs_EDGE,   offsetVE );
++    for ( int i = 1; i <= offsetVE.Extent(); ++i )
++      if ( SMESHDS_SubMesh* sm = offsetMDS->MeshElements( offsetVE( i )))
++        for ( SMDS_NodeIteratorPtr nIt = sm->GetNodes(); nIt->more(); )
++          onVertexOrEdge.insert( nIt->next() );
++    SMESH_MeshEditor offsetEditor( &offsetMesh );
++    SMESH_MeshEditor::TListOfListOfNodes coincident;
++    offsetEditor.FindCoincidentNodes( onVertexOrEdge, Precision::Confusion(), coincident,
++                                      /*SeparateCornersAndMedium=*/false );
++    if ( !coincident.empty() )
++      offsetEditor.MergeNodes( coincident );
++  }
+ 
+   TopTools_IndexedMapOfShape shrinkGeomMap;
+   TopExp::MapShapes( shrinkGeomToMesh, shrinkGeomMap );
+@@ -1279,12 +1303,20 @@
+ 
+   if ( !prismsOk )
+   {
+-    if ( SMESH_subMesh * sm = theMesh.GetSubMesh( theShape ))
+-    {
+-      sm->GetComputeError() =
+-        SMESH_ComputeError::New( COMPERR_ALGO_FAILED,
+-                                 "Viscous layers construction error: bad mesh on offset geometry" );
+-    }
++    // pySMESH: leave no half-copied mesh behind, and put the error on every SOLID as well:
++    // Cartesian_3D receives a compound of its solids, whose sub-mesh a caller does not walk.
++    initMDS->ClearMesh();
++    std::vector< TopoDS_Shape > failed( 1, theShape );
++    for ( TopExp_Explorer soExp( theShape, TopAbs_SOLID ); soExp.More(); soExp.Next() )
++      if ( !soExp.Current().IsSame( theShape ))
++        failed.push_back( soExp.Current() );
++    for ( const TopoDS_Shape& s : failed )
++      if ( SMESH_subMesh * sm = theMesh.GetSubMesh( s ))
++      {
++        sm->GetComputeError() =
++          SMESH_ComputeError::New( COMPERR_ALGO_FAILED,
++                                   "Viscous layers construction error: bad mesh on offset geometry" );
++      }
+     return prismsOk;
+   }
+ 

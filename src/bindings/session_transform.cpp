@@ -21,6 +21,7 @@ namespace session {
 
 py::dict Session::translate(double dx, double dy, double dz,
                      const std::optional<std::vector<EntityId>>& entity_ids) {
+  finite_arg("translate", "offset", dx, dy, dz);
   OpGuard guard(in_op_);
   gp_Trsf t;
   t.SetTranslation(gp_Vec(dx, dy, dz));
@@ -29,6 +30,9 @@ py::dict Session::translate(double dx, double dy, double dz,
 
 py::dict Session::rotate(double ox, double oy, double oz, double ax, double ay, double az,
                   double angle_rad, const std::optional<std::vector<EntityId>>& entity_ids) {
+  finite_arg("rotate", "origin", ox, oy, oz);
+  finite_arg("rotate", "axis", ax, ay, az);
+  finite_arg("rotate", "angle_rad", angle_rad);
   OpGuard guard(in_op_);
   const gp_Vec axis(ax, ay, az);
   if (axis.Magnitude() <= 0.0) {
@@ -44,6 +48,8 @@ py::dict Session::rotate(double ox, double oy, double oz, double ax, double ay, 
 // transform's own history and all of them survive.
 py::dict Session::mirror(double px, double py_, double pz, double nx, double ny, double nz,
                   const std::optional<std::vector<EntityId>>& entity_ids) {
+  finite_arg("mirror", "point", px, py_, pz);
+  finite_arg("mirror", "normal", nx, ny, nz);
   OpGuard guard(in_op_);
   const gp_Dir normal = direction_of("mirror", "normal", nx, ny, nz);
   gp_Trsf t;
@@ -56,6 +62,8 @@ py::dict Session::mirror(double px, double py_, double pz, double nx, double ny,
 // non-planar surface as a B-spline.
 py::dict Session::scale(double sx, double sy, double sz, double cx, double cy, double cz,
                  const std::optional<std::vector<EntityId>>& entity_ids) {
+  finite_arg("scale", "factors", sx, sy, sz);
+  finite_arg("scale", "centre", cx, cy, cz);
   OpGuard guard(in_op_);
   require_positive("scale x", sx);
   require_positive("scale y", sy);

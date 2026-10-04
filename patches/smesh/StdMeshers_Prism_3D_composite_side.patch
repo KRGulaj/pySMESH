@@ -1,0 +1,132 @@
+pySMESH: make StdMeshers_Prism_3D name the real reason it cannot mesh a prism whose side face
+has a composite horizontal side, and forget the errors of the bottom candidates it rejected
+(SMESH V9_16_0).
+
+Defect: Prism_3D reports a solid as failed with the error of a FACE that it tried as the prism
+bottom and rejected, and on a side face with a composite horizontal side it builds a mesh that
+does not follow the EDGEs, which the stale error then hides.
+
+Symptom: a straight prism on a regular n-gon, one bottom EDGE split at its midpoint, the top
+EDGE above it whole, so the wall between them is one 5-EDGE FACE (report §3 B1). With
+Regular_1D + NumberOfSegments(4), 2 on each half-EDGE, and Quadrangle_2D or MEFISTO_2D:
+n = 5 fails with "Composite 'horizontal' edges are not supported", n = 6 with "Side face #27
+has a composite top edge" (#27 is the top cap, not a side face), both "(algorithm Prism_3D)".
+Prism_3D::Compute returns true for both.
+
+Root cause, in StdMeshers_Prism_3D.cxx:
+* initPrism() finds no FACE that must be the bottom: removeQuasiQuads() accepts the caps and
+  the 5-EDGE wall as quadrangles. It then tries the FACEs one by one (:3740-3767), with
+  mySetErrorToSM = false. The true bottom (n + 1 EDGEs) is skipped by "nbFaces < 2 + nbEdges"
+  (:3758-3759); the 5-EDGE wall is rejected in getWallFaces() (:1162 for n = 5, :1251-1255 for
+  n = 6); the top cap is accepted. Each rejection stores its message in the algorithm
+  (SMESH_Algo::error) and nothing clears it. After Compute(), whatever it returned, the solid's
+  sub-mesh takes the worse of its error and the algorithm's (SMESH_subMesh.cxx:1582), and
+  checkComputeError() makes it FAILED_TO_COMPUTE (:2043-2060). The several-solid path clears
+  the error after each candidate (InitComputeError(), :993-996); this path does not.
+* With the top cap as bottom, the 5-EDGE wall has 1 EDGE on its bottom side and 2 on its top
+  side. computeWalls() meshes the top side of a wall that is not meshed yet by projecting
+  side[QUAD_BOTTOM_SIDE].grid->Edge(0) onto side[QUAD_TOP_SIDE].grid->Edge(0) only
+  (:1925-1975): the first half-EDGE gets the 4 segments of the whole bottom EDGE, the second
+  keeps its own 2. The caps then have 5 and 6 EDGEs, project2dMesh() cannot pair them, and
+  projectBottomToTop() places the top nodes by the block approach (bottomToTopTrsf is always
+  identity, GetLayersTransformation() being commented out). Measured with the stale error
+  cleared: mesh volume off the prism volume by 1.7e-5 (n = 5, Quadrangle_2D) to 1.3e-3
+  (n = 5, MEFISTO_2D) relative, 29 top cap nodes against 31 bottom ones, no vertical node
+  column. A composite bottom side, which getWallFaces() accepts when all its EDGEs are on the
+  bottom FACE, becomes a composite top side when initPrism() turns the prism upside down.
+* The search is from SMESH 9a54694a0 (2013-02-12, "Merge from V6_main 11/02/2013"); upstream
+  master at 83f8bf482 has the same code.
+
+Change, in StdMeshers_Prism_3D.cxx only:
+* getWallFaces(), first row of walls: a wall FACE that is not meshed yet and has more than one
+  EDGE on its bottom or top side is refused, "Side face #N has B EDGE(s) on its bottom side and
+  T on its top side; a composite horizontal side is not supported. Split the EDGE opposite the
+  composite side at the same points, so that both sides have the same number of EDGEs".
+* initPrism(), search for a bottom: the reason of each FACE that is not the bottom is kept,
+  "FACE #N: <its error>." or "FACE #N: not tried, it has E EDGEs and the solid F FACEs.". If a
+  bottom is found, the stored error is cleared with error( COMPERR_OK ) (not
+  InitComputeError(), which would also clear a cancel request). If none is found, the error is
+  COMPERR_BAD_SHAPE "No FACE can be the bottom of the prism." followed by those reasons; before,
+  its text was empty.
+
+Not changed: the order of the candidates and the "2 + nbEdges" filter; a wall whose FACE is
+already meshed; computeWalls() and the projections. A solid with no composite horizontal side
+on an unmeshed wall meshes as before, bit for bit, unless a rejected candidate's error used to
+fail it.
+
+diff --git a/src/StdMeshers/StdMeshers_Prism_3D.cxx b/src/StdMeshers/StdMeshers_Prism_3D.cxx
+--- a/src/StdMeshers/StdMeshers_Prism_3D.cxx
++++ b/src/StdMeshers/StdMeshers_Prism_3D.cxx
+@@ -1160,6 +1160,21 @@
+             for ( int iE = 0; iE < botSide->NbEdges(); ++iE )
+               if ( !myHelper->IsSubShape( botSide->Edge(iE), thePrism.myBottom ))
+                 return toSM( error(TCom("Composite 'horizontal' edges are not supported")));
++          }
++          // computeWalls() meshes the top side of a wall that is not meshed yet by projecting
++          // the first EDGE of its bottom side onto the first EDGE of its top side only, so a
++          // composite horizontal side gets a mesh that does not follow its EDGEs.
++          if ( !mesh->GetSubMesh( face )->IsMeshComputed() )
++          {
++            const int nbBotE = quadList.back()->side[ QUAD_BOTTOM_SIDE ].grid->NbEdges();
++            const int nbTopE = quadList.back()->side[ QUAD_TOP_SIDE    ].grid->NbEdges();
++            if ( nbBotE > 1 || nbTopE > 1 )
++              return toSM( error( COMPERR_BAD_SHAPE, TCom("Side face #") << shapeID( face )
++                                  << " has " << nbBotE << " EDGE(s) on its bottom side and "
++                                  << nbTopE << " on its top side; a composite horizontal side"
++                                  << " is not supported. Split the EDGE opposite the composite"
++                                  << " side at the same points, so that both sides have the"
++                                  << " same number of EDGEs" ));
+           }
+           if ( faceMap.Add( face ))
+           {
+@@ -3741,6 +3756,7 @@
+   {
+     bool savedSetErrorToSM = mySetErrorToSM;
+     mySetErrorToSM = false; // ignore errors in initPrism()
++    SMESH_Comment reasons; // why each FACE is not the bottom, reported if none is
+ 
+     // search among meshed FACEs
+     list< SMESH_subMesh* >::iterator sm = meshedSubMesh.begin();
+@@ -3750,21 +3766,40 @@
+       botSM             = *sm;
+       thePrism.myBottom = TopoDS::Face( botSM->GetSubShape() );
+       if ( !initPrism( thePrism, theShape3D, /*selectBottom=*/false ))
++      {
++        reasons << " FACE #" << shapeID( thePrism.myBottom ) << ": "
++                << ( _comment.empty() ? std::string( "rejected" ) : _comment ) << ".";
+         botSM = NULL;
++      }
+     }
+     // search among all FACEs
+     for ( TopExp_Explorer f( theShape3D, TopAbs_FACE ); !botSM && f.More(); f.Next() )
+     {
+       int minNbFaces = 2 + myHelper->Count( f.Current(), TopAbs_EDGE, false);
+-      if ( nbFaces < minNbFaces) continue;
++      if ( nbFaces < minNbFaces)
++      {
++        reasons << " FACE #" << shapeID( f.Current() ) << ": not tried, it has "
++                << minNbFaces - 2 << " EDGEs and the solid " << nbFaces << " FACEs.";
++        continue;
++      }
+       thePrism.Clear();
+       thePrism.myBottom = TopoDS::Face( f.Current() );
+       botSM             = myHelper->GetMesh()->GetSubMesh( thePrism.myBottom );
+       if ( !initPrism( thePrism, theShape3D, /*selectBottom=*/false ))
++      {
++        reasons << " FACE #" << shapeID( thePrism.myBottom ) << ": "
++                << ( _comment.empty() ? std::string( "rejected" ) : _comment ) << ".";
+         botSM = NULL;
++      }
+     }
+     mySetErrorToSM = savedSetErrorToSM;
+-    return botSM ? true : toSM( error( COMPERR_BAD_SHAPE ));
++    if ( botSM )
++    {
++      error( COMPERR_OK ); // forget the errors of the rejected candidates
++      return true;
++    }
++    return toSM( error( COMPERR_BAD_SHAPE,
++                        SMESH_Comment( "No FACE can be the bottom of the prism." ) << reasons ));
+   }
+ 
+   // find vertex 000 - the one with smallest coordinates (for easy DEBUG :-)

@@ -17,7 +17,6 @@
 #include <vector>
 
 #include <BRepAdaptor_Surface.hxx>
-#include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
@@ -33,6 +32,7 @@
 #include <gp_Pnt.hxx>
 
 #include "common.hpp"
+#include "shape_checks.hpp"
 
 namespace pysmesh {
 namespace {
@@ -101,12 +101,34 @@ struct VertexInfo {
   std::array<double, 3> xyz;
 };
 
-std::array<double, 6> bbox_of(const TopoDS_Shape& s) {
-  Bnd_Box box;
-  BRepBndLib::Add(s, box);
+// The six numbers of one box.
+std::array<double, 6> bbox_of(const Bnd_Box& box) {
   std::array<double, 6> b{};
   box.Get(b[0], b[1], b[2], b[3], b[4], b[5]);
   return b;
+}
+
+// The boxes of the geometry of every shape of one indexed map, in its order, computed in
+// parallel with the GIL released: not padded by the tolerance (reports D1, D2).
+std::vector<Bnd_Box> boxes_of(const TopTools_IndexedMapOfShape& map) {
+  std::vector<TopoDS_Shape> shapes;
+  shapes.reserve(static_cast<std::size_t>(map.Extent()));
+  for (int i = 1; i <= map.Extent(); ++i) {
+    shapes.push_back(map.FindKey(i));
+  }
+  py::gil_scoped_release release;
+  return shape_checks::exact_boxes(shapes);
+}
+
+// The measures of every shape of one indexed map, in its order, with the GIL released.
+std::vector<shape_checks::Measure> measures_of(const TopTools_IndexedMapOfShape& map) {
+  std::vector<TopoDS_Shape> shapes;
+  shapes.reserve(static_cast<std::size_t>(map.Extent()));
+  for (int i = 1; i <= map.Extent(); ++i) {
+    shapes.push_back(map.FindKey(i));
+  }
+  py::gil_scoped_release release;
+  return shape_checks::measures(shapes, shape_checks::kDefaultMassPrecision);
 }
 
 // ---- Shape -------------------------------------------------------------------------//
@@ -116,49 +138,56 @@ class Shape {
 
   std::shared_ptr<ShapeData> data() const { return data_; }
 
+  // Areas, volumes and lengths are integrated adaptively at the library's default
+  // precision, in parallel (shape_checks::measures). GProp's fixed rule read a lofted wing
+  // 20 % low (report D3).
   std::vector<FaceInfo> faces() const {
+    const std::vector<shape_checks::Measure> m = measures_of(data_->faces);
+    const std::vector<Bnd_Box> boxes = boxes_of(data_->faces);
     std::vector<FaceInfo> out;
     const int n = data_->faces.Extent();
     out.reserve(n);
     for (int i = 1; i <= n; ++i) {
       const TopoDS_Face& f = TopoDS::Face(data_->faces.FindKey(i));
-      GProp_GProps props;
-      BRepGProp::SurfaceProperties(f, props);
-      const gp_Pnt c = props.CentreOfMass();
+      const gp_XYZ& c = m[static_cast<std::size_t>(i - 1)].centroid;
       std::array<double, 4> uv{};
       BRepTools::UVBounds(f, uv[0], uv[1], uv[2], uv[3]);
       const BRepAdaptor_Surface surf(f);
-      out.push_back(FaceInfo{i, props.Mass(), {c.X(), c.Y(), c.Z()}, bbox_of(f), uv,
+      out.push_back(FaceInfo{i, m[static_cast<std::size_t>(i - 1)].mass,
+                             {c.X(), c.Y(), c.Z()},
+                             bbox_of(boxes[static_cast<std::size_t>(i - 1)]), uv,
                              surface_type_name(surf.GetType())});
     }
     return out;
   }
 
   std::vector<SolidInfo> solids() const {
+    const std::vector<shape_checks::Measure> m = measures_of(data_->solids);
+    const std::vector<Bnd_Box> boxes = boxes_of(data_->solids);
     std::vector<SolidInfo> out;
     const int n = data_->solids.Extent();
     out.reserve(n);
     for (int i = 1; i <= n; ++i) {
-      const TopoDS_Solid& s = TopoDS::Solid(data_->solids.FindKey(i));
-      GProp_GProps props;
-      BRepGProp::VolumeProperties(s, props);
-      const gp_Pnt c = props.CentreOfMass();
-      out.push_back(SolidInfo{i, props.Mass(), {c.X(), c.Y(), c.Z()}, bbox_of(s)});
+      const gp_XYZ& c = m[static_cast<std::size_t>(i - 1)].centroid;
+      out.push_back(SolidInfo{i, m[static_cast<std::size_t>(i - 1)].mass,
+                              {c.X(), c.Y(), c.Z()},
+                              bbox_of(boxes[static_cast<std::size_t>(i - 1)])});
     }
     return out;
   }
 
   std::vector<EdgeInfo> edges() const {
+    const std::vector<shape_checks::Measure> m = measures_of(data_->edges);
+    const std::vector<Bnd_Box> boxes = boxes_of(data_->edges);
     std::vector<EdgeInfo> out;
     const int n = data_->edges.Extent();
     out.reserve(n);
     for (int i = 1; i <= n; ++i) {
       const TopoDS_Edge& e = TopoDS::Edge(data_->edges.FindKey(i));
-      GProp_GProps props;
-      BRepGProp::LinearProperties(e, props);
       double first = 0.0, last = 0.0;
       BRep_Tool::Range(e, first, last);
-      out.push_back(EdgeInfo{i, props.Mass(), bbox_of(e), {first, last}});
+      out.push_back(EdgeInfo{i, m[static_cast<std::size_t>(i - 1)].mass,
+                             bbox_of(boxes[static_cast<std::size_t>(i - 1)]), {first, last}});
     }
     return out;
   }
@@ -179,7 +208,7 @@ class Shape {
   // Exists for the host application's gmsh-tag <-> OCCT-face tie-break (Phase 2 §5). GIL released.
   py::array_t<double> face_distance(int face_id, const py::object& points_obj) const {
     const TopoDS_Face face = data_->face(face_id);  // validates face_id
-    Array2d points = as_2d_f64(points_obj, "points", 3);
+    Array2d points = as_2d_f64(points_obj, "Shape.face_distance", "points", 3);
     const py::ssize_t n = points.shape(0);
     py::array_t<double> out(n);
 
@@ -244,10 +273,11 @@ class Shape {
   // already exposes (report §4.5 persistent-naming fallback, §8.2 marker remap). GIL released
   // for the numeric sweep.
   py::array_t<std::int32_t> match_faces(const py::object& centroids_obj, double tol) const {
+    require_finite("Shape.match_faces", "tol", tol);
     if (!(tol > 0.0)) {
       throw PysmeshError("match_faces: tol must be > 0 (got " + std::to_string(tol) + ").");
     }
-    Array2d centroids = as_2d_f64(centroids_obj, "centroids", 3);
+    Array2d centroids = as_2d_f64(centroids_obj, "Shape.match_faces", "centroids", 3);
     const py::ssize_t q = centroids.shape(0);
 
     // Precompute face centroids (OCCT calls stay under the GIL, ahead of the numeric loop).
@@ -296,18 +326,32 @@ class Shape {
 };
 
 // ---- load_brep ---------------------------------------------------------------------//
-Shape load_brep(const py::bytes& data) {
+// Every solid is checked for its inside, as Session.add_brep does (report V3); with
+// inside_out="reverse" an inside-out solid is reversed instead of refused.
+Shape load_brep(const py::bytes& data, const std::string& inside_out) {
+  const bool reverse = shape_checks::reverse_inside_out("load_brep", inside_out);
   const std::string buffer = data;  // copy the bytes into a std::string
+  require_brep_header(buffer, "BREP read produced a null shape (empty or malformed data)");
   std::istringstream stream(buffer);
   TopoDS_Shape shape;
   BRep_Builder builder;
+  std::vector<shape_checks::InsideOutSolid> wrong;
   try {
     BRepTools::Read(shape, stream, builder);
+    if (!shape.IsNull()) {
+      wrong = shape_checks::inside_out_solids(shape);
+    }
   } catch (const std::exception& e) {
     throw PysmeshError(std::string("BREP read failed: ") + e.what());
   }
   if (shape.IsNull()) {
     throw PysmeshError("BREP read produced a null shape (empty or malformed data)");
+  }
+  if (!wrong.empty()) {
+    if (!reverse) {
+      throw PysmeshError(shape_checks::inside_out_refusal("load_brep", wrong));
+    }
+    shape = shape_checks::reverse_solids(shape, wrong);
   }
   return Shape(std::make_shared<ShapeData>(shape));
 }
@@ -319,8 +363,17 @@ std::shared_ptr<ShapeData> shape_data_of(const py::object& shape_obj) {
   return shape_obj.cast<Shape&>().data();
 }
 
+// Exposed to mesher_viscous.cpp: a Shape on a shape OCCT built, with no BREP round trip, so
+// a mesher built on it meshes that very shape (report L4).
+py::object shape_object_of(const TopoDS_Shape& shape) {
+  return py::cast(Shape(std::make_shared<ShapeData>(shape)));
+}
+
 void bind_shape(py::module_& m) {
-  py::class_<FaceInfo>(m, "FaceInfo")
+  py::class_<FaceInfo>(m, "FaceInfo",
+                       "One face of a Shape, as Shape.faces() lists it: its 1-based id, its "
+                       "area (adaptive, relative precision 1e-6), centroid, the box of its "
+                       "geometry, its UV bounds and the type of its surface.")
       .def_readonly("id", &FaceInfo::id)
       .def_readonly("area", &FaceInfo::area)
       .def_property_readonly(
@@ -335,7 +388,10 @@ void bind_shape(py::module_& m) {
                " area=" + std::to_string(f.area) + ">";
       });
 
-  py::class_<SolidInfo>(m, "SolidInfo")
+  py::class_<SolidInfo>(m, "SolidInfo",
+                        "One solid of a Shape, as Shape.solids() lists it: its 1-based id, "
+                        "its volume (adaptive, relative precision 1e-6), centroid and the box "
+                        "of its geometry.")
       .def_readonly("id", &SolidInfo::id)
       .def_readonly("volume", &SolidInfo::volume)
       .def_property_readonly(
@@ -347,7 +403,10 @@ void bind_shape(py::module_& m) {
                " volume=" + std::to_string(s.volume) + ">";
       });
 
-  py::class_<EdgeInfo>(m, "EdgeInfo")
+  py::class_<EdgeInfo>(m, "EdgeInfo",
+                       "One edge of a Shape, as Shape.edges() lists it: its 1-based id, its "
+                       "length (adaptive, relative precision 1e-6), the box of its geometry "
+                       "and the parameter bounds of its curve.")
       .def_readonly("id", &EdgeInfo::id)
       .def_readonly("length", &EdgeInfo::length)
       .def_property_readonly("bbox",
@@ -359,7 +418,9 @@ void bind_shape(py::module_& m) {
                " length=" + std::to_string(e.length) + ">";
       });
 
-  py::class_<VertexInfo>(m, "VertexInfo")
+  py::class_<VertexInfo>(m, "VertexInfo",
+                         "One vertex of a Shape, as Shape.vertices() lists it: its 1-based "
+                         "id and its position.")
       .def_readonly("id", &VertexInfo::id)
       .def_property_readonly("xyz",
                              [](const VertexInfo& v) { return vec1d(v.xyz.data(), 3); })
@@ -367,7 +428,11 @@ void bind_shape(py::module_& m) {
         return "<VertexInfo id=" + std::to_string(v.id) + ">";
       });
 
-  py::class_<Shape>(m, "Shape")
+  py::class_<Shape>(m, "Shape",
+                    "A shape read from BREP bytes by load_brep. It lists its unique solids, "
+                    "faces, edges and vertices with 1-based ids in TopExp map order, and "
+                    "answers point-to-face distance, face adjacency and face matching "
+                    "queries on them.")
       .def("solids", &Shape::solids,
            "List every unique solid with id (1-based), volume, centroid, bbox.")
       .def("faces", &Shape::faces,
@@ -385,8 +450,10 @@ void bind_shape(py::module_& m) {
            "Nearest face by centroid for each of Q query points (Q,3): (Q,) int32 1-based face "
            "ids, -1 where the nearest face centroid is farther than tol. tol must be > 0.");
 
-  m.def("load_brep", &load_brep, py::arg("data"),
-        "Read a BREP shape from in-memory bytes. Raises on parse failure or null shape.");
+  m.def("load_brep", &load_brep, py::arg("data"), py::arg("inside_out") = "raise",
+        "Read a BREP shape from in-memory bytes. Raises on parse failure, a null shape, or "
+        "an inside-out solid (the point at infinity inside it and a negative volume); with "
+        "inside_out=\"reverse\" such a solid is reversed instead.");
 }
 
 }  // namespace pysmesh

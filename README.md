@@ -257,8 +257,8 @@ take and return BREP bytes and NumPy arrays, and key every result to the
 same 1-based ordinals `Shape.faces()` / `.edges()` / `.solids()` use.
 
 - **`read_step_xde` / `write_step_xde`**: STEP import/export through OCCT's
-  XDE stack, preserving product names, per-face colours, and the file's
-  length unit.
+  XDE stack, preserving product names, per-face names and colours, and the
+  file's length unit. `Session.write_step` names faces by session id.
 - **`read_iges` / `write_iges`**: IGES import/export, on the same contract.
 
   Both readers return the geometry in the file's native unit, plus
@@ -305,11 +305,11 @@ igs.length_unit                              # 0.001 for an MM file, 0.0254 for 
 pysmesh.write_iges(igs.brep, unit=igs.unit_name)
 ```
 
-`read_iges` takes a path, not bytes. OCCT ships no IGES stream reader
-(`IGESSelect_WorkLibrary` does not override `IFSelect_WorkLibrary::ReadStream`).
-Reading one also makes OCCT print `Total number of loaded entities N.` to
-stdout. That is an unconditional info-level message inside `IGESFile_Read`,
-and OCCT gives no switch to silence it.
+`read_iges` takes the content as bytes or a path, like `read_step_xde`. OCCT
+ships no IGES stream reader, so bytes go through a temporary file.
+No call writes to stdout or stderr: pySMESH removes the console printer from the
+default messenger of its private copy of OCCT, so the transfer banners and the
+IGES entity count are not printed.
 
 See `src/pysmesh/_core.pyi` for the full typed API. `mypy --strict`
 type-checks against it.

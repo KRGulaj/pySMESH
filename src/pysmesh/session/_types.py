@@ -287,6 +287,11 @@ class HistoryDelta:
             refusing to commit a shape that is less invalid than before would make those
             operations useless on exactly the shapes they exist for. There, ``False`` is the
             answer to act on, not an error.
+        warnings: What the operation reported without failing, one entry per warning.
+            For a boolean these are OCCT's warning keys
+            (``BOPAlgo_Options::DumpWarnings``), for example
+            ``BOPAlgo_AlertAcquiredSelfIntersection``. Empty when there is nothing to
+            report.
     """
 
     op_index: int
@@ -297,6 +302,7 @@ class HistoryDelta:
     split: NDArray[np.int64]
     merged: NDArray[np.int64]
     valid: bool | None
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -310,10 +316,13 @@ class EntityTable:
     Attributes:
         kind: The entity kind this table covers.
         ids: (N,) int64, ascending.
-        measure: (N,) float64 — volume for solids, area for faces, length for edges, 0.0 for
-            vertices. Summed over every shape a split entity denotes.
+        measure: (N,) float64 — volume for solids, area for faces, length for edges, 0.0
+            for vertices. Summed over every shape a split entity denotes. Integrated
+            adaptively to the default relative precision 1e-6, as
+            :meth:`Session.mass_properties` does without a precision.
         centroid: (N, 3) float64, measure-weighted over a split entity's shapes.
         bbox: (N, 6) float64 — xmin, ymin, zmin, xmax, ymax, zmax, covering every shape.
+            The box of the geometry, as in :class:`BoundsTable`.
         shape_count: (N,) int64 — how many shapes each entity denotes; greater than one
             after a split.
     """
@@ -417,6 +426,11 @@ class BoundsTable:
     Deliberately separate from :class:`EntityTable`: a bounding box costs a fraction of a
     mass property, and a caller culling or spatially indexing a model needs only the box.
 
+    Each box is the box of the geometry, not padded by the shape tolerance: a
+    straight edge's box is the box of its two end points. A B-spline or Bezier curve or
+    surface is bounded by its own points, not by its control polygon, and OCCT pads
+    that box by 1e-7 (``Precision::Confusion()``).
+
     Attributes:
         kind: The entity kind this table covers.
         ids: (N,) int64, ascending.
@@ -447,8 +461,8 @@ class MassTable:
             a spline GProp reported 9e-9 on the area while the area still moved 1e-6 as
             the precision tightened. A value above the precision means the rule stopped
             before it reached it. Summed over a split entity's shapes, weighted by their
-            measures. 0.0 for a vertex. NaN without a precision: the fixed rule reports no
-            estimate.
+            measures. 0.0 for a vertex. Always finite: the rule is adaptive with or
+            without an explicit precision.
     """
 
     ids: NDArray[np.int64]
@@ -752,11 +766,19 @@ class Handoff:
     outer walls share a centroid exactly, so a centroid-keyed map collides on one of the most
     ordinary features in CAD, and collides *silently*.
 
-    **The map is verified to be a bijection before it is handed over.** Two ordinary session
-    states break it — a same-domain merge leaves several live ids on one face, and a split
-    leaves one live id on several — and either makes "this id is that tag" ambiguous.
+    **By default the map is verified to be a bijection before it is handed over.**
+    Ordinary session states break it: a same-domain merge leaves several live ids on one
+    face, a boolean leaves both operands' ids on every sub-shape they share, and a split
+    leaves one live id on several. Each makes "this id is that tag" ambiguous, and
     :meth:`Session.export_handoff` raises rather than returning a map that quietly loses
     some of the caller's names.
+
+    **With** ``allow_aliases=True`` **the map is many-to-one instead.** Each ordinal
+    carries its sub-shape's label, the lowest live id that denotes it, so a split id
+    appears at every ordinal of its pieces. :attr:`face_ids_of` (and the same for the
+    other kinds) lists, per ordinal, every live id that denotes the sub-shape, label
+    first. Nothing is lost: an id resolves to every ordinal whose tuple lists it, and
+    those are exactly the sub-shapes it denotes, however the ids overlap.
 
     What remains the consumer's half: enumerate the imported shape in the same per-kind
     order, check the counts agree, and pair by position. This library cannot verify the other
@@ -768,6 +790,12 @@ class Handoff:
         face_id: (F,) int64 — the entity id of each face, in traversal order.
         edge_id: (E,) int64 — the entity id of each edge, in traversal order.
         vertex_id: (V,) int64 — the entity id of each vertex, in traversal order.
+        solid_ids_of: Per solid ordinal, every live id that denotes the solid, the
+            label (as in ``solid_id``) first, then ascending. One id each for a
+            bijection, the only map the default export returns.
+        face_ids_of: As ``solid_ids_of``, per face ordinal.
+        edge_ids_of: As ``solid_ids_of``, per edge ordinal.
+        vertex_ids_of: As ``solid_ids_of``, per vertex ordinal.
     """
 
     brep: bytes
@@ -775,6 +803,10 @@ class Handoff:
     face_id: NDArray[np.int64]
     edge_id: NDArray[np.int64]
     vertex_id: NDArray[np.int64]
+    solid_ids_of: tuple[tuple[EntityId, ...], ...]
+    face_ids_of: tuple[tuple[EntityId, ...], ...]
+    edge_ids_of: tuple[tuple[EntityId, ...], ...]
+    vertex_ids_of: tuple[tuple[EntityId, ...], ...]
 
 
 def _delta(raw: dict[str, object]) -> HistoryDelta:
@@ -788,6 +820,7 @@ def _delta(raw: dict[str, object]) -> HistoryDelta:
         split=cast("NDArray[np.int64]", raw["split"]),
         merged=cast("NDArray[np.int64]", raw["merged"]),
         valid=cast("bool | None", raw["valid"]),
+        warnings=tuple(cast("list[str]", raw["warnings"])),
     )
 
 
@@ -799,6 +832,17 @@ def _ids(values: Sequence[EntityId]) -> list[int]:
             raise PysmeshError(f"Entity ids must be integers (got {v!r}).")
         out.append(int(v))
     return out
+
+
+def _finite(where: str, name: str, value: float) -> float:
+    """Refuse a NaN or an infinity, as the native argument checks do (report F1).
+
+    For an argument the wrapper converts before the native call, such as an angle in
+    degrees, so that the refusal names the argument the caller gave.
+    """
+    if not math.isfinite(value):
+        raise PysmeshError(f"{where}: {name} must be a finite number (got {value}).")
+    return value
 
 
 def _points(name: str, values: Points) -> NDArray[np.float64]:

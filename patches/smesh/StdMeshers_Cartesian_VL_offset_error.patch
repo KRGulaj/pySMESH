@@ -1,0 +1,83 @@
+pySMESH: Cartesian_3D with viscous layers says why it cannot offset the shape (SMESH V9_16_0;
+applies after StdMeshers_Cartesian_VL_offset_makers_leak.patch and
+StdMeshers_Cartesian_3D_offset_small_cells.patch).
+
+Defect: when the shape cannot be offset by the layer thickness, the compute fails with
+"SOLID 1: no message", or with its message cut short.
+
+Symptom: a 2 x 2 x 2 block with a bore of radius 0.4 on its axis, layers 0.3 thick on every
+face (3 layers, factor 1.2), grid spacing 0.25: "SOLID 1: no message". At 0.29 it meshes.
+
+Root cause, measured with an instrumented build: offset by 0.3, the bore reaches radius 0.7
+and the walls come to 0.7 from its axis, so the offset surfaces touch. BRepOffset_MakeOffset
+then reports IsDone with BRepOffset_NoError and a null shape (at 0.29: a valid solid of
+volume 0.739). ViscousBuilder::MakeOffsetSolid (StdMeshers_Cartesian_VL.cxx:913-957) checks
+only IsDone and hands the null shape on with no error text; its glue of several offset
+solids (:963-969) is not checked either. Compute then throws SALOME_Exception with that text
+(StdMeshers_Cartesian_3D.cxx:154). SMESH_subMesh cuts 7 characters off the text of a
+SALOME_Exception, for the "Salome " of a prefix (SMESH_subMesh.cxx:1615-1620), but the
+std::string constructor of SALOME_Exception adds no prefix, so even a set message lost its
+first word.
+
+Change:
+* StdMeshers_Cartesian_VL.cxx: MakeOffsetSolid sets an error for an empty offset result
+  ("... the layers are too thick for the shape, so that offset surfaces meet ...") and for a
+  failed glue, and frees the maker it made.
+* StdMeshers_Cartesian_3D.cxx: Compute reports the offset error with SMESH_Algo::error
+  instead of throwing it.
+
+Not changed: every shape that can be offset, and the mesh of every case that meshes.
+diff --git a/src/StdMeshers/StdMeshers_Cartesian_VL.cxx b/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
+--- a/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
++++ b/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
+@@ -931,6 +931,17 @@
+     }
+ 
+     makeOffset->MakeOffsetShape();
++    if ( makeOffset->IsDone() && makeOffset->Shape().IsNull() )
++    {
++      // pySMESH: BRepOffset_MakeOffset can report success with an empty result. The null
++      // shape was handed on, and Compute threw it with an empty message: "no message".
++      theError = SMESH_Comment( "Viscous layers: the solid offset inward by the total "
++                                "thickness " ) << -offset << " is empty (BRepOffset_MakeOffset "
++        "reports success with no shape): the layers are too thick for the shape, so that "
++        "offset surfaces meet. Use a smaller total thickness.";
++      delete makeOffset;
++      return TopoDS_Shape();
++    }
+     if ( makeOffset->IsDone() )
+     {
+       shrinkBodies.push_back( makeOffset->Shape() );
+@@ -974,6 +985,15 @@
+       _solidCompound.AddArgument( solid );
+ 
+     _solidCompound.Perform();
++    if ( _solidCompound.HasErrors() || _solidCompound.Shape().IsNull() )
++    {
++      // pySMESH: a failed glue gave a null shape and no error text, as above.
++      theError = SMESH_Comment( "Viscous layers: the solids offset inward by the total "
++                                "thickness " ) << -offset << " could not be glued together "
++        "(BOPAlgo_Builder failed): the layers are too thick for the shape, or the offset "
++        "solids meet. Use a smaller total thickness.";
++      return TopoDS_Shape();
++    }
+     return _solidCompound.Shape();
+   }
+   else
+diff --git a/src/StdMeshers/StdMeshers_Cartesian_3D.cxx b/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
+--- a/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
++++ b/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
+@@ -152,7 +152,12 @@
+     std::string error;
+     TopoDS_Shape offsetShape = builder.MakeOffsetShape( theShape, theMesh, error );
+     if ( offsetShape.IsNull() )
+-      throw SALOME_Exception( error );
++      // pySMESH: the algorithm's own error. SMESH_subMesh cuts 7 characters off the text of
++      // a SALOME_Exception, for the "Salome " of a prefix that the std::string constructor
++      // does not add, so this message lost its first word (and was empty in one case).
++      return this->error( COMPERR_ALGO_FAILED,
++                          error.empty() ? std::string( "Viscous layers: the offset shape is empty" )
++                                        : error );
+     if ( _computeCanceled ) // pySMESH: canceled during the offset step
+       return false;
+ 

@@ -9,6 +9,13 @@
 // installs the typed exception (PysmeshError) with its .details / .face_ids attributes.
 
 #include <exception>
+#include <string>
+
+#include <Message.hxx>
+#include <Message_Messenger.hxx>
+#include <Message_PrinterOStream.hxx>
+#include <Standard_Failure.hxx>
+#include <Utils_SALOME_Exception.hxx>
 
 #include "common.hpp"
 
@@ -44,11 +51,21 @@ void raise_as(py::handle type, const PysmeshError& e) {
   PyErr_SetObject(type.ptr(), exc.ptr());
 }
 
+// An exception's message, or a placeholder when it has none.
+std::string text_of(const char* what) {
+  return what != nullptr && what[0] != '\0' ? std::string(what) : std::string("(no message)");
+}
+
 }  // namespace
 
 void register_error_type(py::module_& m) {
-  py::object error_type = py::reinterpret_steal<py::object>(
-      PyErr_NewException("pysmesh._core.PysmeshError", PyExc_RuntimeError, nullptr));
+  py::object error_type = py::reinterpret_steal<py::object>(PyErr_NewExceptionWithDoc(
+      "pysmesh._core.PysmeshError",
+      "Every failure of the library: a refused input, an error of OCCT or SMESH, or an "
+      "invalid result. The message names the operation, the entity and the reason; details "
+      "holds the per-sub-shape text of a failed mesh compute and face_ids the faces that "
+      "failed. A subclass of RuntimeError.",
+      PyExc_RuntimeError, nullptr));
   m.add_object("PysmeshError", error_type);  // module now owns a reference
   g_error_type = error_type;                  // borrowed handle for the translator
 
@@ -56,8 +73,11 @@ void register_error_type(py::module_& m) {
   // rather than a second one: code that only cares that the operation did not happen keeps
   // catching PysmeshError, and code that must tell "the user stopped it" from "it failed"
   // catches this instead.
-  py::object cancelled_type = py::reinterpret_steal<py::object>(PyErr_NewException(
-      "pysmesh._core.PysmeshCancelled", error_type.ptr(), nullptr));
+  py::object cancelled_type = py::reinterpret_steal<py::object>(PyErr_NewExceptionWithDoc(
+      "pysmesh._core.PysmeshCancelled",
+      "An operation that the caller's cancel predicate stopped. A subclass of PysmeshError; "
+      "the state the operation worked on is left as it was before the call.",
+      error_type.ptr(), nullptr));
   m.add_object("PysmeshCancelled", cancelled_type);
   g_cancelled_type = cancelled_type;
 
@@ -72,14 +92,42 @@ void register_error_type(py::module_& m) {
       raise_as(g_cancelled_type, e);
     } catch (const PysmeshError& e) {
       raise_as(g_error_type, e);
+    } catch (const Standard_Failure& e) {
+      // A safety net, not the contract (report A2): each operation converts what OCCT and
+      // SMESH throw, naming itself. An exception that still arrives here comes from a call
+      // that conversion missed, and it reaches the caller as PysmeshError all the same.
+      raise_as(g_error_type, PysmeshError(std::string("pySMESH: OCCT raised ") +
+                                          e.ExceptionType() + ": " + text_of(e.what())));
+    } catch (const SALOME_Exception& e) {
+      raise_as(g_error_type,
+               PysmeshError(std::string("pySMESH: SMESH raised SALOME_Exception: ") +
+                            text_of(e.what())));
     }
   });
 }
 
 }  // namespace pysmesh
 
+namespace {
+
+// OCCT sends its information messages (the transfer banners of the STEP and IGES writers,
+// the entity count of the IGES reader) to Message::DefaultMessenger(), whose default
+// printer writes to std::cout (report A4). OCCT is private to _core, so removing that
+// printer silences only this copy of OCCT. The messages are not routed to Python's logging
+// instead: OCCT can send them from its worker threads (OSD_Parallel), and a printer that
+// takes the GIL there could deadlock against a caller that holds the GIL while it waits
+// for those workers.
+void silence_occt_messages() {
+  Message::DefaultMessenger()->RemovePrinters(STANDARD_TYPE(Message_PrinterOStream));
+}
+
+}  // namespace
+
 PYBIND11_MODULE(_core, m) {
-  m.doc() = "pySMESH native core: SMESH ViscousLayers bindings (Tier-1).";
+  silence_occt_messages();
+  m.doc() =
+      "pySMESH native core: SALOME SMESH meshing, Open CASCADE geometry operations and the "
+      "Session, statically linked. Private to the pysmesh package, which wraps it.";
   pysmesh::register_error_type(m);
   pysmesh::bind_shape(m);
   pysmesh::bind_mesh(m);

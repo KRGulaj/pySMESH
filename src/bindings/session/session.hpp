@@ -189,6 +189,7 @@
 
 #include "common.hpp"
 #include "progress.hpp"
+#include "shape_checks.hpp"
 
 namespace pysmesh {
 namespace session {
@@ -325,6 +326,10 @@ struct Delta {
   // The BRepCheck_Analyzer verdict on the shape this operation built, when one was taken.
   // Empty means the operation built nothing to check, or the session runs unvalidated.
   std::optional<bool> valid;
+
+  // What the operation reported without failing: OCCT's warning keys for a boolean, one per
+  // line of BOPAlgo_Options::DumpWarnings. Empty when there is nothing to report.
+  std::vector<std::string> warnings;
 };
 
 // ---- Small helpers ------------------------------------------------------------------ //
@@ -397,111 +402,13 @@ inline void append_unique(std::vector<TopoDS_Shape>& dst, const TopoDS_Shape& s)
   dst.push_back(s);
 }
 
-// GProp's adaptive rule falls back to its fixed rule for any Eps above 1e-3
-// (BRepGProp.hxx: "if Eps > 0.001 algorithm performs non-adaptive integration").
-constexpr double kAdaptiveEpsCap = 1e-3;
+// GProp's adaptive rule cap, the enclosed volume and its sign check live in shape_checks,
+// which the stateless module shares.
+using shape_checks::kAdaptiveEpsCap;
 
-// The measure of one shape by its own kind, with GProp's fixed Gauss rule. Exact on analytic
-// geometry; on a face trimmed by an intersection curve, or on a free-form edge, it is not.
-// Session.mass_properties integrates adaptively instead when the caller names a precision.
-inline double measure_of(const TopoDS_Shape& s) {
-  GProp_GProps props;
-  switch (s.ShapeType()) {
-    case TopAbs_SOLID:
-      BRepGProp::VolumeProperties(s, props);
-      return props.Mass();
-    case TopAbs_FACE:
-      BRepGProp::SurfaceProperties(s, props);
-      return props.Mass();
-    case TopAbs_EDGE:
-      BRepGProp::LinearProperties(s, props);
-      return props.Mass();
-    default:
-      return 0.0;
-  }
-}
-
-// Centroid of a shape. For a vertex this is the point itself; GProp's centre of mass is
-// undefined for a zero-measure shape, so the vertex case is handled from the bounding box,
-// which is exact for a point.
-inline std::array<double, 3> centroid_of(const TopoDS_Shape& s) {
-  if (s.ShapeType() == TopAbs_VERTEX) {
-    Bnd_Box box;
-    BRepBndLib::Add(s, box);
-    double a = 0, b = 0, c = 0, d = 0, e = 0, f = 0;
-    box.Get(a, b, c, d, e, f);
-    return {0.5 * (a + d), 0.5 * (b + e), 0.5 * (c + f)};
-  }
-  GProp_GProps props;
-  switch (s.ShapeType()) {
-    case TopAbs_SOLID:
-      BRepGProp::VolumeProperties(s, props);
-      break;
-    case TopAbs_FACE:
-      BRepGProp::SurfaceProperties(s, props);
-      break;
-    default:
-      BRepGProp::LinearProperties(s, props);
-      break;
-  }
-  const gp_Pnt p = props.CentreOfMass();
-  return {p.X(), p.Y(), p.Z()};
-}
-
-// The volume a solid encloses, integrated precisely enough to trust its sign, and the least
-// volume it must enclose to have an inside at all.
-struct EnclosedVolume {
-  double volume = 0.0;
-  double area = 0.0;
-  // eps x area, eps = Precision::Confusion(). A solid enclosing no more than this has, on
-  // average, two sides closer than the distance at which OCCT treats two points as one.
-  double tolerance = 0.0;
-};
-
-// What a solid-making operation checks before it commits a solid: BRepCheck_Analyzer accepts
-// a solid whose shell bounds its complement, so it cannot be the check.
-//
-// The volume is integrated with GProp's adaptive rule, because the fixed rule can get its
-// sign wrong. It integrates each face about a point near the shape, so a face contributes up
-// to D x its area / 3, D the bounding-box diagonal, and the contributions cancel down to the
-// volume. A relative error e on them moves the volume by up to e x D x A / 3, while a sheet
-// of thickness t encloses t x A / 2, so the sign can go when t < 2 e D / 3. The fixed rule's
-// area error on one face of the production assembly was 26 %.
-//
-// The integral is taken in two stages, because only the verdict against the tolerance
-// matters, and a tight precision costs: on the assembly's 436-face solid, 6.6 s at the
-// precision below against 1.2 s at kAdaptiveEpsCap.
-//
-//   * First at kAdaptiveEpsCap. With e the larger of that and the error GProp reports, the
-//     volume is settled when it clears the tolerance by more than e x D x A / 3. Over the
-//     assembly's 117 solids, the real error at this stage was at most 1/60 of that bound, and
-//     116 of them settle here.
-//   * Otherwise at the precision the defeature check derives: e x D x A / 3 set to a tenth of
-//     eps x A gives e = 0.3 x eps / D, so the verdict at the tolerance is the volume's own.
-inline EnclosedVolume enclosed_volume(const TopoDS_Shape& solid) {
-  const double eps = Precision::Confusion();
-  EnclosedVolume out;
-  GProp_GProps surface;
-  BRepGProp::SurfaceProperties(solid, surface);
-  out.area = surface.Mass();
-  out.tolerance = eps * out.area;
-  Bnd_Box box;
-  BRepBndLib::Add(solid, box);
-  const double diagonal = std::max(std::sqrt(box.SquareExtent()), eps);
-  // The most the faces' contributions can add up to, whatever cancels between them.
-  const double lever = diagonal * out.area / 3.0;
-  const double tight = std::min(0.3 * eps / diagonal, kAdaptiveEpsCap);
-  for (const double precision : {kAdaptiveEpsCap, tight}) {
-    GProp_GProps volume;
-    const double reached = BRepGProp::VolumeProperties(solid, volume, precision);
-    out.volume = volume.Mass();
-    if (std::abs(out.volume) > out.tolerance + std::max(precision, reached) * lever ||
-        precision <= tight) {
-      break;
-    }
-  }
-  return out;
-}
+using shape_checks::EnclosedVolume;
+using shape_checks::enclosed_volume;
+using shape_checks::kSignDeflection;
 
 // A caller-supplied point list: (N, 3) float64, C-contiguous. Forcecast so a list of tuples
 // or a float32 array is accepted without the caller having to convert.
@@ -519,6 +426,8 @@ inline std::vector<gp_Pnt> points_of(const char* op, const char* argname,
                        std::to_string(a.shape(0)) + ").");
   }
   const double* p = a.data();
+  require_finite(std::string("Session.") + op, argname, p,
+                 static_cast<std::size_t>(a.shape(0)), 3);
   std::vector<gp_Pnt> out;
   out.reserve(static_cast<std::size_t>(a.shape(0)));
   for (py::ssize_t i = 0; i < a.shape(0); ++i) {
@@ -536,6 +445,8 @@ inline std::vector<double> scalars_of(const char* op, const char* argname,
                        " must be a (N,) array of parameters.");
   }
   const double* p = a.data();
+  require_finite(std::string("Session.") + op, argname, p,
+                 static_cast<std::size_t>(a.shape(0)), 1);
   std::vector<double> out;
   out.reserve(static_cast<std::size_t>(a.shape(0)));
   for (py::ssize_t i = 0; i < a.shape(0); ++i) {
@@ -547,7 +458,18 @@ inline std::vector<double> scalars_of(const char* op, const char* argname,
 // A direction from raw components, rejecting the zero vector loudly. gp_Dir's own
 // constructor raises Standard_ConstructionError, which would surface as an opaque OCCT
 // exception rather than a message naming the argument.
+// The F1 rule (common.hpp, require_finite) for a session operation's float argument, named
+// as the Python API names it.
+inline void finite_arg(const char* op, const char* name, double v) {
+  require_finite(std::string("Session.") + op, name, v);
+}
+
+inline void finite_arg(const char* op, const char* name, double x, double y, double z) {
+  require_finite(std::string("Session.") + op, name, x, y, z);
+}
+
 inline gp_Dir direction_of(const char* op, const char* argname, double x, double y, double z) {
+  require_finite(std::string("Session.") + op, argname, x, y, z);
   const gp_Vec v(x, y, z);
   if (v.Magnitude() <= 0.0) {
     throw PysmeshError(std::string("Session.") + op + ": " + argname +
@@ -688,8 +610,8 @@ class Session {
   // ShapeUpgrade_RemoveInternalWires::Perform no Message_ProgressRange to hand them. They
   // take neither rather than accepting one and ignoring it.
 
-  py::dict add_brep(const py::bytes& data, const py::object& progress,
-                    const py::object& cancel);
+  py::dict add_brep(const py::bytes& data, const std::string& inside_out,
+                    const py::object& progress, const py::object& cancel);
 
   py::dict add_box(double dx, double dy, double dz, double ox, double oy, double oz);
 
@@ -976,7 +898,20 @@ class Session {
 
   // ---- queries ---------------------------------------------------------------------- //
 
-  py::array_t<std::int64_t> entities(const std::string& kind) const;
+  // Live ids of one kind, ascending. With `distinct`, one id per shape of that kind in the
+  // root: its label, the lowest live id that denotes it (label_of), each label once. An
+  // operation that merges shapes carries every input id onto the merged one (report C5),
+  // so without `distinct` such a shape is listed once per id.
+  py::array_t<std::int64_t> entities(const std::string& kind, bool distinct) const;
+
+  // Every shape of one kind that more than one live id denotes, as the ascending list of
+  // those ids, label first; the lists in ascending order of their labels.
+  py::list alias_groups(const std::string& kind) const;
+
+  // Per ordinal of one kind in the root, in the order a reader of brep() enumerates them:
+  // every live id that denotes that sub-shape, ascending (report C4). A merged sub-shape
+  // lists all its ids; a split id appears in the list of each of its pieces.
+  py::list ordinal_ids(const std::string& kind) const;
 
   std::string entity_kind(EntityId id) const;
 
@@ -1167,8 +1102,13 @@ class Session {
   // states break it, both reachable and both legitimate: a merge leaves several live ids on
   // one shape, and a split leaves one live id on several. Either makes "this id is that tag"
   // ambiguous, so the export fails loud naming the ids rather than handing over a map that
-  // silently loses some of them.
-  py::dict export_handoff() const;
+  // silently loses some of them. A boolean leaves the operands' ids on the shapes they share.
+  //
+  // allow_aliases (report C2, amendment 8): the merge is not refused. Each ordinal carries
+  // its shape's label, the lowest live id (label_of), so a split id appears at every ordinal
+  // of its pieces, and "<KIND>_ids_of" lists, per ordinal, every live id of that shape with
+  // the label first. An id resolves to every ordinal that lists it, which is exact.
+  py::dict export_handoff(bool allow_aliases) const;
 
   // ---- names ------------------------------------------------------------------------ //
 
@@ -1473,6 +1413,17 @@ class Session {
   static TopoDS_Wire wire_over(const char* op, const std::vector<TopoDS_Shape>& edges,
                                const std::vector<TopoDS_Shape>& owners);
 
+  // The edges with their near-coincident ends welded, for BRepBuilderAPI_MakeWire's list
+  // form (report M2). That form joins end vertices within the sum of their tolerances and
+  // puts each group's new vertex at BRepLib::BoundingVertex of the group, which for ends at
+  // two different points is the end that comes first in an order keyed by TShape address
+  // (BRepLib_MakeWire_1.cxx, CollectCoincidentVertices): the face differed from process to
+  // process. Here each group whose ends are not all at one point is joined first, at the end
+  // that comes first in the given edge order (each edge's first vertex before its last),
+  // with a tolerance that covers every end of the group. Ends that share a vertex or lie at
+  // one point are left alone, so those edges reach OCCT unchanged.
+  static std::vector<TopoDS_Shape> weld_near_ends(const std::vector<TopoDS_Shape>& edges);
+
   // A wire over a whole body, for the operations that sweep along or across one.
   static TopoDS_Wire wire_of_body(const char* op, const char* argname,
                                   const TopoDS_Shape& body);
@@ -1498,7 +1449,14 @@ class Session {
   // information.
   py::dict commit(const std::vector<TopoDS_Shape>& bodies,
                   const Handle(BRepTools_History) & history, const char* op_name,
-                  const TopoDS_Shape& built, Validation mode = Validation::Strict);
+                  const TopoDS_Shape& built, Validation mode = Validation::Strict,
+                  const std::vector<std::string>& warnings = {});
+
+  // The refusal of a result BRepCheck_Analyzer rejects (report A7): each status it reports,
+  // on which sub-shape, and the live ids that sub-shape comes from through `hist`. The faces
+  // go on face_ids: the rejected faces, and the faces holding a rejected wire, edge or vertex.
+  [[noreturn]] void refuse_invalid(const char* op_name, const TopoDS_Shape& built,
+                                   const Handle(BRepTools_History) & hist) const;
 
   Delta carry_registry(const TopoDS_Shape& new_root, const Handle(BRepTools_History) & hist,
                        std::int64_t op_index);

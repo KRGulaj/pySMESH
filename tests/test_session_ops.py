@@ -904,19 +904,27 @@ def test_a_folded_ruled_loft_is_refused_and_changes_nothing(
     assert (s.op_count, s.issued_id_count, s.brep()) == before
 
 
-def test_a_smooth_loft_through_the_same_sections_is_committed(
+def test_a_smooth_loft_through_the_same_sections_crosses_itself_and_is_refused(
     folded_loft: Callable[[Session], list[list[EntityId]]],
 ) -> None:
-    """The refusal is about the folded surface, not about the sections."""
+    """The smooth loft through the folded sections crosses itself too (report V5).
+
+    Before the self-interference check it was committed with a positive volume,
+    11.598759, and this test accepted it. OCCT's point classifier disagrees with that
+    volume: 200 000 seeded samples of its bounding box count 27.28 +- 0.11 inside, 150
+    standard errors away. A solid whose boundary does not cross itself gives the same
+    volume both ways. The lateral face crosses itself 0.204 from its edges, and it meets
+    a cap.
+    """
     s = Session()
     sections = folded_loft(s)
+    before = (s.op_count, s.issued_id_count, s.brep())
 
-    s.thru_sections(sections, solid=True, ruled=False)
+    with pytest.raises(ps.PysmeshError, match="interferes with itself") as excinfo:
+        s.thru_sections(sections, solid=True, ruled=False)
 
-    solid = [EntityId(int(i)) for i in s.entities(EntityKind.SOLID)]
-    assert s.mass_properties(solid, precision=1e-9).measure[0] > 0.0
-    points = [(0.0, 0.0, 3.0), (1e3, 1e3, 1e3)]
-    assert s.contains(solid, points).tolist() == [[True, False]]
+    assert "crosses itself" in excinfo.value.details
+    assert (s.op_count, s.issued_id_count, s.brep()) == before
 
 
 # =============================================================== Booleans with history == #

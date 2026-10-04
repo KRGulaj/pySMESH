@@ -45,6 +45,7 @@ namespace {
 // there). Raises on parse failure or a null result.
 TopoDS_Shape read_brep(const py::bytes& data) {
   const std::string buffer = data;
+  require_brep_header(buffer, "BREP read produced a null shape (empty or malformed data)");
   std::istringstream stream(buffer);
   TopoDS_Shape shape;
   BRep_Builder builder;
@@ -109,6 +110,8 @@ py::array_t<std::int32_t> build_map(const TopTools_IndexedMapOfShape& old_map,
 
 py::dict unify_same_domain(const py::bytes& brep, bool unify_faces, bool unify_edges,
                             bool concat_bsplines, double linear_tol, double angular_tol_rad) {
+  require_finite("unify_same_domain", "linear_tol", linear_tol);
+  require_finite("unify_same_domain", "angular_tol_rad", angular_tol_rad);
   const TopoDS_Shape shape = read_brep(brep);
 
   // Original sub-shape maps (source of the 1-based ids), captured before Build().

@@ -49,7 +49,13 @@ class _MeshOps(_MesherBase):
             PysmeshError: If SMESH refuses the assignment. The message names the sub-shape
                 and why — a second algorithm of the same dimension already there, a
                 hypothesis that does not fit the algorithm beside it, a sub-shape whose
-                geometry the algorithm cannot read, and so on.
+                geometry the algorithm cannot read, and so on. Also if the assignment
+                makes the model ambiguous (SMESH's ``HYP_CONCURRENT``): a sub-shape
+                under ``on`` lies on two shapes of one type whose similar hypotheses
+                differ, so which one meshes it is undefined. The details name that
+                sub-shape and the hypotheses, and the assignment is undone, so
+                :meth:`assignments` is unchanged. Assign one hypothesis on that
+                sub-shape itself first: it takes priority over those around it.
         """
         kind = "" if on is None else on.kind.name
         ordinal = 0 if on is None else on.ordinal
@@ -118,15 +124,22 @@ class _MeshOps(_MesherBase):
                 flag set beforehand is honoured even by a mesh that finishes quickly.
 
         Returns:
-            What the run produced, and which sub-shapes received elements.
+            What the run produced, which sub-shapes received elements, and which were
+            meshed with a warning from their algorithm (a warning is not a failure).
 
         Raises:
-            PysmeshCancelled: If ``cancel`` returned True or ``progress`` raised. The mesh is
-                cleared, so nothing partial survives.
+            PysmeshCancelled: If ``cancel`` returned True. The mesh is cleared, so
+                nothing partial survives.
+            Exception: Whatever ``progress`` or ``cancel`` raised, re-raised with its
+                own type and traceback. That too stops the compute, and the mesh is
+                cleared.
             PysmeshError: If any sub-mesh failed. The message names every failed sub-shape
                 with SMESH's own reason and the algorithm that reported it, and ``.face_ids``
                 carries the ordinals of the failed faces. The partial mesh is **kept** here
                 rather than cleared, because how far the assignment got is the diagnostic.
+                Also before anything is meshed, if a :class:`ViscousLayers` or
+                :class:`ViscousLayers2D` reaches a solid or a face whose algorithm does
+                not build layers; the message names the sub-shape and the algorithm.
         """
         return _report(self._m.compute(progress, cancel))
 

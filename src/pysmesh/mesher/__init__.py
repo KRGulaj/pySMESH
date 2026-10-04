@@ -82,6 +82,7 @@ from ._catalog import (
     Algorithm,
     Arithmetic1D,
     AutomaticLength,
+    BlockRenumber,
     Cartesian3D,
     CartesianParameters3D,
     CompositeHexa3D,
@@ -94,11 +95,14 @@ from ._catalog import (
     HexaFromSkin3D,
     Hypothesis,
     LayerDistribution,
+    LayerDistribution2D,
+    LengthFromEdges,
     LocalLength,
     MaxElementArea,
     MaxElementVolume,
     MaxLength,
     Mefisto2D,
+    NotConformAllowed,
     NumberOfLayers,
     NumberOfLayers2D,
     NumberOfSegments,
@@ -112,6 +116,7 @@ from ._catalog import (
     ProjectionSource1D,
     ProjectionSource2D,
     ProjectionSource3D,
+    PropagOfDistribution,
     Propagation,
     QuadFromMedialAxis1D2D,
     Quadrangle2D,
@@ -122,8 +127,11 @@ from ._catalog import (
     RadialPrism3D,
     RadialQuadrangle1D2D,
     Regular1D,
+    SegmentAroundVertex0D,
     SegmentLengthAroundVertex,
     StartEndLength,
+    UseExisting1D,
+    UseExisting2D,
     ViscousLayers,
     ViscousLayers2D,
 )
@@ -166,10 +174,12 @@ from ._controls import (
     QualityResult,
     RangeOfIds,
     Selection,
+    ScaledJacobian,
     Skew,
     Taper,
     Volume,
     Warping,
+    Warping3D,
     _QualityOps,
     quality,
     select,
@@ -186,7 +196,14 @@ from ._block import (
     block_points,
     block_shapes,
 )
-from ._edit import EditReport, RemovalReport, SmoothMethod, SplitMethod, _EditOps
+from ._edit import (
+    BoundaryDimension,
+    EditReport,
+    RemovalReport,
+    SmoothMethod,
+    SplitMethod,
+    _EditOps,
+)
 from ._fill import _FillOps
 from ._medial import BranchEnd, MedialAxis, MedialBranch, medial_axis
 from ._search import (
@@ -197,12 +214,14 @@ from ._search import (
     PointState,
     ProjectedPoints,
     RayHits,
+    RayVolumeHits,
     SharpEdges,
     SlotBoundary,
     _SearchOps,
 )
 from ._gmf import GmfMesh, gmf_unwritable_types, gmf_writable_group_name, read_gmf, write_gmf
 from ._group import _GroupOps
+from ._layers import ViscousLayerBuilder, _LayerOps
 from ._mesh import _MeshOps
 
 # The hook aliases belong to the session, which defines them; the mesher shares them
@@ -212,6 +231,7 @@ from ._types import (
     GMF_REQUIRED_MARKER,
     GMF_WRITABLE_TYPES,
     ComputeReport,
+    ComputeWarning,
     ElementDimension,
     ElementType,
     GroupSource,
@@ -224,7 +244,14 @@ from ._types import (
 
 
 class Mesher(
-    _MeshOps, _FillOps, _QualityOps, _GroupOps, _EditOps, _SearchOps, _PatternOps
+    _MeshOps,
+    _FillOps,
+    _QualityOps,
+    _GroupOps,
+    _EditOps,
+    _SearchOps,
+    _PatternOps,
+    _LayerOps,
 ):
     """A mesh, and everything that builds, measures, names, edits and searches it.
 
@@ -373,6 +400,8 @@ __all__ = [
     "BelongToGroup",
     "Block",
     "BlockParameters",
+    "BlockRenumber",
+    "BoundaryDimension",
     "BranchEnd",
     "CancelPredicate",
     "Cartesian3D",
@@ -383,6 +412,7 @@ __all__ = [
     "CompositeHexa3D",
     "CompositeSegment1D",
     "ComputeReport",
+    "ComputeWarning",
     "Control",
     "Deflection1D",
     "Deflection2D",
@@ -408,10 +438,12 @@ __all__ = [
     "HexaFromSkin3D",
     "Hypothesis",
     "LayerDistribution",
+    "LayerDistribution2D",
     "Length",
     "Length2D",
     "Length3D",
     "LessThan",
+    "LengthFromEdges",
     "LocalLength",
     "ManifoldPart",
     "MaxElementArea",
@@ -432,6 +464,7 @@ __all__ = [
     "MultiConnection2D",
     "NodeConnectivityNumber",
     "Not",
+    "NotConformAllowed",
     "NumberOfLayers",
     "NumberOfLayers2D",
     "NumberOfSegments",
@@ -453,6 +486,7 @@ __all__ = [
     "ProjectionSource1D",
     "ProjectionSource2D",
     "ProjectionSource3D",
+    "PropagOfDistribution",
     "Propagation",
     "QuadFromMedialAxis1D2D",
     "QuadType",
@@ -465,8 +499,11 @@ __all__ = [
     "RadialQuadrangle1D2D",
     "RangeOfIds",
     "RayHits",
+    "RayVolumeHits",
     "Regular1D",
     "RemovalReport",
+    "ScaledJacobian",
+    "SegmentAroundVertex0D",
     "SegmentLengthAroundVertex",
     "Selection",
     "SharpEdges",
@@ -479,10 +516,14 @@ __all__ = [
     "SubShape",
     "SubShapeKind",
     "Taper",
+    "UseExisting1D",
+    "UseExisting2D",
     "ViscousLayers",
+    "ViscousLayerBuilder",
     "ViscousLayers2D",
     "Volume",
     "Warping",
+    "Warping3D",
     "block_parameters",
     "block_points",
     "block_shapes",

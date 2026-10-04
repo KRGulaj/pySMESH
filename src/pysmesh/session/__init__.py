@@ -136,6 +136,10 @@ class Session(
     * an output with no input correspondence gets a **new** id;
     * a removed entity's id is marked **dead** and is never reused.
 
+    Arguments: every float argument must be finite. A NaN or an infinity raises
+    :class:`PysmeshError` naming the operation, the argument and the value, before any
+    OCCT call, and the session is left exactly as it was.
+
     Thread contract: **not thread-safe**. One session per thread. Sessions are independent,
     and two may coexist in one process with no cross-talk. Operations release the GIL, so
     entering one while another is in flight on the same session raises

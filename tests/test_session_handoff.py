@@ -31,8 +31,11 @@ Fixture sizing follows the project rule: a 3 x 7 x 11 box, never a unit cube.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 import pysmesh as ps
 from pysmesh import EntityId, EntityKind, Handoff, PysmeshError, Session
@@ -273,7 +276,9 @@ def test_a_split_model_is_refused_naming_the_split_id() -> None:
     with pytest.raises(PysmeshError, match="not a bijection") as excinfo:
         s.export_handoff()
 
-    assert ids[0] in excinfo.value.face_ids
+    # A solid is named in the details under its kind; face_ids holds faces only (A5).
+    assert int(ids[0]) in _details_by_kind(excinfo.value.details)["SOLID"]
+    assert int(ids[0]) not in [int(i) for i in excinfo.value.face_ids]
 
 
 def test_coaxial_walls_defeat_a_centroid_map_but_not_the_shipped_one() -> None:
@@ -367,3 +372,301 @@ def test_the_ordinals_survive_the_round_trip_on_a_real_assembly(
     for ordinal in sample:
         table = s.mass_properties([EntityId(int(handoff.face_id[ordinal]))])
         assert float(table.measure[0]) == pytest.approx(faces[ordinal].area, rel=1e-9)
+
+
+# ------------------------------------------ The refusal's ids (report §2 A5) --- #
+
+# Two 2 x 2 x 2 boxes, the second shifted by 1 along x, fused: coplanar faces merge, and
+# the refusal used to list solids, edges and vertices on face_ids, 8 of them twice. The
+# oracle is independent of the refusal: two ids that denote one shape have the same
+# entity_table row, bit for bit (measure, centroid, box), and a split id has
+# shape_count > 1.
+HANDOFF_KINDS: tuple[EntityKind, ...] = (
+    EntityKind.SOLID,
+    EntityKind.FACE,
+    EntityKind.EDGE,
+    EntityKind.VERTEX,
+)
+
+
+def _coplanar_fuse() -> Session:
+    """The A5 fuse: two shifted boxes with coplanar faces."""
+    s = Session()
+    s.add_box(2.0, 2.0, 2.0)
+    first = s.entities(EntityKind.SOLID).tolist()
+    s.add_box(2.0, 2.0, 2.0, origin=(1.0, 0.0, 0.0))
+    second = [i for i in s.entities(EntityKind.SOLID).tolist() if i not in first]
+    s.fuse(first, second)
+    return s
+
+
+def _blamed_by_kind(s: Session) -> dict[str, set[int]]:
+    """The ids an export must refuse, by kind: aliases and splits."""
+    out: dict[str, set[int]] = {}
+    for kind in HANDOFF_KINDS:
+        table = s.entity_table(kind)
+        rows = np.c_[table.measure, table.centroid, table.bbox]
+        keys = [r.tobytes() for r in rows]
+        ids = {
+            int(i)
+            for i, key, count in zip(table.ids, keys, table.shape_count, strict=True)
+            if keys.count(key) > 1 or int(count) > 1
+        }
+        if ids:
+            out[kind.name] = ids
+    return out
+
+
+def _details_by_kind(details: str) -> dict[str, list[int]]:
+    """The ids the refusal's details list under each kind, in their order."""
+    listing = details.split("The ids, by kind:")[1]
+    out: dict[str, list[int]] = {}
+    for part in listing.split("."):
+        words = part.strip().replace(",", " ").split()
+        if words:
+            out[words[0]] = [int(w) for w in words[1:]]
+    return out
+
+
+def test_a_handoff_refusal_names_each_id_once_and_only_faces_on_face_ids() -> None:
+    """face_ids: the blamed faces, once each; details: every blamed id by kind (A5)."""
+    s = _coplanar_fuse()
+    expected = _blamed_by_kind(s)
+
+    with pytest.raises(PysmeshError) as caught:
+        s.export_handoff()
+
+    face_ids = [int(i) for i in caught.value.face_ids]
+    assert face_ids == sorted(expected["FACE"])
+    listed = _details_by_kind(caught.value.details)
+    assert {k: set(v) for k, v in listed.items()} == expected
+    assert all(len(v) == len(set(v)) for v in listed.values())
+
+
+# ------------------------------------------ Aliases in the handoff (report §4 C2) --- #
+
+# The seven boolean cases of report §4 C2: two 2 x 2 x 2 boxes, the first at the origin.
+# (operation, origin of the second box, its size). Only "fuse overlapping" and "cut
+# overlapping" were a bijection; the rest were refused with no way out.
+Vec3 = tuple[float, float, float]
+C2_CASES: dict[str, tuple[str, Vec3, Vec3]] = {
+    "common_overlapping": ("common", (1.0, 1.0, 1.0), (2.0, 2.0, 2.0)),
+    "common_coplanar": ("common", (1.0, 0.0, 0.0), (2.0, 2.0, 2.0)),
+    "fuse_overlapping": ("fuse", (1.0, 1.0, 1.0), (2.0, 2.0, 2.0)),
+    "fuse_coplanar": ("fuse", (1.0, 0.0, 0.0), (2.0, 2.0, 2.0)),
+    "fuse_face_touching": ("fuse", (2.0, 0.0, 0.0), (2.0, 2.0, 2.0)),
+    "fuse_tool_inside": ("fuse", (0.5, 0.5, 0.0), (1.0, 1.0, 1.0)),
+    "cut_overlapping": ("cut", (1.0, 1.0, 1.0), (2.0, 2.0, 2.0)),
+}
+C2_TOL: float = 1e-9
+
+
+def _c2_session(name: str) -> Session:
+    """One C2 case: a boolean of the box at the origin and the second box."""
+    op, origin, size = C2_CASES[name]
+    s = Session()
+    s.add_box(2.0, 2.0, 2.0)
+    first = s.entities(EntityKind.SOLID).tolist()
+    s.add_box(*size, origin=origin)
+    second = [i for i in s.entities(EntityKind.SOLID).tolist() if i not in first]
+    getattr(s, op)(first, second)
+    return s
+
+
+def _parts(
+    handoff: Handoff,
+) -> dict[EntityKind, tuple[list[Any], tuple[tuple[EntityId, ...], ...]]]:
+    """Per kind: the sub-shapes a reader of the BREP lists, and the ids of each."""
+    shape = ps.load_brep(handoff.brep)
+
+    def by_id(items: list[Any]) -> list[Any]:
+        return sorted(items, key=lambda x: x.id)
+
+    return {
+        EntityKind.SOLID: (by_id(shape.solids()), handoff.solid_ids_of),
+        EntityKind.FACE: (by_id(shape.faces()), handoff.face_ids_of),
+        EntityKind.EDGE: (by_id(shape.edges()), handoff.edge_ids_of),
+        EntityKind.VERTEX: (by_id(shape.vertices()), handoff.vertex_ids_of),
+    }
+
+
+def _union_box(kind: EntityKind, parts: list[Any]) -> NDArray[np.float64]:
+    """The box of the union of some sub-shapes; a vertex has its point."""
+    if kind == EntityKind.VERTEX:
+        pts = np.array([p.xyz for p in parts])
+        return np.r_[pts.min(axis=0), pts.max(axis=0)]
+    own = np.array([p.bbox for p in parts])
+    return np.r_[own[:, :3].min(axis=0), own[:, 3:].max(axis=0)]
+
+
+def _measure_and_centroid(
+    kind: EntityKind, parts: list[Any]
+) -> tuple[float, NDArray[np.float64]]:
+    """Summed volume or area of some sub-shapes, and their measure-weighted centroid."""
+    solid = kind == EntityKind.SOLID
+    measure = np.array([p.volume if solid else p.area for p in parts])
+    centroids = np.array([p.centroid for p in parts])
+    weighted = (centroids * measure[:, None]).sum(axis=0) / measure.sum()
+    return float(measure.sum()), weighted
+
+
+@pytest.mark.parametrize("name", sorted(C2_CASES))
+def test_with_aliases_every_live_id_resolves_to_exactly_its_own_sub_shapes(
+    name: str,
+) -> None:
+    """R(id) = the ordinals whose tuple lists the id: its own sub-shapes, all of them.
+
+    The count of R(id) is the id's shape count, read independently from
+    ``entity_table``; their union box is the id's box; for solids and faces, their
+    summed measure and measure-weighted centroid are the id's own, within 1e-9. For an
+    id of one shape that is its centroid exactly. The coplanar fuse and the fuse with
+    the tool inside, where two ids share only part of their faces, included (C2, E5).
+    """
+    s = _c2_session(name)
+
+    handoff = s.export_handoff(allow_aliases=True)
+
+    for kind, (parts, ids_of) in _parts(handoff).items():
+        boxes = s.bounding_boxes(kind)
+        table = s.entity_table(kind)
+        assert np.array_equal(boxes.ids, table.ids)
+        for row, (entity, box) in enumerate(zip(boxes.ids, boxes.bbox, strict=True)):
+            mine = [parts[i] for i, ids in enumerate(ids_of) if int(entity) in ids]
+            assert len(mine) == int(table.shape_count[row]), (kind, int(entity))
+            assert _union_box(kind, mine) == pytest.approx(box, abs=C2_TOL)
+            if kind in (EntityKind.SOLID, EntityKind.FACE):
+                measure, centroid = _measure_and_centroid(kind, mine)
+                assert measure == pytest.approx(float(table.measure[row]), rel=C2_TOL)
+                assert centroid == pytest.approx(table.centroid[row], abs=C2_TOL)
+
+
+@pytest.mark.parametrize("name", sorted(C2_CASES))
+def test_with_aliases_every_tuple_lists_the_label_first_then_ascending(
+    name: str,
+) -> None:
+    """Each tuple starts with the ordinal's label, the id in ``face_id`` (C2, E5)."""
+    s = _c2_session(name)
+
+    handoff = s.export_handoff(allow_aliases=True)
+
+    pairs = (
+        (handoff.solid_id, handoff.solid_ids_of),
+        (handoff.face_id, handoff.face_ids_of),
+        (handoff.edge_id, handoff.edge_ids_of),
+        (handoff.vertex_id, handoff.vertex_ids_of),
+    )
+    for labels, ids_of in pairs:
+        assert len(ids_of) == labels.size
+        for label, ids in zip(labels.tolist(), ids_of, strict=True):
+            assert ids[0] == label
+            assert list(ids) == sorted(ids)
+
+
+def test_without_aliases_a_boolean_that_shares_sub_shapes_is_still_refused() -> None:
+    """The default stays the bijection: a coplanar common is refused (C2)."""
+    s = _c2_session("common_coplanar")
+
+    with pytest.raises(PysmeshError, match="not a bijection"):
+        s.export_handoff()
+
+
+def test_a_boolean_refusal_names_the_boolean_cause_and_the_alias_way_out() -> None:
+    """After a common, the refusal names a boolean and allow_aliases (C2)."""
+    s = _c2_session("common_overlapping")
+
+    with pytest.raises(PysmeshError, match="not a bijection") as caught:
+        s.export_handoff()
+
+    assert "boolean" in caught.value.details
+    assert "allow_aliases=True" in caught.value.details
+
+
+def test_a_bijection_gives_one_element_tuples_either_way() -> None:
+    """A cut that shares nothing: each tuple is its label alone, either way (C2)."""
+    s = _c2_session("cut_overlapping")
+
+    plain = s.export_handoff()
+    aliased = s.export_handoff(allow_aliases=True)
+
+    assert aliased.face_ids_of == tuple((EntityId(i),) for i in aliased.face_id)
+    assert plain.face_ids_of == aliased.face_ids_of
+    assert np.array_equal(plain.face_id, aliased.face_id)
+    assert plain.brep == aliased.brep
+
+
+# -------------------------------------- Names keyed by session id (report §4 C4) --- #
+
+# The coplanar fuse of report §4 C2: the top faces of the two boxes (z = 2) and their
+# bottom faces (z = 0) become pieces, one of each denoted by both operands' ids. The
+# oracle is geometric: every face the reader finds in the plane z = 2 is named "top",
+# every face in z = 0 "bottom", and no other face is named.
+C4_TOL: float = 1e-9
+
+
+def _faces_in_plane(s: Session, z: float) -> list[EntityId]:
+    """The live faces of the session that lie in the plane at height z."""
+    table = s.bounding_boxes(EntityKind.FACE)
+    lo, hi = table.bbox[:, 2], table.bbox[:, 5]
+    flat = (np.abs(lo - z) < C4_TOL) & (np.abs(hi - z) < C4_TOL)
+    return [EntityId(int(i)) for i in table.ids[flat]]
+
+
+def _in_plane(bbox: NDArray[np.float64], z: float) -> bool:
+    """True if a box is flat at height z."""
+    return abs(bbox[2] - z) < C4_TOL and abs(bbox[5] - z) < C4_TOL
+
+
+def test_write_step_names_every_face_of_the_named_ids_after_a_fuse() -> None:
+    """Agreeing names on a merged face: read back, each face carries its name (C4)."""
+    s = _c2_session("fuse_coplanar")
+    names = {i: "top" for i in _faces_in_plane(s, 2.0)}
+    names.update({i: "bottom" for i in _faces_in_plane(s, 0.0)})
+
+    data = s.write_step(unit="MM", face_names=names)
+
+    imported = ps.read_step_xde(data)
+    faces = {f.id: f for f in ps.load_brep(imported.brep).faces()}
+    labels = {lab.id: lab.name for lab in imported.face_labels if lab.name}
+    for face_id, face in faces.items():
+        top, bottom = _in_plane(face.bbox, 2.0), _in_plane(face.bbox, 0.0)
+        expected = "top" if top else "bottom" if bottom else None
+        assert labels.get(face_id) == expected, (face_id, face.bbox)
+
+
+def test_write_step_names_a_merged_face_from_its_one_named_id() -> None:
+    """One operand's top named: its piece and the shared piece take it (C4)."""
+    s = _c2_session("fuse_coplanar")
+    table = s.bounding_boxes(EntityKind.FACE)
+    tops = _faces_in_plane(s, 2.0)
+    first = next(i for i in tops if table.bbox[table.ids == i][0][0] < C4_TOL)
+
+    data = s.write_step(unit="MM", face_names={first: "top"})
+
+    imported = ps.read_step_xde(data)
+    faces = {f.id: f for f in ps.load_brep(imported.brep).faces()}
+    labels = {lab.id: lab.name for lab in imported.face_labels if lab.name}
+    for face_id, face in faces.items():
+        mine = _in_plane(face.bbox, 2.0) and face.bbox[3] < 2.0 + C4_TOL
+        assert labels.get(face_id) == ("top" if mine else None), (face_id, face.bbox)
+
+
+def test_write_step_refuses_a_merged_face_whose_ids_give_different_names() -> None:
+    """Two names on one merged face: refused, naming the ids and the names (C4)."""
+    s = _c2_session("fuse_coplanar")
+    tops = _faces_in_plane(s, 2.0)
+    names = {i: f"top {k}" for k, i in enumerate(tops)}
+
+    with pytest.raises(PysmeshError, match="names differ") as caught:
+        s.write_step(unit="MM", face_names=names)
+
+    message = str(caught.value)
+    assert all(f"{i}: 'top {k}'" in message for k, i in enumerate(tops))
+
+
+def test_write_step_refuses_a_name_for_an_id_that_is_not_a_live_face() -> None:
+    """A dead or non-face id in face_names is refused, naming it (C4)."""
+    s = _c2_session("fuse_coplanar")
+    solid = int(s.entities(EntityKind.SOLID)[0])
+
+    with pytest.raises(PysmeshError, match=rf"\[{solid}\]"):
+        s.write_step(unit="MM", face_names={EntityId(solid): "body"})

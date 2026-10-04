@@ -23,6 +23,7 @@ Fixture sizing follows the project rule: 3 x 7 x 11, never a unit cube.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator
 
 import numpy as np
@@ -37,6 +38,7 @@ from pysmesh import (
     ElementType,
     Hexa3D,
     Mesher,
+    MinimumAngle,
     NumberOfSegments,
     PysmeshError,
     Quadrangle2D,
@@ -415,6 +417,63 @@ def test_smooth_refuses_a_target_below_a_regular_element(surface_mesher: Mesher)
 def test_smooth_refuses_zero_iterations(surface_mesher: Mesher) -> None:
     with pytest.raises(PysmeshError, match="iterations"):
         surface_mesher.smooth(iterations=0)
+
+
+def test_smooth_on_shape_is_refused_by_name_on_a_mesher_with_no_shape(
+    surface_mesher: Mesher,
+) -> None:
+    """With no CAD, on_shape=True raises naming it; on_shape=False smooths (N2)."""
+    with Mesher.from_mesh(surface_mesher.mesh()) as bare:
+        with pytest.raises(PysmeshError, match=r"smooth\(on_shape=True\)"):
+            bare.smooth(on_shape=True)
+
+        report = bare.smooth(on_shape=False)
+
+    assert report.nodes_after == report.nodes_before
+
+
+# Report §8 S6 found MEFISTO slivers of 0.187 degrees on a 3 x 7 x 11 box under
+# MaxElementArea(1.0). They came from the bound growing the triangles past the 1 m
+# boundary segments (issue E6, MEFISTO_2D_max_element_area.patch), and that mesh has
+# none now. The smoothing claim is checked on a sliver whose single pass has a closed
+# form: the unit square split into 4 triangles around a free node at (0.5, 0.01).
+# Laplacian smoothing moves the node to the mean of its 4 neighbours, and centroidal
+# smoothing to the area-weighted mean of the 4 triangle centroids, which is the centroid
+# of the square. Both give (0.5, 0.5), where the 4 triangles are right isosceles.
+SLIVER_FAN_NODES: NDArray[np.float64] = np.array(
+    [
+        [0.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [1.0, 1.0, 0.0],
+        [0.0, 1.0, 0.0],
+        [0.5, 0.01, 0.0],
+    ],
+    dtype=np.float64,
+)
+SLIVER_FAN: NDArray[np.int64] = np.array(
+    [[0, 1, 4], [1, 2, 4], [2, 3, 4], [3, 0, 4]], dtype=np.int64
+)
+SLIVER_ANGLE_DEG: float = math.degrees(math.atan(0.02))
+SMOOTHED_ANGLE_DEG: float = 45.0
+ANGLE_TOL_DEG: float = 1e-9
+
+
+@pytest.mark.parametrize("method", [SmoothMethod.LAPLACIAN, SmoothMethod.CENTROIDAL])
+def test_smooth_lifts_a_sliver_fan_to_right_isosceles_triangles(
+    method: SmoothMethod,
+) -> None:
+    """atan(0.02) as built; one pass moves the free node to (0.5, 0.5): 45 degrees."""
+    with Mesher.from_arrays(SLIVER_FAN_NODES, SLIVER_FAN) as m:
+        before = float(m.quality(MinimumAngle()).values.min())
+
+        m.smooth(method, iterations=1, on_shape=False)
+        after = float(m.quality(MinimumAngle()).values.min())
+        xyz = m.mesh().node_coords
+
+    corner = np.all(np.isin(xyz[:, :2], (0.0, 1.0)), axis=1)
+    assert before == pytest.approx(SLIVER_ANGLE_DEG, abs=ANGLE_TOL_DEG)
+    assert after == pytest.approx(SMOOTHED_ANGLE_DEG, abs=ANGLE_TOL_DEG)
+    np.testing.assert_allclose(xyz[~corner], [[0.5, 0.5, 0.0]], atol=1e-12)
 
 
 # ---- Orientation -------------------------------------------------------------------------- #

@@ -54,38 +54,93 @@ model-wide default and overriding it on one solid. Read `ComputeReport.meshed` a
 Every entry below is verified against SMESH's own hypothesis compatibility, either from the
 native `StdMeshers` source or from a test that computes a real mesh with it.
 
+### 0-D algorithms
+
+| Algorithm | What it does | Hypotheses it reads |
+|---|---|---|
+| `SegmentAroundVertex0D` | Assigned on a vertex. Meshes nothing itself: it makes the 1-D algorithm of each edge at that vertex give the segment touching it the length of `SegmentLengthAroundVertex`. | `SegmentLengthAroundVertex` (on the same vertex) |
+
 ### 1-D algorithms
 
 | Algorithm | What it does | Hypotheses it reads |
 |---|---|---|
-| `Regular1D` | Discretises every edge it governs, spaced by whichever 1-D hypothesis applies there. The usual base of any assignment. | `NumberOfSegments`, `Arithmetic1D`, `StartEndLength`, `Geometric1D`, `FixedPoints1D`, `Adaptive1D`, `AutomaticLength`, `Deflection1D`, `LocalLength`, `MaxLength`, `SegmentLengthAroundVertex` (vertex-scoped), `Propagation` (edge-scoped) |
+| `Regular1D` | Discretises every edge it governs, spaced by whichever 1-D hypothesis applies there. The usual base of any assignment. | `NumberOfSegments`, `Arithmetic1D`, `StartEndLength`, `Geometric1D`, `FixedPoints1D`, `Adaptive1D`, `AutomaticLength`, `Deflection1D`, `LocalLength`, `MaxLength`, `SegmentLengthAroundVertex` (vertex-scoped, read only with `SegmentAroundVertex0D` on the vertex), `Propagation` and `PropagOfDistribution` (edge-scoped: the first carries the hypothesis to the opposite edges, the second its node fractions) |
 | `CompositeSegment1D` | Discretises a chain of C1-continuous edges as if it were one edge. Useful where an import split one geometric curve into several edges. | The same 1-D hypotheses as `Regular1D`, applied to the whole chain |
 | `Projection1D` | Copies an edge's discretisation from another edge. | `ProjectionSource1D` (required) |
+| `UseExisting1D` | Takes the segments a script made on the edge, with `Mesher.add_nodes` and `Mesher.add_segments` bound to it by `on`, as the edge's mesh. Creates nothing itself. | None |
 
 ### 2-D algorithms
 
 | Algorithm | What it does | Needs beneath | Hypotheses it reads |
 |---|---|---|---|
 | `Quadrangle2D` | Mapped quadrangle meshing of a face bounded by four logical sides. Refuses a face it cannot read as four sides. | A 1-D algorithm and hypothesis on its edges | `QuadrangleParams` (base vertex, corner vertices, how to resolve mismatched sides), `QuadranglePreference` |
-| `Mefisto2D` | Free triangle meshing of a face. | A 1-D algorithm and hypothesis on its edges | `MaxElementArea` (a bound, not a target: it only binds where the boundary would otherwise produce larger elements) |
+| `Mefisto2D` | Free triangle meshing of a face. | A 1-D algorithm and hypothesis on its edges | `MaxElementArea` (a bound, not a target: it refines the face below the boundary segments where it asks for that, and never coarsens it past the longest one; where the boundary segments are too long for the bound, the compute reports a `ComputeWarning` naming the largest triangle area), `LengthFromEdges` (the mean boundary segment as the target edge length; the default when no 2-D hypothesis applies) |
 | `PolygonPerFace2D` | One polygonal element per face, using the edge discretisation directly as its boundary. | A 1-D algorithm and hypothesis on its edges | None |
 | `Projection2D` | Copies a face's mesh from another face. This is how a periodic pair is made to match node for node. | A 1-D algorithm and hypothesis on its own edges, matching the source face's edge counts | `ProjectionSource2D` (required) |
 | `Projection1D2D` | Projects a face's mesh **and** its boundary discretisation from another face. | Nothing: it supplies its own 1-D layer from the source | `ProjectionSource2D` (required) |
 | `QuadFromMedialAxis1D2D` | Quad-dominant meshing of a thin face, built on its medial axis. The only algorithm in the catalogue that reports true progress. | A 1-D algorithm and hypothesis on its edges | None beyond the 1-D layer |
-| `RadialQuadrangle1D2D` | Radial quadrangle meshing of a disk or an annulus. | A 1-D algorithm and hypothesis on the boundary edge | `NumberOfLayers2D`, or a 1-D hypothesis applied to the radial direction |
+| `UseExisting2D` | Takes the faces a script made on the face, bound to it by `on`, as the face's mesh. Creates nothing itself. | Nodes and faces made by a script | None |
+| `RadialQuadrangle1D2D` | Radial quadrangle meshing of a disk or an annulus. | A 1-D algorithm and hypothesis on the boundary edge | `NumberOfLayers2D`, `LayerDistribution2D` (a 1-D hypothesis laid along the radius from the curve inward), or a 1-D hypothesis applied to the radial direction |
+
+### Three 2-D limits, measured
+
+The measurements are on SMESH 9.16. The first two are on a planar NACA 0012 cap with a
+1.25 m chord and a sharp trailing edge, whose wedge angle is 16.54 degrees.
+
+- `Quadrangle2D` maps the face from four corners. On the cap split into 4 edges (trailing
+  edge, mid-upper, leading edge, mid-lower), three of the corners lie on smooth curves, so
+  the map shears the cells. The minimum angle is 2.207 degrees with 30 segments on every
+  edge, 0.347 degrees with them clustered toward the ends, and 0.006 degrees with 40 aft
+  and 30 fore segments under `QUADRANGLE_PREFERENCE`. With 1 or 2 edges it refuses: "Face
+  must have 4 sides but not 1" (`StdMeshers_Quadrangle_2D.cxx:1538`).
+- `QuadFromMedialAxis1D2D` meshes a ring, or a thin strip with two short ends, like a river
+  between its banks (`getSinuousEdges`, `StdMeshers_QuadFromMedialAxis_1D2D.cxx:501`).
+  The cap has a cusp at one end and a round nose at the other, so it fails with 1, 2 or 4
+  edges and 4 or 8 layers: "Not implemented so far" (`:2205`).
+
+The way out for such a face is a better block topology: for example, a C-shaped strip
+along the camber line plus a nose block. Or mesh it with triangles.
+
+The third is `Mefisto2D` on a plain face. Its own quality step (`teamqt`,
+`mefisto2/trte.c:4903`) can leave slivers beside a boundary edge. On the 4 x 4 square with
+16 segments per side, sized by its boundary, 20 of 494 triangles are below 5 degrees and the
+smallest is 0.99 degrees. Run `Mesher.smooth` after `Mefisto2D`. One pass lifts the
+smallest angle there to 15.45 degrees (Laplacian) or 24.93 degrees (centroidal), and no
+triangle stays below 5 degrees. After 3 passes the smallest angle is 21.35 degrees
+(Laplacian) or 29.13 degrees (centroidal).
 
 ### 3-D algorithms
 
 | Algorithm | What it does | Needs beneath | Hypotheses it reads |
 |---|---|---|---|
-| `Cartesian3D` | Body-fitted Cartesian volume meshing: a regular grid, cut against the geometry at the boundary. Hexahedra inside, polyhedra at every cut cell. Meshes every dimension itself; hides any lower-dimension algorithm. Its polyhedra cannot be written to Inria `.mesh`. | Nothing | `CartesianParameters3D` |
-| `Hexa3D` | Structured hexahedral meshing of a block: a solid bounded by six logical faces. Consumes the 2-D mesh below it. | A conforming quadrangle mesh on its six logical faces | None |
+| `Cartesian3D` | Body-fitted Cartesian volume meshing: a regular grid, cut against the geometry at the boundary. Hexahedra inside, polyhedra at every cut cell. Meshes every dimension itself; hides any lower-dimension algorithm. Its polyhedra cannot be written to Inria `.mesh`. With `ViscousLayers` it grows prism layers on the chosen faces: it meshes the shape shrunk by the layer thickness and fills the gap with layer cells (see the viscous layer section of the mesh editing guide). | Nothing | `CartesianParameters3D`, `ViscousLayers` |
+| `Hexa3D` | Structured hexahedral meshing of a block: a solid bounded by six logical faces. Consumes the 2-D mesh below it. | A conforming quadrangle mesh on its six logical faces | `BlockRenumber` (hexahedra and nodes in i, j, k order; axes global by default, or set per block by two vertices) |
 | `CompositeHexa3D` | Structured hexahedral meshing of a solid whose six logical sides are each split into more faces. The counterpart of `Hexa3D` for such an import. | The same conforming quadrangle mesh `Hexa3D` needs, split across more faces | None |
 | `HexaFromSkin3D` | Fills a solid with hexahedra derived from an existing all-quadrangle surface mesh. | An existing all-quadrangle mesh on the solid's skin | None |
 | `Prism3D` | Extrudes a source face's mesh through a prismatic solid. Meshes the lateral faces and edges itself. | A 1-D and 2-D algorithm on the source face only | None of its own |
 | `RadialPrism3D` | An O-grid between an inner and an outer shell: a pipe wall, an annulus. Needs the two shells' meshes to already match, typically via `Projection2D`. | Matching 2-D meshes on the inner and outer shell | `NumberOfLayers` or `LayerDistribution` |
 | `Projection3D` | Copies a solid's mesh from another solid. | Nothing beyond the source solid's own mesh | `ProjectionSource3D` (required) |
 | `PolyhedronPerSolid3D` | One polyhedral element per solid, from the face mesh bounding it. Meshes every dimension itself; hides a lower-dimension algorithm beside it. Unlike `Cartesian3D`, it does consume an existing boundary mesh where one is present. | Nothing required; uses a boundary mesh if present | None |
+
+### `Prism3D`: the source face, and a side face it cannot sweep through
+
+`Prism3D` sweeps from a face that is already meshed. Assign the 2-D algorithm on one face
+alone, with a `SubShape`, and that face is meshed first and becomes the source. On two unit
+boxes stacked and fused, every face a quadrangle, with 3 segments on every edge,
+`Quadrangle2D` on the base face alone gives 3 x 3 x 6 = 54 hexahedra of volume 2. On the top
+face alone it gives the same mesh.
+
+With a global 2-D algorithm only, a face with more or fewer than four edges marks the
+source. If every face reads as a quadrangle, `Prism3D` tries the faces in turn. Up to 4.2.2
+it then reported the error of a face it had rejected, even when a later face worked: the
+stacked boxes failed with "Wrong source face".
+
+A side face whose bottom or top side has more than one edge cannot be swept through. This
+happens where a cap edge is split under a whole one: the side face between them has 5
+edges. `Prism3D` projects onto the first edge of a side only. If another face fits as the
+source, it sweeps from that face; otherwise the compute fails and names, for each face, why
+it is not the source. To sweep between the caps, split the opposite cap edge too, so that
+the side face becomes two quadrangles.
 
 ### Hypotheses that name another part of the model
 
@@ -100,6 +155,10 @@ choice is a rotated mesh.
 `QuadraticMesh` assigned anywhere produces second-order elements instead of linear ones. It
 changes what the algorithms build, so it is not the same as converting an existing linear
 mesh in place with `Mesher.convert_to_quadratic`.
+
+`NotConformAllowed` is global only: `assign` refuses it on a sub-shape. It allows a
+non-conformal mesh between local algorithms that mesh their own boundary. With the
+algorithms of this catalogue, no combination is known in which it changes the mesh.
 
 ## A verified worked example: an O-grid
 
@@ -154,6 +213,22 @@ from pysmesh.mesher import Hexa3D, SubShape, SubShapeKind
 mesher.assign(Hexa3D(), on=SubShape(SubShapeKind.SOLID, 1))
 ```
 
+A hypothesis on a sub-shape takes priority over one on a shape around it. Two hypotheses of
+one kind on two shapes of the same type that share a sub-shape leave that sub-shape
+ambiguous: for example 3 segments on one face and 5 on the face next to it, for their
+common edge. SMESH reports this (`HYP_CONCURRENT`) when a later assignment makes it check
+that edge, and `assign` then raises `PysmeshError`. The details name the edge, the faces
+and their hypotheses. The assignment is undone, so `assignments()` is unchanged. Settle it
+by assigning a hypothesis on the shared edge itself.
+
+`assign` lets four other SMESH statuses pass. A missing hypothesis (`HYP_MISSING`) is the
+normal state while a model is built, and `compute()` names what is still missing. A bad
+parameter (`HYP_BAD_PARAMETER`) is refused when the hypothesis is built, or named by
+`compute()`. A hidden or hiding algorithm (`HYP_HIDDEN_ALGO`, `HYP_HIDING_ALGO`) is SMESH's
+defined priority of an all-dimensional algorithm, and which of the two statuses SMESH
+reports depends only on the order of the assignments; `report.meshed` shows which algorithm
+meshed each sub-shape.
+
 ## Reading `compute()`
 
 `compute()` returns a `ComputeReport`:
@@ -165,11 +240,24 @@ report.edges     # 1-D element count
 report.faces     # 2-D element count
 report.volumes   # 3-D element count
 report.meshed    # one SubMeshCount per sub-shape that received elements
+report.warnings  # one ComputeWarning per sub-shape meshed with a warning
 ```
 
 `report.meshed` is what tells "meshed by the algorithm I put there" from "meshed by an
 enclosing all-dimensional algorithm that hid it". Read it whenever a mixed assignment is in
 play.
+
+**A warning is not a failure.** SMESH marks a sub-mesh computed when its algorithm reports a
+warning: the algorithm met a problem, and it meshed the sub-shape anyway. `compute()` then
+succeeds, and `report.warnings` lists each such sub-shape with its kind, its ordinal, the
+algorithm and SMESH's own words. `Quadrangle2D` asked for `QuadType.REDUCED` on a face whose
+opposite sides have different segment counts is an example: it warns that it used the
+standard transition, and the mesh is the `QuadType.STANDARD` mesh.
+
+```python
+for w in report.warnings:
+    print(w.kind, w.ordinal, w.algorithm, w.text)
+```
 
 **A failure names every failed sub-shape.** `compute()` raises `PysmeshError` if any
 sub-mesh failed. The message carries SMESH's own reason plus the algorithm that reported it,

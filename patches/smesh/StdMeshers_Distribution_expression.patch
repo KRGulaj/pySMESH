@@ -1,0 +1,98 @@
+pySMESH: make the EXPRESSION distribution of StdMeshers_NumberOfSegments integrate its density
+to a relative tolerance, and fail loudly when it cannot (SMESH V9_16_0; applies after
+StdMeshers_Distribution_table.patch).
+
+Defect: NumberOfSegments with DT_ExprFunc places node k of N where the integral of the density
+expression, from the start of the EDGE, reaches k/N of its total. The integral is wrong for any
+density that one fixed Gauss rule cannot resolve, and a failed integral returns 0 with no error.
+
+Symptom (15 m straight EDGE, N = 100, density 1/(a+t), exact node t_k = a(((1+a)/a)^(k/N)-1)):
+the largest node error is 1.3 cm for a = 0.03, 0.95 m for a = 3e-3, 10.2 m for a = 3e-4 and
+11.1 m for a = 3e-5, with the table patch applied and without it alike. The compute reports no
+error. A density with a pole between the 501 points that CheckExpressionFunction samples, such
+as 1/(t-0.3001)^2, is meshed from a finite total although its integral diverges.
+
+Root cause: StdMeshers_Distribution.cxx:230-244 (FunctionExpr::integral) integrates with one
+math_GaussSingleIntegration of order 20 over the whole interval. For the total that interval is
+[0, 1]; a peaked density is underestimated, so J = F(1)/N is too small, the nodes crowd towards
+the peak, and the last segment takes the rest of the EDGE. On !IsDone() or an exception it
+returns 0 and logs only a MESSAGE. The code is unchanged since SMESH 6b471bcc5 (2005-12-28);
+upstream master at 83f8bf482 (2026-09-14) has it unchanged.
+
+Change, in FunctionExpr::integral only:
+* math_KronrodSingleIntegration(f, a, b, 15, 1e-12, 1000): adaptive Gauss-Kronrod with the
+  relative tolerance 1e-12 and at most 1000 refinements. a == b gives 0.
+* !IsDone() (the density cannot be evaluated at a point of [a, b]) throws Standard_Failure
+  that names the interval.
+* OCCT keeps IsDone() true when its iteration limit or its stagnation test (50 refinements
+  that change nothing) ends the loop, and when a NaN error ends it at once. So a reached
+  relative error above 1e-12, or NaN, also throws Standard_Failure, with the interval, the
+  error and the iteration count. SMESH_subMesh::ComputeStateEngine records the exception as
+  the EDGE's compute error (COMPERR_OCC_EXCEPTION), so the compute fails naming the EDGE.
+
+Not changed: FunctionExpr::value; the TABLE distribution; buildDistribution (the table patch
+already solves every node against the running total); StdMeshers_CartesianParameters3D, whose
+spacing functions call FunctionExpr::value only, never integral, so no Cartesian grid moves.
+
+diff --git a/src/StdMeshers/StdMeshers_Distribution.cxx b/src/StdMeshers/StdMeshers_Distribution.cxx
+--- a/src/StdMeshers/StdMeshers_Distribution.cxx
++++ b/src/StdMeshers/StdMeshers_Distribution.cxx
+@@ -28,8 +28,9 @@
+ //
+ #include "StdMeshers_Distribution.hxx"
+ 
+-#include <math_GaussSingleIntegration.hxx>
++#include <math_KronrodSingleIntegration.hxx>
+ #include <utilities.h>
++#include "SMESH_Comment.hxx"
+ 
+ #include <Standard_Failure.hxx>
+ #include <Expr_NamedUnknown.hxx>
+@@ -229,18 +230,35 @@
+ 
+ double FunctionExpr::integral( const double a, const double b ) const
+ {
+-  double res = 0.0;
+-  try {
+-    OCC_CATCH_SIGNALS;
+-    math_GaussSingleIntegration _int
+-      ( *static_cast<math_Function*>( const_cast<FunctionExpr*> (this) ), a, b, 20 );
+-    if( _int.IsDone() )
+-      res = _int.Value();
+-  } catch(Standard_Failure&) {
+-    res = 0.0;
+-    MESSAGE( "Exception in integral calculating" );
+-  }
+-  return res;
++  // pySMESH: one 20-point Gauss rule over [a,b] underestimated a peaked density by orders of
++  // magnitude, and a failure returned 0 with no error. The adaptive Gauss-Kronrod rule
++  // integrates to a relative tolerance; a result that misses it raises instead.
++  if( a == b )
++    return 0.0;
++  const double tolerance = 1e-12;
++  const int    maxNbIter = 1000;
++  math_KronrodSingleIntegration _int
++    ( *static_cast<math_Function*>( const_cast<FunctionExpr*> (this) ), a, b,
++      /*NbPnts=*/15, tolerance, maxNbIter );
++  if( !_int.IsDone() )
++  {
++    SMESH_Comment msg( "StdMeshers::FunctionExpr::integral: the density cannot be evaluated"
++                       " in [" );
++    msg << a << ", " << b << "]";
++    throw Standard_Failure( msg.c_str() );
++  }
++  // OCCT keeps IsDone() true when the iteration limit or its stagnation test stops the
++  // refinement, and a NaN error ends the loop at once; so the reached error is checked.
++  if( !( _int.ErrorReached() <= tolerance ))
++  {
++    SMESH_Comment msg( "StdMeshers::FunctionExpr::integral: the adaptive integral of the"
++                       " density over [" );
++    msg << a << ", " << b << "] did not converge (relative error " << _int.ErrorReached()
++        << " after " << _int.NbIterReached() << " iterations); the density may have a pole"
++        << " or no finite integral";
++    throw Standard_Failure( msg.c_str() );
++  }
++  return _int.Value();
+ }
+ 
+ double dihotomySolve( Function& f, const double val, const double _start, const double _fin, const double eps, bool& ok )

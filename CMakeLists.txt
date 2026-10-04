@@ -177,6 +177,7 @@ pybind11_add_module(_core
     src/bindings/session_handoff.cpp
     src/bindings/session_progress.cpp
     src/bindings/session_bind.cpp
+    src/bindings/shape_checks.cpp
     src/bindings/mesher_core.cpp
     src/bindings/mesher_catalog.cpp
     src/bindings/mesher_harvest.cpp
@@ -188,6 +189,7 @@ pybind11_add_module(_core
     src/bindings/mesher_medial.cpp
     src/bindings/mesher_block.cpp
     src/bindings/mesher_gmf.cpp
+    src/bindings/mesher_viscous.cpp
     src/bindings/mesher_bind.cpp)
 target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
 # TKShHealing (ShapeUpgrade_UnifySameDomain), TKOffset (BRepOffsetAPI_*), and TKTopAlgo
@@ -266,6 +268,17 @@ if(NOT DEFINED PYSMESH_GIT_SHA)
     endif()
 endif()
 string(TIMESTAMP PYSMESH_BUILD_DATE "%Y-%m-%dT%H:%M:%SZ" UTC)
+# __version__: pyproject.toml is the one place the version is set, read here so that the
+# in-tree build and the wheel carry the same value (report C6).
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             ${CMAKE_SOURCE_DIR}/pyproject.toml)
+file(STRINGS ${CMAKE_SOURCE_DIR}/pyproject.toml _pysmesh_version_line
+     REGEX "^version = \"[^\"]+\"" LIMIT_COUNT 1)
+string(REGEX REPLACE "^version = \"([^\"]+)\".*" "\\1" PYSMESH_VERSION
+       "${_pysmesh_version_line}")
+if(NOT PYSMESH_VERSION)
+    message(FATAL_ERROR "pysmesh: pyproject.toml has no 'version = \"...\"' line")
+endif()
 if(NOT DEFINED PYSMESH_WITH_NETGEN)
     set(PYSMESH_WITH_NETGEN "False")
 endif()

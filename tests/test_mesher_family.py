@@ -49,6 +49,7 @@ from pysmesh import (
     Algorithm,
     Arithmetic1D,
     AutomaticLength,
+    BlockRenumber,
     Cartesian3D,
     CartesianParameters3D,
     CompositeHexa3D,
@@ -63,12 +64,15 @@ from pysmesh import (
     HexaFromSkin3D,
     Hypothesis,
     LayerDistribution,
+    LayerDistribution2D,
+    LengthFromEdges,
     LocalLength,
     MaxElementArea,
     MaxElementVolume,
     MaxLength,
     Mefisto2D,
     Mesher,
+    NotConformAllowed,
     NumberOfLayers,
     NumberOfLayers2D,
     NumberOfSegments,
@@ -83,6 +87,7 @@ from pysmesh import (
     ProjectionSource2D,
     ProjectionSource3D,
     Propagation,
+    PropagOfDistribution,
     QuadFromMedialAxis1D2D,
     Quadrangle2D,
     QuadrangleParams,
@@ -93,11 +98,14 @@ from pysmesh import (
     RadialPrism3D,
     RadialQuadrangle1D2D,
     Regular1D,
+    SegmentAroundVertex0D,
     SegmentLengthAroundVertex,
     Session,
     StartEndLength,
     SubShape,
     SubShapeKind,
+    UseExisting1D,
+    UseExisting2D,
     ViscousLayers2D,
 )
 from pysmesh.mesher import ViscousLayers
@@ -221,10 +229,13 @@ def _segment_lengths(mesh: ps.MeshData, edge_ordinal: int) -> list[float]:
 # One instance of each, with the sub-shape it is assigned to. A projection hypothesis needs a
 # source of the right kind, so the box's own sub-shapes serve as one.
 _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
+    # 0-D algorithms
+    (SegmentAroundVertex0D(), SubShape(SubShapeKind.VERTEX, 1)),
     # 1-D algorithms
     (Regular1D(), None),
     (CompositeSegment1D(), None),
     (Projection1D(), None),
+    (UseExisting1D(), SubShape(SubShapeKind.EDGE, 1)),
     # 2-D algorithms
     (Quadrangle2D(), None),
     (Mefisto2D(), None),
@@ -233,6 +244,7 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
     (Projection1D2D(), None),
     (QuadFromMedialAxis1D2D(), None),
     (RadialQuadrangle1D2D(), None),
+    (UseExisting2D(), SubShape(SubShapeKind.FACE, 1)),
     # 3-D algorithms
     (Cartesian3D(), None),
     (Hexa3D(), None),
@@ -255,6 +267,7 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
         NumberOfSegments(count=4, distribution=Distribution.EXPRESSION, expression="1+t"),
         None,
     ),
+    (NumberOfSegments(count=4, distribution=Distribution.BETA_LAW, beta=1.05), None),
     (Arithmetic1D(start_length=0.5, end_length=2.0), None),
     (StartEndLength(start_length=0.5, end_length=2.0), None),
     (Geometric1D(start_length=0.5, common_ratio=1.2), None),
@@ -266,10 +279,16 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
     (MaxLength(length=2.0), None),
     (SegmentLengthAroundVertex(length=0.5), SubShape(SubShapeKind.VERTEX, 1)),
     (Propagation(), SubShape(SubShapeKind.EDGE, 1)),
+    (PropagOfDistribution(), SubShape(SubShapeKind.EDGE, 1)),
     (LayerDistribution(distribution=NumberOfSegments(count=3)), None),
+    (LayerDistribution2D(distribution=NumberOfSegments(count=3)), None),
     (QuadraticMesh(), None),
+    (BlockRenumber(), None),
+    (BlockRenumber(blocks=((1, 1, 2),)), None),
+    (NotConformAllowed(), None),
     # 2-D and 3-D hypotheses
     (MaxElementArea(max_area=4.0), None),
+    (LengthFromEdges(), None),
     (MaxElementVolume(max_volume=8.0), None),
     (QuadranglePreference(), None),
     (QuadrangleParams(quad_type=QuadType.REDUCED), None),
@@ -279,10 +298,35 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
         ),
         None,
     ),
+    (
+        QuadrangleParams(enforced_vertices=(1,), enforced_points=((1.0, 1.0, 0.0),)),
+        None,
+    ),
     (NumberOfLayers(count=3), None),
     (NumberOfLayers2D(count=3), None),
     (
         CartesianParameters3D(spacing_x="1.0", spacing_y="1.0", spacing_z="1.0"),
+        None,
+    ),
+    (
+        CartesianParameters3D(
+            spacing_x="1.0",
+            spacing_y="1.0",
+            spacing_z="1.0",
+            use_quanta=True,
+            quanta=0.5,
+        ),
+        None,
+    ),
+    (
+        CartesianParameters3D(
+            coordinates_x=(0.0, 1.0, 3.0),
+            spacing_y="1.0",
+            spacing_z="1.0",
+            fixed_point=(0.5, 0.5, 0.5),
+            axis_directions=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
+            threshold_for_internal_faces=True,
+        ),
         None,
     ),
     # Hypotheses naming another part of the model
@@ -1153,6 +1197,60 @@ def test_adaptive_1d_keeps_its_three_rules_where_upstream_broke_the_bounds(
         pairs = np.r_[chords, chords[:1]] if closed else chords
         ratio = np.maximum(pairs[1:] / pairs[:-1], pairs[:-1] / pairs[1:])
         assert float(ratio.max(initial=1.0)) <= 2.0 * (1.0 + _ROUND_OFF)
+
+
+def _vertex_ratios(segments: dict[int, NDArray[np.float64]]) -> list[float]:
+    """Per vertex where two or more meshed edges end: longest over shortest end chord.
+
+    Each edge's two end chords sit at its end vertices; a closed edge ends twice at one
+    vertex. The vertices are matched by their coordinates, which are written once per
+    segment and identical.
+    """
+    at_vertex: dict[tuple[float, ...], list[float]] = {}
+    for seg in segments.values():
+        chain = _ordered_chain(seg)
+        chords = np.linalg.norm(np.diff(chain, axis=0), axis=1)
+        for point, chord in ((chain[0], chords[0]), (chain[-1], chords[-1])):
+            at_vertex.setdefault(tuple(point.tolist()), []).append(float(chord))
+    return [max(c) / min(c) for c in at_vertex.values() if len(c) >= 2]
+
+
+@pytest.mark.parametrize(
+    ("kind", "deflection"),
+    [
+        ("bspline_prism", 0.003),
+        ("bspline_prism", 0.01),
+        ("bspline_prism", 0.03),
+        ("bump", 0.003),
+        ("bump", 0.01),
+        ("bump", 0.03),
+        ("arc", 0.003),
+        ("arc", 0.01),
+        ("arc", 0.03),
+        ("cone", 0.01),
+        ("ellipse", 0.03),
+    ],
+)
+def test_adaptive_1d_keeps_the_factor_2_across_every_vertex(
+    kind: str, deflection: float, tmp_path: Path
+) -> None:
+    """Spec (``1d_meshing_hypo.rst``): two adjacent segments differ at most twice.
+
+    Upstream grades the size field in space, so the rule also holds where two edges meet
+    at a vertex (report §18.1; Phase 3 measured at most 1.60 there). The end chords of
+    every pair of meshed edges that share a vertex differ at most by a factor of 2.
+    Tolerance 1e-9: round-off.
+    """
+    session = _rules_session(kind)
+    path = tmp_path / f"{kind}.brep"
+    path.write_bytes(session.brep())
+
+    ratios = _vertex_ratios(
+        _adaptive_brep_segments(path, ADAPTIVE_MIN_SIZE, deflection)
+    )
+
+    assert ratios
+    assert max(ratios) <= 2.0 * (1.0 + _ROUND_OFF), max(ratios)
 
 
 # ---- Families with a fixture of their own ------------------------------------------ #

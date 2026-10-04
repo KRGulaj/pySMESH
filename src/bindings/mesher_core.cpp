@@ -9,6 +9,7 @@
 
 #include "mesher/mesher.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <map>
 #include <set>
@@ -20,6 +21,7 @@
 #include <SMESH_Algo.hxx>
 #include <SMESH_ComputeError.hxx>
 #include <SMESH_Gen.hxx>
+#include <SMESH_HypoFilter.hxx>
 #include <SMESH_Hypothesis.hxx>
 #include <SMESH_Mesh.hxx>
 #include <SMESH_subMesh.hxx>
@@ -90,12 +92,72 @@ const char* status_text(SMESH_Hypothesis::Hypothesis_Status status) {
   }
 }
 
+// Whether `shape` needs an algorithm of its own: an algorithm of an enclosing sub-shape
+// needs the mesh of `shape` as its boundary (NeedDiscreteBoundary()), and no enclosing
+// algorithm meshes all dimensions itself, as Cartesian_3D does. Otherwise a NO_ALGO state is
+// not a fault: a solid with no 3-D algorithm under a surface mesh, or a face under an
+// all-dimensional one.
+bool needs_own_algorithm(SMESH_Mesh& mesh, const TopoDS_Shape& shape) {
+  bool needed = false;
+  for (const TopoDS_Shape& above : mesh.GetAncestors(shape)) {
+    SMESH_subMesh* sub = mesh.GetSubMeshContaining(above);
+    const SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
+    if (algo == nullptr) {
+      continue;
+    }
+    if (!algo->NeedDiscreteBoundary()) {
+      return false;
+    }
+    needed = true;
+  }
+  return needed;
+}
+
 std::string where(const std::string& kind, int ordinal) {
   if (kind.empty()) {
     return "the whole shape";
   }
   return kind + " " + std::to_string(ordinal);
 }
+
+// Resolves the entry strings that a hypothesis stores instead of shapes. Upstream they are
+// study entries resolved by the CORBA layer; here an entry is "KIND:ordinal", built by the
+// catalogue from the caller's ordinals (BlockRenumber's explicit form, report W1.6). The
+// other callbacks are hooks of the SALOME study, which a Mesher does not have: they do
+// nothing, and IsLoaded() is true, so SMESH_Mesh::NotifySubMeshesHypothesisModification
+// skips its reload branch (SMESH_Mesh.cxx:1276). SMESH_Mesh owns and deletes the object.
+class EntryCallUp : public SMESH_Mesh::TCallUp {
+ public:
+  explicit EntryCallUp(std::shared_ptr<ShapeData> data) : data_(std::move(data)) {}
+
+  void RemoveGroup(const int) override {}
+  void HypothesisModified(int, bool) override {}
+  void Load() override {}
+  bool IsLoaded() override { return true; }
+
+  // A null shape for an entry that names nothing, which upstream reports as a bad
+  // parameter (StdMeshers_BlockRenumber::CheckHypothesis). Never throws into SMESH.
+  TopoDS_Shape GetShapeByEntry(const std::string& entry) override {
+    const std::size_t colon = entry.find(':');
+    if (colon == std::string::npos) {
+      return TopoDS_Shape();
+    }
+    const std::string kind = entry.substr(0, colon);
+    try {
+      const int ordinal = std::stoi(entry.substr(colon + 1));
+      if (kind == "SOLID") return data_->solid(ordinal);
+      if (kind == "FACE") return data_->face(ordinal);
+      if (kind == "EDGE") return data_->edge(ordinal);
+      if (kind == "VERTEX") return data_->vertex(ordinal);
+    } catch (const std::exception&) {
+      return TopoDS_Shape();
+    }
+    return TopoDS_Shape();
+  }
+
+ private:
+  std::shared_ptr<ShapeData> data_;
+};
 
 }  // namespace
 
@@ -139,17 +201,40 @@ py::object Params::take(const char* key) {
 
 bool Params::has(const char* key) const { return values_.contains(key); }
 
-double Params::number(const char* key) { return take(key).cast<double>(); }
+// A NaN or an infinity in a numeric field is refused here, for every hypothesis and every
+// quality or selection parameter, before any setter passes it to SMESH (report F1).
+double Params::number(const char* key) {
+  const double v = take(key).cast<double>();
+  require_finite(std::string("Mesher: ") + owner_, key, v);
+  return v;
+}
+
 int Params::integer(const char* key) { return take(key).cast<int>(); }
 bool Params::flag(const char* key) { return take(key).cast<bool>(); }
 std::string Params::text(const char* key) { return take(key).cast<std::string>(); }
 
 std::vector<double> Params::numbers(const char* key) {
-  return take(key).cast<std::vector<double>>();
+  std::vector<double> v = take(key).cast<std::vector<double>>();
+  require_finite(std::string("Mesher: ") + owner_, key, v.data(), v.size(), 1);
+  return v;
 }
 
 std::vector<int> Params::integers(const char* key) {
   return take(key).cast<std::vector<int>>();
+}
+
+std::vector<std::vector<int>> Params::integer_rows(const char* key) {
+  return take(key).cast<std::vector<std::vector<int>>>();
+}
+
+std::vector<std::vector<double>> Params::number_rows(const char* key) {
+  const auto rows = take(key).cast<std::vector<std::vector<double>>>();
+  for (const std::vector<double>& row : rows) {
+    for (const double v : row) {
+      require_finite(std::string("Mesher: ") + owner_, key, v);
+    }
+  }
+  return rows;
 }
 
 std::vector<std::int64_t> Params::ids(const char* key) {
@@ -315,6 +400,7 @@ Mesher::Mesher(const py::object& shape_obj) {
   if (!shape_obj.is_none()) {
     data_ = shape_data_of(shape_obj);
     mesh_->ShapeToMesh(data_->shape);
+    mesh_->SetCallUp(new EntryCallUp(data_));
   }
   meshDS_ = mesh_->GetMeshDS();
   if (data_ != nullptr) {
@@ -432,6 +518,113 @@ void Mesher::build_index_map() {
   }
 }
 
+std::string Mesher::describe_concurrency(const TopoDS_Shape& target,
+                                         SMESH_Hypothesis* hyp) const {
+  // The same search as SMESH_subMesh::CheckConcurrentHypothesis: a sub-shape with no
+  // similar hypothesis of its own, whose nearest ancestors of one type carry different
+  // similar hypotheses. Similar: the same type and dimension, not `hyp` itself, and for
+  // an auxiliary hypothesis the same name (getSimilarAttached, SMESH_subMesh.cxx:2227).
+  SMESH_HypoFilter similar(SMESH_HypoFilter::HasType(hyp->GetType()));
+  similar.And(SMESH_HypoFilter::HasDim(hyp->GetDim()));
+  similar.AndNot(SMESH_HypoFilter::Is(hyp));
+  if (hyp->IsAuxiliary()) {
+    similar.And(SMESH_HypoFilter::HasName(hyp->GetName()));
+  } else {
+    similar.AndNot(SMESH_HypoFilter::IsAuxiliary());
+  }
+  auto name_of = [this](const TopoDS_Shape& s) {
+    const std::pair<const char*, int> at = ordinal_of_shape_index(meshDS_->ShapeToIndex(s));
+    return std::string(at.first[0] != 0 ? at.first : "sub-shape") + " " +
+           std::to_string(at.second);
+  };
+  SMESH_subMesh* sub = mesh_->GetSubMesh(target);
+  for (SMESH_subMeshIteratorPtr it = sub->getDependsOnIterator(false, false); it->more();) {
+    SMESH_subMesh* sm = it->next();
+    if (!sm->IsApplicableHypothesis(hyp) ||
+        sm->CheckConcurrentHypothesis(hyp) != SMESH_Hypothesis::HYP_CONCURRENT) {
+      continue;
+    }
+    const TopoDS_Shape& shared = sm->GetSubShape();
+    std::string owners;
+    std::string kinds;
+    TopAbs_ShapeEnum level = TopAbs_SHAPE;
+    for (const TopoDS_Shape& ancestor : mesh_->GetAncestors(shared)) {
+      const SMESH_Hypothesis* found = mesh_->GetHypothesis(ancestor, similar, false);
+      if (found == nullptr) {
+        continue;
+      }
+      if (level == TopAbs_SHAPE) {
+        level = ancestor.ShapeType();
+      } else if (ancestor.ShapeType() != level) {
+        break;
+      }
+      owners += (owners.empty() ? "" : " and ") + name_of(ancestor) + " (" +
+                found->GetName() + ")";
+      kinds = found->GetName();
+    }
+    return name_of(shared) + " lies on " + owners +
+           ", which carry different hypotheses, so which of them meshes it is "
+           "undefined. Assigning '" + hyp->GetName() + "' made SMESH check the sub-shapes "
+           "it governs and find it. Assign one " + kinds + " on " + name_of(shared) +
+           " itself first: a hypothesis on the sub-shape takes priority over those on the "
+           "shapes around it.";
+  }
+  return "SMESH reported HYP_CONCURRENT, but no sub-shape with two different similar "
+         "hypotheses on its ancestors was found under the assigned shape.";
+}
+
+void Mesher::refuse_unread_layers() const {
+  // Only some algorithms build layers in their Compute: Hexa_3D, PolyhedronPerSolid_3D and
+  // Cartesian_3D read ViscousLayers; Quadrangle_2D, QuadFromMedialAxis_1D2D and MEFISTO_2D
+  // read ViscousLayers2D. The compatible lists do not tell: RadialQuadrangle_1D2D inherits
+  // ViscousLayers2D from Quadrangle_2D and builds no layer. Any other algorithm meshes the
+  // sub-shape with no layer and no word (Prism_3D, RadialQuadrangle_1D2D), fails after
+  // building half of them (PolygonPerFace_2D), or crashed (CompositeHexa_3D).
+  struct LayerKind {
+    TopAbs_ShapeEnum type;
+    const char* kind_name;
+    const char* hypothesis;
+    std::set<std::string> builders;
+    const char* listed;
+  };
+  const LayerKind kinds[] = {
+      {TopAbs_SOLID, "SOLID", "ViscousLayers",
+       {"Hexa_3D", "PolyhedronPerSolid_3D", "Cartesian_3D"},
+       "Hexa_3D, PolyhedronPerSolid_3D and Cartesian_3D"},
+      {TopAbs_FACE, "FACE", "ViscousLayers2D",
+       {"Quadrangle_2D", "QuadFromMedialAxis_1D2D", "MEFISTO_2D"},
+       "Quadrangle_2D, QuadFromMedialAxis_1D2D and MEFISTO_2D"},
+  };
+  for (const LayerKind& kind : kinds) {
+    SMESH_HypoFilter filter(SMESH_HypoFilter::HasName(kind.hypothesis));
+    for (TopExp_Explorer ex(data_->shape, kind.type); ex.More(); ex.Next()) {
+      if (mesh_->GetHypothesis(ex.Current(), filter, /*andAncestors=*/true) == nullptr) {
+        continue;
+      }
+      SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
+      SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
+      if (algo == nullptr || algo->GetName() == nullptr) {
+        continue;  // no algorithm of its own: the compute reports what is missing
+      }
+      const std::string name = algo->GetName();
+      if (kind.builders.count(name) != 0) {
+        continue;
+      }
+      const std::pair<const char*, int> at =
+          ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current()));
+      throw PysmeshError(
+          std::string("Mesher.compute: ") + kind.hypothesis + " reaches " +
+              (at.first[0] != 0 ? at.first : kind.kind_name) + " " +
+              std::to_string(at.second) + ", whose algorithm " + name +
+              " does not build viscous layers.",
+          std::string("Only ") + kind.listed + " build " + kind.hypothesis +
+              "; with " + name + " the layers would be missing, or the compute would fail "
+              "after building some. Assign one of those algorithms there, or assign the "
+              "layers only to the sub-shapes such an algorithm meshes.");
+    }
+  }
+}
+
 std::pair<const char*, int> Mesher::ordinal_of_shape_index(int shape_index) const {
   if (shape_index <= 0 ||
       static_cast<std::size_t>(shape_index) >= index_to_ordinal_.size()) {
@@ -458,6 +651,17 @@ void Mesher::assign(const std::string& name, const py::dict& params, const std::
     throw PysmeshError("Mesher.assign: SMESH refused '" + name + "' on " +
                            where(kind, ordinal) + " — " + status_text(status) + ".",
                        detail);
+  }
+  if (status == SMESH_Hypothesis::HYP_CONCURRENT) {
+    // An ambiguous model: a sub-shape under `target` is governed by two different
+    // hypotheses of one kind on shapes around it, and which one meshes it is undefined
+    // (SMESH_subMesh::CheckConcurrentHypothesis). Undo the assignment and say where.
+    const std::string why = describe_concurrency(target, hyp);
+    mesh_->RemoveHypothesis(target, hyp_id);
+    throw PysmeshError("Mesher.assign: '" + name + "' on " + where(kind, ordinal) +
+                           " makes the model ambiguous (SMESH status HYP_CONCURRENT); it "
+                           "was not assigned.",
+                       why);
   }
   assigned_.push_back({name, kind, ordinal, hyp_id});
 }
@@ -500,6 +704,8 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
                        "before computing.");
   }
 
+  refuse_unread_layers();
+
   ProgressHooks hooks;
   if (!progress.is_none()) {
     if (!py::hasattr(progress, "__call__")) {
@@ -520,7 +726,15 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
     py::gil_scoped_release release;
     ok = gen_->Compute(*mesh_, data_->shape);
   }
-  driver.finish();
+  // finish() re-raises an exception a hook threw, with its own type. A raising hook is a
+  // cancel, so the mesh is cleared first: a cancel leaves no partial mesh, and before this
+  // the re-raise skipped the clear below (report M1).
+  try {
+    driver.finish();
+  } catch (...) {
+    clear_mesh();
+    throw;
+  }
 
   // The driver's own flag decides a cancellation, never Compute()'s return value: a cancel
   // landing late gives a complete mesh and the same `false`, and an ordinary failure gives
@@ -537,8 +751,14 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
   // SMESH_ComputeError is attached to the sub-mesh that actually failed, not to the
   // top-level one. A Quadrangle_2D failure on a cylinder is reported on the two circular
   // FACEs while the enclosing SOLID reports nothing, so every dimension has to be walked.
+  //
+  // A COMPERR_WARNING is not a failure: SMESH defines it as "algo reports error but sub-mesh
+  // is computed anyway" (SMESH_ComputeError.hxx:55) and marks the sub-mesh COMPUTE_OK for it
+  // (SMESH_subMesh.cxx, ComputeStateEngine). IsOK() is false for a warning and IsKO() is not,
+  // so IsKO() decides, and a warning goes on the report instead (report A1).
   std::vector<std::string> failures;
   std::vector<int> failed_faces;
+  py::list warnings;
   for (std::size_t k = 0; k < 4; ++k) {
     for (TopExp_Explorer ex(data_->shape, kKindTypes[k]); ex.More(); ex.Next()) {
       SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
@@ -551,13 +771,21 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
       }
       const int index = meshDS_->ShapeToIndex(ex.Current());
       const std::pair<const char*, int> at = ordinal_of_shape_index(index);
-      std::string line = std::string(at.first[0] ? at.first : kKindNames[k]) + " " +
-                         std::to_string(at.second) + ": ";
+      const char* algorithm = err->myAlgo != nullptr && err->myAlgo->GetName() != nullptr
+                                  ? err->myAlgo->GetName()
+                                  : "";
+      const std::string kind = at.first[0] ? at.first : kKindNames[k];
+      if (!err->IsKO()) {
+        warnings.append(py::make_tuple(kind, at.second, std::string(algorithm),
+                                       err->myComment));
+        continue;
+      }
+      std::string line = kind + " " + std::to_string(at.second) + ": ";
       line += err->myComment.empty() ? std::string("no message") : err->myComment;
       // myAlgo is the algorithm object, not its name — naming it is what makes the message
       // actionable, because the failure is nearly always the algorithm rather than the shape.
-      if (err->myAlgo != nullptr && err->myAlgo->GetName() != nullptr) {
-        line += std::string(" (algorithm ") + err->myAlgo->GetName() + ")";
+      if (algorithm[0] != '\0') {
+        line += std::string(" (algorithm ") + algorithm + ")";
       }
       bool seen = false;
       for (const std::string& s : failures) {
@@ -573,6 +801,50 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
   }
 
   if (!ok || !failures.empty()) {
+    // A missing algorithm, or an algorithm without the hypothesis it needs, is an algorithm
+    // state of the sub-mesh, not a compute error: SMESH_Gen::Compute returns false and no
+    // sub-mesh carries an error text (report A6: "failed on 0 sub-shape(s)"). So each
+    // sub-mesh that was not computed is asked for its state. A VERTEX takes no algorithm of
+    // its own, and NO_ALGO counts only where an enclosing algorithm needs this mesh.
+    std::vector<std::pair<std::pair<std::size_t, int>, std::string>> states;
+    for (std::size_t k = 0; k < 3; ++k) {
+      for (TopExp_Explorer ex(data_->shape, kKindTypes[k]); ex.More(); ex.Next()) {
+        SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
+        if (sub == nullptr || sub->IsMeshComputed() ||
+            sub->GetAlgoState() == SMESH_subMesh::HYP_OK) {
+          continue;
+        }
+        const std::pair<const char*, int> at =
+            ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current()));
+        bool seen = false;
+        for (const auto& s : states) {
+          seen = seen || (s.first.first == k && s.first.second == at.second);
+        }
+        if (seen || at.second <= 0) {
+          continue;
+        }
+        std::string line = std::string(kKindNames[k]) + " " + std::to_string(at.second) + ": ";
+        if (sub->GetAlgoState() == SMESH_subMesh::NO_ALGO) {
+          if (!needs_own_algorithm(*mesh_, ex.Current())) {
+            continue;
+          }
+          line += "no algorithm is assigned to it (algorithm state NO_ALGO)";
+        } else {
+          const SMESH_Algo* algo = sub->GetAlgo();
+          line += std::string(algo != nullptr && algo->GetName() != nullptr ? algo->GetName()
+                                                                            : "its algorithm") +
+                  " is missing a hypothesis it needs (algorithm state MISSING_HYP)";
+        }
+        states.push_back({{k, at.second}, line});
+      }
+    }
+    std::sort(states.begin(), states.end());
+    for (const auto& s : states) {
+      failures.push_back(s.second);
+      if (kKindTypes[s.first.first] == TopAbs_FACE) {
+        failed_faces.push_back(s.first.second);
+      }
+    }
     std::string details;
     for (std::size_t i = 0; i < failures.size(); ++i) {
       details += (i ? "\n" : "") + failures[i];
@@ -586,6 +858,10 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
                        details, failed_faces);
   }
 
+  return success_report(warnings);
+}
+
+py::dict Mesher::success_report(const py::list& warnings) const {
   py::dict out;
   out["nodes"] = static_cast<std::int64_t>(meshDS_->NbNodes());
   out["edges"] = static_cast<std::int64_t>(meshDS_->NbEdges());
@@ -610,6 +886,7 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
     }
   }
   out["meshed"] = meshed;
+  out["warnings"] = warnings;
   return out;
 }
 

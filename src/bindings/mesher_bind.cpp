@@ -23,8 +23,10 @@ void bind_mesher(py::module_& m) {
            py::arg("ordinal"))
       .def("unassign", &Mesher::unassign, py::arg("name"), py::arg("kind"), py::arg("ordinal"))
       .def("has_shape", &Mesher::has_shape)
-      .def("add_nodes", &Mesher::add_nodes, py::arg("coords"))
-      .def("add_elements", &Mesher::add_elements, py::arg("type"), py::arg("connectivity"))
+      .def("add_nodes", &Mesher::add_nodes, py::arg("coords"), py::arg("kind") = "",
+           py::arg("ordinal") = 0, py::arg("parameters") = py::none())
+      .def("add_elements", &Mesher::add_elements, py::arg("type"), py::arg("connectivity"),
+           py::arg("kind") = "", py::arg("ordinal") = 0)
       .def("fill_from_mesh", &Mesher::fill_from_mesh, py::arg("mesh"))
       .def("assignments", &Mesher::assignments)
       .def("compute", &Mesher::compute, py::arg("progress"), py::arg("cancel"))
@@ -43,7 +45,11 @@ void bind_mesher(py::module_& m) {
            py::arg("bi_quadratic"))
       .def("convert_from_quadratic", &Mesher::convert_from_quadratic)
       .def("split_volumes", &Mesher::split_volumes, py::arg("method"), py::arg("nx"),
-           py::arg("ny"), py::arg("nz"))
+           py::arg("ny"), py::arg("nz"), py::arg("avoid_over_constrained") = false)
+      .def("shrink_geometry", &Mesher::shrink_geometry, py::arg("params"))
+      .def("add_layers", &Mesher::add_layers, py::arg("params"), py::arg("inner"))
+      .def("make_boundary_mesh", &Mesher::make_boundary_mesh, py::arg("dimension"),
+           py::arg("elements"), py::arg("around_elements"), py::arg("all_elements"))
       .def("split_quadratic_into_linear", &Mesher::split_quadratic_into_linear,
            py::arg("elements"))
       .def("merge_nodes", &Mesher::merge_nodes, py::arg("tolerance"))
@@ -95,6 +101,8 @@ void bind_mesher(py::module_& m) {
            py::arg("direction"), py::arg("family"))
       .def("ray_hits", &Mesher::ray_hits, py::arg("origin"), py::arg("direction"),
            py::arg("tolerance"))
+      .def("ray_volumes", &Mesher::ray_volumes, py::arg("origin"), py::arg("direction"),
+           py::arg("length"))
       .def("sharp_edges", &Mesher::sharp_edges, py::arg("angle"), py::arg("add_existing"))
       .def("separate_faces_by_edges", &Mesher::separate_faces_by_edges, py::arg("node1"),
            py::arg("node2"), py::arg("medium"), py::arg("name_prefix"))

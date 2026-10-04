@@ -1,0 +1,46 @@
+pySMESH: CompositeHexa_3D refuses viscous layers instead of crashing (SMESH V9_16_0).
+
+Defect: CompositeHexa_3D with a ViscousLayers hypothesis on its solid ends the process with an
+access violation.
+
+Symptom: the unit box, Regular_1D with 4 segments, Quadrangle_2D, CompositeHexa_3D and
+ViscousLayers (0.3 thick, 3 layers, factor 1.2) on one face, all assigned to a compound root
+holding the box (as pySMESH loads a shape): the compute crashes. On a bare SOLID, SMESH
+refuses the hypothesis at assignment (HYP_INCOMPATIBLE), so Compute never sees it.
+
+Root cause, measured with instrumented builds: Compute takes the hypothesis by name
+(StdMeshers_CompositeHexa_3D.cxx:858-859) and calls StdMeshers_ViscousLayers::Compute (:862).
+The layer builder takes its hypotheses from the algorithm's used hypotheses, filtered by the
+compatible list (StdMeshers_ViscousLayers.cxx:2153-2215), and CompositeHexa_3D lists none, so
+the builder fails with "ViscousLayers hypothesis not found". StdMeshers_ViscousLayers::Compute
+then returns a null proxy mesh and drops that error (:1347-1349), and Compute dereferences the
+null pointer (:872). Listing ViscousLayers as compatible builds the layers, but the layer
+quadrangles on the four side faces give their grids more rows than the opposite faces have,
+and the box grid then holds null nodes (16 of 200 on the probe box): the compute crashes
+later. Supporting the layers needs a face-grid loader that leaves the layer cells out.
+
+Change, in StdMeshers_CompositeHexa_3D.cxx only: when a ViscousLayers hypothesis applies,
+Compute returns COMPERR_BAD_PARMETERS, "CompositeHexa_3D does not build viscous layers;
+Hexa_3D does", before any layer is built.
+
+Not changed: CompositeHexa_3D with no ViscousLayers hypothesis.
+diff --git a/src/StdMeshers/StdMeshers_CompositeHexa_3D.cxx b/src/StdMeshers/StdMeshers_CompositeHexa_3D.cxx
+--- a/src/StdMeshers/StdMeshers_CompositeHexa_3D.cxx
++++ b/src/StdMeshers/StdMeshers_CompositeHexa_3D.cxx
+@@ -859,9 +859,13 @@
+   const SMESH_Hypothesis *          hyp = theMesh.GetHypothesis( theShape, vlFilter, true );
+   const StdMeshers_ViscousLayers* vlHyp = static_cast< const StdMeshers_ViscousLayers* >( hyp );
+   if ( vlHyp )
+-    proxyMesh = vlHyp->Compute( theMesh, theShape, /*toMakeN2NMap=*/true );
+-  else
+-    proxyMesh.reset( new SMESH_ProxyMesh( theMesh ));
++    // pySMESH: the layers fail here (the hypothesis is not among the compatible ones, so
++    // the builder does not find it), and Compute then read a null proxy mesh and crashed.
++    // Made compatible, the layer quadrangles on the side FACEs give the side grids more
++    // rows than the opposite FACEs have, and the box grid gets null nodes. Refuse it.
++    return error( COMPERR_BAD_PARMETERS,
++                  "CompositeHexa_3D does not build viscous layers; Hexa_3D does" );
++  proxyMesh.reset( new SMESH_ProxyMesh( theMesh ));
+ 
+   // -------------------------
+   // Try to find 6 side faces

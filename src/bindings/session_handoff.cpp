@@ -31,6 +31,9 @@
 
 #include "session/session.hpp"
 
+#include <map>
+#include <set>
+
 namespace pysmesh {
 namespace session {
 
@@ -38,7 +41,8 @@ namespace {
 
 // The label of one exported sub-shape, and the diagnostics for the two ways it can fail.
 struct KindManifest {
-  std::vector<EntityId> ids;        // one per ordinal, in traversal order
+  std::vector<EntityId> ids;        // one per ordinal, in traversal order: the label
+  std::vector<std::vector<EntityId>> ids_of;  // per ordinal, every live id, label first
   std::vector<EntityId> ambiguous;  // ids sharing a shape with another id (a merge)
   std::vector<EntityId> split;      // ids denoting more than one exported shape (a split)
   std::vector<int> unlabelled;      // ordinals of shapes carrying no live id at all
@@ -46,13 +50,15 @@ struct KindManifest {
 
 }  // namespace
 
-py::dict Session::export_handoff() const {
+py::dict Session::export_handoff(bool allow_aliases) const {
   const TopoDS_Shape root = state_.root;
 
   py::dict out;
   std::vector<EntityId> ambiguous;
   std::vector<EntityId> split;
   std::vector<std::string> unlabelled;
+  // Every blamed id once, under its kind, in the order of kEntityKinds (report A5).
+  std::vector<std::pair<TopAbs_ShapeEnum, std::set<EntityId>>> blamed_by_kind;
 
   for (TopAbs_ShapeEnum kind : kEntityKinds) {
     ShapeSet shapes;
@@ -71,15 +77,20 @@ py::dict Session::export_handoff() const {
       if (it == state_.registry->by_shape.end() || it->second.empty()) {
         m.unlabelled.push_back(i);
         m.ids.push_back(0);
+        m.ids_of.emplace_back();
         continue;
       }
-      // by_shape holds every live id on this shape. More than one is a merge, and the
-      // handoff cannot choose between them: both names are alive and both mean this face.
+      // by_shape holds every live id on this shape, ascending, so the label (label_of) is
+      // the front. More than one is a merge, and without allow_aliases the handoff cannot
+      // choose between them: both names are alive and both mean this face. With it, every
+      // id is listed at this ordinal, and an id resolves to every ordinal that lists it,
+      // which is exact whatever the ids share (report C2, amendment 8).
       if (it->second.size() > 1) {
         for (EntityId id : it->second) {
           m.ambiguous.push_back(id);
         }
       }
+      m.ids_of.push_back(it->second);
       const EntityId id = it->second.front();
       m.ids.push_back(id);
       ++hits[id];
@@ -91,6 +102,11 @@ py::dict Session::export_handoff() const {
       }
     }
 
+    std::set<EntityId> blamed(m.ambiguous.begin(), m.ambiguous.end());
+    blamed.insert(m.split.begin(), m.split.end());
+    if (!blamed.empty()) {
+      blamed_by_kind.emplace_back(kind, std::move(blamed));
+    }
     for (EntityId id : m.ambiguous) {
       ambiguous.push_back(id);
     }
@@ -103,6 +119,15 @@ py::dict Session::export_handoff() const {
 
     const std::string key = std::string(kind_name(kind)) + "_id";
     out[py::str(key)] = ids_array(m.ids);
+    py::list per_ordinal;
+    for (const std::vector<EntityId>& ids : m.ids_of) {
+      py::tuple row(ids.size());
+      for (std::size_t k = 0; k < ids.size(); ++k) {
+        row[k] = py::int_(ids[k]);
+      }
+      per_ordinal.append(row);
+    }
+    out[py::str(std::string(kind_name(kind)) + "_ids_of")] = per_ordinal;
   }
 
   auto tidy = [](std::vector<EntityId>& v) {
@@ -112,28 +137,42 @@ py::dict Session::export_handoff() const {
   tidy(ambiguous);
   tidy(split);
 
-  if (!ambiguous.empty() || !split.empty()) {
+  if (!allow_aliases && (!ambiguous.empty() || !split.empty())) {
     std::ostringstream detail;
     if (!ambiguous.empty()) {
       detail << ambiguous.size()
-             << " id(s) share a sub-shape with another id, which a same-domain merge "
-                "produces: the merged entity is denoted by all of them and the handoff "
-                "cannot choose one. ";
+             << " id(s) share a sub-shape with another id, which a same-domain merge or "
+                "a boolean on coincident sub-shapes produces: the shared entity is denoted "
+                "by all of them and the handoff cannot choose one. ";
     }
     if (!split.empty()) {
       detail << split.size()
              << " id(s) denote more than one sub-shape, which a split produces: the "
                 "entity is no longer one thing to name. ";
     }
-    detail << "Resolve the ambiguity before handing off — a merge is settled by exporting "
-              "after the ids the caller no longer needs have been dropped, a split by "
-              "treating the pieces as the new entities they are.";
-    std::vector<EntityId> blamed = ambiguous;
-    blamed.insert(blamed.end(), split.begin(), split.end());
+    detail << "export_handoff(allow_aliases=True) returns a many-to-one map instead: each "
+              "sub-shape carries its lowest live id, and Handoff.face_ids_of (and the same "
+              "for the other kinds) lists every live id of each sub-shape. Or resolve the "
+              "ambiguity before handing off — a merge is settled by exporting after the ids "
+              "the caller no longer needs have been dropped, a split by treating the pieces "
+              "as the new entities they are. The ids, by kind:";
+    std::vector<EntityId> faces;
+    for (const auto& [kind, ids] : blamed_by_kind) {
+      detail << " " << kind_name(kind);
+      const char* sep = " ";
+      for (EntityId id : ids) {
+        detail << sep << id;
+        sep = ", ";
+      }
+      detail << ".";
+      if (kind == TopAbs_FACE) {
+        faces.assign(ids.begin(), ids.end());
+      }
+    }
     throw PysmeshError(
         "Session.export_handoff: the entity id to sub-shape map is not a bijection, so the "
         "handoff would silently mis-name entities.",
-        detail.str(), ids_as_int(blamed));
+        detail.str(), ids_as_int(faces));
   }
 
   if (!unlabelled.empty()) {

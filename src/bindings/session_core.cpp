@@ -69,8 +69,53 @@ std::int64_t Session::snapshot_count() const {
 
 // ---- queries ---------------------------------------------------------------------- //
 
-py::array_t<std::int64_t> Session::entities(const std::string& kind) const {
-  return ids_array(ids_of_kind(kind_from_name(kind)));
+py::array_t<std::int64_t> Session::entities(const std::string& kind, bool distinct) const {
+  const TopAbs_ShapeEnum k = kind_from_name(kind);
+  if (!distinct) {
+    return ids_array(ids_of_kind(k));
+  }
+  ShapeSet shapes;
+  TopExp::MapShapes(state_.root, k, shapes);
+  std::vector<EntityId> labels;
+  labels.reserve(static_cast<std::size_t>(shapes.Extent()));
+  for (int i = 1; i <= shapes.Extent(); ++i) {
+    labels.push_back(label_of("entities", shapes.FindKey(i)));
+  }
+  std::sort(labels.begin(), labels.end());
+  labels.erase(std::unique(labels.begin(), labels.end()), labels.end());
+  return ids_array(labels);
+}
+
+py::list Session::ordinal_ids(const std::string& kind) const {
+  ShapeSet shapes;
+  TopExp::MapShapes(state_.root, kind_from_name(kind), shapes);
+  py::list out;
+  for (int i = 1; i <= shapes.Extent(); ++i) {
+    const auto it = state_.registry->by_shape.find(shapes.FindKey(i));
+    // by_shape's id lists are sorted ascending when the registry is published.
+    out.append(ids_array(it == state_.registry->by_shape.end() ? std::vector<EntityId>()
+                                                                : it->second));
+  }
+  return out;
+}
+
+py::list Session::alias_groups(const std::string& kind) const {
+  ShapeSet shapes;
+  TopExp::MapShapes(state_.root, kind_from_name(kind), shapes);
+  std::vector<std::vector<EntityId>> groups;
+  for (int i = 1; i <= shapes.Extent(); ++i) {
+    const auto it = state_.registry->by_shape.find(shapes.FindKey(i));
+    // by_shape's id lists are sorted ascending when the registry is published.
+    if (it != state_.registry->by_shape.end() && it->second.size() > 1) {
+      groups.push_back(it->second);
+    }
+  }
+  std::sort(groups.begin(), groups.end());
+  py::list out;
+  for (const std::vector<EntityId>& g : groups) {
+    out.append(ids_array(g));
+  }
+  return out;
 }
 
 std::string Session::entity_kind(EntityId id) const {
@@ -106,9 +151,29 @@ py::dict Session::entity_table(const std::string& kind) const {
   double* bp = bbox.mutable_data();
   std::int64_t* sp = shapes.mutable_data();
 
+  // Every shape of the kind, integrated adaptively at the default precision (report D3),
+  // in parallel with the GIL released: one task per shape, so the result does not depend
+  // on the threads. GProp's fixed rule read a lofted wing 20 % low.
+  std::vector<TopoDS_Shape> all;
+  std::vector<std::size_t> first(ids.size() + 1, 0);
+  for (std::size_t k = 0; k < ids.size(); ++k) {
+    const EntityRecord& rec = state_.registry->alive.at(ids[k]);
+    first[k] = all.size();
+    all.insert(all.end(), rec.shapes.begin(), rec.shapes.end());
+  }
+  first[ids.size()] = all.size();
+  std::vector<shape_checks::Measure> measures;
+  std::vector<Bnd_Box> boxes;
+  {
+    py::gil_scoped_release release;
+    measures = shape_checks::measures(all, shape_checks::kDefaultMassPrecision);
+    // The box of the geometry, not padded by the tolerance (reports D1, D2).
+    boxes = shape_checks::exact_boxes(all);
+  }
+
   for (py::ssize_t i = 0; i < n; ++i) {
-    const EntityRecord& rec = state_.registry->alive.at(ids[static_cast<std::size_t>(i)]);
-    sp[i] = static_cast<std::int64_t>(rec.shapes.size());
+    const auto k = static_cast<std::size_t>(i);
+    sp[i] = static_cast<std::int64_t>(first[k + 1] - first[k]);
     // A split entity is measured over all of its shapes; its centroid and bounding box
     // cover them all. That keeps a split honest in the ground-truth sense: the entity is
     // everything it now denotes, not an arbitrary one of the pieces.
@@ -116,18 +181,17 @@ py::dict Session::entity_table(const std::string& kind) const {
     double wsum = 0.0;
     Bnd_Box box;
     double cx = 0.0, cy = 0.0, cz = 0.0;
-    for (const TopoDS_Shape& s : rec.shapes) {
-      const double m = measure_of(s);
-      const std::array<double, 3> c = centroid_of(s);
+    for (std::size_t j = first[k]; j < first[k + 1]; ++j) {
+      const shape_checks::Measure& m = measures[j];
       // A vertex (and a degenerate edge) has zero measure, so weight it as one instead:
       // an unweighted mean of the pieces is the only meaningful centroid there.
-      const double w = (m > 0.0) ? m : 1.0;
-      total += m;
+      const double w = (m.mass > 0.0) ? m.mass : 1.0;
+      total += m.mass;
       wsum += w;
-      cx += w * c[0];
-      cy += w * c[1];
-      cz += w * c[2];
-      BRepBndLib::Add(s, box);
+      cx += w * m.centroid.X();
+      cy += w * m.centroid.Y();
+      cz += w * m.centroid.Z();
+      box.Add(boxes[j]);
     }
     mp[i] = total;
     cp[3 * i + 0] = cx / wsum;
@@ -470,7 +534,7 @@ TopoDS_Wire Session::wire_over(const char* op, const std::vector<TopoDS_Shape>& 
   }
   BRepBuilderAPI_MakeWire mk;
   NCollection_List<TopoDS_Shape> list;
-  for (const TopoDS_Shape& e : edges) {
+  for (const TopoDS_Shape& e : weld_near_ends(edges)) {
     list.Append(e);
   }
   mk.Add(list);
@@ -479,6 +543,87 @@ TopoDS_Wire Session::wire_over(const char* op, const std::vector<TopoDS_Shape>& 
                        ": the named edges do not form a connected wire.");
   }
   return mk.Wire();
+}
+
+std::vector<TopoDS_Shape> Session::weld_near_ends(const std::vector<TopoDS_Shape>& edges) {
+  // The distinct end vertices, in the order the edges give them.
+  std::vector<TopoDS_Vertex> ends;
+  for (const TopoDS_Shape& e : edges) {
+    TopoDS_Vertex first, last;
+    TopExp::Vertices(TopoDS::Edge(e), first, last);
+    for (const TopoDS_Vertex& v : {first, last}) {
+      bool seen = v.IsNull();
+      for (const TopoDS_Vertex& w : ends) {
+        seen = seen || w.IsSame(v);
+      }
+      if (!seen) {
+        ends.push_back(v);
+      }
+    }
+  }
+  // Groups by BRepLib_MakeWire's own test, distance <= the sum of the two tolerances,
+  // closed transitively. Each group is labelled by its first end.
+  const std::size_t n = ends.size();
+  std::vector<std::size_t> group(n);
+  for (std::size_t i = 0; i < n; ++i) {
+    group[i] = i;
+  }
+  const auto root = [&](std::size_t i) {
+    while (group[i] != i) {
+      i = group[i];
+    }
+    return i;
+  };
+  for (std::size_t i = 0; i < n; ++i) {
+    const gp_Pnt pi = BRep_Tool::Pnt(ends[i]);
+    const double ti = BRep_Tool::Tolerance(ends[i]);
+    for (std::size_t j = i + 1; j < n; ++j) {
+      const double reach = ti + BRep_Tool::Tolerance(ends[j]);
+      if (pi.SquareDistance(BRep_Tool::Pnt(ends[j])) <= reach * reach) {
+        const std::size_t a = root(i);
+        const std::size_t b = root(j);
+        group[std::max(a, b)] = std::min(a, b);
+      }
+    }
+  }
+  BRepTools_ReShape reshape;
+  bool welded = false;
+  for (std::size_t g = 0; g < n; ++g) {
+    if (root(g) != g) {
+      continue;
+    }
+    const gp_Pnt keep = BRep_Tool::Pnt(ends[g]);
+    bool apart = false;
+    double tol = BRep_Tool::Tolerance(ends[g]);
+    for (std::size_t i = g + 1; i < n; ++i) {
+      if (root(i) != g) {
+        continue;
+      }
+      const gp_Pnt p = BRep_Tool::Pnt(ends[i]);
+      apart = apart || !(p.X() == keep.X() && p.Y() == keep.Y() && p.Z() == keep.Z());
+      tol = std::max(tol, keep.Distance(p) + BRep_Tool::Tolerance(ends[i]));
+    }
+    if (!apart) {
+      continue;
+    }
+    TopoDS_Vertex joined = BRepBuilderAPI_MakeVertex(keep).Vertex();
+    BRep_Builder().UpdateVertex(joined, tol);
+    for (std::size_t i = g; i < n; ++i) {
+      if (root(i) == g) {
+        reshape.Replace(ends[i].Oriented(TopAbs_FORWARD), joined);
+      }
+    }
+    welded = true;
+  }
+  if (!welded) {
+    return edges;
+  }
+  std::vector<TopoDS_Shape> out;
+  out.reserve(edges.size());
+  for (const TopoDS_Shape& e : edges) {
+    out.push_back(reshape.Apply(e));
+  }
+  return out;
 }
 
 // A wire over a whole body, for the operations that sweep along or across one.
@@ -519,7 +664,8 @@ py::dict Session::add_bodies(const TopoDS_Shape& added, const char* op_name) {
 // information.
 py::dict Session::commit(const std::vector<TopoDS_Shape>& bodies,
                   const Handle(BRepTools_History) & history, const char* op_name,
-                  const TopoDS_Shape& built, Validation mode) {
+                  const TopoDS_Shape& built, Validation mode,
+                  const std::vector<std::string>& warnings) {
   Handle(BRepTools_History) hist = history;
   if (tear_next_history_) {
     hist.Nullify();
@@ -534,12 +680,19 @@ py::dict Session::commit(const std::vector<TopoDS_Shape>& bodies,
     bool valid = true;
     {
       py::gil_scoped_release release;
-      valid = BRepCheck_Analyzer(built).IsValid();
+      // BRepCheck_Analyzer catches the failures of its own checks; this catch is for the
+      // rest of it, so that nothing it throws reaches the caller raw (report A2).
+      try {
+        valid = BRepCheck_Analyzer(built).IsValid();
+      } catch (const std::exception& e) {
+        py::gil_scoped_acquire acquire;
+        throw PysmeshError(std::string("Session.") + op_name +
+                           ": BRepCheck_Analyzer failed on the result: " + e.what() +
+                           ". Nothing is committed; the session is unchanged.");
+      }
     }
     if (!valid && mode == Validation::Strict) {
-      throw PysmeshError(std::string("Session.") + op_name +
-                         ": the operation produced an invalid shape "
-                         "(BRepCheck_Analyzer reported errors); the session is unchanged.");
+      refuse_invalid(op_name, built, hist);
     }
     verdict = valid;
   }
@@ -548,11 +701,121 @@ py::dict Session::commit(const std::vector<TopoDS_Shape>& bodies,
   const std::int64_t op_index = next_op_;
   Delta delta = carry_registry(new_root, hist, op_index);
   delta.valid = verdict;
+  delta.warnings = warnings;
 
   state_.root = new_root;
   state_.op_index = op_index;
   ++next_op_;
   return delta_dict(delta, op_index, op_name);
+}
+
+void Session::refuse_invalid(const char* op_name, const TopoDS_Shape& built,
+                             const Handle(BRepTools_History) & hist) const {
+  std::vector<shape_checks::CheckFinding> findings;
+  {
+    py::gil_scoped_release release;
+    try {
+      findings = shape_checks::check_findings(built);
+    } catch (const std::exception& e) {
+      py::gil_scoped_acquire acquire;
+      throw PysmeshError(std::string("Session.") + op_name +
+                         ": the operation produced an invalid shape, and reading "
+                         "BRepCheck_Analyzer's statuses failed: " +
+                         e.what() + ". Nothing is committed; the session is unchanged.");
+    }
+  }
+  // Each result sub-shape that a live id became: the same shape, or an image the history
+  // records as modified or generated from one of that id's shapes.
+  ShapeKeyed<std::vector<EntityId>> sources;
+  for (const auto& [id, rec] : state_.registry->alive) {
+    for (const TopoDS_Shape& s : rec.shapes) {
+      sources[s].push_back(id);
+      if (hist.IsNull()) {
+        continue;
+      }
+      for (const TopoDS_Shape& m : hist->Modified(s)) {
+        sources[m].push_back(id);
+      }
+      for (const TopoDS_Shape& g : hist->Generated(s)) {
+        sources[g].push_back(id);
+      }
+    }
+  }
+  const auto ids_from = [&](const TopoDS_Shape& sub) {
+    std::vector<EntityId> ids;
+    const auto it = sources.find(sub);
+    if (it != sources.end()) {
+      ids = it->second;
+    }
+    std::sort(ids.begin(), ids.end());
+    ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
+    return ids;
+  };
+  const auto ordinal = [&](const TopoDS_Shape& sub) {
+    ShapeSet all;
+    TopExp::MapShapes(built, sub.ShapeType(), all);
+    return std::to_string(all.FindIndex(sub));
+  };
+  std::vector<int> faces;
+  const auto add_faces_of = [&](const TopoDS_Shape& sub) {
+    if (sub.ShapeType() == TopAbs_FACE) {
+      for (EntityId id : ids_from(sub)) {
+        faces.push_back(static_cast<int>(id));
+      }
+      return;
+    }
+    for (TopExp_Explorer f(built, TopAbs_FACE); f.More(); f.Next()) {
+      for (TopExp_Explorer s(f.Current(), sub.ShapeType()); s.More(); s.Next()) {
+        if (s.Current().IsSame(sub)) {
+          for (EntityId id : ids_from(f.Current())) {
+            faces.push_back(static_cast<int>(id));
+          }
+          break;
+        }
+      }
+    }
+  };
+  constexpr std::size_t kListed = 20;
+  std::string details;
+  for (std::size_t i = 0; i < findings.size(); ++i) {
+    const shape_checks::CheckFinding& f = findings[i];
+    add_faces_of(f.shape);
+    if (i >= kListed) {
+      continue;
+    }
+    details += std::string(shape_checks::kind_text(f.shape)) + " " + ordinal(f.shape) +
+               " of the result";
+    const std::vector<EntityId> ids = ids_from(f.shape);
+    if (!ids.empty()) {
+      details += " (from id";
+      for (std::size_t k = 0; k < ids.size(); ++k) {
+        details += (k == 0 ? " " : ", ") + std::to_string(ids[k]);
+      }
+      details += ")";
+    }
+    details += ": " + f.status;
+    if (!f.context.IsNull()) {
+      details += " on " + std::string(shape_checks::kind_text(f.context)) + " " +
+                 ordinal(f.context);
+    }
+    details += ". ";
+  }
+  if (findings.size() > kListed) {
+    details += "And " + std::to_string(findings.size() - kListed) + " more. ";
+  }
+  if (findings.empty()) {
+    details += "BRepCheck_Analyzer reported no status on any sub-shape. ";
+  }
+  details += "Ordinals count each kind in TopExp::MapShapes order of the shape the operation "
+             "built.";
+  std::sort(faces.begin(), faces.end());
+  faces.erase(std::unique(faces.begin(), faces.end()), faces.end());
+  throw PysmeshError(std::string("Session.") + op_name +
+                         ": the operation produced an invalid shape (BRepCheck_Analyzer "
+                         "reported " +
+                         std::to_string(findings.size()) + " status(es)); the session is "
+                         "unchanged.",
+                     details, faces);
 }
 
 // Carry every id of one body onto a copy of it, and swap the copy into the model.
@@ -790,6 +1053,11 @@ py::dict Session::delta_dict(const Delta& d, std::int64_t op_index, const char* 
   out["split"] = ids_array(d.split);
   out["merged"] = ids_array(d.merged);
   out["valid"] = d.valid.has_value() ? py::cast(*d.valid) : py::none();
+  py::list warnings;
+  for (const std::string& w : d.warnings) {
+    warnings.append(py::str(w));
+  }
+  out["warnings"] = warnings;
   return out;
 }
 
@@ -800,6 +1068,8 @@ std::vector<std::pair<double, double>> Session::pairs_of(const char* op, const c
                        " must be an (N, 2) array of parameter pairs.");
   }
   const double* p = a.data();
+  require_finite(std::string("Session.") + op, argname, p,
+                 static_cast<std::size_t>(a.shape(0)), 2);
   std::vector<std::pair<double, double>> out;
   out.reserve(static_cast<std::size_t>(a.shape(0)));
   for (py::ssize_t i = 0; i < a.shape(0); ++i) {

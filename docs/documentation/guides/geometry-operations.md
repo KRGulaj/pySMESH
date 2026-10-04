@@ -11,8 +11,8 @@ for what the ordinals mean and when they change.
 ## STEP: `read_step_xde` / `write_step_xde`
 
 `read_step_xde` imports a STEP file through OCCT's XDE stack, carrying product names,
-per-face colours, and the file's length unit across the boundary, none of which a plain
-geometry transfer preserves:
+per-face names and colours, and the file's length unit across the boundary, none of which a
+plain geometry transfer preserves:
 
 ```python
 import pysmesh
@@ -43,10 +43,14 @@ data = pysmesh.write_step_xde(
 never rescales them. Passing `imported.unit_name` makes the export a round trip. See
 [Units](../concepts/units.md#the-write-contract) for the full contract.
 
+A face name is written as the name of the face's STEP entity, and `read_step_xde` reads it
+back on `face_labels`. To name faces by session id rather than by ordinal, use
+`Session.write_step`; see [Session](../concepts/session.md).
+
 ## IGES: `read_iges` / `write_iges`
 
 ```python
-igs = pysmesh.read_iges("housing.igs")   # a path, not bytes
+igs = pysmesh.read_iges("housing.igs")   # a path, or the bytes write_iges returns
 igs.length_unit    # 0.001 for an MM file, 0.0254 for an INCH file
 igs.unit_name       # "MM", "INCH", "M", ...
 
@@ -55,8 +59,8 @@ pysmesh.write_iges(igs.brep, unit=igs.unit_name)   # re-export, unit-exact
 
 `write_iges` takes the unit of the coordinates as an explicit argument and declares it in
 the header without rescaling, exactly as `write_step_xde` does. Both accept the same ten
-names. See [Units](../concepts/units.md) for the full contract, including why `read_iges`
-takes a path and not bytes.
+names. See [Units](../concepts/units.md) for the full contract, including how `read_iges`
+reads bytes.
 
 ## Tessellation: `tessellate`
 

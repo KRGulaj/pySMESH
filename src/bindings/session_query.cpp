@@ -89,171 +89,6 @@ void write_frame(const gp_Ax3& frame, double* origin, double* axis, double* ref_
   ref_dir[2] = x.Z();
 }
 
-// ---- mass properties at a precision ---------------------------------------------------- //
-
-// One shape's measure and centre of mass, and the relative error the rule reports reaching.
-struct Props {
-  double mass = 0.0;
-  gp_XYZ centroid;
-  double error = 0.0;
-};
-
-// One piece of an edge's parameter range under the 15-point Gauss-Kronrod rule.
-struct Piece {
-  double a = 0.0;
-  double b = 0.0;
-  double length = 0.0;  // the Kronrod estimate of the arc length over [a, b]
-  double error = 0.0;   // |Kronrod - Gauss|: the rule's estimate of the error in `length`
-  gp_XYZ moment;        // the Kronrod estimate of the integral of C(t) |C'(t)| over [a, b]
-};
-
-// The 15-point Kronrod rule and the 7-point Gauss rule nested in it, from OCCT's tables.
-class KronrodRule {
- public:
-  KronrodRule() : kronrod_p_(1, 15), kronrod_w_(1, 15), gauss_w_(1, 7) {
-    math_Vector gauss_p(1, 7);
-    if (!math::KronrodPointsAndWeights(15, kronrod_p_, kronrod_w_) ||
-        !math::OrderedGaussPointsAndWeights(7, gauss_p, gauss_w_)) {
-      throw PysmeshError(
-          "Session.mass_properties: OCCT's math tables gave no 15-point Gauss-Kronrod rule.");
-    }
-  }
-
-  // Every even Kronrod node is a node of the nested Gauss rule (math.hxx), so one set of
-  // curve evaluations gives both estimates.
-  Piece integrate(const BRepAdaptor_Curve& c, double a, double b) const {
-    const double half = 0.5 * (b - a);
-    const double mid = 0.5 * (a + b);
-    double kronrod = 0.0;
-    double gauss = 0.0;
-    gp_XYZ moment;
-    for (int i = 1; i <= 15; ++i) {
-      gp_Pnt p;
-      gp_Vec d1;
-      c.D1(mid + half * kronrod_p_(i), p, d1);
-      const double speed = d1.Magnitude();
-      kronrod += kronrod_w_(i) * speed;
-      moment += p.XYZ() * (kronrod_w_(i) * speed);
-      if (i % 2 == 0) {
-        gauss += gauss_w_(i / 2) * speed;
-      }
-    }
-    return {a, b, half * kronrod, std::abs(half * (kronrod - gauss)), moment * half};
-  }
-
- private:
-  math_Vector kronrod_p_;
-  math_Vector kronrod_w_;
-  math_Vector gauss_w_;
-};
-
-// A point's measure is 0 and its centre is itself. The bounding box is exact for a point,
-// and it is also the centre of a degenerate edge, which has no curve to integrate.
-Props point_props(const TopoDS_Shape& s) {
-  Bnd_Box box;
-  BRepBndLib::Add(s, box);
-  double a = 0, b = 0, c = 0, d = 0, e = 0, f = 0;
-  box.Get(a, b, c, d, e, f);
-  Props out;
-  out.centroid = gp_XYZ(0.5 * (a + d), 0.5 * (b + e), 0.5 * (c + f));
-  return out;
-}
-
-// Bisections one edge may take before the rule stops. A piece's error falls as a high power
-// of its width on a smooth curve, so a converging edge needs a few dozen; the cap only ends
-// an edge the rule cannot resolve, and the error it then reports is above the precision.
-constexpr int kMaxEdgeBisections = 20000;
-
-// Arc length and centroid of an edge, integrated adaptively.
-//
-// BRepGProp has no adaptive rule for a curve: LinearProperties takes no precision. Its fixed
-// rule is exact on a line or a circle and not on a free-form edge. On a spline through six
-// points it measured 18.5768806517 against a true length of 18.5656473408, 6.05e-4 high.
-//
-// The range is first split at every parameter where the curve's continuity drops below CN,
-// the knots of a B-spline. Each span is then polynomial, where Gauss-Kronrod converges
-// fastest. The rule then bisects the piece with the largest error estimate until the
-// summed estimate is within precision x the length. That is the criterion GProp applies to a
-// face's area. The centroid's first moments are integrated on the same nodes, so the
-// centroid follows the rule the length follows.
-Props adaptive_edge(const TopoDS_Edge& e, double precision, const KronrodRule& rule) {
-  BRepAdaptor_Curve c(e);
-  const int spans = c.NbIntervals(GeomAbs_CN);
-  NCollection_Array1<double> bounds(1, spans + 1);
-  c.Intervals(bounds, GeomAbs_CN);
-
-  const auto worse = [](const Piece& x, const Piece& y) { return x.error < y.error; };
-  std::priority_queue<Piece, std::vector<Piece>, decltype(worse)> pieces(worse);
-  double length = 0.0;
-  double error = 0.0;
-  for (int i = 1; i <= spans; ++i) {
-    const Piece p = rule.integrate(c, bounds(i), bounds(i + 1));
-    length += p.length;
-    error += p.error;
-    pieces.push(p);
-  }
-  for (int n = 0; n < kMaxEdgeBisections && error > precision * length; ++n) {
-    const Piece worst = pieces.top();
-    pieces.pop();
-    const double mid = 0.5 * (worst.a + worst.b);
-    const Piece left = rule.integrate(c, worst.a, mid);
-    const Piece right = rule.integrate(c, mid, worst.b);
-    length += left.length + right.length - worst.length;
-    error += left.error + right.error - worst.error;
-    pieces.push(left);
-    pieces.push(right);
-  }
-
-  // Summed again from the pieces: the running totals carry the round-off of every update.
-  Props out;
-  gp_XYZ moment;
-  double sum_error = 0.0;
-  while (!pieces.empty()) {
-    const Piece& p = pieces.top();
-    out.mass += p.length;
-    sum_error += p.error;
-    moment += p.moment;
-    pieces.pop();
-  }
-  // An edge whose curve does not move has no length to weight a centroid by: it is a point.
-  if (!(out.mass > 0.0)) {
-    return point_props(e);
-  }
-  out.centroid = moment / out.mass;
-  out.error = sum_error / out.mass;
-  return out;
-}
-
-// One shape's properties integrated adaptively to `precision`, a relative error.
-//
-// A solid and a face go to GProp's adaptive rule, which refines each face until two steps
-// agree to `precision` relative and returns its estimate of the relative error reached over
-// the whole shape (BRepGProp.hxx). An edge goes to adaptive_edge above.
-Props adaptive_props_of(const TopoDS_Shape& s, double precision, const KronrodRule& rule) {
-  GProp_GProps props;
-  Props out;
-  switch (s.ShapeType()) {
-    case TopAbs_SOLID:
-      out.error = BRepGProp::VolumeProperties(s, props, precision);
-      break;
-    case TopAbs_FACE:
-      out.error = BRepGProp::SurfaceProperties(s, props, precision);
-      break;
-    case TopAbs_EDGE: {
-      const TopoDS_Edge& e = TopoDS::Edge(s);
-      if (BRep_Tool::Degenerated(e) || !BRep_Tool::IsGeometric(e)) {
-        return point_props(s);
-      }
-      return adaptive_edge(e, precision, rule);
-    }
-    default:
-      return point_props(s);
-  }
-  out.mass = props.Mass();
-  out.centroid = props.CentreOfMass().XYZ();
-  return out;
-}
-
 }  // namespace
 
 py::dict Session::entity_types(const std::string& kind) const {
@@ -409,11 +244,26 @@ py::dict Session::bounding_boxes(const std::string& kind) const {
   py::array_t<double> bbox({n, static_cast<py::ssize_t>(6)});
   double* bp = bbox.mutable_data();
 
+  // The box of the geometry, not padded by the tolerance (reports D1, D2), each shape
+  // in parallel with the GIL released.
+  std::vector<TopoDS_Shape> all;
+  std::vector<std::size_t> first(ids.size() + 1, 0);
+  for (std::size_t k = 0; k < ids.size(); ++k) {
+    const EntityRecord& rec = state_.registry->alive.at(ids[k]);
+    first[k] = all.size();
+    all.insert(all.end(), rec.shapes.begin(), rec.shapes.end());
+  }
+  first[ids.size()] = all.size();
+  std::vector<Bnd_Box> boxes;
+  {
+    py::gil_scoped_release release;
+    boxes = shape_checks::exact_boxes(all);
+  }
   for (py::ssize_t i = 0; i < n; ++i) {
-    const EntityRecord& rec = state_.registry->alive.at(ids[static_cast<std::size_t>(i)]);
+    const auto k = static_cast<std::size_t>(i);
     Bnd_Box box;
-    for (const TopoDS_Shape& s : rec.shapes) {
-      BRepBndLib::Add(s, box);
+    for (std::size_t j = first[k]; j < first[k + 1]; ++j) {
+      box.Add(boxes[j]);
     }
     box.Get(bp[6 * i + 0], bp[6 * i + 1], bp[6 * i + 2], bp[6 * i + 3], bp[6 * i + 4],
             bp[6 * i + 5]);
@@ -442,13 +292,30 @@ py::dict Session::mass_properties(const std::vector<EntityId>& entity_ids,
       std::ostringstream s;
       s << "Session.mass_properties: precision " << p << " is above " << kAdaptiveEpsCap
         << ", where GProp's rule stops being adaptive and integrates with its fixed rule. "
-           "Pass None for the fixed rule, or a precision <= "
-        << kAdaptiveEpsCap << ".";
+           "Pass None for the default precision "
+        << shape_checks::kDefaultMassPrecision << ", or a precision <= " << kAdaptiveEpsCap
+        << ".";
       throw PysmeshError(s.str());
     }
   }
-  const std::optional<KronrodRule> rule =
-      precision.has_value() ? std::optional<KronrodRule>(std::in_place) : std::nullopt;
+  // Without a precision the default one, never GProp's fixed rule: that rule read a wing
+  // lofted through one-edge sections 20 % low (report D3).
+  const double p = precision.value_or(shape_checks::kDefaultMassPrecision);
+
+  // Every shape of every named entity, integrated in parallel with the GIL released.
+  std::vector<TopoDS_Shape> shapes;
+  std::vector<std::size_t> first(entity_ids.size() + 1, 0);
+  for (std::size_t k = 0; k < entity_ids.size(); ++k) {
+    const EntityRecord& rec = require_alive("mass_properties", entity_ids[k]);
+    first[k] = shapes.size();
+    shapes.insert(shapes.end(), rec.shapes.begin(), rec.shapes.end());
+  }
+  first[entity_ids.size()] = shapes.size();
+  std::vector<shape_checks::Measure> measures;
+  {
+    py::gil_scoped_release release;
+    measures = shape_checks::measures(shapes, p);
+  }
 
   const auto n = static_cast<py::ssize_t>(entity_ids.size());
   py::array_t<double> measure(n);
@@ -459,8 +326,6 @@ py::dict Session::mass_properties(const std::vector<EntityId>& entity_ids,
   double* ep = error.mutable_data();
 
   for (py::ssize_t i = 0; i < n; ++i) {
-    const EntityRecord& rec =
-        require_alive("mass_properties", entity_ids[static_cast<std::size_t>(i)]);
     // Each shape is measured by its own kind — volume for a solid, area for a face, length
     // for an edge. Never by walking a parent: BRepGProp::LinearProperties on a SOLID visits
     // every edge once per owning face, so a total edge length taken that way is silently
@@ -470,35 +335,23 @@ py::dict Session::mass_properties(const std::vector<EntityId>& entity_ids,
     double cx = 0.0, cy = 0.0, cz = 0.0;
     // Sum over the pieces of |measure| x relative error: the absolute error of the total.
     double abs_error = 0.0;
-    for (const TopoDS_Shape& s : rec.shapes) {
-      double m = 0.0;
-      std::array<double, 3> c{};
-      if (rule.has_value()) {
-        const Props props = adaptive_props_of(s, *precision, *rule);
-        m = props.mass;
-        c = {props.centroid.X(), props.centroid.Y(), props.centroid.Z()};
-        abs_error += props.error * std::abs(m);
-      } else {
-        m = measure_of(s);
-        c = centroid_of(s);
-      }
-      const double w = (m > 0.0) ? m : 1.0;
-      total += m;
+    const auto k = static_cast<std::size_t>(i);
+    for (std::size_t j = first[k]; j < first[k + 1]; ++j) {
+      const shape_checks::Measure& m = measures[j];
+      const double w = (m.mass > 0.0) ? m.mass : 1.0;
+      total += m.mass;
       wsum += w;
-      cx += w * c[0];
-      cy += w * c[1];
-      cz += w * c[2];
+      cx += w * m.centroid.X();
+      cy += w * m.centroid.Y();
+      cz += w * m.centroid.Z();
+      abs_error += m.error * std::abs(m.mass);
     }
     mp[i] = total;
     cp[3 * i + 0] = cx / wsum;
     cp[3 * i + 1] = cy / wsum;
     cp[3 * i + 2] = cz / wsum;
-    // The fixed rule reports no estimate. A measure of zero, a point's, is exact.
-    if (!rule.has_value()) {
-      ep[i] = std::numeric_limits<double>::quiet_NaN();
-    } else {
-      ep[i] = (total != 0.0) ? abs_error / std::abs(total) : 0.0;
-    }
+    // A measure of zero, a point's, is exact.
+    ep[i] = (total != 0.0) ? abs_error / std::abs(total) : 0.0;
   }
 
   py::dict out;
@@ -1144,34 +997,229 @@ py::dict Session::project_on_face(EntityId face_id, const PointArray& points) co
   return out;
 }
 
+namespace {
+
+// A box as Bnd_Box::Get reports it, with closed intervals: the numbers bounding_boxes returns.
+struct Box6 {
+  double lo[3];
+  double hi[3];
+
+  // Every interval of this box lies inside the other's.
+  bool inside(const Box6& o) const {
+    for (int k = 0; k < 3; ++k) {
+      if (lo[k] < o.lo[k] || hi[k] > o.hi[k]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Every interval of this box shares a point with the other's.
+  bool meets(const Box6& o) const {
+    for (int k = 0; k < 3; ++k) {
+      if (lo[k] > o.hi[k] || hi[k] < o.lo[k]) {
+        return false;
+      }
+    }
+    return true;
+  }
+};
+
+// The reported numbers of a box that is not void.
+Box6 box6_of(const Bnd_Box& b) {
+  Box6 out{};
+  b.Get(out.lo[0], out.lo[1], out.lo[2], out.hi[0], out.hi[1], out.hi[2]);
+  return out;
+}
+
+// The parts whose boxes BRepBndLib::AddOptimal joins into a shape's box: its faces, its
+// edges outside every face, its vertices outside every edge (BRepBndLib.cxx:265-427). Each
+// part's box is the one AddOptimal computes for it inside the shape, so the shape's box is
+// the union of its parts' boxes.
+void append_box_parts(const TopoDS_Shape& s, std::vector<TopoDS_Shape>& parts) {
+  for (TopExp_Explorer x(s, TopAbs_FACE); x.More(); x.Next()) {
+    parts.push_back(x.Current());
+  }
+  for (TopExp_Explorer x(s, TopAbs_EDGE, TopAbs_FACE); x.More(); x.Next()) {
+    parts.push_back(x.Current());
+  }
+  for (TopExp_Explorer x(s, TopAbs_VERTEX, TopAbs_EDGE); x.More(); x.Next()) {
+    parts.push_back(x.Current());
+  }
+}
+
+// What entities_in_box knows of one part's box E.
+struct PartBox {
+  enum State { kVoid, kUnproven, kCoarse, kExact };
+  State state = kVoid;  // kVoid: E is void, so the part adds nothing
+  Box6 box{};           // kCoarse: a box proven to contain E; kExact: E itself
+};
+
+enum class Verdict { kOut, kIn, kPending };
+
+// The verdict on one entity, the union H of the boxes E of its parts [begin, end). With the
+// coarse box C of a part containing its E (and E void only when C is):
+//   * strict, H inside the query: every E inside it. C inside means E inside; C missing the
+//     query means E is not inside, so H is not.
+//   * otherwise, H meets the query: on each axis, some E reaches below the query's top and
+//     some E reaches above its bottom. A part with C.hi <= top has E.lo <= top; a part with
+//     C.lo >= bottom has E.hi >= bottom. Only a part with C.lo <= top (C.hi >= bottom) can
+//     reach below the top (above the bottom).
+// Every comparison is on the reported numbers, so the verdict equals the one on H.
+// need_exact non-null: first pass, marks the parts whose E the verdict needs, and returns
+// kPending if any. Null: second pass, every needed E known.
+Verdict decide(const std::vector<PartBox>& known, std::size_t begin, std::size_t end,
+               const Box6& q, bool strict, std::vector<bool>* need_exact) {
+  bool any = false;  // H is not void
+  if (strict) {
+    std::vector<std::size_t> open;
+    for (std::size_t j = begin; j < end; ++j) {
+      const PartBox& p = known[j];
+      if (p.state == PartBox::kVoid) {
+        continue;
+      }
+      if (p.state == PartBox::kUnproven) {
+        open.push_back(j);
+        continue;
+      }
+      any = true;
+      if (!p.box.meets(q) || (p.state == PartBox::kExact && !p.box.inside(q))) {
+        return Verdict::kOut;
+      }
+      if (!p.box.inside(q)) {
+        open.push_back(j);
+      }
+    }
+    if (open.empty()) {
+      return any ? Verdict::kIn : Verdict::kOut;
+    }
+    if (need_exact == nullptr) {
+      throw PysmeshError("Session.entities_in_box: internal error, a part box is undecided.");
+    }
+    for (std::size_t j : open) {
+      (*need_exact)[j] = true;
+    }
+    return Verdict::kPending;
+  }
+
+  std::vector<std::size_t> wanted;
+  for (int k = 0; k < 3; ++k) {
+    for (const bool below : {true, false}) {
+      // below: some E.lo <= q.hi[k]; otherwise: some E.hi >= q.lo[k].
+      bool witnessed = false;
+      std::vector<std::size_t> candidates;
+      for (std::size_t j = begin; j < end && !witnessed; ++j) {
+        const PartBox& p = known[j];
+        if (p.state == PartBox::kVoid) {
+          continue;
+        }
+        if (p.state == PartBox::kUnproven) {
+          candidates.push_back(j);
+          continue;
+        }
+        any = true;
+        const Box6& b = p.box;
+        if (p.state == PartBox::kExact) {
+          witnessed = below ? b.lo[k] <= q.hi[k] : b.hi[k] >= q.lo[k];
+        } else if (below ? b.hi[k] <= q.hi[k] : b.lo[k] >= q.lo[k]) {
+          witnessed = true;
+        } else if (below ? b.lo[k] <= q.hi[k] : b.hi[k] >= q.lo[k]) {
+          candidates.push_back(j);
+        }
+      }
+      if (witnessed) {
+        continue;
+      }
+      if (candidates.empty()) {
+        return Verdict::kOut;
+      }
+      wanted.insert(wanted.end(), candidates.begin(), candidates.end());
+    }
+  }
+  if (wanted.empty()) {
+    return any ? Verdict::kIn : Verdict::kOut;
+  }
+  if (need_exact == nullptr) {
+    throw PysmeshError("Session.entities_in_box: internal error, a part box is undecided.");
+  }
+  for (std::size_t j : wanted) {
+    (*need_exact)[j] = true;
+  }
+  return Verdict::kPending;
+}
+
+}  // namespace
+
 py::array_t<std::int64_t> Session::entities_in_box(const std::string& kind, double xmin,
                                                    double ymin, double zmin, double xmax,
                                                    double ymax, double zmax,
                                                    bool strict) const {
+  finite_arg("entities_in_box", "minimum", xmin, ymin, zmin);
+  finite_arg("entities_in_box", "maximum", xmax, ymax, zmax);
   if (xmax < xmin || ymax < ymin || zmax < zmin) {
     throw PysmeshError("Session.entities_in_box: every max must be >= its min.");
   }
-  Bnd_Box query;
-  query.Update(xmin, ymin, zmin, xmax, ymax, zmax);
+  const Box6 query{{xmin, ymin, zmin}, {xmax, ymax, zmax}};
+
+  // The answer is that of the box of the geometry, not padded by the tolerance (reports D1,
+  // D2), as bounding_boxes reports it: an entity that fits the query box exactly is inside
+  // it under strict. Two levels (brief amendment 5): a coarse box proven to contain the box
+  // of each part decides wherever it can, and only the parts it cannot decide pay for their
+  // exact box. The entity's box is the union of its parts' boxes, so the answer is the same.
+  const std::vector<EntityId> ids = ids_of_kind(kind_from_name(kind));
+  std::vector<TopoDS_Shape> parts;
+  std::vector<std::size_t> first(ids.size() + 1, 0);
+  for (std::size_t k = 0; k < ids.size(); ++k) {
+    first[k] = parts.size();
+    for (const TopoDS_Shape& s : state_.registry->alive.at(ids[k]).shapes) {
+      append_box_parts(s, parts);
+    }
+  }
+  first[ids.size()] = parts.size();
+  std::vector<std::optional<Bnd_Box>> coarse;
+  {
+    py::gil_scoped_release release;
+    coarse = shape_checks::coarse_boxes(parts);
+  }
+  std::vector<PartBox> known(parts.size());
+  for (std::size_t j = 0; j < parts.size(); ++j) {
+    if (!coarse[j]) {
+      known[j].state = PartBox::kUnproven;
+    } else if (!coarse[j]->IsVoid()) {
+      known[j] = PartBox{PartBox::kCoarse, box6_of(*coarse[j])};
+    }
+  }
+
+  std::vector<Verdict> verdict(ids.size());
+  std::vector<bool> need_exact(parts.size(), false);
+  for (std::size_t k = 0; k < ids.size(); ++k) {
+    verdict[k] = decide(known, first[k], first[k + 1], query, strict, &need_exact);
+  }
+
+  std::vector<TopoDS_Shape> rest;
+  std::vector<std::size_t> rest_of;
+  for (std::size_t j = 0; j < parts.size(); ++j) {
+    if (need_exact[j]) {
+      rest.push_back(parts[j]);
+      rest_of.push_back(j);
+    }
+  }
+  std::vector<Bnd_Box> exact;
+  {
+    py::gil_scoped_release release;
+    exact = shape_checks::exact_boxes(rest);
+  }
+  for (std::size_t r = 0; r < rest.size(); ++r) {
+    known[rest_of[r]] = exact[r].IsVoid() ? PartBox{} : PartBox{PartBox::kExact, box6_of(exact[r])};
+  }
 
   std::vector<EntityId> hits;
-  for (EntityId id : ids_of_kind(kind_from_name(kind))) {
-    const EntityRecord& rec = state_.registry->alive.at(id);
-    Bnd_Box box;
-    for (const TopoDS_Shape& s : rec.shapes) {
-      BRepBndLib::Add(s, box);
+  for (std::size_t k = 0; k < ids.size(); ++k) {
+    if (verdict[k] == Verdict::kPending) {
+      verdict[k] = decide(known, first[k], first[k + 1], query, strict, nullptr);
     }
-    if (box.IsVoid()) {
-      continue;
-    }
-    if (strict) {
-      double a, b, c, d, e, f;
-      box.Get(a, b, c, d, e, f);
-      if (a >= xmin && b >= ymin && c >= zmin && d <= xmax && e <= ymax && f <= zmax) {
-        hits.push_back(id);
-      }
-    } else if (!query.IsOut(box)) {
-      hits.push_back(id);
+    if (verdict[k] == Verdict::kIn) {
+      hits.push_back(ids[k]);
     }
   }
   return ids_array(hits);
@@ -1179,6 +1227,7 @@ py::array_t<std::int64_t> Session::entities_in_box(const std::string& kind, doub
 
 py::array_t<bool> Session::contains(const std::vector<EntityId>& solid_ids,
                                     const PointArray& points, double tol) const {
+  finite_arg("contains", "tol", tol);
   if (solid_ids.empty()) {
     throw PysmeshError("Session.contains: solid_ids must name at least one solid.");
   }

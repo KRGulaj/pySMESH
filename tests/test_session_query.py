@@ -39,11 +39,13 @@ Fixture sizing follows the project rule: a 3 x 7 x 11 box, never a unit cube.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import numpy as np
 import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
+from numpy.typing import NDArray
 
 import pysmesh as ps
 from pysmesh import EntityId, EntityKind, Session
@@ -343,6 +345,9 @@ def test_mass_properties_rejects_a_dead_id(box: Session) -> None:
 
 # ------------------------------------------------ Mass properties at a precision --- #
 
+# The default relative precision of every measure without an explicit one (report D3).
+DEFAULT_PRECISION: float = 1e-6
+
 # A pipe tee: a branch of radius R2 rising from the axis of a main cylinder of radius R1.
 TEE_R1: float = 1.7
 TEE_L1: float = 11.0
@@ -440,21 +445,24 @@ def test_the_tee_at_a_precision_matches_its_closed_form(tee: Session) -> None:
     assert table.error[0] <= 1e-9
 
 
-def test_the_tee_without_a_precision_reads_the_fixed_rule_as_before(
+def test_the_tee_without_a_precision_reads_its_closed_form_at_the_default_precision(
     tee: Session,
 ) -> None:
-    """``precision=None`` is 4.2.1's answer to the last digit, fixed-rule error and all."""
+    """``precision=None`` is the adaptive rule at 1e-6, not the fixed rule (report D3).
+
+    The fixed rule read the tee 1.39e-6 high (TEE_FIXED_RULE_VOLUME); the default now
+    meets the closed form within its precision and reports a finite error.
+    """
     solid = ids_of(tee, EntityKind.SOLID)
 
     default = tee.mass_properties(solid)
     explicit = tee.mass_properties(solid, precision=None)
 
-    assert default.measure[0] == pytest.approx(
-        TEE_FIXED_RULE_VOLUME, rel=0.0, abs=5e-13
-    )
+    assert default.measure[0] == pytest.approx(tee_closed_form(), rel=DEFAULT_PRECISION)
+    assert abs(default.measure[0] - TEE_FIXED_RULE_VOLUME) > 1e-4
     assert np.array_equal(default.measure, explicit.measure)
     assert np.array_equal(default.centroid, explicit.centroid)
-    assert np.isnan(default.error).all()
+    assert 0.0 <= float(default.error[0]) <= DEFAULT_PRECISION
 
 
 @pytest.mark.parametrize("precision", [None, 1e-3, 1e-6, 1e-12])
@@ -473,16 +481,17 @@ def test_a_cylinder_matches_its_closed_form_at_every_setting(
     )
 
 
-def test_an_edge_at_a_precision_measures_the_length_the_fixed_rule_misses() -> None:
+def test_an_edge_at_a_precision_measures_the_length_the_fixed_rule_missed() -> None:
     """BRepGProp has no adaptive rule for a curve; the edge rule is Gauss-Kronrod on its own.
 
-    On this parabolic arc the fixed rule reads 12.0355 against a closed form of 12.0302.
+    On this parabolic arc the fixed rule read 12.0355 against a closed form of 12.0302.
+    Without a precision the default, 1e-6, meets it too (report D3).
     """
     s = Session()
     s.add_bspline(BENT_PARABOLA, degree=2)
     edge = ids_of(s, EntityKind.EDGE)
 
-    fixed = s.mass_properties(edge)
+    default = s.mass_properties(edge)
     table = s.mass_properties(edge, precision=1e-12)
 
     expected = parabola_length(BENT_PARABOLA)
@@ -490,7 +499,7 @@ def test_an_edge_at_a_precision_measures_the_length_the_fixed_rule_misses() -> N
     assert table.centroid[0] == pytest.approx(
         parabola_centroid(BENT_PARABOLA), rel=1e-12, abs=1e-12
     )
-    assert fixed.measure[0] != pytest.approx(expected, rel=1e-4)
+    assert default.measure[0] == pytest.approx(expected, rel=DEFAULT_PRECISION)
 
 
 @settings(max_examples=25, deadline=None, derandomize=True)
@@ -1694,3 +1703,444 @@ def test_no_query_advances_the_session(box: Session) -> None:
     assert box.op_count == ops_before
     assert box.issued_id_count == ids_before
     assert box.state_op_index == 1
+
+
+# ----------------------------------------- The default rule on a lofted wing (D3) --- #
+
+# The report's wing: NACA 0012, three sections at z = 0, 1, 2, chord 1 - 0.1 z, span 2,
+# lofted smooth. Each section is the chord-1 section scaled, so the volume is the
+# chord-1 section area times the integral of the squared chord,
+# int_0^2 (1 - 0.1 z)^2 dz.
+WING_POINTS: int = 60
+WING_SPAN: float = 2.0
+CHORD_SQUARED_INTEGRAL: float = (
+    WING_SPAN - 0.1 * WING_SPAN**2 + 0.01 * WING_SPAN**3 / 3.0
+)
+# Curve samples for the section area by Green's theorem; the error of the polygon rule
+# is below 1e-11 of the area at this density.
+SECTION_SAMPLES: int = 200_001
+
+
+def _naca(chord: float) -> np.ndarray:
+    """NACA 0012 with a sharp trailing edge: closed loop TE, upper, LE, lower, TE."""
+    b = np.linspace(0.0, np.pi, WING_POINTS)
+    x = 0.5 * (1.0 - np.cos(b))
+    yt = 0.6 * (
+        0.2969 * np.sqrt(x) - 0.1260 * x - 0.3516 * x**2 + 0.2843 * x**3 - 0.1036 * x**4
+    )
+    upper = np.c_[x[::-1], yt[::-1]]
+    lower = np.c_[x[1:], -yt[1:]]
+    return np.vstack([upper, lower]) * chord
+
+
+def _add_section(s: Session, z: float, chord: float, two_edge: bool) -> list[int]:
+    """One section at height z: one closed spline, or an upper and a lower spline."""
+    p = np.c_[_naca(chord), np.full(2 * WING_POINTS - 1, z)]
+    before = set(ids_of(s, EntityKind.EDGE))
+    if two_edge:
+        half = len(p) // 2
+        s.add_spline(p[: half + 1])
+        s.add_spline(p[half:])
+        s.make_wire([i for i in ids_of(s, EntityKind.EDGE) if i not in before])
+    else:
+        s.add_spline(p)
+    return [i for i in ids_of(s, EntityKind.EDGE) if i not in before]
+
+
+def _section_area(two_edge: bool) -> float:
+    """The area inside the chord-1 section, by Green's theorem on curve samples."""
+    s = Session()
+    edges = _add_section(s, 0.0, 1.0, two_edge)
+    xy: list[np.ndarray] = []
+    for edge in edges:
+        t0, t1 = s.edge_parameter_bounds([edge])[0]
+        xy.append(s.curve_at(edge, np.linspace(t0, t1, SECTION_SAMPLES)).points[:, :2])
+    loop = np.vstack(xy)
+    x, y = loop[:, 0], loop[:, 1]
+    return abs(0.5 * float(np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y)))
+
+
+def _wing(two_edge: bool) -> Session:
+    """The report's wing, lofted smooth through its three sections."""
+    s = Session()
+    sections = [
+        _add_section(s, z, 1.0 - 0.1 * z, two_edge) for z in (0.0, 1.0, WING_SPAN)
+    ]
+    s.thru_sections(sections, solid=True, ruled=False)
+    return s
+
+
+@pytest.mark.parametrize("two_edge", [False, True], ids=["one_edge", "two_edge"])
+def test_every_default_volume_of_a_wing_equals_its_section_integral(
+    two_edge: bool,
+) -> None:
+    """mass_properties, entity_table and Shape.solids, all without a precision.
+
+    The fixed rule read the one-edge wing 20.2 % low (0.106101 for 0.132909). The stated
+    bound is the default precision, 1e-6 relative; the brief's own bound is 1e-5.
+    """
+    s = _wing(two_edge)
+    expected = _section_area(two_edge) * CHORD_SQUARED_INTEGRAL
+    solids = ids_of(s, EntityKind.SOLID)
+
+    by_mass = float(s.mass_properties(solids).measure[0])
+    by_table = float(s.entity_table(EntityKind.SOLID).measure[0])
+    by_shape = ps.load_brep(s.brep()).solids()[0].volume
+
+    for volume in (by_mass, by_table, by_shape):
+        assert volume == pytest.approx(expected, rel=DEFAULT_PRECISION)
+        assert volume == pytest.approx(expected, rel=1e-5)
+
+
+@pytest.mark.parametrize(
+    ("build", "volume"),
+    [
+        (lambda s: s.add_box(BOX_DX, BOX_DY, BOX_DZ), BOX_VOLUME),
+        (lambda s: s.add_cylinder(1.3, 4.1), math.pi * 1.3**2 * 4.1),
+        (lambda s: s.add_sphere(2.2), 4.0 / 3.0 * math.pi * 2.2**3),
+    ],
+    ids=["box", "cylinder", "sphere"],
+)
+def test_every_default_volume_of_a_primitive_equals_its_closed_form(
+    build: object, volume: float
+) -> None:
+    """The box, the cylinder and the sphere, within the default precision."""
+    s = Session()
+    build(s)  # type: ignore[operator]
+    solids = ids_of(s, EntityKind.SOLID)
+
+    table = s.mass_properties(solids)
+
+    assert float(table.measure[0]) == pytest.approx(volume, rel=DEFAULT_PRECISION)
+    assert float(s.entity_table(EntityKind.SOLID).measure[0]) == pytest.approx(
+        volume, rel=DEFAULT_PRECISION
+    )
+    assert ps.load_brep(s.brep()).solids()[0].volume == pytest.approx(
+        volume, rel=DEFAULT_PRECISION
+    )
+    assert 0.0 <= float(table.error[0]) <= DEFAULT_PRECISION
+
+
+# ------------------------------------------------- Boxes of the geometry (D1, D2) --- #
+
+# The pad OCCT's optimal box adds to a B-spline or Bezier curve whatever the tolerance:
+# Precision::Confusion() (GeomBndLib_SplineHelpers.pxx, CurveBoxOptimal). 1e-9 more
+# covers the optimiser's parameter tolerance (Precision::PConfusion() along the curve)
+# and the gap between 200 001 samples and the true extremum.
+SPLINE_PAD: float = 1e-7
+SPLINE_SLACK: float = 1e-9
+# The repro's NACA 0012 spline: chord 2 m, its leading edge at x = 5.
+NACA_CHORD: float = 2.0
+NACA_SHIFT: float = 5.0
+
+
+def _naca_spline(s: Session) -> EntityId:
+    """The repro's spline: NACA 0012, chord 2, leading edge at (5, 0, 0)."""
+    p = _naca(NACA_CHORD)
+    s.add_spline(np.c_[p[:, 0] + NACA_SHIFT, p[:, 1], np.zeros(len(p))])
+    return ids_of(s, EntityKind.EDGE)[-1]
+
+
+def test_a_line_has_the_box_of_its_end_points_in_every_reader() -> None:
+    """(0, 0, 0)-(1, 0, 0) has the box [0, 0, 0, 1, 0, 0]: no tolerance pad (D1)."""
+    s = Session()
+    s.add_line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    expected = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+
+    boxes = [
+        s.entity_table(EntityKind.EDGE).bbox[0],
+        s.bounding_boxes(EntityKind.EDGE).bbox[0],
+        ps.load_brep(s.brep()).edges()[0].bbox,
+    ]
+
+    for box in boxes:
+        assert np.asarray(box) == pytest.approx(expected, abs=1e-12)
+
+
+def test_a_box_that_fits_the_query_exactly_is_found_under_strict() -> None:
+    """A unit box at x = 5..6: strict finds its solid and its six faces (D1)."""
+    s = Session()
+    s.add_box(1.0, 1.0, 1.0, origin=(5.0, 0.0, 0.0))
+    low, high = (5.0, 0.0, 0.0), (6.0, 1.0, 1.0)
+
+    solids = s.entities_in_box(EntityKind.SOLID, low, high, strict=True)
+    faces = s.entities_in_box(EntityKind.FACE, low, high, strict=True)
+
+    assert len(solids) == 1
+    assert len(faces) == 6
+
+
+def test_a_spline_box_bounds_the_curve_not_its_poles() -> None:
+    """The box lies within OCCT's pad of the extent of 200 001 curve samples (D2).
+
+    BRepBndLib::Add bounded the control polygon, 2.72 mm below the leading edge.
+    """
+    s = Session()
+    edge = _naca_spline(s)
+    t0, t1 = s.edge_parameter_bounds([edge])[0]
+    points = s.curve_at(edge, np.linspace(t0, t1, 200_001)).points
+    low, high = points.min(axis=0), points.max(axis=0)
+
+    box = s.bounding_boxes(EntityKind.EDGE).bbox[0]
+
+    assert np.all(box[:3] <= low + SPLINE_SLACK)
+    assert np.all(box[:3] >= low - SPLINE_PAD - SPLINE_SLACK)
+    assert np.all(box[3:] >= high - SPLINE_SLACK)
+    assert np.all(box[3:] <= high + SPLINE_PAD + SPLINE_SLACK)
+
+
+def test_a_query_box_left_of_the_leading_edge_does_not_report_the_spline() -> None:
+    """x in [-2 mm, -0.5 mm] of the leading edge holds no point of the spline (D2)."""
+    s = Session()
+    _naca_spline(s)
+
+    hits = s.entities_in_box(
+        EntityKind.EDGE,
+        (NACA_SHIFT - 0.002, -1.0, -1.0),
+        (NACA_SHIFT - 0.0005, 1.0, 1.0),
+    )
+
+    assert len(hits) == 0
+
+
+# ------------------------------------------- Aliases: one shape, several ids (C5) --- #
+
+# The oracle is independent of the registry: the distinct shapes of the session's BREP.
+_BREP_COUNT: dict[EntityKind, str] = {
+    EntityKind.SOLID: "solids",
+    EntityKind.FACE: "faces",
+    EntityKind.EDGE: "edges",
+}
+
+
+def _brep_count(s: Session, kind: EntityKind) -> int:
+    """How many distinct shapes of one kind the session's BREP holds."""
+    shape = ps.load_brep(s.brep())
+    return len(getattr(shape, _BREP_COUNT[kind])())
+
+
+def _common_of_cylinder_and_box() -> Session:
+    """A unit cylinder and a 2 x 2 x 1 box at the origin: their common is a quarter."""
+    s = Session()
+    s.add_cylinder(1.0, 1.0)
+    cylinder = ids_of(s, EntityKind.SOLID)
+    s.add_box(2.0, 2.0, 1.0)
+    box = [i for i in ids_of(s, EntityKind.SOLID) if i not in cylinder]
+    s.common(cylinder, box)
+    return s
+
+
+def _fragment_of_four_sectors() -> Session:
+    """Four annular sectors (r 1..2, z 0..1) round the z axis, touching, fragmented."""
+    s = Session()
+    for i in range(4):
+        edges = set(ids_of(s, EntityKind.EDGE))
+        faces = set(ids_of(s, EntityKind.FACE))
+        solids = set(ids_of(s, EntityKind.SOLID))
+        s.add_polyline(
+            [(1.0, 0.0, 0.0), (2.0, 0.0, 0.0), (2.0, 0.0, 1.0), (1.0, 0.0, 1.0)],
+            closed=True,
+        )
+        s.make_face([e for e in ids_of(s, EntityKind.EDGE) if e not in edges])
+        face = [f for f in ids_of(s, EntityKind.FACE) if f not in faces]
+        s.revolve(face, (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), math.pi / 2.0)
+        sector = [v for v in ids_of(s, EntityKind.SOLID) if v not in solids]
+        s.rotate((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), i * math.pi / 2.0, sector)
+    s.fragment(ids_of(s, EntityKind.SOLID))
+    return s
+
+
+def _sewn_wrap_around_face() -> Session:
+    """A smooth loft of 13 straight generators round a unit circle, the last a copy of
+    the first, sewn alone: its two coincident generators merge into one edge."""
+    lofted = Session()
+    sections = []
+    for p in np.linspace(0.0, 2.0 * math.pi, 13)[:-1]:
+        before = set(ids_of(lofted, EntityKind.EDGE))
+        c, d = math.cos(float(p)), math.sin(float(p))
+        lofted.add_line((c, d, 0.0), (c, d, 1.0))
+        sections.append([i for i in ids_of(lofted, EntityKind.EDGE) if i not in before])
+    before = set(ids_of(lofted, EntityKind.EDGE))
+    lofted.copy(sections[0])
+    sections.append([i for i in ids_of(lofted, EntityKind.EDGE) if i not in before])
+    lofted.thru_sections(sections, solid=False, ruled=False)
+    s = Session()
+    s.add_brep(lofted.brep())
+    s.sew(ids_of(s, EntityKind.FACE), tolerance=1e-6)
+    return s
+
+
+# Report C5's three cases. Shapes: the common is 1 solid; the 4 sectors have 6 faces
+# each, 4 of them shared by 2 neighbours, so 24 - 4 = 20 faces; the sewn face keeps its
+# 2 circles and 1 seam edge. Merged: the common carries the ids of the cylinder and the
+# box; each of the 4 shared faces carries the ids of its 2 sectors; the seam carries the
+# ids of the 2 coincident generators. Each merged shape has 2 ids.
+@pytest.mark.parametrize(
+    ("build", "kind", "shapes", "merged"),
+    [
+        (_common_of_cylinder_and_box, EntityKind.SOLID, 1, 1),
+        (_fragment_of_four_sectors, EntityKind.FACE, 20, 4),
+        (_sewn_wrap_around_face, EntityKind.EDGE, 3, 1),
+    ],
+    ids=["common_solid", "fragment_faces", "sew_edges"],
+)
+def test_distinct_entities_list_each_shape_once_and_alias_groups_hold_the_rest(
+    build: Callable[[], Session], kind: EntityKind, shapes: int, merged: int
+) -> None:
+    """One id per shape of the BREP; each merged shape is one group of its 2 ids."""
+    s = build()
+    in_brep = _brep_count(s, kind)
+
+    distinct = s.entities(kind, distinct=True)
+    groups = s.alias_groups(kind)
+
+    assert in_brep == shapes
+    assert len(distinct) == in_brep
+    assert [len(g) for g in groups] == [2] * merged
+    assert len(s.entities(kind)) == in_brep + merged
+    assert {int(g[0]) for g in groups} <= set(distinct.tolist())
+
+
+def test_the_distinct_common_of_a_cylinder_and_a_box_has_the_quarter_volume() -> None:
+    """Summed over distinct ids the common is pi / 4; over all ids, pi / 2 (C5)."""
+    s = _common_of_cylinder_and_box()
+
+    solids = s.entities(EntityKind.SOLID, distinct=True)
+
+    volume = float(s.mass_properties(solids).measure.sum())
+
+    assert volume == pytest.approx(math.pi / 4.0, rel=DEFAULT_PRECISION)
+
+
+# -------------------------------------- Two-level box query (D1, D2, amendment 5) --- #
+
+# Query boxes per kind and strict value: seeded random boxes over the model, and boxes
+# placed on entity boxes (exactly, larger and smaller by the offset, touching below and
+# above), where a wrong first level would show.
+RANDOM_BOX_QUERIES: int = 12
+PLACED_BOX_QUERIES: int = 6
+PLACED_OFFSET: float = 1e-9
+
+BoxQuery = tuple[tuple[float, float, float], tuple[float, float, float]]
+
+
+def _all_exact_hits(
+    table: ps.BoundsTable, query: BoxQuery, strict: bool
+) -> NDArray[np.int64]:
+    """The all-exact answer: the bounding_boxes numbers against the query, closed."""
+    q_lo, q_hi = np.asarray(query[0]), np.asarray(query[1])
+    lo, hi = table.bbox[:, :3], table.bbox[:, 3:]
+    if strict:
+        keep = np.all(lo >= q_lo, axis=1) & np.all(hi <= q_hi, axis=1)
+    else:
+        keep = np.all(lo <= q_hi, axis=1) & np.all(hi >= q_lo, axis=1)
+    return table.ids[keep]
+
+
+def _box_queries(boxes: NDArray[np.float64], seed: int) -> list[BoxQuery]:
+    """Random boxes over the model's extent, and boxes on and around entity boxes."""
+    rng = np.random.default_rng(seed)
+    low, high = boxes[:, :3].min(axis=0), boxes[:, 3:].max(axis=0)
+    span = high - low
+    raw: list[tuple[NDArray[np.float64], NDArray[np.float64]]] = []
+    for _ in range(RANDOM_BOX_QUERIES):
+        a = low - 0.1 * span + 1.2 * span * rng.random(3)
+        b = low - 0.1 * span + 1.2 * span * rng.random(3)
+        raw.append((np.minimum(a, b), np.maximum(a, b)))
+    count = min(PLACED_BOX_QUERIES, len(boxes))
+    for i in rng.choice(len(boxes), size=count, replace=False):
+        lo, hi = boxes[i, :3], boxes[i, 3:]
+        a, b = lo + PLACED_OFFSET, hi - PLACED_OFFSET
+        flat = a > b
+        mid = 0.5 * (lo + hi)
+        raw += [
+            (lo, hi),
+            (lo - PLACED_OFFSET, hi + PLACED_OFFSET),
+            (np.where(flat, mid, a), np.where(flat, mid, b)),
+            (lo - 1.0, lo),
+            (hi, hi + 1.0),
+        ]
+    return [
+        (
+            (float(a[0]), float(a[1]), float(a[2])),
+            (float(b[0]), float(b[1]), float(b[2])),
+        )
+        for a, b in raw
+    ]
+
+
+def _new_edges(s: Session, before: set[EntityId]) -> list[EntityId]:
+    """Edge ids created since `before`."""
+    return [i for i in ids_of(s, EntityKind.EDGE) if i not in before]
+
+
+def _every_box_branch() -> Session:
+    """The D1/D2 cases and a face or edge of every type the first level bounds.
+
+    Plane, sphere, cylinder, cone, torus, extrusion and B-spline faces; line, circle,
+    ellipse and B-spline edges; and a surface of revolution, which only the exact box
+    bounds. The axes are tilted so that every located bound is transformed.
+    """
+    s = Session()
+    s.add_line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    s.add_box(1.0, 1.0, 1.0, origin=(5.0, 0.0, 0.0))
+    _naca_spline(s)
+    s.add_sphere(1.0, centre=(0.0, 4.0, 0.0))
+    s.add_cylinder(0.5, 2.0, origin=(-3.0, 0.0, 0.0), axis=(1.0, 0.0, 0.0))
+    s.add_cone(1.0, 0.3, 1.5, origin=(0.0, -4.0, 0.0), axis=(0.0, 1.0, 1.0))
+    s.add_torus(1.5, 0.4, origin=(4.0, 4.0, 1.0), axis=(1.0, 1.0, 0.0))
+    s.add_ellipse((0.0, 0.0, 3.0), (0.0, 0.0, 1.0), 2.0, 0.7, x_dir=(1.0, 1.0, 0.0))
+    s.add_arc((-1.0, -1.0, -2.0), (0.0, -0.5, -2.0), (1.0, -1.0, -2.0))
+    before = set(ids_of(s, EntityKind.EDGE))
+    s.add_bspline(
+        [(-2.0, 2.0, -1.0), (-1.0, 3.0, -1.0), (0.0, 2.5, -1.0), (1.0, 3.0, -1.0)]
+    )
+    s.extrude(_new_edges(s, before), (0.0, 0.0, 1.0))
+    before = set(ids_of(s, EntityKind.EDGE))
+    s.add_bspline([(3.0, -3.0, 0.0), (3.5, -3.0, 0.5), (3.2, -3.0, 1.0)])
+    s.revolve(_new_edges(s, before), (2.0, -3.0, 0.0), (0.0, 0.0, 1.0), math.pi)
+    sections = []
+    for z in (-3.0, -2.5):
+        before = set(ids_of(s, EntityKind.EDGE))
+        s.add_spline([(6.0, -2.0, z), (7.0, -1.5 + 0.2 * z, z), (8.0, -2.0, z)])
+        sections.append(_new_edges(s, before))
+    s.thru_sections(sections, solid=False, ruled=False)
+    return s
+
+
+def _two_level_mismatches(s: Session, kind: EntityKind) -> list[str]:
+    """Every query whose entities_in_box answer differs from the all-exact one."""
+    table = s.bounding_boxes(kind)
+    out = []
+    for query in _box_queries(table.bbox, seed=42):
+        for strict in (True, False):
+            got = s.entities_in_box(kind, query[0], query[1], strict=strict)
+            want = _all_exact_hits(table, query, strict).tolist()
+            if got.tolist() != want:
+                out.append(f"{query} strict={strict}: {got.tolist()} != {want}")
+    return out
+
+
+@pytest.mark.parametrize("kind", [EntityKind.SOLID, EntityKind.FACE, EntityKind.EDGE])
+def test_the_two_level_box_query_equals_the_all_exact_rule_on_every_box_branch(
+    kind: EntityKind,
+) -> None:
+    """entities_in_box returns what the bounding_boxes numbers give (amendment 5)."""
+    s = _every_box_branch()
+
+    mismatches = _two_level_mismatches(s, kind)
+
+    assert mismatches == []
+
+
+@pytest.mark.parametrize("kind", [EntityKind.SOLID, EntityKind.FACE, EntityKind.EDGE])
+def test_the_two_level_box_query_equals_the_all_exact_rule_on_the_production_assembly(
+    industrial_step_brep: bytes, kind: EntityKind
+) -> None:
+    """The same equality on perrinn_f1: 117 solids, 5 606 faces, 13 996 edges."""
+    s = Session()
+    s.add_brep(industrial_step_brep)
+
+    mismatches = _two_level_mismatches(s, kind)
+
+    assert mismatches == []

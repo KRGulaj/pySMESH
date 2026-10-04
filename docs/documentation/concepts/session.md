@@ -76,7 +76,7 @@ other.
 | Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove` |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
-| Handoff | `export_handoff`, `brep` |
+| Handoff | `export_handoff`, `brep`, `write_step` |
 | Identity and introspection | `entities`, `entity_kind`, `is_alive`, `shape_count`, `name_of`, `origin`, `resolve`, `op_count`, `state_op_index`, `issued_id_count`, `entity_count` |
 
 Every mutating operation returns a `HistoryDelta`: which ids it created, deleted, modified,
@@ -92,8 +92,14 @@ are correct for clean geometry: `fuzzy=0.0` means "use each shape's own stored t
 which is the right answer for geometry built in the session or imported cleanly. Raise it
 only for an import whose faces do not quite meet, and choose it against the measured gap
 rather than turning it up for luck: a `fuzzy` value larger than the model's smallest real
-feature merges things that are genuinely separate. `parallel=True` is a speed setting only;
-the result does not depend on it.
+feature merges things that are genuinely separate.
+
+`parallel=True` does not change the result, but it changes the memory, not only the speed.
+Each OCCT worker thread holds its own working data. Measured on 16 threads with `fragment`
+of curved blocks: about 5 MB per input B-spline face in parallel, against about 0.8 MB with
+`parallel=False`, 6 to 7 times more. 512 lofted blocks (3 072 faces) peaked at 15.6 GB in
+parallel and at 2.2 GB without. Pass `parallel=False` to `fragment` and to the other
+booleans when 5 MB times the face count nears the memory you can spare.
 
 ## Two queries a feature filter needs
 
@@ -183,10 +189,42 @@ mesher.compute()
 `handoff.face_id[i]` is the `EntityId` of the face a reader of `handoff.brep` enumerates at
 position `i`. Pairing that array with a mesh element's sub-shape ordinal (see
 [Meshing model](meshing-model.md)) is what carries a mesh cell back to the session entity it
-came from. `export_handoff` verifies the id-to-sub-shape map is a bijection before it
-returns, and raises rather than handing back a map that has quietly lost some of the
-caller's names: a same-domain merge leaves several live ids on one face, and a split leaves
-one live id on several, and either makes the pairing ambiguous.
+came from. By default `export_handoff` verifies the id-to-sub-shape map is a bijection
+before it returns, and raises rather than handing back a map that has quietly lost some of
+the caller's names. Three causes make the pairing ambiguous: a same-domain merge leaves
+several live ids on one face, a boolean leaves both operands' ids on every sub-shape they
+share (every `common`, and a `fuse` with coincident sub-shapes), and a split leaves one live
+id on several.
+
+`export_handoff(allow_aliases=True)` returns a many-to-one map instead. Each ordinal
+carries its sub-shape's label, the lowest live id that denotes it, so a split id appears at
+every ordinal of its pieces. `handoff.face_ids_of[i]` (and the same for solids, edges and
+vertices) lists every live id of the sub-shape at ordinal `i`, label first. An id resolves
+to every ordinal whose tuple lists it: those are exactly the sub-shapes it denotes, also
+where two ids share only part of their sub-shapes, as after a coplanar `fuse`.
+
+`write_step(unit=..., face_names=...)` writes the live shape to STEP with face names keyed
+by entity id, so the names survive the edits that move ordinals. The rules follow the three
+causes above:
+
+- A split id names every piece it denotes.
+- A face that several ids denote takes the name when every named id among them gives the
+  same one. An unnamed id does not block the name of another id.
+- If the named ids of one face give different names, `write_step` raises. The message lists
+  each such face with its ids and their names.
+
+`read_step_xde` reads the names back on `face_labels`. `write_step` reads the ids of each
+face from the registry, which is the same relation `face_ids_of` reports.
+
+## Non-finite arguments
+
+Every float argument of a session operation must be finite. A NaN or an infinity raises
+`PysmeshError` before any OCCT call. The message names the operation, the argument and
+the value, for example `Session.extrude: vector must be finite (got (nan, 0, 1))`. The
+session is left exactly as it was. The standalone functions (`offset_shape`,
+`make_thick_solid`, `point_in_solid`, `tessellate`, `unify_same_domain`,
+`compute_viscous_layers`, the `Shape` and `Mesh` methods) and every numeric field of a
+mesher hypothesis follow the same rule.
 
 ## Thread contract
 

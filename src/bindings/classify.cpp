@@ -37,6 +37,7 @@ namespace {
 // distance.cpp, which are file-local there). Raises on parse failure or a null result.
 TopoDS_Shape read_brep(const py::bytes& data) {
   const std::string buffer = data;
+  require_brep_header(buffer, "BREP read produced a null shape (empty or malformed data)");
   std::istringstream stream(buffer);
   TopoDS_Shape shape;
   BRep_Builder builder;
@@ -53,6 +54,7 @@ TopoDS_Shape read_brep(const py::bytes& data) {
 
 py::array_t<bool> point_in_solid(const py::bytes& brep, const py::object& points_obj,
                                  double tol) {
+  require_finite("point_in_solid", "tol", tol);
   if (!(tol > 0.0)) {
     throw PysmeshError("point_in_solid: tol must be > 0 (got " + std::to_string(tol) + ").");
   }
@@ -69,7 +71,7 @@ py::array_t<bool> point_in_solid(const py::bytes& brep, const py::object& points
         "makeSolids before classifying). Open shells/faces have no defined interior.");
   }
 
-  Array2d points = as_2d_f64(points_obj, "points", 3);
+  Array2d points = as_2d_f64(points_obj, "point_in_solid", "points", 3);
   const py::ssize_t n = points.shape(0);
   py::array_t<bool> out(n);
 

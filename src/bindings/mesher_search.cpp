@@ -42,6 +42,7 @@
 #include <SMESHDS_Mesh.hxx>
 #include <SMESH_MeshAlgos.hxx>
 #include <SMESH_TypeDefs.hxx>
+#include <Precision.hxx>
 #include <TopAbs_State.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Dir.hxx>
@@ -373,6 +374,69 @@ py::dict Mesher::ray_hits(const std::vector<double>& origin,
   out["points"] = rows_to_array(points, 3);
   out["candidates"] = static_cast<std::int64_t>(candidates.size());
   out["crossings"] = crossings;
+  return out;
+}
+
+py::dict Mesher::ray_volumes(const std::vector<double>& origin,
+                             const std::vector<double>& direction, double length) const {
+  ensure_open();
+  require_triple(origin, "Mesher.ray_volumes: origin");
+  require_triple(direction, "Mesher.ray_volumes: direction");
+  if (direction[0] == 0.0 && direction[1] == 0.0 && direction[2] == 0.0) {
+    throw PysmeshError("Mesher.ray_volumes: the direction must not be the zero vector.");
+  }
+  if (!(length > 0.0)) {
+    throw PysmeshError("Mesher.ray_volumes: the length must be > 0 (got " +
+                       std::to_string(length) + ").");
+  }
+  const gp_Ax1 ray(gp_Pnt(origin[0], origin[1], origin[2]),
+                   gp_Dir(direction[0], direction[1], direction[2]));
+  const double ray_length = std::isinf(length) ? Precision::Infinite() : length;
+
+  std::vector<const SMDS_MeshElement*> candidates;
+  searcher_for(*meshDS_)->GetElementsNearLine(ray, SMDSAbs_Volume, candidates);
+
+  struct Hit {
+    double entry, exit;
+    int facet_entry, facet_exit;
+    std::int64_t id;
+  };
+  std::vector<Hit> hits;
+  for (const SMDS_MeshElement* volume : candidates) {
+    double t_min = 0.0, t_max = 0.0;
+    int f_min = -1, f_max = -1;
+    if (!SMESH_MeshAlgos::IntersectRayVolume(ray, ray_length, volume, t_min, t_max, f_min,
+                                             f_max)) {
+      continue;
+    }
+    // Upstream also answers true for a cell wholly behind the origin ("inside, hitting back
+    // face" with a negative exit, SMESH_MeshAlgos.cxx:2672-2676). The ray is a half line,
+    // so a cell it never reaches is dropped here.
+    if (t_max < 0.0) {
+      continue;
+    }
+    hits.push_back({t_min, t_max, f_min, f_max, static_cast<std::int64_t>(volume->GetID())});
+  }
+  std::sort(hits.begin(), hits.end(), [](const Hit& a, const Hit& b) {
+    return a.entry != b.entry ? a.entry < b.entry : a.id < b.id;
+  });
+
+  std::vector<std::int64_t> ids, facet_entry, facet_exit;
+  std::vector<double> entry, exit;
+  for (const Hit& h : hits) {
+    ids.push_back(h.id);
+    entry.push_back(h.entry);
+    exit.push_back(h.exit);
+    facet_entry.push_back(h.facet_entry);
+    facet_exit.push_back(h.facet_exit);
+  }
+  py::dict out;
+  out["ids"] = vector_to_array(ids);
+  out["entry"] = vector_to_array(entry);
+  out["exit"] = vector_to_array(exit);
+  out["facet_entry"] = vector_to_array(facet_entry);
+  out["facet_exit"] = vector_to_array(facet_exit);
+  out["candidates"] = static_cast<std::int64_t>(candidates.size());
   return out;
 }
 

@@ -252,7 +252,7 @@ def test_method_enum_values_are_fixed() -> None:
         {"total_thickness": 0.0},
         {"total_thickness": -1.0},
         {"n_layers": 0},
-        {"stretch_factor": 1.0},
+        {"stretch_factor": 0.9},
         {"group_name": ""},
         {"face_ids": ()},
     ],

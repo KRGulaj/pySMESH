@@ -31,11 +31,13 @@
 
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRep_Builder.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_BuilderAlgo.hxx>
 #include <NCollection_List.hxx>
 #include <TopExp.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
@@ -78,12 +80,14 @@
 
 #include <StdMeshers_Cartesian_3D.hxx>
 #include <StdMeshers_CartesianParameters3D.hxx>
+#include <StdMeshers_CompositeHexa_3D.hxx>
 #include <StdMeshers_Hexa_3D.hxx>
 #include <StdMeshers_Import_1D2D.hxx>
 #include <StdMeshers_MEFISTO_2D.hxx>
 #include <StdMeshers_MaxElementArea.hxx>
 #include <StdMeshers_MaxElementVolume.hxx>
 #include <StdMeshers_NumberOfSegments.hxx>
+#include <StdMeshers_ViscousLayerBuilder.hxx>
 #include <StdMeshers_PolyhedronPerSolid_3D.hxx>
 #include <StdMeshers_Prism_3D.hxx>
 #include <StdMeshers_Projection_2D.hxx>
@@ -96,6 +100,8 @@
 #include <StdMeshers_NotConformAllowed.hxx>
 #include <StdMeshers_ViscousLayers.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
+#include <SMDS_UnstructuredGrid.hxx>
 #include <StdMeshers_LayerDistribution2D.hxx>
 #include <StdMeshers_LengthFromEdges.hxx>
 #include <StdMeshers_RadialQuadrangle_1D2D.hxx>
@@ -2413,6 +2419,389 @@ void probe_cat916_3d_additions() {
   }
 }
 
+
+// ------------------------------------------------------------------------------ P4DIST ---- //
+// The TABLE and EXPRESSION distributions of NumberOfSegments, after the pySMESH patches
+// StdMeshers_Distribution_table.patch and StdMeshers_Distribution_expression.patch. Node k of
+// N sits where the integral of the density from the start of the edge reaches k/N of its
+// total; each check computes that position in closed form. tests/test_mesher_distribution.py
+// holds the full grid through the Python API.
+
+// Normalised nodes of n segments in geometric progression on a 15-long edge, first segment h0.
+std::vector<double> geometric_target(double h0, int n, double length) {
+  double lo = 1.0 + 1e-12, hi = 3.0;
+  for (int it = 0; it < 200; ++it) {
+    const double mid = 0.5 * (lo + hi);
+    (h0 * (std::pow(mid, n) - 1.0) / (mid - 1.0) < length ? lo : hi) = mid;
+  }
+  const double ratio = 0.5 * (lo + hi);
+  std::vector<double> x(1, 0.0);
+  double sum = 0.0;
+  for (int i = 0; i < n; ++i) {
+    sum += h0 * std::pow(ratio, i);
+    x.push_back(sum / length);
+  }
+  x.back() = 1.0;
+  return x;
+}
+
+// Node positions of the linearly interpolated density table (x, d): on each interval the
+// integral is quadratic, and node k is the root s = 2r / (d_i + sqrt(d_i^2 + 2 a r)).
+std::vector<double> table_closed_form(const std::vector<double>& x, const std::vector<double>& d,
+                                      int n) {
+  std::vector<double> integral(1, 0.0);
+  for (std::size_t i = 1; i < x.size(); ++i) {
+    integral.push_back(integral.back() + 0.5 * (d[i] + d[i - 1]) * (x[i] - x[i - 1]));
+  }
+  std::vector<double> t(1, 0.0);
+  std::size_t i = 0;
+  for (int k = 1; k < n; ++k) {
+    const double target = integral.back() * k / n;
+    while (i + 2 < x.size() && integral[i + 1] <= target) ++i;
+    const double slope = (d[i + 1] - d[i]) / (x[i + 1] - x[i]);
+    const double rest = target - integral[i];
+    t.push_back(x[i] + 2.0 * rest / (d[i] + std::sqrt(d[i] * d[i] + 2.0 * slope * rest)));
+  }
+  t.push_back(1.0);
+  return t;
+}
+
+void probe_p4_distributions() {
+  section("P4DIST", "TABLE and EXPRESSION node distributions against their closed forms");
+  const double length = 15.0;
+
+  // TABLE: the density 1/h at every node of a geometric target with a 3e-6 wall segment.
+  {
+    const int n = 100;
+    const std::vector<double> x = geometric_target(3e-6, n, length);
+    std::vector<double> d;
+    for (std::size_t i = 0; i < x.size(); ++i) {
+      const double h = i == 0              ? x[1] - x[0]
+                       : i + 1 == x.size() ? x[i] - x[i - 1]
+                                           : 0.5 * (x[i + 1] - x[i - 1]);
+      d.push_back(1.0 / h);
+    }
+    std::vector<double> table;
+    for (std::size_t i = 0; i < x.size(); ++i) {
+      table.push_back(x[i]);
+      table.push_back(d[i]);
+    }
+    Session s(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(length, 0, 0)).Edge());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* h = s.make<StdMeshers_NumberOfSegments>();
+    h->SetNumberOfSegments(n);
+    h->SetDistrType(StdMeshers_NumberOfSegments::DT_TabFunc);
+    h->SetConversionMode(1);
+    h->SetTableFunction(table);
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), h);
+    check(ok && s.compute(), "P4DIST TABLE with a 3e-6 wall segment computes (was 'no message')");
+    const std::vector<double> got = sorted_node_x(s.meshDS());
+    const std::vector<double> want = table_closed_form(x, d, n);
+    double worst = got.size() == want.size() ? 0.0 : 1e300;
+    for (std::size_t i = 0; got.size() == want.size() && i < got.size(); ++i) {
+      worst = std::max(worst, std::fabs(got[i] - length * want[i]));
+    }
+    char msg[200];
+    std::snprintf(msg, sizeof(msg),
+                  "P4DIST TABLE: 101 nodes within 1e-10 L of the closed form (max error %.2e)",
+                  worst);
+    check(worst <= 1e-10 * length, msg);
+  }
+
+  // EXPRESSION: the density 1/(a+t), node k at a(((1+a)/a)^(k/N) - 1).
+  {
+    const int n = 100;
+    const double a = 3e-5;
+    Session s(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(length, 0, 0)).Edge());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* h = s.make<StdMeshers_NumberOfSegments>();
+    h->SetNumberOfSegments(n);
+    h->SetDistrType(StdMeshers_NumberOfSegments::DT_ExprFunc);
+    h->SetConversionMode(1);
+    h->SetExpressionFunction("1/(3e-05+t)");
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), h);
+    check(ok && s.compute(), "P4DIST EXPRESSION 1/(3e-5+t) computes");
+    const std::vector<double> got = sorted_node_x(s.meshDS());
+    double worst = got.size() == static_cast<std::size_t>(n + 1) ? 0.0 : 1e300;
+    for (int k = 0; got.size() == static_cast<std::size_t>(n + 1) && k <= n; ++k) {
+      const double want = length * a * (std::pow((1.0 + a) / a, double(k) / n) - 1.0);
+      worst = std::max(worst, std::fabs(got[k] - want));
+    }
+    char msg[200];
+    std::snprintf(msg, sizeof(msg),
+                  "P4DIST EXPRESSION: 101 nodes within 1e-10 L of the closed form (max error "
+                  "%.2e; 11.1 m before the patch)",
+                  worst);
+    check(worst <= 1e-10 * length, msg);
+  }
+
+  // EXPRESSION with no finite integral: a pole between the points the setter samples. The
+  // edge fails with a compute error that says the integral did not converge.
+  {
+    Session s(BRepBuilderAPI_MakeEdge(gp_Pnt(0, 0, 0), gp_Pnt(length, 0, 0)).Edge());
+    StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+    StdMeshers_NumberOfSegments* h = s.make<StdMeshers_NumberOfSegments>();
+    h->SetNumberOfSegments(10);
+    h->SetDistrType(StdMeshers_NumberOfSegments::DT_ExprFunc);
+    h->SetConversionMode(1);
+    h->SetExpressionFunction("1/(t-0.3001)^2");
+    const bool ok = s.assign(s.shape(), a1) && s.assign(s.shape(), h);
+    const bool computed = ok && s.compute();
+    TopExp_Explorer edge(s.shape(), TopAbs_EDGE);
+    const SMESH_ComputeErrorPtr err = s.mesh().GetSubMesh(edge.Current())->GetComputeError();
+    const bool says = err && err->myComment.find("did not converge") != std::string::npos;
+    check(ok && !computed && says,
+          "P4DIST EXPRESSION 1/(t-0.3001)^2 fails the edge: the integral did not converge");
+  }
+}
+
+// SMESH_Mesh_hypothesis_status.patch: AddHypothesis returns the HYP_CONCURRENT it finds.
+// SMESH_subMesh::CheckConcurrentHypothesis looks for two different similar hypotheses on two
+// ancestors of one level, leaving out the one being added (getSimilarAttached). So the
+// conflict is two NumberOfSegments already on two faces that share an edge; adding a third
+// 1-D hypothesis to the solid around them, which is not the main shape, reports it. Before
+// the patch the last check of AddHypothesis overwrote the status with HYP_OK.
+void probe_p4_hypothesis_status() {
+  section("P4HYP", "AddHypothesis keeps the worst status of its checks");
+  BRep_Builder builder;
+  TopoDS_Compound two;
+  builder.MakeCompound(two);
+  builder.Add(two, BRepPrimAPI_MakeBox(3.0, 7.0, 11.0).Shape());
+  builder.Add(two, BRepPrimAPI_MakeBox(gp_Pnt(10.0, 0.0, 0.0), 3.0, 7.0, 11.0).Shape());
+  NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces, solids;
+  TopExp::MapShapes(two, TopAbs_FACE, faces);
+  TopExp::MapShapes(two, TopAbs_SOLID, solids);
+  // MakeBox lists its faces as x = 0, x = max, y = 0, y = max, z = 0, z = max: faces 1 and 3
+  // of the first box share an edge.
+  Session s(two);
+  StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+  StdMeshers_NumberOfSegments* three = s.make<StdMeshers_NumberOfSegments>();
+  StdMeshers_NumberOfSegments* five = s.make<StdMeshers_NumberOfSegments>();
+  StdMeshers_NumberOfSegments* seven = s.make<StdMeshers_NumberOfSegments>();
+  three->SetNumberOfSegments(3);
+  five->SetNumberOfSegments(5);
+  seven->SetNumberOfSegments(7);
+  const bool before = s.assign(s.shape(), a1) && s.assign(faces.FindKey(1), three) &&
+                      s.assign(faces.FindKey(3), five);
+  const SMESH_Hypothesis::Hypothesis_Status status = s.assign_status(solids.FindKey(1), seven);
+  char msg[200];
+  std::snprintf(msg, sizeof(msg),
+                "P4HYP 3 and 5 segments on faces sharing an edge, then 7 on their solid: "
+                "HYP_CONCURRENT (got %d; HYP_OK = 0 before the patch)",
+                static_cast<int>(status));
+  check(before && status == SMESH_Hypothesis::HYP_CONCURRENT, msg);
+}
+
+// StdMeshers_ViscousLayerBuilder_lifecycle.patch: AddLayers before GetShrinkGeometry throws
+// instead of reading an unset pointer; a second GetShrinkGeometry replaces the first; the
+// builder is in the generator's map under its own id, so it can outlive the generator.
+void probe_p4_layer_builder_lifecycle() {
+  section("P4VLB", "the two-step viscous-layer builder owns what it makes");
+  const TopoDS_Shape box = BRepPrimAPI_MakeBox(1.0, 1.0, 1.0).Shape();
+  Session s(box);
+  StdMeshers_ViscousLayerBuilder* b = s.make<StdMeshers_ViscousLayerBuilder>();
+  b->SetTotalThickness(0.2);
+  b->SetNumberLayers(2);
+  b->SetStretchFactor(1.0);
+  b->SetBndShapes(std::vector<int>(), /*toIgnore=*/true);
+  bool refused = false;
+  try {
+    b->AddLayers(s.mesh(), s.mesh(), box);
+  } catch (const SALOME_Exception&) {
+    refused = true;
+  }
+  check(refused, "P4VLB AddLayers before GetShrinkGeometry throws SALOME_Exception");
+  const TopoDS_Shape first = b->GetShrinkGeometry(s.mesh(), box);
+  const TopoDS_Shape second = b->GetShrinkGeometry(s.mesh(), box);
+  check(!first.IsNull() && !second.IsNull(),
+        "P4VLB two GetShrinkGeometry calls in a row both give a shrunk solid");
+  check(s.gen().GetStudyContext()->mapHypothesis[b->GetID()] == b,
+        "P4VLB the builder keeps its own entry in the generator's map");
+}
+
+
+// ------------------------------------------------------------------------------ P4CVL ---- //
+
+// Cartesian_3D at the given spacing with ViscousLayers (0.2 thick, 3 layers, factor 1.2) on
+// every face of the session's shape.
+void cartesian_layers(Session& s, const char* spacing) {
+  StdMeshers_Cartesian_3D* a3 = s.make<StdMeshers_Cartesian_3D>();
+  StdMeshers_CartesianParameters3D* grid = s.make<StdMeshers_CartesianParameters3D>();
+  for (int axis = 0; axis < 3; ++axis) {
+    std::vector<std::string> step(1, spacing);
+    std::vector<double> internal;
+    grid->SetGridSpacing(step, internal, axis);
+  }
+  StdMeshers_ViscousLayers* layers = s.make<StdMeshers_ViscousLayers>();
+  layers->SetTotalThickness(0.2);
+  layers->SetNumberLayers(3);
+  layers->SetStretchFactor(1.2);
+  layers->SetBndShapes(std::vector<int>(), /*toIgnore=*/true);
+  s.assign(s.shape(), a3);
+  s.assign(s.shape(), grid);
+  s.assign(s.shape(), layers);
+}
+
+// StdMeshers_Cartesian_VL_duplicate_nodes.patch, StdMeshers_Cartesian_3D_viscous_submeshes
+// .patch, StdMeshers_Cartesian_3D_offset_small_cells.patch and
+// SMDS_UnstructuredGrid_links_leak.patch.
+void probe_p4_cartesian_layers() {
+  section("P4CVL", "Cartesian_3D with viscous layers on inclined and curved walls");
+  {
+    // A regular hexagonal prism, circumradius 1, height 1: at spacing 0.1 the vertical
+    // edges at x = +-1 lie on end planes of the grid, where the offset mesh doubles nodes.
+    const double kPi = std::acos(-1.0);
+    BRepBuilderAPI_MakePolygon hexagon;
+    for (int k = 0; k < 6; ++k) {
+      hexagon.Add(gp_Pnt(std::cos(k * kPi / 3.0), std::sin(k * kPi / 3.0), 0.0));
+    }
+    hexagon.Close();
+    const TopoDS_Face base = BRepBuilderAPI_MakeFace(hexagon.Wire()).Face();
+    Session s(BRepPrimAPI_MakePrism(base, gp_Vec(0.0, 0.0, 1.0)).Shape());
+    cartesian_layers(s, "0.1");
+    check(s.compute() && s.meshDS()->NbVolumes() > 0,
+          "P4CVL hexagonal prism at spacing 0.1 computes (was 'bad mesh on offset geometry')");
+  }
+  {
+    // A cylinder, radius 1, height 2, spacing 0.25: the seam EDGE has no element of its own,
+    // and cut cells under the default size threshold were dropped from the offset mesh.
+    const TopoDS_Shape cylinder = BRepPrimAPI_MakeCylinder(1.0, 2.0).Shape();
+    Session s(cylinder);
+    cartesian_layers(s, "0.25");
+    check(s.compute(), "P4CVL cylinder computes with every sub-mesh computed");
+    TopExp_Explorer solid(cylinder, TopAbs_SOLID);
+    int faces_on_solid = 0;
+    if (SMESHDS_SubMesh* sm = s.meshDS()->MeshElements(solid.Current())) {
+      for (SMDS_ElemIteratorPtr it = sm->GetElements(); it->more();) {
+        faces_on_solid += it->next()->GetType() == SMDSAbs_Face ? 1 : 0;
+      }
+    }
+    char msg[160];
+    std::snprintf(msg, sizeof(msg),
+                  "P4CVL cylinder: no face inside the mesh on the SOLID (got %d; 48 before)",
+                  faces_on_solid);
+    check(faces_on_solid == 0, msg);
+  }
+  {
+    // The grid holds the one reference to its links, however often they are rebuilt.
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    const bool ok = build_hexa_mesh(s, 2);
+    SMDS_UnstructuredGrid* grid = s.meshDS()->GetGrid();
+    const int built = ok ? grid->GetLinks()->GetReferenceCount() : -1;
+    grid->BuildLinks();
+    const int rebuilt = grid->GetLinks()->GetReferenceCount();
+    grid->DeleteLinks();
+    char msg[160];
+    std::snprintf(msg, sizeof(msg),
+                  "P4CVL the grid's cell links have one reference, built and rebuilt (got %d, "
+                  "%d; 2 before), and DeleteLinks drops them",
+                  built, rebuilt);
+    check(built == 1 && rebuilt == 1 && !grid->HasLinks(), msg);
+  }
+}
+
+
+// ------------------------------------------------------------------------------ P4MEF ---- //
+
+// MEFISTO_2D on the 4 x 4 square with n segments per side and MaxElementArea(max_area):
+// whether it computed, the triangle count, the largest triangle area, and whether the face
+// carries a COMPERR_WARNING.
+struct MefistoRun {
+  bool computed = false;
+  int triangles = 0;
+  double largest = 0.0;
+  bool warned = false;
+};
+
+MefistoRun mefisto_square(int segments, double max_area) {
+  const TopoDS_Face face =
+      BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 0, 4, 0, 4).Face();
+  Session s(face);
+  StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+  StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+  n->SetNumberOfSegments(segments);
+  StdMeshers_MEFISTO_2D* a2 = s.make<StdMeshers_MEFISTO_2D>();
+  StdMeshers_MaxElementArea* area = s.make<StdMeshers_MaxElementArea>();
+  area->SetMaxArea(max_area);
+  MefistoRun run;
+  run.computed = s.assign(face, a1) && s.assign(face, n) && s.assign(face, a2) &&
+                 s.assign(face, area) && s.compute();
+  for (SMDS_FaceIteratorPtr it = s.meshDS()->facesIterator(); it->more();) {
+    const SMDS_MeshElement* f = it->next();
+    const gp_XYZ p0(f->GetNode(0)->X(), f->GetNode(0)->Y(), f->GetNode(0)->Z());
+    const gp_XYZ p1(f->GetNode(1)->X(), f->GetNode(1)->Y(), f->GetNode(1)->Z());
+    const gp_XYZ p2(f->GetNode(2)->X(), f->GetNode(2)->Y(), f->GetNode(2)->Z());
+    run.largest = std::max(run.largest, 0.5 * ((p1 - p0) ^ (p2 - p0)).Modulus());
+    ++run.triangles;
+  }
+  const SMESH_ComputeErrorPtr err = s.mesh().GetSubMesh(face)->GetComputeError();
+  run.warned = err && err->myName == COMPERR_WARNING;
+  return run;
+}
+
+// MEFISTO_2D_max_element_area.patch: aptrte clamped the edge bound to the boundary segments,
+// so MaxElementArea had no effect below their size; a bound the boundary cannot meet is a
+// compute warning on the face.
+void probe_p4_mefisto_max_element_area() {
+  section("P4MEF", "MaxElementArea bounds the MEFISTO_2D triangles");
+  const MefistoRun tight = mefisto_square(8, 0.0625);
+  char msg[200];
+  std::snprintf(msg, sizeof(msg),
+                "P4MEF 8 segments per side, max_area 0.0625: %d triangles (>= 256), largest "
+                "%.4f (<= 0.0625; 134 and 0.1758 before), no warning",
+                tight.triangles, tight.largest);
+  check(tight.computed && tight.triangles >= 256 && tight.largest <= 0.0625 * (1 + 1e-9) &&
+            !tight.warned,
+        msg);
+  const MefistoRun coarse = mefisto_square(2, 0.25);
+  std::snprintf(msg, sizeof(msg),
+                "P4MEF 2 segments per side, max_area 0.25: computed with a COMPERR_WARNING "
+                "on the face (largest %.4f)",
+                coarse.largest);
+  check(coarse.computed && coarse.warned && coarse.largest > 0.25, msg);
+}
+
+
+// ------------------------------------------------------------------------------ P4L6 ----- //
+
+// StdMeshers_CompositeHexa_3D_viscous_layers.patch: CompositeHexa_3D with ViscousLayers used
+// to read a null proxy mesh and crash; it now fails the compute with an error that says so.
+void probe_p4_composite_hexa_layers() {
+  section("P4L6", "CompositeHexa_3D refuses viscous layers instead of crashing");
+  // Under a compound root, as load_brep gives a shape: on a bare SOLID, SMESH refuses the
+  // hypothesis at assignment (HYP_INCOMPATIBLE), and Compute never sees it.
+  BRep_Builder builder;
+  TopoDS_Compound box;
+  builder.MakeCompound(box);
+  builder.Add(box, BRepPrimAPI_MakeBox(1.0, 1.0, 1.0).Shape());
+  Session s(box);
+  StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+  StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+  n->SetNumberOfSegments(4);
+  StdMeshers_Quadrangle_2D* a2 = s.make<StdMeshers_Quadrangle_2D>();
+  StdMeshers_CompositeHexa_3D* a3 = s.make<StdMeshers_CompositeHexa_3D>();
+  StdMeshers_ViscousLayers* layers = s.make<StdMeshers_ViscousLayers>();
+  layers->SetTotalThickness(0.3);
+  layers->SetNumberLayers(3);
+  layers->SetStretchFactor(1.2);
+  layers->SetBndShapes(std::vector<int>(1, s.meshDS()->ShapeToIndex(
+                           TopExp_Explorer(box, TopAbs_FACE).Current())),
+                       /*toIgnore=*/false);
+  const bool assigned = s.assign(box, a1) && s.assign(box, n) && s.assign(box, a2) &&
+                        s.assign(box, a3) && s.assign(box, layers);
+  const bool computed = s.compute();
+  TopExp_Explorer solid(box, TopAbs_SOLID);
+  const SMESH_ComputeErrorPtr err = s.mesh().GetSubMesh(solid.Current())->GetComputeError();
+  const bool named = err && err->myComment.find("does not build viscous layers") !=
+                                std::string::npos;
+  char msg[300];
+  std::snprintf(msg, sizeof(msg),
+                "P4L6 CompositeHexa_3D + ViscousLayers: the compute fails on the SOLID, naming "
+                "the reason (it crashed before); assigned %d computed %d error '%s'",
+                int(assigned), int(computed), err ? err->myComment.c_str() : "(none)");
+  check(assigned && !computed && named, msg);
+}
+
 }  // namespace
 
 void run_smesh_probe() {
@@ -2430,4 +2819,10 @@ void run_smesh_probe() {
   probe_cat916_1d_additions();
   probe_cat916_2d_additions();
   probe_cat916_3d_additions();
+  probe_p4_distributions();
+  probe_p4_hypothesis_status();
+  probe_p4_layer_builder_lifecycle();
+  probe_p4_cartesian_layers();
+  probe_p4_mefisto_max_element_area();
+  probe_p4_composite_hexa_layers();
 }

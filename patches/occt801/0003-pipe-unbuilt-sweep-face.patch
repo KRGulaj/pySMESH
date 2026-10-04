@@ -1,0 +1,60 @@
+Defect F2 (pipe): BRepOffsetAPI_MakePipe crashes the process when the sweep of a
+face profile fails on part of the spine.
+
+Defect id: F2 (pySMESH phase 4, finding F2, brief amendment 4).
+
+Symptom: a spine that is a degree-4 Bezier curve through the poles
+(-0.845, -0.984, -0.652), (-3.252, -3.050, 1.382), (1.781, 0.093, -7.257),
+(-2.439, -2.658, 0.313), (-1.140, -0.689, -1.099), and a profile that is a planar
+0.077 x 1 rectangle face at the origin. The BRepOffsetAPI_MakePipe constructor
+reads address 0x38 and the process ends with an access violation. A straight
+spine with the same face builds.
+
+Root cause: BRepFill_Pipe::MakeShape(), face profile. Each wire of the face is swept by
+BRepFill_Sweep, and the sweep's SubShape() array becomes myFaces
+(BRepFill_Pipe.cxx:696-715 at V8_0_1). The sweep is not asked whether it is done; here
+it is not (BRepFill_Sweep::IsDone() false, measured). Where it built no face the array
+holds a null shape. The loop that collects the faces of the solid then calls
+myFaces->Value(ii, jj).ShapeType() (line 809), which reads the TShape of the null shape;
+the IsNull() test on the next lines comes too late.
+
+Change: a null entry of myFaces in that loop throws StdFail_NotDone. The solid
+cannot be closed without the face, so the pipe fails at the face it lacks.
+BRepFill_Pipe already reports a profile it cannot sweep by throwing
+(Standard_DomainError, line 614). Kind: a clean failure, not a computed pipe:
+the sweep has no face to give for that part of the spine. Only an input that
+read the null shape reaches the throw.
+
+Files and functions changed:
+  src/ModelingAlgorithms/TKBool/BRepFill/BRepFill_Pipe.cxx
+    BRepFill_Pipe::MakeShape(), face branch, the loop over myFaces.
+
+Applies to: OCCT V8_0_1 (b8f597c677811d1f9f4d8a97f5ae2825c0353a42), after 0001.
+
+diff --git a/src/ModelingAlgorithms/TKBool/BRepFill/BRepFill_Pipe.cxx b/src/ModelingAlgorithms/TKBool/BRepFill/BRepFill_Pipe.cxx
+index b7726d63..8147cbce 100644
+--- a/src/ModelingAlgorithms/TKBool/BRepFill/BRepFill_Pipe.cxx
++++ b/src/ModelingAlgorithms/TKBool/BRepFill/BRepFill_Pipe.cxx
+@@ -43,6 +43,7 @@
+ #include <ShapeUpgrade_RemoveLocations.hxx>
+ #include <Standard_DomainError.hxx>
+ #include <Standard_NotImplemented.hxx>
++#include <StdFail_NotDone.hxx>
+ #include <TopAbs_ShapeEnum.hxx>
+ #include <TopExp.hxx>
+ #include <TopoDS.hxx>
+@@ -806,6 +807,14 @@ TopoDS_Shape BRepFill_Pipe::MakeShape(const TopoDS_Shape& S,
+     {
+       for (jj = 1; jj <= myFaces->RowLength(); jj++)
+       {
++        // A null entry is a face the sweep did not build: BRepFill_Sweep::Build failed on
++        // that part of the profile and reports not done. The solid cannot be closed without
++        // it, so the pipe fails here instead of reading the shape type of a null shape.
++        if (myFaces->Value(ii, jj).IsNull())
++        {
++          throw StdFail_NotDone("BRepFill_Pipe::MakeShape: the sweep built no face for a "
++                                "part of the profile along the spine");
++        }
+         if (myFaces->Value(ii, jj).ShapeType() == TopAbs_FACE)
+         {
+           F = TopoDS::Face(myFaces->Value(ii, jj));

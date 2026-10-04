@@ -31,6 +31,7 @@ from ._types import (
     _DEFAULT_LINEAR_TOL,
     _DEFAULT_SEW_TOLERANCE,
     _delta,
+    _finite,
     _ids,
 )
 
@@ -138,9 +139,11 @@ class _HealOps(_SessionBase):
             tolerance: Largest gap between two boundaries that still counts as shared (> 0).
                 Deliberately tight by default: sewing across a real gap invents topology
                 rather than repairing it.
-            make_solid: Close the result into solids, as described above. Only a watertight
-                shell bounds a volume. If any shell of the result is open, every shell is
-                left a shell, and ``valid`` reports on them.
+            make_solid: Close the result into solids, as described above. Only a
+                watertight shell bounds a volume, so if a shell of the result is open,
+                or no face sewed into a shell, the operation raises and names the free
+                edges, and nothing is committed. Sew with ``make_solid=False`` to keep
+                open shells.
             non_manifold: Allow more than two faces to meet at one edge. Off by default,
                 because a non-manifold result is rarely what a CAD repair wants and is
                 accepted by very little downstream.
@@ -155,13 +158,16 @@ class _HealOps(_SessionBase):
             ``make_solid`` built is in ``created``, one id per solid.
 
         Raises:
-            PysmeshError: On a non-positive tolerance, an empty selection, a dead id, or a
-                selection that shares sub-shapes with bodies left out of the scope. Also,
-                with ``make_solid``, if a closed shell cannot be committed as a solid: it
-                encloses no volume, the classifier cannot place it, or it touches another
-                shell from inside. ``.face_ids`` then carries the ids of that shell's faces,
-                and the message names the reason, with the other shell's faces when there
-                is one. Nothing is committed, and the session is left exactly as it was.
+            PysmeshError: On a non-positive tolerance, an empty selection, a dead id, or
+                a selection that shares sub-shapes with bodies left out of the scope.
+                Also, with ``make_solid``, if a shell of the result is open, or no face
+                sewed into a shell: the message counts the free edges and ``.details``
+                names each by its end points and length. And with ``make_solid``, if a
+                closed shell cannot be committed as a solid: it encloses no volume, the
+                classifier cannot place it, or it touches another shell from inside.
+                ``.face_ids`` then carries the ids of that shell's faces, and the
+                message names the reason, with the other shell's faces when there is
+                one. Nothing is committed, and the session is left exactly as it was.
         """
         return _delta(
             self._s.sew(
@@ -245,7 +251,11 @@ class _HealOps(_SessionBase):
                 unify_edges,
                 concat_bsplines,
                 linear_tol,
-                math.radians(angular_tol_deg),
+                math.radians(
+                    _finite(
+                        "Session.unify_same_domain", "angular_tol_deg", angular_tol_deg
+                    )
+                ),
             )
         )
 
@@ -339,7 +349,8 @@ class _HealOps(_SessionBase):
             tools: Entities whose owning bodies do the imprinting. At least one, and disjoint
                 from ``targets``.
             fuzzy: Additional tolerance for the operation, in model units.
-            parallel: Run OCCT's internal steps in parallel.
+            parallel: Run OCCT's internal steps in parallel. Faster, at several times
+                the peak memory: see :meth:`fragment` for the measured cost.
             glue: What OCCT may assume about how the operands meet. See :class:`GlueMode`.
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the operation runs. ``None`` reports nothing.
@@ -352,8 +363,9 @@ class _HealOps(_SessionBase):
             every piece and its name resolves as :attr:`ResolutionStatus.AMBIGUOUS`.
 
         Raises:
-            PysmeshError: On an empty operand list, a dead id, a body named on both sides, a
-                negative ``fuzzy``, or an operation OCCT reports as failed.
+            PysmeshError: On an empty operand list, a dead id, a body named on both
+                sides, a negative ``fuzzy``, an operation OCCT reports as failed, or a
+                result with no solid for targets that hold one.
         """
         return _delta(
             self._s.imprint(
