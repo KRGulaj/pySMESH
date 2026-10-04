@@ -74,6 +74,25 @@ native `StdMeshers` source or from a test that computes a real mesh with it.
 | `QuadFromMedialAxis1D2D` | Quad-dominant meshing of a thin face, built on its medial axis. The only algorithm in the catalogue that reports true progress. | A 1-D algorithm and hypothesis on its edges | None beyond the 1-D layer |
 | `RadialQuadrangle1D2D` | Radial quadrangle meshing of a disk or an annulus. | A 1-D algorithm and hypothesis on the boundary edge | `NumberOfLayers2D`, or a 1-D hypothesis applied to the radial direction |
 
+### Two 2-D limits, measured
+
+The measurements are on SMESH 9.16, on a planar NACA 0012 cap with a 1.25 m chord and a
+sharp trailing edge, whose wedge angle is 16.54 degrees.
+
+- `Quadrangle2D` maps the face from four corners. On the cap split into 4 edges (trailing
+  edge, mid-upper, leading edge, mid-lower), three of the corners lie on smooth curves, so
+  the map shears the cells. The minimum angle is 2.207 degrees with 30 segments on every
+  edge, 0.347 degrees with them clustered toward the ends, and 0.006 degrees with 40 aft
+  and 30 fore segments under `QUADRANGLE_PREFERENCE`. With 1 or 2 edges it refuses: "Face
+  must have 4 sides but not 1" (`StdMeshers_Quadrangle_2D.cxx:1538`).
+- `QuadFromMedialAxis1D2D` meshes a ring, or a thin strip with two short ends, like a river
+  between its banks (`getSinuousEdges`, `StdMeshers_QuadFromMedialAxis_1D2D.cxx:501`).
+  The cap has a cusp at one end and a round nose at the other, so it fails with 1, 2 or 4
+  edges and 4 or 8 layers: "Not implemented so far" (`:2205`).
+
+The way out for such a face is a better block topology: for example, a C-shaped strip
+along the camber line plus a nose block. Or mesh it with triangles.
+
 ### 3-D algorithms
 
 | Algorithm | What it does | Needs beneath | Hypotheses it reads |

@@ -134,6 +134,17 @@ class Quadrangle2D(Algorithm):
     ``MISSING_HYP``). :class:`QuadrangleParams` names a base vertex for a three-sided
     face; :class:`QuadranglePreference` changes what happens where the sides do not
     match.
+
+    The map from four corners shears the cells where the corners are not where the
+    face turns. A planar NACA 0012 cap, 1.25 m chord, sharp trailing edge (wedge 16.54
+    degrees), split into 4 edges at the trailing edge, mid-upper, leading edge and
+    mid-lower, measured on SMESH 9.16: minimum angle 2.207 degrees with 30 segments on
+    every edge, 0.347 degrees with them clustered toward the ends, and 0.006 degrees
+    with 40 aft and 30 fore segments under ``QUADRANGLE_PREFERENCE``. With 1 or 2 edges
+    it refuses: "Face must have 4 sides but not 1"
+    (``StdMeshers_Quadrangle_2D.cxx:1538``). Give such a face a better block topology,
+    for example a C-shaped strip along the camber line plus a nose block, or mesh it
+    with triangles.
     """
 
     native_name: ClassVar[str] = "Quadrangle_2D"
@@ -177,6 +188,15 @@ class QuadFromMedialAxis1D2D(Algorithm):
 
     The one algorithm in this catalogue that reports true progress of its own; the rest
     report at sub-mesh granularity.
+
+    It meshes a ring (two wires), or one wire of at least 4 edges whose medial axis has
+    two branch points, each joined by two branches to vertices: a thin strip with two
+    short ends, like a river between its banks (``getSinuousEdges``,
+    ``StdMeshers_QuadFromMedialAxis_1D2D.cxx:501``). Any other face fails with "Not
+    implemented so far" (``:2205``). A closed thin face with a cusp has no such ends: a
+    NACA 0012 cap with a sharp trailing edge fails with 1, 2 or 4 edges and 4 or 8
+    layers (SMESH 9.16). Mesh such a face as :class:`Quadrangle2D` describes, or with
+    triangles.
     """
 
     native_name: ClassVar[str] = "QuadFromMedialAxis_1D2D"
