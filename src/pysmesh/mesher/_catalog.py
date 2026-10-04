@@ -295,6 +295,15 @@ class Cartesian3D(Algorithm):
     * Its polyhedral cells have no representation in the Inria ``.mesh`` format, so such a
       mesh cannot be written with :func:`pysmesh.write_gmf`.
 
+    With :class:`ViscousLayers` beside it, it grows prism layers on the chosen faces. It
+    shrinks the shape by the total thickness, lays the grid in the shrunk shape, and
+    fills the gap with layer cells. Each layer edge runs from a node of the shrunk
+    boundary to its nearest point on the wall, along the normal of a plane wall, and the
+    layer nodes divide it at the closed-form fractions of the stack. The shrunk mesh
+    keeps every cut cell that has volume, whatever ``size_threshold`` says, so the
+    layers have no gap. A stack too thick for the shape, where one shrunk surface meets
+    another, fails the compute on the SOLID and leaves no cell.
+
     Sized by :class:`CartesianParameters3D`.
     """
 
@@ -813,7 +822,9 @@ class CartesianParameters3D(Hypothesis):
         spacing_y: Spacing expression along y, or empty when ``coordinates_y`` is given.
         spacing_z: Spacing expression along z, or empty when ``coordinates_z`` is given.
         size_threshold: A cut cell smaller than ``1 / size_threshold`` of a full one is
-            merged into its neighbour rather than kept as a sliver.
+            dropped, so the mesh boundary has a dent there instead of a sliver. With
+            :class:`ViscousLayers` it does not apply: the mesh inside the layers keeps
+            every cut cell that has volume.
         spacing_from: The range each spacing expression covers, as fractions of the
             shape's bounding box along its axis. With one expression per axis the range
             is the whole box, ``(0.0, 1.0)``; SMESH refuses any other value

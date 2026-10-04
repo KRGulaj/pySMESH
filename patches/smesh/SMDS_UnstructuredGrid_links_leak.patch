@@ -1,0 +1,66 @@
+pySMESH: an SMDS mesh frees its cell links with its grid (SMESH V9_16_0).
+
+Defect: every mesh whose inverse-element links were built leaks them when it is destroyed or
+cleared. The links hold one list of cells per node, so the leak grows with the mesh.
+
+Symptom: 20 computes of a 2 x 2 x 2 box at spacing 0.1, Cartesian_3D with viscous layers on
+every face, each in a fresh mesh that is then closed. With the offset mesh and the offset
+makers freed (StdMeshers_Cartesian_3D_offset_mesh_leak.patch,
+StdMeshers_Cartesian_VL_offset_makers_leak.patch), the private bytes still grew by 0.90 MB per
+compute (5.0 MB at spacing 0.05), against 0.10 MB with no layers. A bisection build put all of
+it on the first SMDS_Mesh::FindElement of the layer step (setBnd2Sub), which builds the links
+of the target mesh.
+
+Root cause: since VTK 9.0, vtkUnstructuredGrid::Links is a vtkSmartPointer. The raw-pointer
+code of SMDS_UnstructuredGrid::BuildLinks (SMDS_UnstructuredGrid.cxx:1062-1076) assigns
+New() to it, which the smart pointer registers, then adds Register(this) and Delete(). That
+leaves two references with one owner: the grid's destructor, vtkUnstructuredGrid::Initialize
+(SMDS_Mesh::Clear) and a later assignment release only one. DeleteLinks (:1078-1086) calls
+UnRegister before it clears the pointer, which is right only for that doubled count.
+
+Change, in SMDS_UnstructuredGrid.cxx only: BuildLinks makes the links with
+vtkSmartPointer::New and assigns them, so the grid holds exactly one reference; DeleteLinks
+clears the smart pointer.
+
+Not changed: how the links are built, read and updated, and every mesh.
+diff --git a/src/SMDS/SMDS_UnstructuredGrid.cxx b/src/SMDS/SMDS_UnstructuredGrid.cxx
+--- a/src/SMDS/SMDS_UnstructuredGrid.cxx
++++ b/src/SMDS/SMDS_UnstructuredGrid.cxx
+@@ -1061,28 +1061,20 @@
+ 
+ void SMDS_UnstructuredGrid::BuildLinks()
+ {
+-  // Remove the old links if they are already built
+-  if (this->Links)
+-  {
+-    this->Links->UnRegister(this);
+-  }
+-
+-  SMDS_CellLinks* links;
+-  this->Links = links = SMDS_CellLinks::New();
+-  (static_cast< vtkCellLinks *>(this->Links.GetPointer()))->Allocate(this->GetNumberOfPoints());
+-  this->Links->Register(this);
++  // pySMESH: Links is a vtkSmartPointer (VTK 9), and it holds the one reference the grid
++  // owns. The Register/UnRegister/Delete calls of the raw-pointer code left a second
++  // reference, so the last links of every grid outlived it. Assigning the new links
++  // releases the old ones.
++  vtkSmartPointer< SMDS_CellLinks > links = vtkSmartPointer< SMDS_CellLinks >::New();
++  this->Links = links;
++  (static_cast< vtkCellLinks *>(links.GetPointer()))->Allocate(this->GetNumberOfPoints());
+   links->BuildLinks(this, this->Connectivity,this->GetCellTypesArray() );
+-  this->Links->Delete();
+ }
+ 
+ void SMDS_UnstructuredGrid::DeleteLinks()
+ {
+-  // Remove the old links if they are already built
+-  if (this->Links)
+-  {
+-    this->Links->UnRegister(this);
+-    this->Links = NULL;
+-  }
++  // pySMESH: the smart pointer releases the grid's one reference (see BuildLinks)
++  this->Links = nullptr;
+ }
+ SMDS_CellLinks* SMDS_UnstructuredGrid::GetLinks()
+ {

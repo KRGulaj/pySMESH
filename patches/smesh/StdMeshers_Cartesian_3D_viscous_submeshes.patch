@@ -1,0 +1,40 @@
+pySMESH: Cartesian_3D with viscous layers marks the sub-meshes of the meshed solids computed
+(SMESH V9_16_0; applies after StdMeshers_Cartesian_3D_offset_mesh_leak.patch).
+
+Defect: after a successful compute with viscous layers, an EDGE or VERTEX sub-mesh with no
+element of its own reads as not computed, so the compute is reported as failed on it with no
+message although the mesh is complete.
+
+Symptom: a cylinder (the seam EDGE), a sphere (the seam and the poles), a block with a bore
+(the bore's seam), layers on every face: complete meshes, each reported as failed on those
+sub-shapes.
+
+Root cause: the plain path marks every sub-mesh of each solid computed after it makes the
+volumes (setSubmeshesComputed, StdMeshers_Cartesian_3D.cxx:229, :390-395). The viscous path
+runs the plain path on the offset mesh only (:144-165), so the marks land on the offset mesh
+and not on the target.
+
+Change, in StdMeshers_Cartesian_3D.cxx only: after MakeViscousLayers succeeds, the target's
+sub-meshes are marked as the plain path marks them.
+
+Not changed: a failed compute, and the plain path.
+diff --git a/src/StdMeshers/StdMeshers_Cartesian_3D.cxx b/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
+--- a/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
++++ b/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
+@@ -165,7 +165,15 @@
+     if ( ! this->Compute( *offsetMesh, offsetShape ))
+       return false;
+ 
+-    return builder.MakeViscousLayers( *offsetMesh, theMesh, theShape, &_computeCanceled );
++    if ( !builder.MakeViscousLayers( *offsetMesh, theMesh, theShape, &_computeCanceled ))
++      return false;
++
++    // pySMESH: the layers complete the mesh of every solid, but only the offset mesh had
++    // its sub-meshes marked computed (by the inner call); an EDGE or VERTEX with no
++    // element of its own (a seam, a pole) then read as failed. Mark them as the plain path
++    // does.
++    setSubmeshesComputed( theMesh, theShape );
++    return true;
+   }
+ 
+   // The algorithm generates the mesh in following steps:

@@ -1,0 +1,41 @@
+pySMESH: the viscous layer builder of Cartesian_3D frees the offset makers it creates (SMESH
+V9_16_0; applies after StdMeshers_Cartesian_VL_duplicate_nodes.patch).
+
+Defect: each compute of Cartesian_3D with viscous layers, and each shrink of the two-step
+ViscousLayerBuilder, leaks one BRepOffset_MakeOffset per solid.
+
+Symptom: 20 computes of a 2 x 2 x 2 box at spacing 0.1 with layers on every face, each in a
+fresh mesh that is then closed. With the offset TmpMesh freed
+(StdMeshers_Cartesian_3D_offset_mesh_leak.patch), the private bytes still grow by 1.06 MB per
+compute; the same loop with no layers grows by 0.10 MB.
+
+Root cause: ViscousBuilder::MakeOffsetSolid makes each maker with new
+(StdMeshers_Cartesian_VL.cxx:913) and keeps it in _makeOffsetCollection (:930), which
+getOffsetSubShape reads for the offset history. ~ViscousBuilder (:882-885) deletes only
+_offsetMesh. A maker that fails is in no collection, and the return at :957 drops it.
+
+Change, in StdMeshers_Cartesian_VL.cxx only: ~ViscousBuilder deletes every maker in
+_makeOffsetCollection, and the failure branch deletes its maker before it returns.
+
+Not changed: the offset shapes, their history, and every mesh.
+diff --git a/src/StdMeshers/StdMeshers_Cartesian_VL.cxx b/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
+--- a/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
++++ b/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
+@@ -886,6 +886,9 @@
+ StdMeshers_Cartesian_VL::ViscousBuilder::~ViscousBuilder()
+ {
+   delete _offsetMesh; //_offsetMesh = 0;
++  // pySMESH: MakeOffsetSolid makes these with new; nothing else frees them
++  for ( BRepOffset_MakeOffset* makeOffset : _makeOffsetCollection )
++    delete makeOffset;
+ }
+ 
+ //================================================================================
+@@ -957,6 +960,7 @@
+         theError = "operation not done.";
+       }
+       theError = "BRepOffset_MakeOffset error: " + theError;
++      delete makeOffset; // pySMESH: not in _makeOffsetCollection, so freed here
+ 
+       return TopoDS_Shape();
+     }    

@@ -113,6 +113,12 @@ PATCH_MANIFEST: Final[tuple[tuple[str, str], ...]] = (
     ("smesh/SMESH_Mesh_hypothesis_status.patch", "src/SMESH"),
     ("smesh/StdMeshers_ViscousLayerBuilder_lifecycle.patch", "src/SMESH"),
     ("smesh/StdMeshers_Cartesian_VL_group_2d.patch", "src/SMESH"),
+    ("smesh/StdMeshers_Cartesian_VL_duplicate_nodes.patch", "src/SMESH"),
+    ("smesh/StdMeshers_Cartesian_3D_offset_mesh_leak.patch", "src/SMESH"),
+    ("smesh/StdMeshers_Cartesian_3D_viscous_submeshes.patch", "src/SMESH"),
+    ("smesh/StdMeshers_Cartesian_3D_offset_small_cells.patch", "src/SMESH"),
+    ("smesh/StdMeshers_Cartesian_VL_offset_makers_leak.patch", "src/SMESH"),
+    ("smesh/SMDS_UnstructuredGrid_links_leak.patch", "src/SMESH"),
     # --- OCCT 8.0 layer (conda) : root staged/ ---
     ("occt8/0003-boost-regex-str-enum.patch", "."),
     ("occt8/0004-occt-8.0-compat.patch", "."),

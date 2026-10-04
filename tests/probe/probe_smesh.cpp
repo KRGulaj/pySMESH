@@ -99,6 +99,8 @@
 #include <StdMeshers_NotConformAllowed.hxx>
 #include <StdMeshers_ViscousLayers.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
+#include <SMDS_UnstructuredGrid.hxx>
 #include <StdMeshers_LayerDistribution2D.hxx>
 #include <StdMeshers_LengthFromEdges.hxx>
 #include <StdMeshers_RadialQuadrangle_1D2D.hxx>
@@ -2616,6 +2618,87 @@ void probe_p4_layer_builder_lifecycle() {
         "P4VLB the builder keeps its own entry in the generator's map");
 }
 
+
+// ------------------------------------------------------------------------------ P4CVL ---- //
+
+// Cartesian_3D at the given spacing with ViscousLayers (0.2 thick, 3 layers, factor 1.2) on
+// every face of the session's shape.
+void cartesian_layers(Session& s, const char* spacing) {
+  StdMeshers_Cartesian_3D* a3 = s.make<StdMeshers_Cartesian_3D>();
+  StdMeshers_CartesianParameters3D* grid = s.make<StdMeshers_CartesianParameters3D>();
+  for (int axis = 0; axis < 3; ++axis) {
+    std::vector<std::string> step(1, spacing);
+    std::vector<double> internal;
+    grid->SetGridSpacing(step, internal, axis);
+  }
+  StdMeshers_ViscousLayers* layers = s.make<StdMeshers_ViscousLayers>();
+  layers->SetTotalThickness(0.2);
+  layers->SetNumberLayers(3);
+  layers->SetStretchFactor(1.2);
+  layers->SetBndShapes(std::vector<int>(), /*toIgnore=*/true);
+  s.assign(s.shape(), a3);
+  s.assign(s.shape(), grid);
+  s.assign(s.shape(), layers);
+}
+
+// StdMeshers_Cartesian_VL_duplicate_nodes.patch, StdMeshers_Cartesian_3D_viscous_submeshes
+// .patch, StdMeshers_Cartesian_3D_offset_small_cells.patch and
+// SMDS_UnstructuredGrid_links_leak.patch.
+void probe_p4_cartesian_layers() {
+  section("P4CVL", "Cartesian_3D with viscous layers on inclined and curved walls");
+  {
+    // A regular hexagonal prism, circumradius 1, height 1: at spacing 0.1 the vertical
+    // edges at x = +-1 lie on end planes of the grid, where the offset mesh doubles nodes.
+    const double kPi = std::acos(-1.0);
+    BRepBuilderAPI_MakePolygon hexagon;
+    for (int k = 0; k < 6; ++k) {
+      hexagon.Add(gp_Pnt(std::cos(k * kPi / 3.0), std::sin(k * kPi / 3.0), 0.0));
+    }
+    hexagon.Close();
+    const TopoDS_Face base = BRepBuilderAPI_MakeFace(hexagon.Wire()).Face();
+    Session s(BRepPrimAPI_MakePrism(base, gp_Vec(0.0, 0.0, 1.0)).Shape());
+    cartesian_layers(s, "0.1");
+    check(s.compute() && s.meshDS()->NbVolumes() > 0,
+          "P4CVL hexagonal prism at spacing 0.1 computes (was 'bad mesh on offset geometry')");
+  }
+  {
+    // A cylinder, radius 1, height 2, spacing 0.25: the seam EDGE has no element of its own,
+    // and cut cells under the default size threshold were dropped from the offset mesh.
+    const TopoDS_Shape cylinder = BRepPrimAPI_MakeCylinder(1.0, 2.0).Shape();
+    Session s(cylinder);
+    cartesian_layers(s, "0.25");
+    check(s.compute(), "P4CVL cylinder computes with every sub-mesh computed");
+    TopExp_Explorer solid(cylinder, TopAbs_SOLID);
+    int faces_on_solid = 0;
+    if (SMESHDS_SubMesh* sm = s.meshDS()->MeshElements(solid.Current())) {
+      for (SMDS_ElemIteratorPtr it = sm->GetElements(); it->more();) {
+        faces_on_solid += it->next()->GetType() == SMDSAbs_Face ? 1 : 0;
+      }
+    }
+    char msg[160];
+    std::snprintf(msg, sizeof(msg),
+                  "P4CVL cylinder: no face inside the mesh on the SOLID (got %d; 48 before)",
+                  faces_on_solid);
+    check(faces_on_solid == 0, msg);
+  }
+  {
+    // The grid holds the one reference to its links, however often they are rebuilt.
+    Session s(BRepPrimAPI_MakeBox(BX, BY, BZ).Shape());
+    const bool ok = build_hexa_mesh(s, 2);
+    SMDS_UnstructuredGrid* grid = s.meshDS()->GetGrid();
+    const int built = ok ? grid->GetLinks()->GetReferenceCount() : -1;
+    grid->BuildLinks();
+    const int rebuilt = grid->GetLinks()->GetReferenceCount();
+    grid->DeleteLinks();
+    char msg[160];
+    std::snprintf(msg, sizeof(msg),
+                  "P4CVL the grid's cell links have one reference, built and rebuilt (got %d, "
+                  "%d; 2 before), and DeleteLinks drops them",
+                  built, rebuilt);
+    check(built == 1 && rebuilt == 1 && !grid->HasLinks(), msg);
+  }
+}
+
 }  // namespace
 
 void run_smesh_probe() {
@@ -2636,4 +2719,5 @@ void run_smesh_probe() {
   probe_p4_distributions();
   probe_p4_hypothesis_status();
   probe_p4_layer_builder_lifecycle();
+  probe_p4_cartesian_layers();
 }

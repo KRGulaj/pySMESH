@@ -14,6 +14,7 @@ read the layer node planes of the meshes and compare them with these positions.
 from __future__ import annotations
 
 import json
+import math
 import os
 import subprocess
 import sys
@@ -26,6 +27,8 @@ from numpy.typing import NDArray
 import pysmesh as ps
 from pysmesh import (
     Area,
+    BadOrientedVolume,
+    BareBorderVolume,
     Cartesian3D,
     CartesianParameters3D,
     ElementType,
@@ -608,3 +611,260 @@ def test_add_layers_refuses_a_builder_other_than_the_shrinks() -> None:
 
             with pytest.raises(PysmeshError, match="differs"):
                 outer.add_layers(ViscousLayerBuilder(0.3, 2, 1.0), inner)
+
+
+# ---- L5 Cartesian_3D with viscous layers ------------------------------------------ #
+
+CARTESIAN_STACK: tuple[float, int, float] = (0.2, 3, 1.2)
+_FACETS: dict[int, tuple[tuple[int, ...], ...]] = {
+    int(ElementType.TETRAHEDRON): ((0, 1, 2), (0, 1, 3), (1, 2, 3), (2, 0, 3)),
+    int(ElementType.PYRAMID): (
+        (0, 1, 2, 3),
+        (0, 1, 4),
+        (1, 2, 4),
+        (2, 3, 4),
+        (3, 0, 4),
+    ),
+    int(ElementType.PENTAHEDRON): (
+        (0, 1, 2),
+        (3, 4, 5),
+        (0, 1, 4, 3),
+        (1, 2, 5, 4),
+        (2, 0, 3, 5),
+    ),
+    int(ElementType.HEXAHEDRON): (
+        (0, 1, 2, 3),
+        (4, 5, 6, 7),
+        (0, 1, 5, 4),
+        (1, 2, 6, 5),
+        (2, 3, 7, 6),
+        (3, 0, 4, 7),
+    ),
+}
+_SURFACE: frozenset[int] = frozenset(
+    {int(ElementType.TRIANGLE), int(ElementType.QUADRANGLE), int(ElementType.POLYGON)}
+)
+
+
+def _hex_prism(turn: float) -> ps.Shape:
+    """A regular hexagonal prism: circumradius 1, height 1, turned ``turn`` deg on z."""
+    a0 = math.radians(turn)
+    corners = np.array(
+        [
+            [math.cos(a0 + k * math.pi / 3), math.sin(a0 + k * math.pi / 3), 0.0]
+            for k in range(6)
+        ],
+        dtype=np.float64,
+    )
+    session = Session()
+    session.add_polyline(corners, closed=True)
+    session.make_face(list(session.entities(ps.EntityKind.EDGE)))
+    session.extrude(list(session.entities(ps.EntityKind.FACE)), (0.0, 0.0, 1.0))
+    return ps.load_brep(session.brep())
+
+
+def _shape_of(build: str) -> ps.Shape:
+    """A wedge, a cylinder, a sphere, or a 2 x 2 x 2 block with a bore of radius 0.4."""
+    session = Session()
+    if build == "wedge":
+        session.add_wedge(2.0, 2.0, 2.0, 0.5)
+    elif build == "cylinder":
+        session.add_cylinder(1.0, 2.0)
+    elif build == "sphere":
+        session.add_sphere(1.0)
+    else:
+        session.add_box(2.0, 2.0, 2.0)
+        block = session.entities(ps.EntityKind.SOLID).tolist()
+        session.add_cylinder(0.4, 2.0, origin=(1.0, 1.0, 0.0))
+        everything = session.entities(ps.EntityKind.SOLID).tolist()
+        session.cut(block, [i for i in everything if i not in block])
+    return ps.load_brep(session.brep())
+
+
+def _assign_cartesian_layers(
+    mesher: Mesher, spacing: str, ignored: tuple[int, ...], total: float
+) -> None:
+    """Cartesian3D at ``spacing``, the stack on every face but ``ignored``."""
+    _, count, factor = CARTESIAN_STACK
+    mesher.assign(Cartesian3D())
+    mesher.assign(
+        CartesianParameters3D(spacing_x=spacing, spacing_y=spacing, spacing_z=spacing)
+    )
+    mesher.assign(
+        ViscousLayers(
+            total_thickness=total,
+            layer_count=count,
+            stretch_factor=factor,
+            boundary=ignored,
+            ignore=True,
+            group_name="bl",
+        )
+    )
+
+
+def _cartesian_layers(
+    shape: ps.Shape, spacing: str, ignored: tuple[int, ...] = ()
+) -> tuple[ps.MeshData, ps.ComputeReport, int, int]:
+    """Mesh ``shape`` with Cartesian layers: the mesh, the report, two bad-cell counts.
+
+    The counts are the cells with a boundary facet that no face covers, and the inverted
+    cells.
+    """
+    with Mesher(shape) as mesher:
+        _assign_cartesian_layers(mesher, spacing, ignored, CARTESIAN_STACK[0])
+        report = mesher.compute()
+        bare = mesher.select(BareBorderVolume()).count
+        inverted = mesher.select(BadOrientedVolume()).count
+        mesh = mesher.mesh()
+    return mesh, report, bare, inverted
+
+
+def _shared_split_volume(mesh: ps.MeshData) -> float:
+    """The cell volumes summed with each facet split the same way in both its cells.
+
+    Each facet is fanned into triangles from its centroid, and each triangle makes a
+    tetrahedron with the cell centroid (the layer and cut cells are star-shaped about
+    it). Two cells that share a warped facet then split it alike, so on a conforming
+    mesh the sum is the volume its skin encloses: a void or an overlap changes it. The
+    Volume control splits each cell on its own, so on the warped corner cells it does
+    not add up.
+    """
+    xyz = mesh.node_coords
+    total = 0.0
+    for row in range(mesh.element_count):
+        kind = int(mesh.element_type[row])
+        nodes = mesh.nodes_of(row)
+        if kind == int(ElementType.POLYHEDRON):
+            facets = np.split(nodes, np.cumsum(mesh.face_sizes_of(row))[:-1])
+        elif kind in _FACETS:
+            facets = [nodes[list(f)] for f in _FACETS[kind]]
+        else:
+            continue
+        centre = xyz[np.unique(nodes)].mean(axis=0)
+        for facet in facets:
+            ring = xyz[facet] - centre
+            cross = np.cross(ring, np.roll(ring, -1, axis=0))
+            total += float(np.abs(cross @ ring.mean(axis=0)).sum()) / 6.0
+    return total
+
+
+def _offsets(
+    distance: NDArray[np.float64], keep: NDArray[np.bool_]
+) -> NDArray[np.float64]:
+    """The distinct wall distances of the kept nodes, up to the total thickness."""
+    near = keep & (distance > -TOL) & (distance <= CARTESIAN_STACK[0] + TOL)
+    return np.unique(np.round(distance[near], 9))
+
+
+def _stack_planes() -> NDArray[np.float64]:
+    """The wall, then the end of each layer: the closed form of CARTESIAN_STACK."""
+    total, count, factor = CARTESIAN_STACK
+    return np.concatenate(([0.0], _layer_ends(total, factor, count)))
+
+
+def test_cartesian_layers_on_the_inclined_wall_of_a_wedge_sit_at_the_closed_form() -> (
+    None
+):
+    """The wall 0.8 x + 0.6 y = 1.6 of add_wedge(2, 2, 2, 0.5), mid-wall nodes.
+
+    A layer edge runs along the normal of a plane wall, and the layer nodes divide it at
+    the closed-form fractions, so the planes are exact. The wedge has volume
+    (2 + 0.5) / 2 * 2 * 2 = 5.
+    """
+    mesh, _, bare, inverted = _cartesian_layers(_shape_of("wedge"), "0.25")
+
+    xyz = mesh.node_coords
+    distance = 1.6 - xyz @ np.array([0.8, 0.6, 0.0])
+    along = xyz @ np.array([-0.6, 0.8, 0.0])
+    keep = (np.abs(along) < 0.5) & (xyz[:, 2] > 0.2 + TOL) & (xyz[:, 2] < 1.8 - TOL)
+    np.testing.assert_allclose(_offsets(distance, keep), _stack_planes(), atol=TOL)
+    assert (bare, inverted) == (0, 0)
+    assert _shared_split_volume(mesh) == pytest.approx(5.0, rel=TOL)
+
+
+@pytest.mark.parametrize("caps", ["layered", "ignored"])
+@pytest.mark.parametrize("turn", [0.0, 15.0, 30.0])
+def test_cartesian_layers_fill_a_hexagonal_prism_with_no_void(
+    turn: float, caps: str
+) -> None:
+    """Inclined walls at grid spacing 0.1, the shape the layers failed on.
+
+    At 0 and 30 deg a vertical edge lies on an end plane of the grid, where the offset
+    mesh doubled its nodes (duplicate_nodes patch); cut cells dropped from the offset
+    mesh left voids in the layers (offset_small_cells patch). The prism has volume
+    3 sqrt(3) / 2. The wall between corners 0 and 1 has its outward normal at
+    ``turn + 30`` deg, at the apothem cos(30 deg) from the axis.
+    """
+    shape = _hex_prism(turn)
+    flat = tuple(int(f.id) for f in shape.faces() if abs(f.bbox[2] - f.bbox[5]) < TOL)
+    ignored = flat if caps == "ignored" else ()
+
+    mesh, _, bare, inverted = _cartesian_layers(shape, "0.1", ignored)
+
+    xyz = mesh.node_coords
+    angle = math.radians(turn + 30.0)
+    normal = np.array([math.cos(angle), math.sin(angle), 0.0])
+    tangent = np.array([-normal[1], normal[0], 0.0])
+    rim = 0.0 if ignored else CARTESIAN_STACK[0]
+    keep = (np.abs(xyz @ tangent) < 0.2) & (xyz[:, 2] > rim + TOL)
+    keep &= xyz[:, 2] < 1.0 - rim - TOL
+    distance = math.cos(math.pi / 6.0) - xyz @ normal
+    np.testing.assert_allclose(_offsets(distance, keep), _stack_planes(), atol=TOL)
+    assert (bare, inverted) == (0, 0)
+    assert _shared_split_volume(mesh) == pytest.approx(1.5 * math.sqrt(3.0), rel=TOL)
+
+
+def test_cartesian_layers_on_a_cylinder_sit_at_the_closed_form_and_skin_it() -> None:
+    """Radius 1, height 2, spacing 0.25: the layer edges of the side run radially.
+
+    The radial offsets of mid-height nodes are the closed form. Every face element lies
+    on the skin: on a cap, or on the side within the sagitta of its chords (a chord of
+    at most 0.4 has a sagitta below 0.02). A cut cell dropped from the offset mesh used
+    to leave faces inside, at radius 0.78, and layer cells with uncovered facets.
+    """
+    mesh, _, bare, inverted = _cartesian_layers(_shape_of("cylinder"), "0.25")
+
+    xyz = mesh.node_coords
+    radius = np.hypot(xyz[:, 0], xyz[:, 1])
+    keep = (xyz[:, 2] > 0.2 + TOL) & (xyz[:, 2] < 1.8 - TOL)
+    np.testing.assert_allclose(_offsets(1.0 - radius, keep), _stack_planes(), atol=TOL)
+    assert (bare, inverted) == (0, 0)
+    rows = [
+        r for r in range(mesh.element_count) if int(mesh.element_type[r]) in _SURFACE
+    ]
+    centres = np.array([xyz[mesh.nodes_of(r)].mean(axis=0) for r in rows])
+    on_cap = (centres[:, 2] < TOL) | (centres[:, 2] > 2.0 - TOL)
+    on_side = np.hypot(centres[:, 0], centres[:, 1]) > 0.98
+    assert bool(np.all(on_cap | on_side))
+
+
+@pytest.mark.parametrize("build", ["sphere", "bored"])
+def test_cartesian_layers_on_curved_faces_leave_no_sub_mesh_failed(build: str) -> None:
+    """A sphere (its seam and poles), a block with a bore (the bore's seam).
+
+    The mesh was complete, but the EDGE and VERTEX sub-meshes with no element of their
+    own were left unmarked, so compute() failed on them with no message
+    (viscous_submeshes patch). Now it succeeds with no warning, and every boundary
+    facet is covered.
+    """
+    _, report, bare, inverted = _cartesian_layers(_shape_of(build), "0.25")
+
+    assert report.volumes > 0
+    assert report.warnings == ()
+    assert (bare, inverted) == (0, 0)
+
+
+def test_a_failed_cartesian_layer_compute_leaves_no_cell() -> None:
+    """Layers of 0.3 in the bored block: the offset bore meets the offset walls.
+
+    The offset shape gives no cell, so the compute fails loudly on the SOLID, and the
+    target holds no copy of an offset mesh.
+    """
+    with Mesher(_shape_of("bored")) as mesher:
+        _assign_cartesian_layers(mesher, "0.25", (), 0.3)
+
+        with pytest.raises(PysmeshError, match="meshing failed") as raised:
+            mesher.compute()
+
+        assert "SOLID 1" in raised.value.details
+        assert mesher.mesh().element_count == 0

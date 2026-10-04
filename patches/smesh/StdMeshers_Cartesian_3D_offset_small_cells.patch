@@ -1,0 +1,40 @@
+pySMESH: Cartesian_3D with viscous layers keeps every cut cell of its offset mesh that has
+volume, so the layers have no void (SMESH V9_16_0; applies after
+StdMeshers_Cartesian_3D_viscous_submeshes.patch).
+
+Defect: a mesh from Cartesian_3D with viscous layers can have voids in the layer region, and
+the compute reports success.
+
+Symptom: a cylinder of radius 1 and height 2, layers on every face (0.2 thick, 3 layers,
+factor 1.2), grid spacing 0.25: 192 layer cells have a facet on the mesh boundary that no face
+covers, 48 boundary faces lie inside the mesh at radius 0.78, and the layer volume is 2.846
+against 3.002 for a mesh with no void. A hexagonal prism at spacing 0.1 misses 3.3 % of its
+volume. With size_threshold 1000 in CartesianParameters3D both are complete.
+
+Root cause, measured: the inner compute meshes the offset shape and drops each cut cell
+smaller than 1/size_threshold of a full cell (Hexahedron::checkPolyhedronSize,
+StdMeshers_Cartesian_3D_Hexahedron.cxx:3192; the default threshold is 4). A dropped cell
+leaves a dent in the offset boundary. The faces around the dent do not lie on an offset FACE,
+so they go to the SOLID (:4224-4251). MakeViscousLayers grows layers only from the faces of
+the offset FACEs (makePrisms), so no layer grows over a dent, and the dent faces stay inside
+the copied mesh.
+
+Change, in StdMeshers_Cartesian_3D.cxx only: in the inner compute of the viscous path, the
+grid's size threshold is infinite, so only a cut cell with no volume is dropped. The offset
+boundary then lies on the offset FACEs everywhere.
+
+Not changed: the plain path, which still applies size_threshold.
+diff --git a/src/StdMeshers/StdMeshers_Cartesian_3D.cxx b/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
+--- a/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
++++ b/src/StdMeshers/StdMeshers_Cartesian_3D.cxx
+@@ -213,6 +213,10 @@
+     {
+       grid._toAddEdges = true;
+       grid._toCreateFaces = true;
++      // pySMESH: the layers grow from the boundary faces of the offset FACEs. A cut cell
++      // dropped as too small leaves a dent whose faces go to the SOLID, so no layer grows
++      // there and the mesh has a void. Drop only a cell with no volume.
++      grid._sizeThreshold = std::numeric_limits< double >::infinity();
+     }
+ 
+     const auto numOfThreads = std::thread::hardware_concurrency() == 0 ? 1 : std::thread::hardware_concurrency();
