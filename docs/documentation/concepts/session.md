@@ -198,9 +198,10 @@ id on several.
 
 `export_handoff(allow_aliases=True)` returns a many-to-one map instead. Each ordinal
 carries its sub-shape's label, the lowest live id that denotes it, so a split id appears at
-every ordinal of its pieces. `handoff.aliases` maps every other live id to its label. An id
-resolves to the ordinals that carry it, or, if it is a key of `aliases`, to the ordinals
-that carry its label; those are exactly the sub-shapes it denotes.
+every ordinal of its pieces. `handoff.face_ids_of[i]` (and the same for solids, edges and
+vertices) lists every live id of the sub-shape at ordinal `i`, label first. An id resolves
+to every ordinal whose tuple lists it: those are exactly the sub-shapes it denotes, also
+where two ids share only part of their sub-shapes, as after a coplanar `fuse`.
 
 `write_step(unit=..., face_names=...)` writes the live shape to STEP with face names keyed
 by entity id, so the names survive the edits that move ordinals. The rules follow the three
@@ -213,8 +214,7 @@ causes above:
   each such face with its ids and their names.
 
 `read_step_xde` reads the names back on `face_labels`. `write_step` reads the ids of each
-face from the registry, not from the `aliases` map, so it also covers the cases that
-`allow_aliases=True` refuses.
+face from the registry, which is the same relation `face_ids_of` reports.
 
 ## Non-finite arguments
 

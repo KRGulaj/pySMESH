@@ -459,12 +459,6 @@ C2_CASES: dict[str, tuple[str, Vec3, Vec3]] = {
     "cut_overlapping": ("cut", (1.0, 1.0, 1.0), (2.0, 2.0, 2.0)),
 }
 C2_TOL: float = 1e-9
-# The two cases a label map cannot express: each operand's split face keeps its own
-# piece and both ids denote the shared piece, so one id is a label on one piece and an
-# alias on another. allow_aliases refuses them by name (escalated as E5 in this
-# phase's ledger).
-C2_UNRESOLVABLE: tuple[str, ...] = ("fuse_coplanar", "fuse_tool_inside")
-C2_RESOLVABLE: tuple[str, ...] = tuple(sorted(set(C2_CASES) - set(C2_UNRESOLVABLE)))
 
 
 def _c2_session(name: str) -> Session:
@@ -479,24 +473,20 @@ def _c2_session(name: str) -> Session:
     return s
 
 
-def _resolve(handoff: Handoff, ids: NDArray[np.int64], entity: int) -> list[int]:
-    """The ordinals an id resolves to: those carrying it, or its label for an alias."""
-    label = int(handoff.aliases.get(EntityId(entity), EntityId(entity)))
-    return np.flatnonzero(ids == label).tolist()
-
-
-def _parts(handoff: Handoff) -> dict[EntityKind, tuple[list[Any], NDArray[np.int64]]]:
-    """Per kind: the sub-shapes a reader of the BREP lists, and the id array."""
+def _parts(
+    handoff: Handoff,
+) -> dict[EntityKind, tuple[list[Any], tuple[tuple[EntityId, ...], ...]]]:
+    """Per kind: the sub-shapes a reader of the BREP lists, and the ids of each."""
     shape = ps.load_brep(handoff.brep)
 
     def by_id(items: list[Any]) -> list[Any]:
         return sorted(items, key=lambda x: x.id)
 
     return {
-        EntityKind.SOLID: (by_id(shape.solids()), handoff.solid_id),
-        EntityKind.FACE: (by_id(shape.faces()), handoff.face_id),
-        EntityKind.EDGE: (by_id(shape.edges()), handoff.edge_id),
-        EntityKind.VERTEX: (by_id(shape.vertices()), handoff.vertex_id),
+        EntityKind.SOLID: (by_id(shape.solids()), handoff.solid_ids_of),
+        EntityKind.FACE: (by_id(shape.faces()), handoff.face_ids_of),
+        EntityKind.EDGE: (by_id(shape.edges()), handoff.edge_ids_of),
+        EntityKind.VERTEX: (by_id(shape.vertices()), handoff.vertex_ids_of),
     }
 
 
@@ -520,37 +510,56 @@ def _measure_and_centroid(
     return float(measure.sum()), weighted
 
 
-@pytest.mark.parametrize("name", C2_RESOLVABLE)
-def test_with_aliases_every_live_id_resolves_to_ordinals_of_its_own_geometry(
+@pytest.mark.parametrize("name", sorted(C2_CASES))
+def test_with_aliases_every_live_id_resolves_to_exactly_its_own_sub_shapes(
     name: str,
 ) -> None:
-    """Union box, measure and centroid of each id's ordinals are the id's own (C2)."""
+    """R(id) = the ordinals whose tuple lists the id: its own sub-shapes, all of them.
+
+    The count of R(id) is the id's shape count, read independently from
+    ``entity_table``; their union box is the id's box; for solids and faces, their
+    summed measure and measure-weighted centroid are the id's own, within 1e-9. For an
+    id of one shape that is its centroid exactly. The coplanar fuse and the fuse with
+    the tool inside, where two ids share only part of their faces, included (C2, E5).
+    """
     s = _c2_session(name)
 
     handoff = s.export_handoff(allow_aliases=True)
 
-    for kind, (parts, ids) in _parts(handoff).items():
+    for kind, (parts, ids_of) in _parts(handoff).items():
         boxes = s.bounding_boxes(kind)
-        for entity, box in zip(boxes.ids.tolist(), boxes.bbox, strict=True):
-            mine = [parts[i] for i in _resolve(handoff, ids, entity)]
-            assert mine, (kind, entity)
+        table = s.entity_table(kind)
+        assert np.array_equal(boxes.ids, table.ids)
+        for row, (entity, box) in enumerate(zip(boxes.ids, boxes.bbox, strict=True)):
+            mine = [parts[i] for i, ids in enumerate(ids_of) if int(entity) in ids]
+            assert len(mine) == int(table.shape_count[row]), (kind, int(entity))
             assert _union_box(kind, mine) == pytest.approx(box, abs=C2_TOL)
             if kind in (EntityKind.SOLID, EntityKind.FACE):
-                table = s.mass_properties([EntityId(entity)])
                 measure, centroid = _measure_and_centroid(kind, mine)
-                assert measure == pytest.approx(float(table.measure[0]), rel=C2_TOL)
-                assert centroid == pytest.approx(table.centroid[0], abs=C2_TOL)
+                assert measure == pytest.approx(float(table.measure[row]), rel=C2_TOL)
+                assert centroid == pytest.approx(table.centroid[row], abs=C2_TOL)
 
 
-@pytest.mark.parametrize("name", C2_UNRESOLVABLE)
-def test_with_aliases_ids_sharing_only_part_of_their_sub_shapes_are_refused(
+@pytest.mark.parametrize("name", sorted(C2_CASES))
+def test_with_aliases_every_tuple_lists_the_label_first_then_ascending(
     name: str,
 ) -> None:
-    """No lossy label map is returned: the refusal names the two ids (C2)."""
+    """Each tuple starts with the ordinal's label, the id in ``face_id`` (C2, E5)."""
     s = _c2_session(name)
 
-    with pytest.raises(PysmeshError, match="denote different sub-shapes"):
-        s.export_handoff(allow_aliases=True)
+    handoff = s.export_handoff(allow_aliases=True)
+
+    pairs = (
+        (handoff.solid_id, handoff.solid_ids_of),
+        (handoff.face_id, handoff.face_ids_of),
+        (handoff.edge_id, handoff.edge_ids_of),
+        (handoff.vertex_id, handoff.vertex_ids_of),
+    )
+    for labels, ids_of in pairs:
+        assert len(ids_of) == labels.size
+        for label, ids in zip(labels.tolist(), ids_of, strict=True):
+            assert ids[0] == label
+            assert list(ids) == sorted(ids)
 
 
 def test_without_aliases_a_boolean_that_shares_sub_shapes_is_still_refused() -> None:
@@ -572,14 +581,15 @@ def test_a_boolean_refusal_names_the_boolean_cause_and_the_alias_way_out() -> No
     assert "allow_aliases=True" in caught.value.details
 
 
-def test_a_bijective_export_has_no_aliases() -> None:
-    """A cut that shares nothing gives the same map either way, and no aliases (C2)."""
+def test_a_bijection_gives_one_element_tuples_either_way() -> None:
+    """A cut that shares nothing: each tuple is its label alone, either way (C2)."""
     s = _c2_session("cut_overlapping")
 
     plain = s.export_handoff()
     aliased = s.export_handoff(allow_aliases=True)
 
-    assert dict(aliased.aliases) == {}
+    assert aliased.face_ids_of == tuple((EntityId(i),) for i in aliased.face_id)
+    assert plain.face_ids_of == aliased.face_ids_of
     assert np.array_equal(plain.face_id, aliased.face_id)
     assert plain.brep == aliased.brep
 

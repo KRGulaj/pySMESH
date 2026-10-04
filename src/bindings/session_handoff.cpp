@@ -41,7 +41,8 @@ namespace {
 
 // The label of one exported sub-shape, and the diagnostics for the two ways it can fail.
 struct KindManifest {
-  std::vector<EntityId> ids;        // one per ordinal, in traversal order
+  std::vector<EntityId> ids;        // one per ordinal, in traversal order: the label
+  std::vector<std::vector<EntityId>> ids_of;  // per ordinal, every live id, label first
   std::vector<EntityId> ambiguous;  // ids sharing a shape with another id (a merge)
   std::vector<EntityId> split;      // ids denoting more than one exported shape (a split)
   std::vector<int> unlabelled;      // ordinals of shapes carrying no live id at all
@@ -51,8 +52,6 @@ struct KindManifest {
 
 py::dict Session::export_handoff(bool allow_aliases) const {
   const TopoDS_Shape root = state_.root;
-  // allow_aliases: every other live id of a shape, mapped to the shape's label (report C2).
-  std::map<EntityId, EntityId> aliases;
 
   py::dict out;
   std::vector<EntityId> ambiguous;
@@ -78,18 +77,20 @@ py::dict Session::export_handoff(bool allow_aliases) const {
       if (it == state_.registry->by_shape.end() || it->second.empty()) {
         m.unlabelled.push_back(i);
         m.ids.push_back(0);
+        m.ids_of.emplace_back();
         continue;
       }
-      // by_shape holds every live id on this shape. More than one is a merge, and the
-      // handoff cannot choose between them: both names are alive and both mean this face.
+      // by_shape holds every live id on this shape, ascending, so the label (label_of) is
+      // the front. More than one is a merge, and without allow_aliases the handoff cannot
+      // choose between them: both names are alive and both mean this face. With it, every
+      // id is listed at this ordinal, and an id resolves to every ordinal that lists it,
+      // which is exact whatever the ids share (report C2, amendment 8).
       if (it->second.size() > 1) {
         for (EntityId id : it->second) {
           m.ambiguous.push_back(id);
         }
-        if (allow_aliases) {
-          add_aliases(it->second, aliases);
-        }
       }
+      m.ids_of.push_back(it->second);
       const EntityId id = it->second.front();
       m.ids.push_back(id);
       ++hits[id];
@@ -118,6 +119,15 @@ py::dict Session::export_handoff(bool allow_aliases) const {
 
     const std::string key = std::string(kind_name(kind)) + "_id";
     out[py::str(key)] = ids_array(m.ids);
+    py::list per_ordinal;
+    for (const std::vector<EntityId>& ids : m.ids_of) {
+      py::tuple row(ids.size());
+      for (std::size_t k = 0; k < ids.size(); ++k) {
+        row[k] = py::int_(ids[k]);
+      }
+      per_ordinal.append(row);
+    }
+    out[py::str(std::string(kind_name(kind)) + "_ids_of")] = per_ordinal;
   }
 
   auto tidy = [](std::vector<EntityId>& v) {
@@ -141,10 +151,11 @@ py::dict Session::export_handoff(bool allow_aliases) const {
                 "entity is no longer one thing to name. ";
     }
     detail << "export_handoff(allow_aliases=True) returns a many-to-one map instead: each "
-              "sub-shape carries its lowest live id, and Handoff.aliases maps every other "
-              "id to it. Or resolve the ambiguity before handing off — a merge is settled "
-              "by exporting after the ids the caller no longer needs have been dropped, a "
-              "split by treating the pieces as the new entities they are. The ids, by kind:";
+              "sub-shape carries its lowest live id, and Handoff.face_ids_of (and the same "
+              "for the other kinds) lists every live id of each sub-shape. Or resolve the "
+              "ambiguity before handing off — a merge is settled by exporting after the ids "
+              "the caller no longer needs have been dropped, a split by treating the pieces "
+              "as the new entities they are. The ids, by kind:";
     std::vector<EntityId> faces;
     for (const auto& [kind, ids] : blamed_by_kind) {
       detail << " " << kind_name(kind);
@@ -188,58 +199,7 @@ py::dict Session::export_handoff(bool allow_aliases) const {
   }
 
   out["brep"] = py::bytes(stream.str());
-  py::dict alias_dict;
-  for (const auto& [alias, label] : aliases) {
-    alias_dict[py::int_(alias)] = py::int_(label);
-  }
-  out["aliases"] = alias_dict;
   return out;
-}
-
-void Session::add_aliases(const std::vector<EntityId>& ids,
-                          std::map<EntityId, EntityId>& aliases) const {
-  // by_shape lists the ids of a shape ascending, so its label is the front (label_of).
-  const EntityId label = ids.front();
-  ShapeSet label_shapes;
-  for (const TopoDS_Shape& s : state_.registry->alive.at(label).shapes) {
-    label_shapes.Add(s);
-  }
-  for (std::size_t k = 1; k < ids.size(); ++k) {
-    const EntityId alias = ids[k];
-    const auto seen = aliases.find(alias);
-    if (seen != aliases.end() && seen->second == label) {
-      continue;
-    }
-    // One entry alias -> label holds only when the two ids denote the same shapes:
-    // otherwise resolving the alias through its label would gain or lose some of them.
-    ShapeSet alias_shapes;
-    for (const TopoDS_Shape& s : state_.registry->alive.at(alias).shapes) {
-      alias_shapes.Add(s);
-    }
-    int shared = 0;
-    for (int i = 1; i <= alias_shapes.Extent(); ++i) {
-      shared += label_shapes.Contains(alias_shapes.FindKey(i)) ? 1 : 0;
-    }
-    const bool same = seen == aliases.end() && shared == alias_shapes.Extent() &&
-                      shared == label_shapes.Extent();
-    if (!same) {
-      const std::string other =
-          seen == aliases.end() ? std::to_string(label) : std::to_string(seen->second);
-      throw PysmeshError(
-          "Session.export_handoff(allow_aliases=True): id " + std::to_string(alias) +
-              " shares sub-shapes with id " + std::to_string(label) +
-              " but the two denote different sub-shapes (id " + std::to_string(alias) +
-              ": " + std::to_string(alias_shapes.Extent()) + ", id " + std::to_string(label) +
-              ": " + std::to_string(label_shapes.Extent()) + ", shared: " +
-              std::to_string(shared) + "), so no label map can resolve id " +
-              std::to_string(alias) + " to exactly its own sub-shapes (it would also be "
-              "resolved through id " + other + ").",
-          "A boolean of two split faces leaves this: each id keeps its own piece and both "
-          "denote the shared piece. Export without allow_aliases to see every blamed id, "
-          "or drop one of the two ids before handing off.");
-    }
-    aliases[alias] = label;
-  }
 }
 
 }  // namespace session

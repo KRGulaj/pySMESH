@@ -1104,16 +1104,11 @@ class Session {
   // ambiguous, so the export fails loud naming the ids rather than handing over a map that
   // silently loses some of them. A boolean leaves the operands' ids on the shapes they share.
   //
-  // allow_aliases (report C2): the merge is not refused. Each ordinal carries its shape's
-  // label, the lowest live id (label_of), so a split id appears at every ordinal of its
-  // pieces, and "aliases" maps every other live id of a shape to that label. An alias that
-  // does not denote exactly the sub-shapes of its label is refused: one entry could not
-  // resolve it.
+  // allow_aliases (report C2, amendment 8): the merge is not refused. Each ordinal carries
+  // its shape's label, the lowest live id (label_of), so a split id appears at every ordinal
+  // of its pieces, and "<KIND>_ids_of" lists, per ordinal, every live id of that shape with
+  // the label first. An id resolves to every ordinal that lists it, which is exact.
   py::dict export_handoff(bool allow_aliases) const;
-
-  // Adds alias -> label for every id after the first of one shape's ascending id list.
-  void add_aliases(const std::vector<EntityId>& ids,
-                   std::map<EntityId, EntityId>& aliases) const;
 
   // ---- names ------------------------------------------------------------------------ //
 

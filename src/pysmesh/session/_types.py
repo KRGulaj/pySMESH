@@ -12,10 +12,9 @@ defaults with the reasoning for each. No operation lives in this module.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from enum import IntEnum, StrEnum
-from types import MappingProxyType
 from typing import Final, NewType, TypeAlias, cast
 
 import numpy as np
@@ -776,10 +775,10 @@ class Handoff:
 
     **With** ``allow_aliases=True`` **the map is many-to-one instead.** Each ordinal
     carries its sub-shape's label, the lowest live id that denotes it, so a split id
-    appears at every ordinal of its pieces. :attr:`aliases` maps every other live id of
-    a sub-shape to that label. Nothing is lost: an id resolves to the ordinals that
-    carry it, or, if it is a key of :attr:`aliases`, to the ordinals that carry its
-    label, and those are exactly the sub-shapes it denotes.
+    appears at every ordinal of its pieces. :attr:`face_ids_of` (and the same for the
+    other kinds) lists, per ordinal, every live id that denotes the sub-shape, label
+    first. Nothing is lost: an id resolves to every ordinal whose tuple lists it, and
+    those are exactly the sub-shapes it denotes, however the ids overlap.
 
     What remains the consumer's half: enumerate the imported shape in the same per-kind
     order, check the counts agree, and pair by position. This library cannot verify the other
@@ -791,8 +790,12 @@ class Handoff:
         face_id: (F,) int64 — the entity id of each face, in traversal order.
         edge_id: (E,) int64 — the entity id of each edge, in traversal order.
         vertex_id: (V,) int64 — the entity id of each vertex, in traversal order.
-        aliases: Every live id that shares its sub-shapes with a lower id, mapped to
-            that label. Empty for a bijection, the only map the default export returns.
+        solid_ids_of: Per solid ordinal, every live id that denotes the solid, the
+            label (as in ``solid_id``) first, then ascending. One id each for a
+            bijection, the only map the default export returns.
+        face_ids_of: As ``solid_ids_of``, per face ordinal.
+        edge_ids_of: As ``solid_ids_of``, per edge ordinal.
+        vertex_ids_of: As ``solid_ids_of``, per vertex ordinal.
     """
 
     brep: bytes
@@ -800,9 +803,10 @@ class Handoff:
     face_id: NDArray[np.int64]
     edge_id: NDArray[np.int64]
     vertex_id: NDArray[np.int64]
-    aliases: Mapping[EntityId, EntityId] = field(
-        default_factory=lambda: MappingProxyType({})
-    )
+    solid_ids_of: tuple[tuple[EntityId, ...], ...]
+    face_ids_of: tuple[tuple[EntityId, ...], ...]
+    edge_ids_of: tuple[tuple[EntityId, ...], ...]
+    vertex_ids_of: tuple[tuple[EntityId, ...], ...]
 
 
 def _delta(raw: dict[str, object]) -> HistoryDelta:

@@ -12,7 +12,6 @@ across per-area translation units; see the package docstring for the whole surfa
 from __future__ import annotations
 
 from collections.abc import Mapping
-from types import MappingProxyType
 from typing import cast
 
 import numpy as np
@@ -50,9 +49,9 @@ class _HandoffOps(_SessionBase):
         Args:
             allow_aliases: Return a many-to-one map instead of refusing a shared
                 sub-shape. Each ordinal carries its sub-shape's label, the lowest live
-                id that denotes it, and :attr:`Handoff.aliases` maps every other live id
-                to that label. See :class:`Handoff` for how an id resolves to its
-                ordinals.
+                id that denotes it, and :attr:`Handoff.face_ids_of` (and the same for
+                the other kinds) lists every live id of each sub-shape. See
+                :class:`Handoff` for how an id resolves to its ordinals.
 
         Returns:
             The BREP bytes and one id array per entity kind, each in traversal order.
@@ -60,21 +59,24 @@ class _HandoffOps(_SessionBase):
         Raises:
             PysmeshError: If the map is not a bijection and ``allow_aliases`` is False —
                 the blamed faces on ``.face_ids``, every blamed id by kind in
-                ``.details`` —, if an id shares a sub-shape with a lower id without
-                denoting the same sub-shapes (no label map can resolve it), or if the
-                BREP write fails.
+                ``.details`` —, or if the BREP write fails.
         """
         raw = self._s.export_handoff(allow_aliases)
-        aliases = cast("dict[int, int]", raw["aliases"])
+
+        def ids_of(kind: str) -> tuple[tuple[EntityId, ...], ...]:
+            rows = cast("list[tuple[int, ...]]", raw[f"{kind}_ids_of"])
+            return tuple(tuple(EntityId(i) for i in row) for row in rows)
+
         return Handoff(
             brep=cast("bytes", raw["brep"]),
             solid_id=cast("NDArray[np.int64]", raw["SOLID_id"]),
             face_id=cast("NDArray[np.int64]", raw["FACE_id"]),
             edge_id=cast("NDArray[np.int64]", raw["EDGE_id"]),
             vertex_id=cast("NDArray[np.int64]", raw["VERTEX_id"]),
-            aliases=MappingProxyType(
-                {EntityId(k): EntityId(v) for k, v in aliases.items()}
-            ),
+            solid_ids_of=ids_of("SOLID"),
+            face_ids_of=ids_of("FACE"),
+            edge_ids_of=ids_of("EDGE"),
+            vertex_ids_of=ids_of("VERTEX"),
         )
 
     def write_step(
