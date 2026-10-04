@@ -63,6 +63,7 @@ from pysmesh import (
     HexaFromSkin3D,
     Hypothesis,
     LayerDistribution,
+    LengthFromEdges,
     LocalLength,
     MaxElementArea,
     MaxElementVolume,
@@ -275,6 +276,7 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
     (QuadraticMesh(), None),
     # 2-D and 3-D hypotheses
     (MaxElementArea(max_area=4.0), None),
+    (LengthFromEdges(), None),
     (MaxElementVolume(max_volume=8.0), None),
     (QuadranglePreference(), None),
     (QuadrangleParams(quad_type=QuadType.REDUCED), None),

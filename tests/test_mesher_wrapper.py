@@ -20,6 +20,9 @@ from numpy.typing import NDArray
 import pysmesh as ps
 from pysmesh import (
     Arithmetic1D,
+    ElementType,
+    LengthFromEdges,
+    Mefisto2D,
     Mesher,
     NumberOfSegments,
     PropagOfDistribution,
@@ -32,6 +35,7 @@ from pysmesh import (
 )
 
 LINE_LENGTH: float = 10.0
+SQUARE_SIDE: float = 4.0
 TOL: float = 1e-9
 
 # The trapezoid of the propagation test: a 4-long bottom, a 2-long top, height 2.
@@ -76,6 +80,39 @@ def _edge_at_height(shape: ps.Shape, y: float) -> int:
         if abs(box[1] - y) < TOL and abs(box[4] - y) < TOL:
             return edge.id
     raise AssertionError(f"no horizontal edge at y = {y}")
+
+
+def _square_shape() -> ps.Shape:
+    """A 4 x 4 planar square face."""
+    session = Session()
+    session.add_rectangle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), SQUARE_SIDE, SQUARE_SIDE)
+    return ps.load_brep(session.brep())
+
+
+def _triangle_area(mesh: ps.MeshData) -> float:
+    """The summed area of the triangles of ``mesh``."""
+    rows = [
+        mesh.nodes_of(i)
+        for i in range(mesh.element_count)
+        if int(mesh.element_type[i]) == int(ElementType.TRIANGLE)
+    ]
+    tri = np.asarray(rows, dtype=np.int64)
+    p0, p1, p2 = (mesh.node_coords[tri[:, k]] for k in range(3))
+    return 0.5 * float(np.linalg.norm(np.cross(p1 - p0, p2 - p0), axis=1).sum())
+
+
+def _mean_triangle_edge(mesh: ps.MeshData) -> float:
+    """The mean edge length over the triangles of ``mesh``, shared edges twice."""
+    rows = [
+        mesh.nodes_of(i)
+        for i in range(mesh.element_count)
+        if int(mesh.element_type[i]) == int(ElementType.TRIANGLE)
+    ]
+    tri = np.asarray(rows, dtype=np.int64)
+    p = mesh.node_coords
+    pairs = ((0, 1), (1, 2), (2, 0))
+    lengths = [np.linalg.norm(p[tri[:, a]] - p[tri[:, b]], axis=1) for a, b in pairs]
+    return float(np.concatenate(lengths).mean())
 
 
 def _sorted_x(mesh: ps.MeshData) -> NDArray[np.float64]:
@@ -140,3 +177,44 @@ def test_propag_of_distribution_repeats_the_fractions_on_a_shorter_edge() -> Non
     forward = np.allclose(on_top, fractions, atol=TOL)
     backward = np.allclose(on_top, np.sort(1.0 - fractions), atol=TOL)
     assert forward or backward, on_top
+
+
+# ---- W1.4 LengthFromEdges --------------------------------------------------------- #
+
+
+def _mefisto_square(segments: int, length_from_edges: bool) -> ps.MeshData:
+    """MEFISTO on the square, ``segments`` boundary segments per side."""
+    with Mesher(_square_shape()) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=segments))
+        mesher.assign(Mefisto2D())
+        if length_from_edges:
+            mesher.assign(LengthFromEdges())
+        mesher.compute()
+        return mesher.mesh()
+
+
+@pytest.mark.parametrize("segments", [8, 16, 32])
+def test_length_from_edges_sizes_the_triangles_by_the_boundary_segment(
+    segments: int,
+) -> None:
+    """The triangles fill the square at the size of the boundary segment ``h``.
+
+    Spec (SMESH ``2d_meshing_hypo.rst``): LengthFromEdges "defines the maximum linear
+    size of mesh faces as an average length of mesh edges approximating the meshed
+    face boundary"; here ``h = 4 / segments``. MEFISTO takes it as an ideal edge
+    length (``aptrte.cxx``: an edge "should" lie between 0.65 and 1.3 of it), so the
+    mean triangle edge is held within a factor 1.5 of ``h``. It is also MEFISTO's
+    default (``StdMeshers_MEFISTO_2D::CheckHypothesis``), so the mesh equals the one
+    made with no 2-D hypothesis. The triangles fill the 4 x 4 square: area 16.
+    """
+    h = SQUARE_SIDE / segments
+
+    mesh = _mefisto_square(segments, length_from_edges=True)
+
+    default = _mefisto_square(segments, length_from_edges=False)
+    np.testing.assert_array_equal(
+        np.sort(mesh.node_coords, axis=0), np.sort(default.node_coords, axis=0)
+    )
+    assert _triangle_area(mesh) == pytest.approx(SQUARE_SIDE**2, abs=TOL)
+    assert h / 1.5 < _mean_triangle_edge(mesh) < 1.5 * h

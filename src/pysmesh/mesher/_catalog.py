@@ -617,6 +617,20 @@ class MaxElementArea(Hypothesis):
 
 
 @dataclass(frozen=True)
+class LengthFromEdges(Hypothesis):
+    """Size the triangles of :class:`Mefisto2D` from the face's own boundary.
+
+    The target edge length of the triangles is the mean length of the segments on the
+    face's boundary. Mefisto2D uses the same rule when no 2-D hypothesis applies, so
+    this states the default explicitly. MEFISTO takes the length as an ideal, not as a
+    bound: the mean triangle edge measures 0.72 to 1.11 times the boundary segment on a
+    square with 4 to 32 segments per side (see also :class:`Mefisto2D`).
+    """
+
+    native_name: ClassVar[str] = "LengthFromEdges"
+
+
+@dataclass(frozen=True)
 class MaxElementVolume(Hypothesis):
     """An upper bound on a 3-D element's volume.
 

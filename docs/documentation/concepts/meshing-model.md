@@ -73,7 +73,7 @@ native `StdMeshers` source or from a test that computes a real mesh with it.
 | Algorithm | What it does | Needs beneath | Hypotheses it reads |
 |---|---|---|---|
 | `Quadrangle2D` | Mapped quadrangle meshing of a face bounded by four logical sides. Refuses a face it cannot read as four sides. | A 1-D algorithm and hypothesis on its edges | `QuadrangleParams` (base vertex, corner vertices, how to resolve mismatched sides), `QuadranglePreference` |
-| `Mefisto2D` | Free triangle meshing of a face. | A 1-D algorithm and hypothesis on its edges | `MaxElementArea` (a bound, not a target: it only binds where the boundary would otherwise produce larger elements) |
+| `Mefisto2D` | Free triangle meshing of a face. | A 1-D algorithm and hypothesis on its edges | `MaxElementArea` (a bound, not a target: it only binds where the boundary would otherwise produce larger elements), `LengthFromEdges` (the mean boundary segment as the target edge length; the default when no 2-D hypothesis applies) |
 | `PolygonPerFace2D` | One polygonal element per face, using the edge discretisation directly as its boundary. | A 1-D algorithm and hypothesis on its edges | None |
 | `Projection2D` | Copies a face's mesh from another face. This is how a periodic pair is made to match node for node. | A 1-D algorithm and hypothesis on its own edges, matching the source face's edge counts | `ProjectionSource2D` (required) |
 | `Projection1D2D` | Projects a face's mesh **and** its boundary discretisation from another face. | Nothing: it supplies its own 1-D layer from the source | `ProjectionSource2D` (required) |
