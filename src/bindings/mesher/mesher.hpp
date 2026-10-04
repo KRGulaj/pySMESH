@@ -321,7 +321,8 @@ class Mesher {
   // mesh", which is upstream's own convention for these calls.
   void convert_to_quadratic(bool force_3d, bool bi_quadratic);
   bool convert_from_quadratic();
-  py::dict split_volumes(int method, double nx, double ny, double nz);
+  py::dict split_volumes(int method, double nx, double ny, double nz,
+                         bool avoid_over_constrained);
   py::dict split_quadratic_into_linear(const std::vector<std::int64_t>& elements);
   py::dict merge_nodes(double tolerance);
   py::list find_coincident_nodes(double tolerance, const std::vector<std::int64_t>& nodes,

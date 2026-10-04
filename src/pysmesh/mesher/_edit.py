@@ -248,6 +248,8 @@ class _EditOps(_MesherBase):
         self,
         method: SplitMethod = SplitMethod.HEXA_TO_2_PRISMS,
         facet_normal: tuple[float, float, float] = (0.0, 0.0, 1.0),
+        *,
+        avoid_over_constrained: bool = False,
     ) -> EditReport:
         """Split every volume cell of the mesh.
 
@@ -255,11 +257,20 @@ class _EditOps(_MesherBase):
         only. Groups of volumes follow the split: a cell in a group is replaced by the cells
         it became, and all of them are in the group afterwards.
 
+        A tetrahedron is over-constrained when all 4 of its nodes carry a 2-D element:
+        every node lies on the boundary mesh, so the cell has no free node. With
+        ``avoid_over_constrained``, each cell is cut by a standard variant that makes no
+        such tetrahedron. Where no variant qualifies, the cell is cut through its
+        barycentre instead, which adds one node and more tetrahedra.
+
         Args:
             method: How to cut each cell.
             facet_normal: Which facet of each hexahedron is cut into two triangles, chosen as
                 the one this direction points along. Read only by the two prism methods; the
                 tetrahedral ones ignore it.
+            avoid_over_constrained: Choose the cut that makes no over-constrained
+                tetrahedron. Read by :attr:`SplitMethod.HEXA_TO_5` and
+                :attr:`SplitMethod.HEXA_TO_6` only.
 
         Returns:
             The counts either side of the split.
@@ -269,7 +280,11 @@ class _EditOps(_MesherBase):
                 vector, or if the mesher has been released.
         """
         raw = self._m.split_volumes(
-            int(method), facet_normal[0], facet_normal[1], facet_normal[2]
+            int(method),
+            facet_normal[0],
+            facet_normal[1],
+            facet_normal[2],
+            avoid_over_constrained,
         )
         return _report(raw)
 

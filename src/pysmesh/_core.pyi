@@ -633,7 +633,12 @@ class Mesher:
     def convert_to_quadratic(self, force_3d: bool, bi_quadratic: bool) -> None: ...
     def convert_from_quadratic(self) -> bool: ...
     def split_volumes(
-        self, method: int, nx: float, ny: float, nz: float
+        self,
+        method: int,
+        nx: float,
+        ny: float,
+        nz: float,
+        avoid_over_constrained: bool = False,
     ) -> dict[str, object]: ...
     def split_quadratic_into_linear(
         self, elements: Sequence[int]

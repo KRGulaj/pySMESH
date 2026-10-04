@@ -45,6 +45,7 @@ from pysmesh import (
     SegmentAroundVertex0D,
     SegmentLengthAroundVertex,
     Session,
+    SplitMethod,
     SubShape,
     SubShapeKind,
     UseExisting1D,
@@ -951,3 +952,64 @@ def test_an_enforced_vertex_brings_its_node_into_the_face_mesh() -> None:
     assert _quad_uses_node_at(mesh, ENFORCED)
     assert not _quad_uses_node_at(plain, ENFORCED)
     assert _quad_area(mesh)[0] == pytest.approx(SQUARE_SIDE**2, rel=1e-12)
+
+
+# ---- W3.1 split_volumes(avoid_over_constrained) ----------------------------------- #
+
+
+def _over_constrained(mesh: ps.MeshData) -> int:
+    """How many tetrahedra have all 4 nodes on a node of a 2-D element."""
+    faces = np.flatnonzero(
+        (mesh.element_type == int(ElementType.QUADRANGLE))
+        | (mesh.element_type == int(ElementType.TRIANGLE))
+    )
+    on_surface = np.zeros(mesh.node_coords.shape[0], dtype=bool)
+    for i in faces:
+        on_surface[mesh.nodes_of(i)] = True
+    tetra = np.flatnonzero(mesh.element_type == int(ElementType.TETRAHEDRON))
+    return sum(int(np.all(on_surface[mesh.nodes_of(i)])) for i in tetra)
+
+
+def _tetra_volume(mesh: ps.MeshData) -> float:
+    """The summed volume of the tetrahedra of ``mesh``."""
+    tetra = np.flatnonzero(mesh.element_type == int(ElementType.TETRAHEDRON))
+    total = 0.0
+    for i in tetra:
+        p = _xyz_of(mesh, i)
+        total += abs(float(np.dot(p[1] - p[0], np.cross(p[2] - p[0], p[3] - p[0])))) / 6
+    return total
+
+
+def _split_block(avoid: bool) -> ps.MeshData:
+    """The 2 x 2 x 2 Hexa3D block of the box, split by HEXA_TO_6."""
+    with Mesher(_box_shape()) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=2))
+        mesher.assign(Quadrangle2D())
+        mesher.assign(Hexa3D())
+        mesher.compute()
+        mesher.split_volumes(SplitMethod.HEXA_TO_6, avoid_over_constrained=avoid)
+        return mesher.mesh()
+
+
+def test_avoid_over_constrained_splits_every_block_cell_through_the_centre_node() -> (
+    None
+):
+    """2 x 2 x 2 hexahedra into 48 tetrahedra, none with all 4 nodes on the boundary.
+
+    Spec (SMESH ``SMESH_MeshEditor::SplitVolumes``, 9.16): with
+    ``avoidOverConstrainedVolumes`` the split "will choose the variant with no
+    over-constrained volumes". Each cell of the block has one interior node, the
+    block centre, and one of the 4 diagonals of HEXA_TO_6 runs through it: then each
+    of the 6 tetrahedra holds it. Without the option some tetrahedra are
+    over-constrained. Both fill the box: volume 231.
+    """
+    plain = _split_block(avoid=False)
+
+    avoided = _split_block(avoid=True)
+
+    assert avoided.count_of(ElementType.TETRAHEDRON) == 48
+    assert _over_constrained(avoided) == 0
+    assert _over_constrained(plain) > 0
+    for mesh in (plain, avoided):
+        assert _tetra_volume(mesh) == pytest.approx(BOX_DX * BOX_DY * BOX_DZ, rel=1e-12)

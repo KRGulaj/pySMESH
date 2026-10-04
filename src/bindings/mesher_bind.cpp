@@ -45,7 +45,7 @@ void bind_mesher(py::module_& m) {
            py::arg("bi_quadratic"))
       .def("convert_from_quadratic", &Mesher::convert_from_quadratic)
       .def("split_volumes", &Mesher::split_volumes, py::arg("method"), py::arg("nx"),
-           py::arg("ny"), py::arg("nz"))
+           py::arg("ny"), py::arg("nz"), py::arg("avoid_over_constrained") = false)
       .def("split_quadratic_into_linear", &Mesher::split_quadratic_into_linear,
            py::arg("elements"))
       .def("merge_nodes", &Mesher::merge_nodes, py::arg("tolerance"))

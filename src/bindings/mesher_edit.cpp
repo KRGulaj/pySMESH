@@ -221,7 +221,8 @@ py::dict Mesher::split_quadratic_into_linear(const std::vector<std::int64_t>& el
 
 // ---- Volume splitting ------------------------------------------------------------------ //
 
-py::dict Mesher::split_volumes(int method, double nx, double ny, double nz) {
+py::dict Mesher::split_volumes(int method, double nx, double ny, double nz,
+                               bool avoid_over_constrained) {
   ensure_open();
   if (method < SMESH_MeshEditor::HEXA_TO_5 || method > SMESH_MeshEditor::HEXA_TO_4_PRISMS) {
     throw PysmeshError("Mesher.split_volumes: unknown split method " +
@@ -254,7 +255,11 @@ py::dict Mesher::split_volumes(int method, double nx, double ny, double nz) {
       facets.insert(std::make_pair(volume, -1));
     }
   }
-  editor.SplitVolumes(facets, method);
+  // avoidOverConstrainedVolumes (SMESH 9.16, 5b941aae8, report W3.1): among the standard
+  // tetrahedral variants, skip one that makes a tetrahedron whose 4 nodes all carry a 2-D
+  // element; if none is left, upstream splits through the cell's barycentre instead
+  // (SMESH_MeshEditor.cxx:2319-2333). Read by HEXA_TO_5 and HEXA_TO_6 only.
+  editor.SplitVolumes(facets, method, avoid_over_constrained);
   publish(*meshDS_);
 
   py::dict out = report(before, counts_of(*meshDS_), 0);
