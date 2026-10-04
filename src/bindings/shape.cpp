@@ -331,6 +331,7 @@ class Shape {
 Shape load_brep(const py::bytes& data, const std::string& inside_out) {
   const bool reverse = shape_checks::reverse_inside_out("load_brep", inside_out);
   const std::string buffer = data;  // copy the bytes into a std::string
+  require_brep_header(buffer, "BREP read produced a null shape (empty or malformed data)");
   std::istringstream stream(buffer);
   TopoDS_Shape shape;
   BRep_Builder builder;

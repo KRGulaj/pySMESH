@@ -63,6 +63,7 @@ namespace {
 // Deserialize BREP bytes into a TopoDS_Shape. Mirrors unify.cpp / shape.cpp.
 TopoDS_Shape read_brep(const py::bytes& data) {
   const std::string buffer = data;
+  require_brep_header(buffer, "BREP read produced a null shape (empty or malformed data)");
   std::istringstream stream(buffer);
   TopoDS_Shape shape;
   BRep_Builder builder;

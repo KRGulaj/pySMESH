@@ -26,9 +26,9 @@ OCCT 8.0.1 has no IGES stream reader: no IGES work library overrides
 ``IFSelect_WorkLibrary::ReadStream``, which returns 1. So bytes are written to a file in
 a temporary directory, read, and removed.
 
-Importing an IGES file makes OCCT print one line to stdout ("Total number of loaded
-entities N."). It is an unconditional info-level message inside ``IGESFile_Read``; OCCT
-exposes no switch for it.
+Neither direction writes to stdout or stderr. OCCT sends its messages, such as "Total
+number of loaded entities N.", to its default messenger, whose console printer pySMESH
+removes from its private copy of OCCT.
 """
 
 from __future__ import annotations

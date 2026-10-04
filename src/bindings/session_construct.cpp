@@ -183,6 +183,8 @@ py::dict Session::add_brep(const py::bytes& data, const std::string& inside_out,
   OpGuard guard(in_op_);
   const bool reverse = shape_checks::reverse_inside_out("Session.add_brep", inside_out);
   const std::string buffer = data;
+  require_brep_header(
+      buffer, "Session.add_brep: BREP read produced a null shape (empty or malformed data).");
   ProgressDriver driver("add_brep", hooks_of("add_brep", progress, cancel));
   TopoDS_Shape imported;
   std::vector<shape_checks::InsideOutSolid> wrong;

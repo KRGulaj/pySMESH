@@ -399,6 +399,7 @@ py::dict read_step_xde(const py::object& data_or_path) {
 // Read a BREP shape from in-memory bytes (mirrors the file-local helper in the other TUs).
 TopoDS_Shape read_brep(const py::bytes& data) {
   const std::string buffer = data;
+  require_brep_header(buffer, "BREP read produced a null shape (empty or malformed data)");
   std::istringstream stream(buffer);
   TopoDS_Shape shape;
   BRep_Builder builder;

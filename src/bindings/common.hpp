@@ -146,6 +146,16 @@ using Array2i = py::array_t<std::int64_t, py::array::c_style | py::array::forcec
 // caller names it ("Session.extrude", "tessellate"), `name` the argument.
 
 // A number for a message: "nan", "inf" or "-inf" for the non-finite values.
+// TopTools_ShapeSet::Read writes "File was not written with this version of the topology"
+// to std::cout and returns a null shape when BREP data holds no version line
+// (TopTools_ShapeSet.cxx:698). Every BREP reader checks for that line first and raises the
+// message it gives a null shape, so no line reaches stdout before the error (report A4).
+inline void require_brep_header(const std::string& data, const std::string& null_message) {
+  if (data.find("CASCADE Topology V") == std::string::npos) {
+    throw PysmeshError(null_message);
+  }
+}
+
 inline std::string number_text(double v) {
   if (std::isnan(v)) {
     return "nan";

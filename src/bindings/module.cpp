@@ -11,6 +11,9 @@
 #include <exception>
 #include <string>
 
+#include <Message.hxx>
+#include <Message_Messenger.hxx>
+#include <Message_PrinterOStream.hxx>
 #include <Standard_Failure.hxx>
 #include <Utils_SALOME_Exception.hxx>
 
@@ -97,7 +100,23 @@ void register_error_type(py::module_& m) {
 
 }  // namespace pysmesh
 
+namespace {
+
+// OCCT sends its information messages (the transfer banners of the STEP and IGES writers,
+// the entity count of the IGES reader) to Message::DefaultMessenger(), whose default
+// printer writes to std::cout (report A4). OCCT is private to _core, so removing that
+// printer silences only this copy of OCCT. The messages are not routed to Python's logging
+// instead: OCCT can send them from its worker threads (OSD_Parallel), and a printer that
+// takes the GIL there could deadlock against a caller that holds the GIL while it waits
+// for those workers.
+void silence_occt_messages() {
+  Message::DefaultMessenger()->RemovePrinters(STANDARD_TYPE(Message_PrinterOStream));
+}
+
+}  // namespace
+
 PYBIND11_MODULE(_core, m) {
+  silence_occt_messages();
   m.doc() = "pySMESH native core: SMESH ViscousLayers bindings (Tier-1).";
   pysmesh::register_error_type(m);
   pysmesh::bind_shape(m);

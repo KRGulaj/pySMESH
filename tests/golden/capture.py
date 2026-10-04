@@ -1250,8 +1250,8 @@ def _meta() -> dict[str, Value]:
     }
 
 
-# Native libraries write to stdout (OCCT's XSTEP banner, SMESH traces), so a child reports
-# its result on one line carrying this prefix and everything else on stdout is ignored.
+# A child reports its result on one line carrying this prefix; any other line on stdout
+# is ignored.
 _RESULT_PREFIX: Final[str] = "GOLDEN-RESULT "
 _CHILD_TIMEOUT_S: Final[float] = 900.0
 
@@ -1300,7 +1300,7 @@ def main(argv: list[str]) -> int:
     """Command-line entry point; see the module docstring."""
     if len(argv) == 2 and argv[0] == "--probe":
         values = _guard(_PROBES[argv[1]][1])
-        # Leading newline: a native writer may leave stdout mid-line (the IGES dump does).
+        # Leading newline: the result line starts a line of its own.
         print("\n" + _RESULT_PREFIX + json.dumps(values), flush=True)
         return 0
     if len(argv) != 1:
