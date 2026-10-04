@@ -93,6 +93,7 @@ from pysmesh import (
     RadialPrism3D,
     RadialQuadrangle1D2D,
     Regular1D,
+    SegmentAroundVertex0D,
     SegmentLengthAroundVertex,
     Session,
     StartEndLength,
@@ -221,6 +222,8 @@ def _segment_lengths(mesh: ps.MeshData, edge_ordinal: int) -> list[float]:
 # One instance of each, with the sub-shape it is assigned to. A projection hypothesis needs a
 # source of the right kind, so the box's own sub-shapes serve as one.
 _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
+    # 0-D algorithms
+    (SegmentAroundVertex0D(), SubShape(SubShapeKind.VERTEX, 1)),
     # 1-D algorithms
     (Regular1D(), None),
     (CompositeSegment1D(), None),

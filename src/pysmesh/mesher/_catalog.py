@@ -89,6 +89,22 @@ class QuadType(IntEnum):
     REDUCED = 4
 
 
+# ---- 0-D algorithms ---------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class SegmentAroundVertex0D(Algorithm):
+    """Make :class:`SegmentLengthAroundVertex` take effect at one vertex.
+
+    Assign it on the vertex, beside the hypothesis. It meshes nothing itself. The 1-D
+    algorithm of each edge that the vertex bounds then moves the nodes near the vertex,
+    so that the segment touching it has the hypothesis's length. Without it the
+    hypothesis is accepted and never read.
+    """
+
+    native_name: ClassVar[str] = "SegmentAroundVertex_0D"
+
+
 # ---- 1-D algorithms -------------------------------------------------------------------- #
 
 
@@ -518,6 +534,9 @@ class MaxLength(Hypothesis):
 @dataclass(frozen=True)
 class SegmentLengthAroundVertex(Hypothesis):
     """A segment length applied to the segments touching one vertex.
+
+    It takes effect only with :class:`SegmentAroundVertex0D` assigned on the same
+    vertex. Without that algorithm the hypothesis is accepted and never read.
 
     Attributes:
         length: Target length next to the vertex.

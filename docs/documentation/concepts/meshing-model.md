@@ -54,11 +54,17 @@ model-wide default and overriding it on one solid. Read `ComputeReport.meshed` a
 Every entry below is verified against SMESH's own hypothesis compatibility, either from the
 native `StdMeshers` source or from a test that computes a real mesh with it.
 
+### 0-D algorithms
+
+| Algorithm | What it does | Hypotheses it reads |
+|---|---|---|
+| `SegmentAroundVertex0D` | Assigned on a vertex. Meshes nothing itself: it makes the 1-D algorithm of each edge at that vertex give the segment touching it the length of `SegmentLengthAroundVertex`. | `SegmentLengthAroundVertex` (on the same vertex) |
+
 ### 1-D algorithms
 
 | Algorithm | What it does | Hypotheses it reads |
 |---|---|---|
-| `Regular1D` | Discretises every edge it governs, spaced by whichever 1-D hypothesis applies there. The usual base of any assignment. | `NumberOfSegments`, `Arithmetic1D`, `StartEndLength`, `Geometric1D`, `FixedPoints1D`, `Adaptive1D`, `AutomaticLength`, `Deflection1D`, `LocalLength`, `MaxLength`, `SegmentLengthAroundVertex` (vertex-scoped), `Propagation` (edge-scoped) |
+| `Regular1D` | Discretises every edge it governs, spaced by whichever 1-D hypothesis applies there. The usual base of any assignment. | `NumberOfSegments`, `Arithmetic1D`, `StartEndLength`, `Geometric1D`, `FixedPoints1D`, `Adaptive1D`, `AutomaticLength`, `Deflection1D`, `LocalLength`, `MaxLength`, `SegmentLengthAroundVertex` (vertex-scoped, read only with `SegmentAroundVertex0D` on the vertex), `Propagation` (edge-scoped) |
 | `CompositeSegment1D` | Discretises a chain of C1-continuous edges as if it were one edge. Useful where an import split one geometric curve into several edges. | The same 1-D hypotheses as `Regular1D`, applied to the whole chain |
 | `Projection1D` | Copies an edge's discretisation from another edge. | `ProjectionSource1D` (required) |
 
