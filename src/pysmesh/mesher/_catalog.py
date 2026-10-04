@@ -34,7 +34,8 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import ClassVar
 
-from ..viscous import ExtrusionMethod
+from .._core import PysmeshError
+from ..viscous import ExtrusionMethod, _check_layer_stack
 from ._types import SubShape, _Spec
 
 
@@ -936,7 +937,8 @@ class ViscousLayers(Hypothesis):
     Attributes:
         total_thickness: Total height of the layer stack.
         layer_count: Number of layers.
-        stretch_factor: Ratio between one layer's thickness and the next.
+        stretch_factor: Ratio between one layer's thickness and the next, >= 1; 1 gives
+            layers of equal thickness.
         boundary: Face ordinals the layers grow on, or — when ``ignore`` is True — the faces
             they do **not** grow on.
         ignore: Read ``boundary`` as the exclusion list rather than the wall list.
@@ -955,6 +957,12 @@ class ViscousLayers(Hypothesis):
     ignore: bool = False
     method: ExtrusionMethod = ExtrusionMethod.SURF_OFFSET_SMOOTH
 
+    def __post_init__(self) -> None:
+        """Refuse a stack SMESH would not grow as stated: T > 0, N >= 1, f >= 1."""
+        _check_layer_stack(
+            "ViscousLayers", self.total_thickness, self.layer_count, self.stretch_factor
+        )
+
 
 @dataclass(frozen=True)
 class ViscousLayers2D(Hypothesis):
@@ -965,10 +973,12 @@ class ViscousLayers2D(Hypothesis):
     Attributes:
         total_thickness: Total height of the layer stack.
         layer_count: Number of layers.
-        stretch_factor: Ratio between one layer's thickness and the next.
+        stretch_factor: Ratio between one layer's thickness and the next, >= 1; 1 gives
+            layers of equal thickness.
         boundary: Edge ordinals the layers grow on, or their complement when ``ignore``.
         ignore: Read ``boundary`` as the exclusion list rather than the wall list.
-        method: How a node is translated away from the wall.
+        method: Read by the 3-D :class:`ViscousLayers` only; 2-D layers have no
+            extrusion method, so any value but the default is refused.
         group_name: Name of the element group the layers are collected into.
     """
 
@@ -981,3 +991,19 @@ class ViscousLayers2D(Hypothesis):
     group_name: str
     ignore: bool = False
     method: ExtrusionMethod = ExtrusionMethod.SURF_OFFSET_SMOOTH
+
+    def __post_init__(self) -> None:
+        """Refuse a stack SMESH would not grow as stated, and a 2-D extrusion method."""
+        _check_layer_stack(
+            "ViscousLayers2D",
+            self.total_thickness,
+            self.layer_count,
+            self.stretch_factor,
+        )
+        if self.method != ExtrusionMethod.SURF_OFFSET_SMOOTH:
+            raise PysmeshError(
+                "ViscousLayers2D: 2-D layers have no extrusion method "
+                f"(got {self.method.name}); method is read by the 3-D "
+                "ViscousLayers only (SMESH additional_hypo.rst, 'Viscous Layers "
+                "2D'). Leave it at the default."
+            )

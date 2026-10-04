@@ -102,7 +102,8 @@ class VLParams:
         total_thickness: Total layer stack thickness T [m] (T > 0). The caller converts
             from first-cell height via ``T = dy1 * (g**N - 1) / (g - 1)``.
         n_layers: Number of layers N (N >= 1).
-        stretch_factor: Geometric growth ratio g between consecutive layers (g > 1).
+        stretch_factor: Geometric growth ratio g between consecutive layers (g >= 1;
+            1 gives layers of equal thickness).
         is_ignore: If True, ``face_ids`` is the excluded set rather than the wall set.
         method: Extrusion strategy.
         group_name: Non-empty name of the SMESH group collecting the layer prisms; prism
@@ -125,16 +126,9 @@ class VLParams:
             raise PysmeshError("VLParams.face_ids must not be empty.")
         if any(fid < 1 for fid in self.face_ids):
             raise PysmeshError("VLParams.face_ids must be 1-based positive ids.")
-        if not self.total_thickness > 0.0:
-            raise PysmeshError(
-                f"VLParams.total_thickness must be > 0 (got {self.total_thickness})."
-            )
-        if self.n_layers < 1:
-            raise PysmeshError(f"VLParams.n_layers must be >= 1 (got {self.n_layers}).")
-        if not self.stretch_factor > 1.0:
-            raise PysmeshError(
-                f"VLParams.stretch_factor must be > 1.0 (got {self.stretch_factor})."
-            )
+        _check_layer_stack(
+            "VLParams", self.total_thickness, self.n_layers, self.stretch_factor
+        )
         if not self.group_name:
             raise PysmeshError("VLParams.group_name must be non-empty.")
 
