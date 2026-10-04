@@ -23,6 +23,7 @@ Fixture sizing follows the project rule: 3 x 7 x 11, never a unit cube.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterator
 
 import numpy as np
@@ -36,7 +37,11 @@ from pysmesh import (
     ElementDimension,
     ElementType,
     Hexa3D,
+    LocalLength,
+    MaxElementArea,
+    Mefisto2D,
     Mesher,
+    MinimumAngle,
     NumberOfSegments,
     PysmeshError,
     Quadrangle2D,
@@ -415,6 +420,39 @@ def test_smooth_refuses_a_target_below_a_regular_element(surface_mesher: Mesher)
 def test_smooth_refuses_zero_iterations(surface_mesher: Mesher) -> None:
     with pytest.raises(PysmeshError, match="iterations"):
         surface_mesher.smooth(iterations=0)
+
+
+# Report §8 S6: a 3 x 7 x 11 box meshed by Mefisto2D with 1 m edges and 1 m2 areas.
+# On SMESH 9.16 its two 3 x 11 faces hold triangles of 0.187 degrees, two nodes on one
+# boundary edge and one interior node. One smoothing pass, of either method, moves the
+# interior nodes; the worst triangle left has only boundary nodes, which smoothing never
+# moves, and its smallest angle is atan(1/3).
+MEFISTO_BOX: tuple[float, float, float] = (3.0, 7.0, 11.0)
+SLIVER_BOUND_DEG: float = 1.0
+SMOOTHED_ANGLE_DEG: float = math.degrees(math.atan(1.0 / 3.0))
+ANGLE_TOL_DEG: float = 1e-9
+
+
+@pytest.mark.parametrize("method", [SmoothMethod.LAPLACIAN, SmoothMethod.CENTROIDAL])
+def test_smooth_lifts_the_mefisto_box_slivers_to_atan_one_third(
+    method: SmoothMethod,
+) -> None:
+    """Below 1 degree as meshed; one pass lifts the minimum angle to atan(1/3) (S6)."""
+    s = Session()
+    s.add_box(*MEFISTO_BOX)
+    with Mesher(ps.load_brep(s.brep())) as m:
+        m.assign(Regular1D())
+        m.assign(LocalLength(length=1.0))
+        m.assign(Mefisto2D())
+        m.assign(MaxElementArea(max_area=1.0))
+        m.compute()
+        before = float(m.quality(MinimumAngle()).values.min())
+
+        m.smooth(method, iterations=1)
+        after = float(m.quality(MinimumAngle()).values.min())
+
+    assert before < SLIVER_BOUND_DEG
+    assert after == pytest.approx(SMOOTHED_ANGLE_DEG, abs=ANGLE_TOL_DEG)
 
 
 # ---- Orientation -------------------------------------------------------------------------- #

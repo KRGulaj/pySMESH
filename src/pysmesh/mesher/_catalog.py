@@ -152,7 +152,18 @@ class Quadrangle2D(Algorithm):
 
 @dataclass(frozen=True)
 class Mefisto2D(Algorithm):
-    """Free triangle meshing of a face. Sized by :class:`MaxElementArea`."""
+    """Free triangle meshing of a face. Sized by :class:`MaxElementArea`.
+
+    Its own quality step (``teamqt``, ``mefisto2/trte.c:4903``, called at
+    ``aptrte.cxx:594-612``) can leave slivers beside a boundary edge. On a 3 x 7 x 11
+    box with ``LocalLength(1.0)`` and ``MaxElementArea(1.0)``, the two 3 x 11 faces hold
+    triangles of 0.187 degrees, two nodes on one boundary edge and one interior node; 4
+    of 440 triangles are below 5 degrees and 44 below 20 (SMESH 9.16). Run
+    :meth:`~pysmesh.Mesher.smooth` after it: one pass, Laplacian or centroidal, lifts
+    the minimum angle there to 18.43 degrees, atan(1/3), the worst triangle left having
+    only boundary nodes; no triangle stays below 5 degrees, 4 below 20. More passes
+    change nothing on that box.
+    """
 
     native_name: ClassVar[str] = "MEFISTO_2D"
 

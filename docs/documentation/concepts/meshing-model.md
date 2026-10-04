@@ -74,10 +74,10 @@ native `StdMeshers` source or from a test that computes a real mesh with it.
 | `QuadFromMedialAxis1D2D` | Quad-dominant meshing of a thin face, built on its medial axis. The only algorithm in the catalogue that reports true progress. | A 1-D algorithm and hypothesis on its edges | None beyond the 1-D layer |
 | `RadialQuadrangle1D2D` | Radial quadrangle meshing of a disk or an annulus. | A 1-D algorithm and hypothesis on the boundary edge | `NumberOfLayers2D`, or a 1-D hypothesis applied to the radial direction |
 
-### Two 2-D limits, measured
+### Three 2-D limits, measured
 
-The measurements are on SMESH 9.16, on a planar NACA 0012 cap with a 1.25 m chord and a
-sharp trailing edge, whose wedge angle is 16.54 degrees.
+The measurements are on SMESH 9.16. The first two are on a planar NACA 0012 cap with a
+1.25 m chord and a sharp trailing edge, whose wedge angle is 16.54 degrees.
 
 - `Quadrangle2D` maps the face from four corners. On the cap split into 4 edges (trailing
   edge, mid-upper, leading edge, mid-lower), three of the corners lie on smooth curves, so
@@ -92,6 +92,15 @@ sharp trailing edge, whose wedge angle is 16.54 degrees.
 
 The way out for such a face is a better block topology: for example, a C-shaped strip
 along the camber line plus a nose block. Or mesh it with triangles.
+
+The third is `Mefisto2D` on a plain box. Its own quality step (`teamqt`,
+`mefisto2/trte.c:4903`) can leave slivers beside a boundary edge. On a 3 x 7 x 11 box with
+`LocalLength(1.0)` and `MaxElementArea(1.0)`, the two 3 x 11 faces hold triangles of 0.187
+degrees, each with two nodes on one boundary edge and one interior node. 4 of 440 triangles
+are below 5 degrees, and 44 are below 20. Run `Mesher.smooth` after `Mefisto2D`. One pass,
+Laplacian or centroidal, lifts the minimum angle there to 18.43 degrees, which is
+atan(1/3): the worst triangle left has only boundary nodes, and smoothing never moves
+those. No triangle stays below 5 degrees, and 4 stay below 20.
 
 ### 3-D algorithms
 
