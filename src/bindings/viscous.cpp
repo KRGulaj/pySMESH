@@ -89,8 +89,8 @@ void assert_status(SMESH_Hypothesis::Hypothesis_Status status, const char* what)
   }
 }
 
-// Wall faces = the faces layers grow on. SetBndShapes(is_ignore=false): face_ids ARE the
-// walls; is_ignore=true: walls are every face NOT listed. Returns 1-based face_ids.
+// Wall faces = the faces layers grow on: face_ids, or with is_ignore every face NOT listed.
+// Returns 1-based face_ids, for the harvest of the inner surface per wall face.
 std::vector<int> wall_face_ids(const ShapeData& data, const std::vector<int>& face_ids,
                                bool is_ignore) {
   if (!is_ignore) {
@@ -141,17 +141,16 @@ py::dict compute_viscous_layers(const py::object& mesh_obj, const std::vector<in
     }
   }
 
-  // Resolve the wall set up front and always pass it explicitly with toIgnore=false.
-  // StdMeshers_ViscousLayers's toIgnore=true path corrupts the heap on this SMESH version
-  // (a coarse box with one non-wall face crashes, while the identical wall set passed
-  // explicitly with toIgnore=false is fine); normalizing here sidesteps that path entirely
-  // and keeps the Python is_ignore semantics intact.
+  // The wall set, for the harvest of the inner surface below. The face list itself goes
+  // to SMESH as given, with toIgnore = is_ignore. Before SMESH 9.16 this binding resolved
+  // the walls and always passed toIgnore=false, because the toIgnore=true path corrupted the
+  // heap; on 9.16 the two give the same mesh, and toIgnore=true ran clean in 70 fresh
+  // processes and on coarse boxes of 1 and 2 segments per edge (report L3).
   const std::vector<int> walls = wall_face_ids(*data, face_ids, is_ignore);
 
   // Shape-index-hazard translation: face_id -> TopoDS_Face -> SMESHDS index.
   std::vector<int> shape_ids;
-  shape_ids.reserve(walls.size());
-  for (int fid : walls) {
+  for (int fid : face_ids) {
     shape_ids.push_back(meshDS->ShapeToIndex(data->face(fid)));  // data->face validates fid
   }
 
@@ -171,7 +170,7 @@ py::dict compute_viscous_layers(const py::object& mesh_obj, const std::vector<in
   vl->SetStretchFactor(stretch_factor);
   vl->SetMethod(static_cast<StdMeshers_ViscousLayers::ExtrusionMethod>(method));
   vl->SetGroupName(group_name);
-  vl->SetBndShapes(shape_ids, /*toIgnore=*/false);  // walls listed explicitly (see above)
+  vl->SetBndShapes(shape_ids, is_ignore);  // the listed faces, walls or excluded
 
   for (TopExp_Explorer solids(shape, TopAbs_SOLID); solids.More(); solids.Next()) {
     assert_status(mesh.AddHypothesis(solids.Current(), algo_id), "assigning 3D algorithm");

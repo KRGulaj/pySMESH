@@ -13,6 +13,12 @@ read the layer node planes of the meshes and compare them with these positions.
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 import numpy as np
 import pytest
 from numpy.typing import NDArray
@@ -275,3 +281,85 @@ def test_compute_viscous_layers_accepts_f_1_and_grows_equal_layers(
     np.testing.assert_allclose(
         in_stack, np.r_[0.0, _layer_ends(total, 1.0, count)], atol=1e-9
     )
+
+
+# ---- L3 ignore=True on the catalogue path ------------------------------------------ #
+
+# The child grows layers on five faces of the unit box with the catalogue path, once by
+# ignoring the face x = 0 and once by listing the other five, and prints, per axis, the
+# node planes within T of each side. It sets up the DLL search as tests/conftest.py
+# does.
+_IGNORE_CHILD: str = """
+import json, os, sys
+occt = os.environ.get("PYSMESH_OCCT_BIN")
+if occt:
+    os.add_dll_directory(occt)
+lib = os.path.join(sys.prefix, "Library", "bin")
+if os.path.isdir(lib):
+    os.add_dll_directory(lib)
+sys.path.insert(0, sys.argv[1])
+import numpy as np
+import pysmesh as ps
+
+T, N, F = 0.3, 3, 1.2
+s = ps.Session()
+s.add_box(1.0, 1.0, 1.0)
+box = ps.load_brep(s.brep())
+x0 = next(f.id for f in box.faces() if abs(f.bbox[0]) < 1e-9 and abs(f.bbox[3]) < 1e-9)
+out = {}
+others = tuple(f.id for f in box.faces() if f.id != x0)
+for ignore, walls in ((True, (x0,)), (False, others)):
+    with ps.Mesher(box) as m:
+        m.assign(ps.Regular1D())
+        m.assign(ps.NumberOfSegments(count=4))
+        m.assign(ps.Quadrangle2D())
+        m.assign(ps.Hexa3D())
+        m.assign(ps.ViscousLayers(total_thickness=T, layer_count=N, stretch_factor=F,
+                                  boundary=walls, ignore=ignore, group_name="bl"))
+        m.compute()
+        xyz = m.mesh().node_coords
+    sides = []
+    for axis in range(3):
+        v = np.unique(np.round(xyz[:, axis], 9))
+        sides.append(v[(v > 1e-12) & (v <= T + 1e-9)].tolist())
+        sides.append((1.0 - v[(v < 1 - 1e-12) & (v >= 1 - T - 1e-9)]).tolist())
+    nodes = np.sort(np.round(xyz, 9), axis=0).tolist()
+    out[str(ignore)] = {"sides": sides, "nodes": nodes}
+print("IGNORE-RESULT " + json.dumps(out))
+"""
+
+
+def test_ignore_on_the_catalogue_path_grows_layers_on_the_other_faces_every_time() -> (
+    None
+):
+    """Five fresh processes: each exits cleanly and grows the stack on five faces.
+
+    ``viscous.cpp`` used to avoid ``toIgnore=true`` because it corrupted the heap. On
+    SMESH 9.16, in a child process each time: the closed-form planes stand at the five
+    wall sides (x = 1, y = 0, y = 1, z = 0, z = 1) and not at the ignored side x = 0,
+    and the mesh is node for node the one the explicit list of five walls gives.
+    """
+    total, count = 0.3, 3
+    ends = _layer_ends(total, 1.2, count)
+    package_root = str(Path(ps.__file__).resolve().parent.parent)
+
+    for _ in range(5):
+        proc = subprocess.run(
+            [sys.executable, "-c", _IGNORE_CHILD, package_root],
+            capture_output=True,
+            text=True,
+            timeout=300.0,
+            env=dict(os.environ),
+            check=False,
+        )
+
+        assert proc.returncode == 0, proc.stderr[-2000:]
+        line = next(
+            ln for ln in proc.stdout.splitlines() if ln.startswith("IGNORE-RESULT ")
+        )
+        result = json.loads(line.removeprefix("IGNORE-RESULT "))
+        ignored, listed = result["True"], result["False"]
+        for side, planes in enumerate(ignored["sides"]):
+            hits = [any(abs(p - e) < TOL for p in planes) for e in ends]
+            assert all(hits) == (side != 0), (side, planes)
+        assert ignored["nodes"] == listed["nodes"]
