@@ -67,6 +67,7 @@ native `StdMeshers` source or from a test that computes a real mesh with it.
 | `Regular1D` | Discretises every edge it governs, spaced by whichever 1-D hypothesis applies there. The usual base of any assignment. | `NumberOfSegments`, `Arithmetic1D`, `StartEndLength`, `Geometric1D`, `FixedPoints1D`, `Adaptive1D`, `AutomaticLength`, `Deflection1D`, `LocalLength`, `MaxLength`, `SegmentLengthAroundVertex` (vertex-scoped, read only with `SegmentAroundVertex0D` on the vertex), `Propagation` and `PropagOfDistribution` (edge-scoped: the first carries the hypothesis to the opposite edges, the second its node fractions) |
 | `CompositeSegment1D` | Discretises a chain of C1-continuous edges as if it were one edge. Useful where an import split one geometric curve into several edges. | The same 1-D hypotheses as `Regular1D`, applied to the whole chain |
 | `Projection1D` | Copies an edge's discretisation from another edge. | `ProjectionSource1D` (required) |
+| `UseExisting1D` | Takes the segments a script made on the edge, with `Mesher.add_nodes` and `Mesher.add_segments` bound to it by `on`, as the edge's mesh. Creates nothing itself. | None |
 
 ### 2-D algorithms
 
@@ -78,6 +79,7 @@ native `StdMeshers` source or from a test that computes a real mesh with it.
 | `Projection2D` | Copies a face's mesh from another face. This is how a periodic pair is made to match node for node. | A 1-D algorithm and hypothesis on its own edges, matching the source face's edge counts | `ProjectionSource2D` (required) |
 | `Projection1D2D` | Projects a face's mesh **and** its boundary discretisation from another face. | Nothing: it supplies its own 1-D layer from the source | `ProjectionSource2D` (required) |
 | `QuadFromMedialAxis1D2D` | Quad-dominant meshing of a thin face, built on its medial axis. The only algorithm in the catalogue that reports true progress. | A 1-D algorithm and hypothesis on its edges | None beyond the 1-D layer |
+| `UseExisting2D` | Takes the faces a script made on the face, bound to it by `on`, as the face's mesh. Creates nothing itself. | Nodes and faces made by a script | None |
 | `RadialQuadrangle1D2D` | Radial quadrangle meshing of a disk or an annulus. | A 1-D algorithm and hypothesis on the boundary edge | `NumberOfLayers2D`, `LayerDistribution2D` (a 1-D hypothesis laid along the radius from the curve inward), or a 1-D hypothesis applied to the radial direction |
 
 ### Three 2-D limits, measured

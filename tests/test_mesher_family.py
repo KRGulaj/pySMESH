@@ -104,6 +104,8 @@ from pysmesh import (
     StartEndLength,
     SubShape,
     SubShapeKind,
+    UseExisting1D,
+    UseExisting2D,
     ViscousLayers2D,
 )
 from pysmesh.mesher import ViscousLayers
@@ -233,6 +235,7 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
     (Regular1D(), None),
     (CompositeSegment1D(), None),
     (Projection1D(), None),
+    (UseExisting1D(), SubShape(SubShapeKind.EDGE, 1)),
     # 2-D algorithms
     (Quadrangle2D(), None),
     (Mefisto2D(), None),
@@ -241,6 +244,7 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
     (Projection1D2D(), None),
     (QuadFromMedialAxis1D2D(), None),
     (RadialQuadrangle1D2D(), None),
+    (UseExisting2D(), SubShape(SubShapeKind.FACE, 1)),
     # 3-D algorithms
     (Cartesian3D(), None),
     (Hexa3D(), None),

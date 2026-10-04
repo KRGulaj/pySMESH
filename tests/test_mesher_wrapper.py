@@ -13,6 +13,8 @@ about by hand. The native paths behind them keep their own tests in
 
 from __future__ import annotations
 
+from itertools import pairwise
+
 import numpy as np
 import pytest
 from numpy.typing import NDArray
@@ -41,6 +43,8 @@ from pysmesh import (
     Session,
     SubShape,
     SubShapeKind,
+    UseExisting1D,
+    UseExisting2D,
 )
 
 LINE_LENGTH: float = 10.0
@@ -389,3 +393,183 @@ def test_block_renumber_refuses_vertices_that_share_no_edge() -> None:
         _hexa_box(BlockRenumber(blocks=((1, origin, far),)))
 
     assert "not connected by an edge" in caught.value.details
+
+
+# ---- W1.2 UseExisting1D, UseExisting2D and the bound fill ------------------------- #
+
+
+def _xyz_of(mesh: ps.MeshData, element: int) -> NDArray[np.float64]:
+    """The node coordinates of one element, (k, 3)."""
+    return np.asarray(mesh.node_coords[mesh.nodes_of(element)], dtype=np.float64)
+
+
+def _edge_between(
+    shape: ps.Shape, a: tuple[float, float, float], b: tuple[float, float, float]
+) -> int:
+    """The ordinal of the straight edge of ``shape`` from ``a`` to ``b``."""
+    lo, hi = np.minimum(a, b), np.maximum(a, b)
+    for edge in shape.edges():
+        box = np.asarray(edge.bbox)
+        if np.allclose(box[:3], lo, atol=TOL) and np.allclose(box[3:], hi, atol=TOL):
+            return edge.id
+    raise AssertionError(f"no edge from {a} to {b}")
+
+
+def _vertex_node(mesh: ps.MeshData, ordinal: int) -> int:
+    """The id of the node that a compute put on vertex ``ordinal``."""
+    on_vertex = (mesh.node_kind == int(SubShapeKind.VERTEX)) & (
+        mesh.node_ordinal == ordinal
+    )
+    (row,) = np.flatnonzero(on_vertex)
+    return int(mesh.node_id[row])
+
+
+def _coons_nodes(
+    bottom: NDArray[np.float64], width: float, height: float
+) -> NDArray[np.float64]:
+    """The nodes of a 3 x 3 mapped mesh of a width x height rectangle, sorted.
+
+    The bottom side has its nodes at the fractions ``bottom``, the three other sides 3
+    equal segments. Quadrangle_2D puts node (i, j) at the fraction
+    ``x = (1 - y) b_i + y t_i`` with ``y = j / 3`` and ``t_i = i / 3``
+    (``StdMeshers_Quadrangle_2D``, ``computeQuadDominant``); the Coons patch of a
+    rectangle maps it to ``(x W, y H)``.
+    """
+    y = np.arange(4, dtype=np.float64)[:, None] / 3.0
+    t = np.arange(4, dtype=np.float64)[None, :] / 3.0
+    x = (1.0 - y) * bottom[None, :] + y * t
+    grid = np.stack([(x * width).ravel(), np.repeat(y.ravel() * height, 4)], axis=1)
+    return grid[np.lexsort((grid[:, 1], grid[:, 0]))]
+
+
+def test_use_existing_1d_takes_script_segments_and_the_faces_mesh_from_them() -> None:
+    """Script nodes at x = 0.5 and 2 on the edge shape the two faces beside it.
+
+    Spec (SMESH ``define_mesh_by_script.rst``): "Use Edges to be Created Manually"
+    lets a script make the 1-D mesh, whose nodes and elements "must be assigned to
+    geometry entities ... in order to be used by an algorithm of upper dimension". The
+    box edge from (0, 0, 0) to (3, 0, 0) gets nodes at the fractions 0, 1/6, 2/3, 1;
+    every other edge 3 equal segments. Quadrangle2D then maps both faces at the edge
+    from these nodes: the closed form of :func:`_coons_nodes`.
+    """
+    shape = _box_shape()
+    edge = SubShape(
+        SubShapeKind.EDGE, _edge_between(shape, (0.0, 0.0, 0.0), (BOX_DX, 0.0, 0.0))
+    )
+    start = _vertex_at(shape, (0.0, 0.0, 0.0))
+    end = _vertex_at(shape, (BOX_DX, 0.0, 0.0))
+    inner_xyz = np.array([[0.5, 0.0, 0.0], [2.0, 0.0, 0.0]])
+
+    with Mesher(shape) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=3))
+        mesher.assign(UseExisting1D(), on=edge)
+        mesher.compute()
+        first = mesher.mesh()
+        inner = mesher.add_nodes(inner_xyz, on=edge)
+        chain = [_vertex_node(first, start), *inner.tolist(), _vertex_node(first, end)]
+        segments = mesher.add_segments(np.array(list(pairwise(chain))), on=edge)
+        mesher.assign(Quadrangle2D())
+        mesher.compute()
+        mesh = mesher.mesh()
+
+    bottom = np.array([0.0, 0.5, 2.0, BOX_DX]) / BOX_DX
+    on_edge = (mesh.element_kind == int(SubShapeKind.EDGE)) & (
+        mesh.element_ordinal == edge.ordinal
+    )
+    assert sorted(mesh.element_id[on_edge].tolist()) == sorted(segments.tolist())
+    xyz = mesh.node_coords
+    for plane, (axis, height) in {1: (2, BOX_DZ), 2: (1, BOX_DY)}.items():
+        on_face = np.abs(xyz[:, plane]) < TOL
+        got = xyz[on_face][:, [0, axis]]
+        got = got[np.lexsort((got[:, 1], got[:, 0]))]
+        np.testing.assert_allclose(got, _coons_nodes(bottom, BOX_DX, height), atol=TOL)
+
+
+def test_use_existing_2d_takes_script_faces_and_the_solid_meshes_from_them() -> None:
+    """Script quadrangles on one face make that face's mesh; Hexa3D fills the box.
+
+    Spec (``define_mesh_by_script.rst``): "Use Faces to be Created Manually", then a 3-D
+    algorithm. The script copies the 3 x 3 quadrangles Quadrangle2D would make on the
+    face at z = 0, bound to that face; Hexa3D then fills the box with 27 hexahedra of
+    total volume 3 x 7 x 11 = 231.
+    """
+    shape = _box_shape()
+    bottom = next(
+        f.id for f in shape.faces() if abs(f.bbox[2]) < TOL and abs(f.bbox[5]) < TOL
+    )
+    face = SubShape(SubShapeKind.FACE, bottom)
+
+    with Mesher(shape) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=3))
+        mesher.assign(UseExisting2D(), on=face)
+        mesher.compute()
+        first = mesher.mesh()
+        xyz = first.node_coords
+        step = np.array([BOX_DX, BOX_DY]) / 3.0
+        ij = np.rint(xyz[:, :2] / step).astype(np.int64)
+        at_bottom = np.abs(xyz[:, 2]) < TOL
+        ids = {
+            (int(i), int(j)): int(n)
+            for (i, j), n, keep in zip(ij, first.node_id, at_bottom, strict=True)
+            if keep
+        }
+        pairs = [(i, j) for i in (1, 2) for j in (1, 2)]
+        interior = np.array([[i * step[0], j * step[1], 0.0] for i, j in pairs])
+        made = mesher.add_nodes(interior, on=face)
+        for k, (i, j) in enumerate(pairs):
+            ids[(i, j)] = int(made[k])
+        quads = np.array(
+            [
+                [ids[(i, j)], ids[(i, j + 1)], ids[(i + 1, j + 1)], ids[(i + 1, j)]]
+                for i in range(3)
+                for j in range(3)
+            ]
+        )
+        mesher.add_quadrangles(quads, on=face)
+        mesher.assign(Quadrangle2D())
+        mesher.assign(Hexa3D())
+        mesher.compute()
+        mesh = mesher.mesh()
+
+    hexa = np.flatnonzero(mesh.element_type == int(ElementType.HEXAHEDRON))
+    assert hexa.size == 27
+    volume = sum(float(np.prod(np.ptp(_xyz_of(mesh, i), axis=0))) for i in hexa)
+    assert volume == pytest.approx(BOX_DX * BOX_DY * BOX_DZ, rel=1e-12)
+
+
+def test_a_node_given_its_curve_parameter_is_bound_and_a_wrong_one_refused() -> None:
+    """A node at u is accepted with u; with another u, or off the edge, it is refused.
+
+    The edge's own parameter range and the curve point at u come from the session
+    queries (``Session.edge_parameter_bounds``, ``Session.curve_at``). A refusal adds no
+    node.
+    """
+    session = Session()
+    session.add_line((0.0, 0.0, 0.0), (LINE_LENGTH, 0.0, 0.0))
+    (edge_id,) = session.entities(ps.EntityKind.EDGE).tolist()
+    lo, hi = session.edge_parameter_bounds([edge_id])[0]
+    u = lo + 0.25 * (hi - lo)
+    point = session.curve_at(edge_id, [u]).points
+    edge = SubShape(SubShapeKind.EDGE, 1)
+
+    with Mesher(ps.load_brep(session.brep())) as mesher:
+        made = mesher.add_nodes(point, on=edge, parameters=np.array([u]))
+        with pytest.raises(PysmeshError, match="does not lie on EDGE 1"):
+            mesher.add_nodes(point, on=edge, parameters=np.array([u + 0.1 * (hi - lo)]))
+        with pytest.raises(PysmeshError, match="does not lie on EDGE 1"):
+            mesher.add_nodes(np.array([[5.0, 1.0, 0.0]]), on=edge)
+        count = mesher.mesh().node_coords.shape[0]
+
+    assert made.shape == (1,)
+    assert count == 1
+
+
+def test_an_element_bound_to_a_sub_shape_of_another_dimension_is_refused() -> None:
+    """A segment cannot be bound to a face: the dimensions differ."""
+    with Mesher(_box_shape()) as mesher:
+        nodes = mesher.add_nodes(np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]))
+
+        with pytest.raises(PysmeshError, match="dimensions differ"):
+            mesher.add_segments(nodes[None, :], on=SubShape(SubShapeKind.FACE, 1))

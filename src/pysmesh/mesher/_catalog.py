@@ -120,6 +120,21 @@ class Regular1D(Algorithm):
 
 
 @dataclass(frozen=True)
+class UseExisting1D(Algorithm):
+    """Take the segments a script made on an edge as the edge's mesh.
+
+    It creates nothing and counts as computed, so the faces around the edge are meshed
+    from the script's segments. Assign it before the script runs: a compute of the edge
+    by another algorithm would replace them. Make the nodes and the segments with
+    :meth:`~pysmesh.Mesher.add_nodes` and :meth:`~pysmesh.Mesher.add_segments`, both
+    with ``on`` naming the edge. The end nodes are the vertex nodes, which a compute of
+    the vertices makes.
+    """
+
+    native_name: ClassVar[str] = "UseExisting_1D"
+
+
+@dataclass(frozen=True)
 class CompositeSegment1D(Algorithm):
     """Discretise a chain of C1-continuous edges as if it were one edge.
 
@@ -138,6 +153,18 @@ class Projection1D(Algorithm):
 
 
 # ---- 2-D algorithms -------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class UseExisting2D(Algorithm):
+    """Take the faces a script made on a face as the face's mesh.
+
+    The 2-D counterpart of :class:`UseExisting1D`: it creates nothing and counts as
+    computed, so a 3-D algorithm meshes the solid from the script's faces. Bind the
+    script's nodes and faces to the face with ``on``.
+    """
+
+    native_name: ClassVar[str] = "UseExisting_2D"
 
 
 @dataclass(frozen=True)

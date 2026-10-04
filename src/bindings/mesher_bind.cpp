@@ -23,8 +23,10 @@ void bind_mesher(py::module_& m) {
            py::arg("ordinal"))
       .def("unassign", &Mesher::unassign, py::arg("name"), py::arg("kind"), py::arg("ordinal"))
       .def("has_shape", &Mesher::has_shape)
-      .def("add_nodes", &Mesher::add_nodes, py::arg("coords"))
-      .def("add_elements", &Mesher::add_elements, py::arg("type"), py::arg("connectivity"))
+      .def("add_nodes", &Mesher::add_nodes, py::arg("coords"), py::arg("kind") = "",
+           py::arg("ordinal") = 0, py::arg("parameters") = py::none())
+      .def("add_elements", &Mesher::add_elements, py::arg("type"), py::arg("connectivity"),
+           py::arg("kind") = "", py::arg("ordinal") = 0)
       .def("fill_from_mesh", &Mesher::fill_from_mesh, py::arg("mesh"))
       .def("assignments", &Mesher::assignments)
       .def("compute", &Mesher::compute, py::arg("progress"), py::arg("cancel"))

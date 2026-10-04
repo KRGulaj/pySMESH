@@ -245,16 +245,25 @@ class Mesher {
 
   // ---- Filling from arrays (mesher_scratch.cpp) ---------------------------------------- //
   // The injection path: nodes and elements handed in directly rather than produced by an
-  // algorithm. Both work on a shape-backed mesher too, and what they add is bound to no
-  // sub-shape there, because a caller-supplied cell has no geometry to sit on.
+  // algorithm. Both work on a shape-backed mesher too. What they add is bound to no
+  // sub-shape unless the caller names one (`kind` and `ordinal`, report W1.2): then an
+  // algorithm of higher dimension can build on it, which is what UseExisting_1D/2D are for.
 
-  // Insert N nodes given as an (N, 3) table. Returns their new mesh ids.
-  py::array_t<std::int64_t> add_nodes(const py::object& coords);
+  // Insert N nodes given as an (N, 3) table. Returns their new mesh ids. With a sub-shape
+  // named, each node is bound to it: SetNodeOnVertex, SetNodeOnEdge (u), SetNodeOnFace
+  // (u, v) or SetNodeInVolume. `parameters` gives u, (N,), on an edge or (u, v), (N, 2), on
+  // a face; None projects each node onto the sub-shape instead. A node that does not lie on
+  // its sub-shape is refused before anything is added.
+  py::array_t<std::int64_t> add_nodes(const py::object& coords, const std::string& kind,
+                                      int ordinal, const py::object& parameters);
 
   // Insert M elements of one entity type, given as an (M, k) table of **node ids**. Returns
   // their new mesh ids. Polygons and polyhedra are refused: their node count does not
-  // determine their shape, so a rectangular table cannot express one.
-  py::array_t<std::int64_t> add_elements(int type, const py::object& connectivity);
+  // determine their shape, so a rectangular table cannot express one. With a sub-shape
+  // named, each element is bound to it (SetMeshElementOnShape); its dimension must be the
+  // sub-shape's.
+  py::array_t<std::int64_t> add_elements(int type, const py::object& connectivity,
+                                         const std::string& kind, int ordinal);
 
   // Fill an empty mesher from the arrays a harvest produced, keeping every id. This is what
   // turns a mesh read from a file back into a live one. Refuses a mesher that already holds

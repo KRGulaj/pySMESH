@@ -130,6 +130,8 @@ from ._catalog import (
     SegmentAroundVertex0D,
     SegmentLengthAroundVertex,
     StartEndLength,
+    UseExisting1D,
+    UseExisting2D,
     ViscousLayers,
     ViscousLayers2D,
 )
@@ -493,6 +495,8 @@ __all__ = [
     "SubShape",
     "SubShapeKind",
     "Taper",
+    "UseExisting1D",
+    "UseExisting2D",
     "ViscousLayers",
     "ViscousLayers2D",
     "Volume",

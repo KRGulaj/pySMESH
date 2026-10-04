@@ -24,17 +24,28 @@
 
 #include "mesher/mesher.hpp"
 
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
 
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepClass_FaceClassifier.hxx>
+#include <BRep_Tool.hxx>
+#include <Precision.hxx>
 #include <SMDSAbs_ElementType.hxx>
 #include <SMDS_MeshCell.hxx>
 #include <SMDS_MeshNode.hxx>
 #include <SMESHDS_Mesh.hxx>
 #include <SMESH_Gen.hxx>
 #include <SMESH_Mesh.hxx>
+#include <ShapeAnalysis_Curve.hxx>
+#include <ShapeAnalysis_Surface.hxx>
+#include <TopoDS.hxx>
 
 namespace pysmesh {
 namespace mesher {
@@ -217,19 +228,147 @@ void rebuild_mesh(SMESHDS_Mesh& ds, const py::dict& mesh) {
 
 // ---- The fill -------------------------------------------------------------------------- //
 
-py::array_t<std::int64_t> Mesher::add_nodes(const py::object& coords) {
+namespace {
+
+// The dimension of a sub-shape kind, as the element families count it.
+int dimension_of(const std::string& kind) {
+  if (kind == "VERTEX") return 0;
+  if (kind == "EDGE") return 1;
+  if (kind == "FACE") return 2;
+  return 3;
+}
+
+// The dimension of an element type, or -1 for a ball, which no sub-shape kind matches.
+int element_dimension(int type) {
+  switch (family_of(type)) {
+    case SMDSAbs_0DElement:
+      return 0;
+    case SMDSAbs_Edge:
+      return 1;
+    case SMDSAbs_Face:
+      return 2;
+    case SMDSAbs_Volume:
+      return 3;
+    default:
+      return -1;
+  }
+}
+
+// How far a node may lie from the sub-shape it is bound to: the sub-shape's own tolerance,
+// and never less than Precision::Confusion().
+double binding_tolerance(const TopoDS_Shape& s) {
+  double tol = Precision::Confusion();
+  if (s.ShapeType() == TopAbs_VERTEX) tol = BRep_Tool::Tolerance(TopoDS::Vertex(s));
+  if (s.ShapeType() == TopAbs_EDGE) tol = BRep_Tool::Tolerance(TopoDS::Edge(s));
+  if (s.ShapeType() == TopAbs_FACE) tol = BRep_Tool::Tolerance(TopoDS::Face(s));
+  return std::max(tol, Precision::Confusion());
+}
+
+// Where on its sub-shape each node sits: u on an edge, (u, v) on a face. Computed, and
+// checked, for every row before any node is added, so a refusal leaves the mesh unchanged.
+std::vector<std::array<double, 2>> node_sites(const TopoDS_Shape& s, const std::string& kind,
+                                              int ordinal, const double* xyz, py::ssize_t n,
+                                              const py::object& parameters) {
+  const double tol = binding_tolerance(s);
+  const std::string where = kind + " " + std::to_string(ordinal);
+  auto refuse = [&](py::ssize_t row, double gap, const std::string& why) {
+    throw PysmeshError("Mesher.add_nodes: the node at row " + std::to_string(row) +
+                       " does not lie on " + where + ": " + why + " (gap " +
+                       std::to_string(gap) + ", tolerance " + std::to_string(tol) + ").");
+  };
+  const int columns = kind == "EDGE" ? 1 : kind == "FACE" ? 2 : 0;
+  std::vector<double> given;
+  if (!parameters.is_none()) {
+    if (columns == 0) {
+      throw PysmeshError("Mesher.add_nodes: parameters are read on an EDGE or a FACE only, "
+                         "not on a " + kind + ".");
+    }
+    const auto table = point_table(parameters.attr("reshape")(n, columns), "parameters",
+                                   columns);
+    given.assign(table.data(), table.data() + table.size());
+  }
+  std::vector<std::array<double, 2>> sites(static_cast<std::size_t>(n), {0.0, 0.0});
+  for (py::ssize_t i = 0; i < n; ++i) {
+    const gp_Pnt p(xyz[3 * i], xyz[3 * i + 1], xyz[3 * i + 2]);
+    std::array<double, 2>& site = sites[static_cast<std::size_t>(i)];
+    if (kind == "VERTEX") {
+      const double gap = p.Distance(BRep_Tool::Pnt(TopoDS::Vertex(s)));
+      if (gap > tol) refuse(i, gap, "it is not at the vertex");
+    } else if (kind == "EDGE") {
+      const BRepAdaptor_Curve curve(TopoDS::Edge(s));
+      double gap = 0.0;
+      if (!given.empty()) {
+        site[0] = given[static_cast<std::size_t>(i)];
+        if (site[0] < curve.FirstParameter() - Precision::PConfusion() ||
+            site[0] > curve.LastParameter() + Precision::PConfusion()) {
+          refuse(i, 0.0, "u = " + std::to_string(site[0]) + " is outside [" +
+                             std::to_string(curve.FirstParameter()) + ", " +
+                             std::to_string(curve.LastParameter()) + "]");
+        }
+        gap = p.Distance(curve.Value(site[0]));
+      } else {
+        gp_Pnt proj;
+        gap = ShapeAnalysis_Curve().Project(curve, p, tol, proj, site[0]);
+      }
+      if (gap > tol) refuse(i, gap, "the edge at u is that far from it");
+    } else if (kind == "FACE") {
+      const TopoDS_Face& face = TopoDS::Face(s);
+      double gap = 0.0;
+      if (!given.empty()) {
+        site = {given[2 * static_cast<std::size_t>(i)],
+                given[2 * static_cast<std::size_t>(i) + 1]};
+        gap = p.Distance(BRepAdaptor_Surface(face).Value(site[0], site[1]));
+      } else {
+        ShapeAnalysis_Surface surface(BRep_Tool::Surface(face));
+        const gp_Pnt2d uv = surface.ValueOfUV(p, tol);
+        site = {uv.X(), uv.Y()};
+        gap = surface.Gap();
+      }
+      if (gap > tol) refuse(i, gap, "the surface at (u, v) is that far from it");
+      const BRepClass_FaceClassifier inside(face, gp_Pnt2d(site[0], site[1]), tol);
+      if (inside.State() == TopAbs_OUT) refuse(i, gap, "it is outside the face boundary");
+    } else {
+      BRepClass3d_SolidClassifier inside(s, p, tol);
+      if (inside.State() == TopAbs_OUT) refuse(i, 0.0, "it is outside the solid");
+    }
+  }
+  return sites;
+}
+
+}  // namespace
+
+py::array_t<std::int64_t> Mesher::add_nodes(const py::object& coords, const std::string& kind,
+                                            int ordinal, const py::object& parameters) {
   ensure_open();
   const auto table = point_table(coords, "coords", 3);
   const py::ssize_t n = table.shape(0);
+  const double* xyz = table.data();
+
+  TopoDS_Shape target;
+  std::vector<std::array<double, 2>> sites;
+  if (!kind.empty()) {
+    target = sub_shape(kind, ordinal);  // validates the kind and the ordinal
+    sites = node_sites(target, kind, ordinal, xyz, n, parameters);
+  } else if (!parameters.is_none()) {
+    throw PysmeshError("Mesher.add_nodes: parameters need a sub-shape to be read on.");
+  }
 
   py::array_t<std::int64_t> ids(n);
-  const double* xyz = table.data();
   std::int64_t* out = ids.mutable_data();
   for (py::ssize_t i = 0; i < n; ++i) {
     const SMDS_MeshNode* node = meshDS_->AddNode(xyz[3 * i], xyz[3 * i + 1], xyz[3 * i + 2]);
     if (node == nullptr) {
       throw PysmeshError("Mesher.add_nodes: SMESH refused the node at row " +
                          std::to_string(i) + ".");
+    }
+    if (!kind.empty()) {
+      const std::array<double, 2>& site = sites[static_cast<std::size_t>(i)];
+      if (kind == "VERTEX") meshDS_->SetNodeOnVertex(node, TopoDS::Vertex(target));
+      if (kind == "EDGE") meshDS_->SetNodeOnEdge(node, TopoDS::Edge(target), site[0]);
+      if (kind == "FACE") {
+        meshDS_->SetNodeOnFace(node, TopoDS::Face(target), site[0], site[1]);
+      }
+      if (kind == "SOLID") meshDS_->SetNodeInVolume(node, TopoDS::Solid(target));
     }
     out[i] = static_cast<std::int64_t>(node->GetID());
   }
@@ -239,11 +378,21 @@ py::array_t<std::int64_t> Mesher::add_nodes(const py::object& coords) {
   return ids;
 }
 
-py::array_t<std::int64_t> Mesher::add_elements(int type, const py::object& connectivity) {
+py::array_t<std::int64_t> Mesher::add_elements(int type, const py::object& connectivity,
+                                               const std::string& kind, int ordinal) {
   ensure_open();
   if (type < 0 || type >= static_cast<int>(SMDSEntity_Last)) {
     throw PysmeshError("Mesher.add_elements: " + std::to_string(type) +
                        " is not an element type.");
+  }
+  TopoDS_Shape target;
+  if (!kind.empty()) {
+    target = sub_shape(kind, ordinal);  // validates the kind and the ordinal
+    if (element_dimension(type) != dimension_of(kind)) {
+      throw PysmeshError("Mesher.add_elements: an element of type " + std::to_string(type) +
+                         " cannot be bound to " + kind + " " + std::to_string(ordinal) +
+                         ": the dimensions differ.");
+    }
   }
   const SMDSAbs_EntityType entity = static_cast<SMDSAbs_EntityType>(type);
   if (entity == SMDSEntity_Node) {
@@ -292,6 +441,9 @@ py::array_t<std::int64_t> Mesher::add_elements(int type, const py::object& conne
     if (!add_element(*meshDS_, type, nodes, next)) {
       throw PysmeshError("Mesher.add_elements: SMESH refused row " + std::to_string(i) +
                          " as element type " + std::to_string(type) + ".");
+    }
+    if (!kind.empty()) {
+      meshDS_->SetMeshElementOnShape(meshDS_->FindElement(next), target);
     }
     out[i] = static_cast<std::int64_t>(next);
     ++next;
