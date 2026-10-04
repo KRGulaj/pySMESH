@@ -58,7 +58,8 @@ class _BooleanOps(_SessionBase):
             fuzzy: Additional tolerance for the boolean, in model units. ``0.0`` uses each
                 shape's own tolerance, which is right for clean geometry; a dirty import
                 that fails at the default may succeed at an explicit value.
-            parallel: Run the boolean's internal steps in parallel.
+            parallel: Run the boolean's internal steps in parallel. Faster, at several
+                times the peak memory: see :meth:`fragment` for the measured cost.
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the operation runs. ``None`` reports nothing.
             cancel: Called with no arguments; return ``True`` to stop the operation.
@@ -93,7 +94,8 @@ class _BooleanOps(_SessionBase):
             targets: Solid entity ids to cut from. At least one.
             tools: Solid entity ids to cut with. At least one. They are consumed.
             fuzzy: Additional tolerance for the boolean, in model units.
-            parallel: Run the boolean's internal steps in parallel.
+            parallel: Run the boolean's internal steps in parallel. Faster, at several
+                times the peak memory: see :meth:`fragment` for the measured cost.
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the operation runs. ``None`` reports nothing.
             cancel: Called with no arguments; return ``True`` to stop the operation.
@@ -133,7 +135,8 @@ class _BooleanOps(_SessionBase):
             targets: Solid entity ids. At least one.
             tools: Solid entity ids. At least one.
             fuzzy: Additional tolerance for the boolean, in model units.
-            parallel: Run the boolean's internal steps in parallel.
+            parallel: Run the boolean's internal steps in parallel. Faster, at several
+                times the peak memory: see :meth:`fragment` for the measured cost.
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the operation runs. ``None`` reports nothing.
             cancel: Called with no arguments; return ``True`` to stop the operation.
@@ -174,7 +177,8 @@ class _BooleanOps(_SessionBase):
             targets: Solid entity ids. At least one.
             tools: Solid entity ids. At least one.
             fuzzy: Additional tolerance for the boolean, in model units.
-            parallel: Run the boolean's internal steps in parallel.
+            parallel: Run the boolean's internal steps in parallel. Faster, at several
+                times the peak memory: see :meth:`fragment` for the measured cost.
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the operation runs. ``None`` reports nothing.
             cancel: Called with no arguments; return ``True`` to stop the operation.
@@ -212,7 +216,8 @@ class _BooleanOps(_SessionBase):
             targets: Solid entity ids to split. At least one.
             tools: Solid entity ids to split with. At least one. They are not consumed.
             fuzzy: Additional tolerance for the boolean, in model units.
-            parallel: Run the boolean's internal steps in parallel.
+            parallel: Run the boolean's internal steps in parallel. Faster, at several
+                times the peak memory: see :meth:`fragment` for the measured cost.
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the operation runs. ``None`` reports nothing.
             cancel: Called with no arguments; return ``True`` to stop the operation.
@@ -248,7 +253,13 @@ class _BooleanOps(_SessionBase):
         Args:
             entities: Solid entity ids. At least two.
             fuzzy: Additional tolerance for the boolean, in model units.
-            parallel: Run the boolean's internal steps in parallel.
+            parallel: Run the boolean's internal steps in parallel. The result does not
+                depend on it; the peak memory does. Each OCCT worker thread holds its
+                own working data: measured on 16 threads, about 5 MB per input B-spline
+                face in parallel against about 0.8 MB with ``parallel=False``, 6 to 7
+                times more. 512 lofted blocks (3 072 faces) peaked at 15.6 GB in
+                parallel and 2.2 GB without. Pass ``parallel=False`` when 5 MB times the
+                face count nears the memory you can spare.
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the operation runs. ``None`` reports nothing.
             cancel: Called with no arguments; return ``True`` to stop the operation.

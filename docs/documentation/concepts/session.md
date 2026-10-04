@@ -92,8 +92,14 @@ are correct for clean geometry: `fuzzy=0.0` means "use each shape's own stored t
 which is the right answer for geometry built in the session or imported cleanly. Raise it
 only for an import whose faces do not quite meet, and choose it against the measured gap
 rather than turning it up for luck: a `fuzzy` value larger than the model's smallest real
-feature merges things that are genuinely separate. `parallel=True` is a speed setting only;
-the result does not depend on it.
+feature merges things that are genuinely separate.
+
+`parallel=True` does not change the result, but it changes the memory, not only the speed.
+Each OCCT worker thread holds its own working data. Measured on 16 threads with `fragment`
+of curved blocks: about 5 MB per input B-spline face in parallel, against about 0.8 MB with
+`parallel=False`, 6 to 7 times more. 512 lofted blocks (3 072 faces) peaked at 15.6 GB in
+parallel and at 2.2 GB without. Pass `parallel=False` to `fragment` and to the other
+booleans when 5 MB times the face count nears the memory you can spare.
 
 ## Two queries a feature filter needs
 

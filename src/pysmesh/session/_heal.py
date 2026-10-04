@@ -349,7 +349,8 @@ class _HealOps(_SessionBase):
             tools: Entities whose owning bodies do the imprinting. At least one, and disjoint
                 from ``targets``.
             fuzzy: Additional tolerance for the operation, in model units.
-            parallel: Run OCCT's internal steps in parallel.
+            parallel: Run OCCT's internal steps in parallel. Faster, at several times
+                the peak memory: see :meth:`fragment` for the measured cost.
             glue: What OCCT may assume about how the operands meet. See :class:`GlueMode`.
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the operation runs. ``None`` reports nothing.
