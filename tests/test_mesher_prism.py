@@ -20,7 +20,15 @@ half-edge, so that every face can be structured.
   With the top cap as the bottom, the 5-edge face has 1 edge on its bottom side and 2 on
   its top side, and Prism3D projects only onto the first edge of a top side
   (``StdMeshers_Prism_3D.cxx`` computeWalls), so it cannot mesh that face. The message
-  must say so for that face, not report the error of a rejected candidate.
+  must say so for that face, and name the way out, not report the error of a rejected
+  candidate.
+* **The way out meshes.** With the top edge split too, at the same point, the side face
+  is two quadrangles: the prism fills its volume, the caps are 1 apart node for node,
+  and the cells are the bottom faces times the layers.
+* **Unmatched segments still fill the solid.** With 4 segments on each half-edge under
+  4 on the whole top edge (repro ``r3h.py``), Prism3D sweeps between two side faces. The
+  cells are warped, so the oracle is their exact volume with bilinear faces, the
+  boundary nodes on the prism's faces, and positive cells.
 
 Report §8 S4: two unit boxes stacked and fused, so every face is a quadrangle and each
 side is two faces. Nothing marks a source face, so Prism3D tries the faces in turn.
@@ -73,17 +81,30 @@ BASES: tuple[str, ...] = ("quadrangle", "mefisto")
 MEFISTO_MAX_AREA: float = 0.02
 
 
-def _split_edge_prism(n: int) -> ps.Shape:
-    """The B1 solid: an n-gon prism, one bottom edge split, the top edge above whole."""
+def _split_edge_prism(n: int, split_top: bool = False) -> ps.Shape:
+    """The B1 solid: an n-gon prism, one bottom edge split, the top edge above whole.
+
+    With ``split_top`` the top edge is split too, at the same point: the way out, which
+    turns the 5-edge side face into two quadrangles.
+    """
     t = np.linspace(0.0, 2.0 * np.pi, n + 1)[:-1]
     bottom = np.c_[np.cos(t), np.sin(t), np.zeros(n)]
     top = bottom + (0.0, 0.0, HEIGHT)
     mid = 0.5 * (bottom[0] + bottom[1])
-    loops = [
-        np.vstack([bottom[:1], mid, bottom[1:]]),
-        top[::-1],
-        np.array([bottom[0], mid, bottom[1], top[1], top[0]]),
-    ]
+    top_mid = mid + (0.0, 0.0, HEIGHT)
+    if split_top:
+        loops = [
+            np.vstack([bottom[:1], mid, bottom[1:]]),
+            np.vstack([top[:1], top_mid, top[1:]])[::-1],
+            np.array([bottom[0], mid, top_mid, top[0]]),
+            np.array([mid, bottom[1], top[1], top_mid]),
+        ]
+    else:
+        loops = [
+            np.vstack([bottom[:1], mid, bottom[1:]]),
+            top[::-1],
+            np.array([bottom[0], mid, bottom[1], top[1], top[0]]),
+        ]
     for i in range(1, n):
         j = (i + 1) % n
         loops.append(np.array([bottom[i], bottom[j], top[j], top[i]]))
@@ -98,16 +119,18 @@ def _split_edge_prism(n: int) -> ps.Shape:
     return ps.load_brep(s.brep())
 
 
-def _assign(m: Mesher, shape: ps.Shape, n: int, base: str) -> None:
-    """Regular1D, 4 segments and 2 per half-edge, the base mesher, then Prism3D."""
+def _assign(
+    m: Mesher, shape: ps.Shape, n: int, base: str, half_segments: int = HALF_SEGMENTS
+) -> None:
+    """Regular1D, 4 segments and ``half_segments`` per half-edge, the base, Prism3D."""
     half = math.sin(math.pi / n)
     halves = [e.id for e in shape.edges() if abs(e.length - half) < NODE_TOL]
-    assert len(halves) == 2
+    assert len(halves) in (2, 4)
     m.assign(Regular1D())
     m.assign(NumberOfSegments(count=LAYERS))
     for e in halves:
         m.assign(
-            NumberOfSegments(count=HALF_SEGMENTS), on=SubShape(SubShapeKind.EDGE, e)
+            NumberOfSegments(count=half_segments), on=SubShape(SubShapeKind.EDGE, e)
         )
     if base == "quadrangle":
         m.assign(Quadrangle2D())
@@ -123,6 +146,18 @@ def _unlifted_top_nodes(xyz: NDArray[np.float64]) -> int:
     bottom = xyz[np.abs(xyz[:, 2]) < NODE_TOL, :2]
     gap = np.linalg.norm(top[:, None, :] - bottom[None, :, :], axis=2).min(axis=1)
     return int(np.count_nonzero(gap > NODE_TOL))
+
+
+def _bottom_face_count(mesh: ps.MeshData) -> int:
+    """How many 2-D elements lie on the bottom cap, z = 0."""
+    count = 0
+    for k in range(len(mesh.element_type)):
+        rows = mesh.element_nodes[mesh.element_offsets[k] : mesh.element_offsets[k + 1]]
+        if mesh.element_kind[k] == int(SubShapeKind.FACE) and bool(
+            np.all(np.abs(mesh.node_coords[rows, 2]) < NODE_TOL)
+        ):
+            count += 1
+    return count
 
 
 @pytest.mark.parametrize("base", BASES)
@@ -160,7 +195,8 @@ def test_a_split_edge_hexagon_prism_is_refused_naming_the_composite_side(
     assert "No FACE can be the bottom of the prism." in details
     assert (
         "has 1 EDGE(s) on its bottom side and 2 on its top side; "
-        "a composite horizontal side is not supported"
+        "a composite horizontal side is not supported. Split the EDGE opposite the "
+        "composite side at the same points"
     ) in details
 
 
@@ -212,3 +248,134 @@ def test_stacked_boxes_fill_volume_2_with_the_closed_form_hexahedra(
     assert hexahedra == n * n * 2 * n == len(volumes)
     assert float(volumes.min()) > 0.0
     assert float(volumes.sum()) == pytest.approx(STACK_VOLUME, rel=VOLUME_RTOL)
+
+
+# The way out and the r3h case (brief amendment 7). A conforming mesh whose boundary
+# nodes lie on the planar faces fills the solid exactly when every cell is measured with
+# its faces as bilinear surfaces, the surfaces two neighbours share: by the divergence
+# theorem, V = 1/3 of the flux of X through the cell's faces (3 x 3 Gauss points, exact
+# for a bilinear face). SMESH's Volume control splits each cell into tetrahedra by its
+# own diagonals, which neighbours need not share, so on warped cells its sum is not the
+# solid's volume.
+GAUSS_POINTS: NDArray[np.float64] = np.array(
+    [0.5 - math.sqrt(0.15), 0.5, 0.5 + math.sqrt(0.15)], dtype=np.float64
+)
+GAUSS_WEIGHTS: NDArray[np.float64] = np.array([5.0, 8.0, 5.0], dtype=np.float64) / 18.0
+CELL_FACES: dict[int, tuple[tuple[int, ...], ...]] = {
+    int(ElementType.PENTAHEDRON): (
+        (0, 1, 2),
+        (3, 4, 5),
+        (0, 1, 4, 3),
+        (1, 2, 5, 4),
+        (2, 0, 3, 5),
+    ),
+    int(ElementType.HEXAHEDRON): (
+        (0, 1, 2, 3),
+        (4, 5, 6, 7),
+        (0, 1, 5, 4),
+        (1, 2, 6, 5),
+        (2, 3, 7, 6),
+        (3, 0, 4, 7),
+    ),
+}
+
+
+def _face_flux(p: NDArray[np.float64], centre: NDArray[np.float64]) -> float:
+    """The flux of X through one cell face, its normal pointing away from the centre."""
+    if len(p) == 3:
+        n = 0.5 * np.cross(p[1] - p[0], p[2] - p[0])
+        c = p.mean(axis=0)
+        flux = float(np.dot(c, n))
+        return flux if float(np.dot(c - centre, n)) >= 0.0 else -flux
+    total = 0.0
+    for i, u in enumerate(GAUSS_POINTS):
+        for j, v in enumerate(GAUSS_POINTS):
+            x = (
+                (1 - u) * (1 - v) * p[0]
+                + u * (1 - v) * p[1]
+                + u * v * p[2]
+                + (1 - u) * v * p[3]
+            )
+            xu = (1 - v) * (p[1] - p[0]) + v * (p[2] - p[3])
+            xv = (1 - u) * (p[3] - p[0]) + u * (p[2] - p[1])
+            total += float(GAUSS_WEIGHTS[i] * GAUSS_WEIGHTS[j]) * float(
+                np.dot(x, np.cross(xu, xv))
+            )
+    mid = p.mean(axis=0)
+    normal = np.cross(p[1] - p[0] + p[2] - p[3], p[3] - p[0] + p[2] - p[1])
+    return total if float(np.dot(mid - centre, normal)) >= 0.0 else -total
+
+
+def _exact_volume(mesh: ps.MeshData) -> float:
+    """The sum of the cells' volumes with bilinear faces."""
+    xyz, off, con = mesh.node_coords, mesh.element_offsets, mesh.element_nodes
+    total = 0.0
+    for k, kind in enumerate(mesh.element_type):
+        faces = CELL_FACES.get(int(kind))
+        if faces is None:
+            continue
+        nodes = con[off[k] : off[k + 1]]
+        centre = xyz[nodes].mean(axis=0)
+        total += (
+            sum(_face_flux(xyz[[nodes[i] for i in f]], centre) for f in faces) / 3.0
+        )
+    return total
+
+
+def _off_surface_nodes(mesh: ps.MeshData, n: int) -> int:
+    """How many nodes on a face, edge or vertex lie off the prism's surface."""
+    t = np.linspace(0.0, 2.0 * np.pi, n + 1)[:-1]
+    corners = np.c_[np.cos(t), np.sin(t)]
+    edges = np.roll(corners, -1, axis=0) - corners
+    normals = np.c_[edges[:, 1], -edges[:, 0]] / np.linalg.norm(edges, axis=1)[:, None]
+    bound = np.isin(
+        mesh.node_kind,
+        [int(SubShapeKind.FACE), int(SubShapeKind.EDGE), int(SubShapeKind.VERTEX)],
+    )
+    xyz = mesh.node_coords[bound]
+    side = np.einsum("pnk,nk->pn", xyz[:, None, :2] - corners[None, :, :], normals)
+    gap = np.minimum(
+        np.minimum(np.abs(xyz[:, 2]), np.abs(xyz[:, 2] - HEIGHT)),
+        np.abs(side).min(axis=1),
+    )
+    return int(np.count_nonzero(gap > NODE_TOL))
+
+
+@pytest.mark.parametrize("base", BASES)
+def test_the_way_out_a_prism_with_both_cap_edges_split_meshes_as_a_prism(
+    base: str,
+) -> None:
+    """Top edge split too: exact volume, positive cells, caps 1 apart, cells (B1)."""
+    shape = _split_edge_prism(5, split_top=True)
+    area = 0.5 * 5 * math.sin(2.0 * math.pi / 5)
+
+    with Mesher(shape) as m:
+        _assign(m, shape, 5, base)
+        m.compute()
+        volumes = m.quality(ps.Volume()).values
+        mesh = m.mesh()
+
+    bottom_faces = _bottom_face_count(mesh)
+    assert float(volumes.sum()) == pytest.approx(area * HEIGHT, rel=VOLUME_RTOL)
+    assert float(volumes.min()) > 0.0
+    assert _unlifted_top_nodes(mesh.node_coords) == 0
+    assert len(volumes) == bottom_faces * LAYERS
+
+
+@pytest.mark.parametrize("base", BASES)
+def test_a_split_edge_prism_with_unmatched_segments_fills_its_volume_exactly(
+    base: str,
+) -> None:
+    """r3h: 4 segments per half-edge under 4 above: exact fill, on-face nodes (B1)."""
+    shape = _split_edge_prism(5)
+    area = 0.5 * 5 * math.sin(2.0 * math.pi / 5)
+
+    with Mesher(shape) as m:
+        _assign(m, shape, 5, base, half_segments=LAYERS)
+        m.compute()
+        volumes = m.quality(ps.Volume()).values
+        mesh = m.mesh()
+
+    assert _exact_volume(mesh) == pytest.approx(area * HEIGHT, rel=VOLUME_RTOL)
+    assert float(volumes.min()) > 0.0
+    assert _off_surface_nodes(mesh, 5) == 0

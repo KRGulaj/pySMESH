@@ -40,7 +40,8 @@ Root cause, in StdMeshers_Prism_3D.cxx:
 Change, in StdMeshers_Prism_3D.cxx only:
 * getWallFaces(), first row of walls: a wall FACE that is not meshed yet and has more than one
   EDGE on its bottom or top side is refused, "Side face #N has B EDGE(s) on its bottom side and
-  T on its top side; a composite horizontal side is not supported".
+  T on its top side; a composite horizontal side is not supported. Split the EDGE opposite the
+  composite side at the same points, so that both sides have the same number of EDGEs".
 * initPrism(), search for a bottom: the reason of each FACE that is not the bottom is kept,
   "FACE #N: <its error>." or "FACE #N: not tried, it has E EDGEs and the solid F FACEs.". If a
   bottom is found, the stored error is cleared with error( COMPERR_OK ) (not
@@ -56,7 +57,7 @@ fail it.
 diff --git a/src/StdMeshers/StdMeshers_Prism_3D.cxx b/src/StdMeshers/StdMeshers_Prism_3D.cxx
 --- a/src/StdMeshers/StdMeshers_Prism_3D.cxx
 +++ b/src/StdMeshers/StdMeshers_Prism_3D.cxx
-@@ -1160,6 +1160,19 @@
+@@ -1160,6 +1160,21 @@
              for ( int iE = 0; iE < botSide->NbEdges(); ++iE )
                if ( !myHelper->IsSubShape( botSide->Edge(iE), thePrism.myBottom ))
                  return toSM( error(TCom("Composite 'horizontal' edges are not supported")));
@@ -72,11 +73,13 @@ diff --git a/src/StdMeshers/StdMeshers_Prism_3D.cxx b/src/StdMeshers/StdMeshers_
 +              return toSM( error( COMPERR_BAD_SHAPE, TCom("Side face #") << shapeID( face )
 +                                  << " has " << nbBotE << " EDGE(s) on its bottom side and "
 +                                  << nbTopE << " on its top side; a composite horizontal side"
-+                                  << " is not supported" ));
++                                  << " is not supported. Split the EDGE opposite the composite"
++                                  << " side at the same points, so that both sides have the"
++                                  << " same number of EDGEs" ));
            }
            if ( faceMap.Add( face ))
            {
-@@ -3741,6 +3754,7 @@
+@@ -3741,6 +3756,7 @@
    {
      bool savedSetErrorToSM = mySetErrorToSM;
      mySetErrorToSM = false; // ignore errors in initPrism()
@@ -84,7 +87,7 @@ diff --git a/src/StdMeshers/StdMeshers_Prism_3D.cxx b/src/StdMeshers/StdMeshers_
  
      // search among meshed FACEs
      list< SMESH_subMesh* >::iterator sm = meshedSubMesh.begin();
-@@ -3750,21 +3764,40 @@
+@@ -3750,21 +3766,40 @@
        botSM             = *sm;
        thePrism.myBottom = TopoDS::Face( botSM->GetSubShape() );
        if ( !initPrism( thePrism, theShape3D, /*selectBottom=*/false ))
