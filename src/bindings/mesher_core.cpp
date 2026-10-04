@@ -226,6 +226,16 @@ std::vector<std::vector<int>> Params::integer_rows(const char* key) {
   return take(key).cast<std::vector<std::vector<int>>>();
 }
 
+std::vector<std::vector<double>> Params::number_rows(const char* key) {
+  const auto rows = take(key).cast<std::vector<std::vector<double>>>();
+  for (const std::vector<double>& row : rows) {
+    for (const double v : row) {
+      require_finite(std::string("Mesher: ") + owner_, key, v);
+    }
+  }
+  return rows;
+}
+
 std::vector<std::int64_t> Params::ids(const char* key) {
   return take(key).cast<std::vector<std::int64_t>>();
 }

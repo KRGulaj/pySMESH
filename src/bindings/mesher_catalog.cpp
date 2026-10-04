@@ -31,6 +31,7 @@
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Vertex.hxx>
+#include <gp_Pnt.hxx>
 
 // --- algorithms ---
 // StdMeshers_CompositeHexa_3D.hxx and StdMeshers_CompositeSegment_1D.hxx ship with the SAME
@@ -333,6 +334,27 @@ SMESH_Hypothesis* make_area_hypothesis(const std::string& name, Params& p, Facto
       corners.push_back(m.meshDS().ShapeToIndex(m.sub_shape("VERTEX", ordinal)));
     }
     h->SetCorners(corners);
+    // Enforced nodes (SetEnforcedNodes, report W2.4), read when sent: vertices of the meshed
+    // shape by ordinal, and points by coordinates.
+    if (p.has("enforced_vertices") || p.has("enforced_points")) {
+      std::vector<TopoDS_Shape> shapes;
+      if (p.has("enforced_vertices")) {
+        for (const int ordinal : p.integers("enforced_vertices")) {
+          shapes.push_back(m.sub_shape("VERTEX", ordinal));
+        }
+      }
+      std::vector<gp_Pnt> points;
+      if (p.has("enforced_points")) {
+        for (const std::vector<double>& row : p.number_rows("enforced_points")) {
+          if (row.size() != 3) {
+            throw PysmeshError("QuadrangleParams: an enforced point needs 3 coordinates "
+                               "(got " + std::to_string(row.size()) + ").");
+          }
+          points.emplace_back(row[0], row[1], row[2]);
+        }
+      }
+      h->SetEnforcedNodes(shapes, points);
+    }
     return h;
   }
   if (name == "NumberOfLayers") {

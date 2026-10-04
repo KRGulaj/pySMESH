@@ -748,10 +748,19 @@ class QuadranglePreference(Hypothesis):
 class QuadrangleParams(Hypothesis):
     """How :class:`Quadrangle2D` reads a face that is not a plain four-sided patch.
 
+    Enforced nodes put a node of the mesh at each given point: the node nearest the
+    point moves there, and its row and column bend to meet it. A point is used on each
+    face it projects into, within 1 % of the face's size; on another face it is ignored.
+    Where the hypothesis is assigned on the face itself, a point too far from the face
+    fails the compute instead. :attr:`QuadType.REDUCED` makes no enforced node.
+
     Attributes:
         quad_type: Which way to resolve mismatched sides.
         base_vertex: The corner to treat as the base of a three-sided face, or None.
         corner_vertices: Vertex ordinals to force as the face's corners, or empty.
+        enforced_vertices: Vertex ordinals whose points get an enforced node. The
+            vertex's own node is the one the quadrangles meet at.
+        enforced_points: ``(x, y, z)`` points that get an enforced node.
     """
 
     native_name: ClassVar[str] = "QuadrangleParams"
@@ -759,6 +768,8 @@ class QuadrangleParams(Hypothesis):
     quad_type: QuadType = QuadType.STANDARD
     base_vertex: SubShape | None = None
     corner_vertices: tuple[int, ...] = ()
+    enforced_vertices: tuple[int, ...] = ()
+    enforced_points: tuple[tuple[float, float, float], ...] = ()
 
 
 @dataclass(frozen=True)

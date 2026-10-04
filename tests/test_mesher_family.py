@@ -298,6 +298,10 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
         ),
         None,
     ),
+    (
+        QuadrangleParams(enforced_vertices=(1,), enforced_points=((1.0, 1.0, 0.0),)),
+        None,
+    ),
     (NumberOfLayers(count=3), None),
     (NumberOfLayers2D(count=3), None),
     (

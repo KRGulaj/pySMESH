@@ -39,6 +39,7 @@ from pysmesh import (
     PropagOfDistribution,
     PysmeshError,
     Quadrangle2D,
+    QuadrangleParams,
     RadialQuadrangle1D2D,
     Regular1D,
     SegmentAroundVertex0D,
@@ -857,3 +858,96 @@ def test_the_threshold_on_a_shared_face_leaves_out_the_thin_slab(
     _, volume = _cartesian_volume(ps.load_brep(session.brep()), parameters)
 
     assert volume == pytest.approx(expected, rel=1e-12)
+
+
+# ---- W2.4 QuadrangleParams enforced nodes ----------------------------------------- #
+
+ENFORCED: tuple[float, float, float] = (1.5, 2.5, 0.0)
+
+
+def _quad_square(params: QuadrangleParams | None, *, with_vertex: bool) -> ps.MeshData:
+    """Quadrangle2D on the 4 x 4 square, 4 segments per side, with ``params``.
+
+    With ``with_vertex`` the shape also holds a free vertex at :data:`ENFORCED`.
+    """
+    session = Session()
+    session.add_rectangle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), SQUARE_SIDE, SQUARE_SIDE)
+    if with_vertex:
+        session.add_vertex(ENFORCED)
+    with Mesher(ps.load_brep(session.brep())) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=4))
+        mesher.assign(Quadrangle2D())
+        if params is not None:
+            mesher.assign(params)
+        mesher.compute()
+        return mesher.mesh()
+
+
+def _face_node_at(mesh: ps.MeshData, point: tuple[float, float, float]) -> bool:
+    """True if a node bound to a face lies at ``point``."""
+    on_face = mesh.node_kind == int(SubShapeKind.FACE)
+    near = np.all(np.abs(mesh.node_coords - np.array(point)) < TOL, axis=1)
+    return bool(np.any(on_face & near))
+
+
+def _quad_uses_node_at(mesh: ps.MeshData, point: tuple[float, float, float]) -> bool:
+    """True if a quadrangle of ``mesh`` has a node at ``point``."""
+    quads = np.flatnonzero(mesh.element_type == int(ElementType.QUADRANGLE))
+    target = np.array(point)
+    return any(
+        bool(np.any(np.all(np.abs(_xyz_of(mesh, i) - target) < TOL, axis=1)))
+        for i in quads
+    )
+
+
+def _quad_area(mesh: ps.MeshData) -> tuple[float, float]:
+    """The summed area of the quadrangles and the smallest signed area among them."""
+    quads = np.flatnonzero(mesh.element_type == int(ElementType.QUADRANGLE))
+    areas = []
+    for i in quads:
+        p = _xyz_of(mesh, i)
+        cross = np.cross(p[2] - p[0], p[3] - p[1])
+        areas.append(0.5 * float(cross[2]))
+    signed = np.array(areas)
+    return float(np.abs(signed).sum()), float(np.min(np.sign(signed[0]) * signed))
+
+
+def test_an_enforced_point_puts_a_node_on_it_and_the_face_stays_filled() -> None:
+    """A node of the face at (1.5, 2.5, 0), off the regular 1.0 grid; area still 16.
+
+    Spec (SMESH ``2d_meshing_hypo.rst``, "Enforced nodes"): the points "where the
+    algorithm should create nodes"; the node closest to the point moves to it. Every
+    quadrangle keeps the orientation of the first, so none is folded.
+    """
+    plain = _quad_square(None, with_vertex=False)
+
+    mesh = _quad_square(
+        QuadrangleParams(enforced_points=(ENFORCED,)), with_vertex=False
+    )
+
+    assert _face_node_at(mesh, ENFORCED)
+    assert not _face_node_at(plain, ENFORCED)
+    area, smallest = _quad_area(mesh)
+    assert area == pytest.approx(SQUARE_SIDE**2, rel=1e-12)
+    assert smallest > 0.0
+
+
+def test_an_enforced_vertex_brings_its_node_into_the_face_mesh() -> None:
+    """A free vertex of the shape, named by ordinal: the quadrangles meet at its node.
+
+    The vertex has its own node from the start; upstream makes that node the enforced
+    one (``StdMeshers_Quadrangle_2D::getEnforcedUV``). Without the hypothesis no
+    quadrangle uses it.
+    """
+    session = Session()
+    session.add_rectangle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), SQUARE_SIDE, SQUARE_SIDE)
+    session.add_vertex(ENFORCED)
+    vertex = _vertex_at(ps.load_brep(session.brep()), ENFORCED)
+    plain = _quad_square(None, with_vertex=True)
+
+    mesh = _quad_square(QuadrangleParams(enforced_vertices=(vertex,)), with_vertex=True)
+
+    assert _quad_uses_node_at(mesh, ENFORCED)
+    assert not _quad_uses_node_at(plain, ENFORCED)
+    assert _quad_area(mesh)[0] == pytest.approx(SQUARE_SIDE**2, rel=1e-12)

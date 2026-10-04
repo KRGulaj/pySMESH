@@ -144,6 +144,9 @@ class Params {
   // entry (the blocks of BlockRenumber: solid, vertex, vertex).
   std::vector<std::vector<int>> integer_rows(const char* key);
 
+  // A list of number rows (points), every value checked finite like number().
+  std::vector<std::vector<double>> number_rows(const char* key);
+
   // Mesh ids, which are wider than an int by construction: SMDS numbers every node and
   // element in one 64-bit sequence.
   std::vector<std::int64_t> ids(const char* key);
