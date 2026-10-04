@@ -389,6 +389,10 @@ class Mesher {
                               const std::vector<double>& direction, int family) const;
   py::dict ray_hits(const std::vector<double>& origin, const std::vector<double>& direction,
                     double tolerance) const;
+  // The volume cells a ray passes through, with the ray parameters where it enters and
+  // leaves each (SMESH_MeshAlgos::IntersectRayVolume, report W3.3).
+  py::dict ray_volumes(const std::vector<double>& origin, const std::vector<double>& direction,
+                       double length) const;
   py::dict elements_in_sphere(const std::vector<double>& centre, double radius,
                               int family) const;
   py::dict elements_in_box(const std::vector<double>& minimum,

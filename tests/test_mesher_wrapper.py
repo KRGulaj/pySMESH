@@ -1142,3 +1142,68 @@ def test_a_face_given_to_a_volume_boundary_is_refused() -> None:
             mesher.make_boundary_mesh(
                 BoundaryDimension.FACES_OF_VOLUMES, elements=[int(face)]
             )
+
+
+# ---- W3.3 ray_volumes ------------------------------------------------------------- #
+
+
+def _block_mesh() -> tuple[Mesher, ps.MeshData]:
+    """The 3 x 3 x 3 Hexa3D block of the 3 x 7 x 11 box, still open."""
+    mesher = Mesher(_box_shape())
+    mesher.assign(Regular1D())
+    mesher.assign(NumberOfSegments(count=3))
+    mesher.assign(Quadrangle2D())
+    mesher.assign(Hexa3D())
+    mesher.compute()
+    return mesher, mesher.mesh()
+
+
+def _cell_at(mesh: ps.MeshData, point: tuple[float, float, float]) -> int:
+    """The id of the hexahedron of the block whose box holds ``point``."""
+    for i in np.flatnonzero(mesh.element_type == int(ElementType.HEXAHEDRON)):
+        p = _xyz_of(mesh, int(i))
+        if np.all(p.min(axis=0) < point) and np.all(point < p.max(axis=0)):
+            return int(mesh.element_id[i])
+    raise AssertionError(f"no cell at {point}")
+
+
+def test_a_ray_along_x_enters_and_leaves_each_cell_at_its_planes() -> None:
+    """From x = -1 along +x at y = z = 1: entered at t = 1, 2, 3, left at 2, 3, 4.
+
+    Spec (``SMESH_MeshAlgos::IntersectRayVolume``): tMin and tMax are where the ray
+    meets the cell's near and far facets. The block's cells are 1 wide in x, so the
+    planes x = 0, 1, 2, 3 are at t = x + 1.
+    """
+    mesher, mesh = _block_mesh()
+    with mesher:
+        hits = mesher.ray_volumes((-1.0, 1.0, 1.0), (1.0, 0.0, 0.0))
+
+    expected = [_cell_at(mesh, (x + 0.5, 1.0, 1.0)) for x in range(3)]
+    assert hits.ids.tolist() == expected
+    np.testing.assert_allclose(hits.entry, [1.0, 2.0, 3.0], atol=TOL)
+    np.testing.assert_allclose(hits.exit, [2.0, 3.0, 4.0], atol=TOL)
+    assert np.all(hits.facet_entry >= 0)
+    assert np.all(hits.facet_exit >= 0)
+
+
+def test_a_ray_from_inside_a_cell_and_cut_short_reports_what_it_reaches() -> None:
+    """From x = 1.5 with length 1: its own cell (entry -0.5, exit 0.5) and the next
+    one, left at the ray's end (exit 1.0, no exit facet); the cell behind is not met."""
+    mesher, mesh = _block_mesh()
+    with mesher:
+        hits = mesher.ray_volumes((1.5, 1.0, 1.0), (1.0, 0.0, 0.0), length=1.0)
+
+    assert hits.ids.tolist() == [
+        _cell_at(mesh, (1.5, 1.0, 1.0)),
+        _cell_at(mesh, (2.5, 1.0, 1.0)),
+    ]
+    np.testing.assert_allclose(hits.entry, [-0.5, 0.5], atol=TOL)
+    np.testing.assert_allclose(hits.exit, [0.5, 1.0], atol=TOL)
+    assert hits.facet_exit.tolist()[1] == -1
+
+
+def test_a_ray_volume_query_refuses_a_zero_length() -> None:
+    """Degenerate input: a ray of length 0 meets nothing and is refused."""
+    mesher, _ = _block_mesh()
+    with mesher, pytest.raises(PysmeshError, match="length must be > 0"):
+        mesher.ray_volumes((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), length=0.0)

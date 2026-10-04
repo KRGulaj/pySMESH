@@ -230,7 +230,15 @@ near_line = mesher.elements_near_line(origin=(0.0, 0.0, 0.0), direction=(0.0, 0.
 hits = mesher.ray_hits(origin=(0.0, 0.0, -5.0), direction=(0.0, 0.0, 1.0))
 hits.ids            # faces hit, nearest first
 hits.crossings       # distinct positions the surface was actually crossed at
+
+cells = mesher.ray_volumes(origin=(0.0, 0.0, -5.0), direction=(0.0, 0.0, 1.0))
+cells.ids            # volume cells crossed, in the order the ray enters them
+cells.entry, cells.exit   # distances where it enters and leaves each one
 ```
+
+`ray_volumes` cuts the ray by the plane of every facet of each cell (Haines' test), which
+is exact for cells with planar facets. The origin's own cell has a negative entry, and a
+cell behind the origin is not reported.
 
 `closest_distance(points, family=ElementDimension.VOLUME)` is the one query with no
 counterpart in a surface-only pipeline: the distance from a point to a **volume cell**.

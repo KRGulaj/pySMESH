@@ -99,6 +99,8 @@ void bind_mesher(py::module_& m) {
            py::arg("direction"), py::arg("family"))
       .def("ray_hits", &Mesher::ray_hits, py::arg("origin"), py::arg("direction"),
            py::arg("tolerance"))
+      .def("ray_volumes", &Mesher::ray_volumes, py::arg("origin"), py::arg("direction"),
+           py::arg("length"))
       .def("sharp_edges", &Mesher::sharp_edges, py::arg("angle"), py::arg("add_existing"))
       .def("separate_faces_by_edges", &Mesher::separate_faces_by_edges, py::arg("node1"),
            py::arg("node2"), py::arg("medium"), py::arg("name_prefix"))

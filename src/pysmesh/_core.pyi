@@ -760,6 +760,9 @@ class Mesher:
     def ray_hits(
         self, origin: Sequence[float], direction: Sequence[float], tolerance: float
     ) -> dict[str, object]: ...
+    def ray_volumes(
+        self, origin: Sequence[float], direction: Sequence[float], length: float
+    ) -> dict[str, object]: ...
     def sharp_edges(self, angle: float, add_existing: bool) -> dict[str, object]: ...
     def separate_faces_by_edges(
         self, node1: object, node2: object, medium: object, name_prefix: str

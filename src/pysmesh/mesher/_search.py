@@ -22,6 +22,7 @@ back parallel to one another.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import IntEnum
@@ -112,6 +113,37 @@ class ProjectedPoints:
 
     points: NDArray[np.float64]
     ids: NDArray[np.int64]
+
+
+
+@dataclass(frozen=True)
+class RayVolumeHits:
+    """The volume cells one ray passes through, in the order it enters them.
+
+    Each cell is intersected as a convex polyhedron: the ray is cut by the plane of
+    every facet (Haines' test, ``SMESH_MeshAlgos::IntersectRayVolume``). That is exact
+    for a cell with planar facets; a cell with a warped facet or a non-convex polyhedron
+    is treated as the convex cell its facet planes bound.
+
+    Attributes:
+        ids: (V,) int64 — the cells, by entry parameter, then by id.
+        entry: (V,) float64 — the distance along the direction where the ray enters each
+            cell. Negative for the cell the origin lies in.
+        exit: (V,) float64 — the distance where it leaves each cell, or the ray's length
+            if that comes first. Never negative: a cell behind the origin is not met.
+        facet_entry: (V,) int64 — the facet the ray enters through, by its index in
+            SMESH's facet order for the cell type (``SMDS_VolumeTool``).
+        facet_exit: (V,) int64 — the facet it leaves through, or -1 where the ray ends
+            inside the cell.
+        candidates: How many cells the bounding-box test passed to the exact test.
+    """
+
+    ids: NDArray[np.int64]
+    entry: NDArray[np.float64]
+    exit: NDArray[np.float64]
+    facet_entry: NDArray[np.int64]
+    facet_exit: NDArray[np.int64]
+    candidates: int
 
 
 @dataclass(frozen=True)
@@ -488,6 +520,41 @@ class _SearchOps(_MesherBase):
             points=cast("NDArray[np.float64]", raw["points"]),
             candidates=cast("int", raw["candidates"]),
             crossings=cast("int", raw["crossings"]),
+        )
+
+    def ray_volumes(
+        self,
+        origin: tuple[float, float, float],
+        direction: tuple[float, float, float],
+        length: float = math.inf,
+    ) -> RayVolumeHits:
+        """Cast a ray through the mesh's volume cells and return every cell it crosses.
+
+        The volume counterpart of :meth:`ray_hits`. The ray is a half line from
+        ``origin`` along ``direction``, cut at ``length``; a cell behind the origin is
+        not met.
+
+        Args:
+            origin: Where the ray starts.
+            direction: Which way it goes. It is normalised, so the parameters reported
+                are distances.
+            length: How far the ray reaches. Infinite by default.
+
+        Returns:
+            The cells crossed, with the entry and exit distances and facets.
+
+        Raises:
+            PysmeshError: If the direction is the zero vector, if ``length`` is not
+                positive, or if the mesher has been released.
+        """
+        raw = self._m.ray_volumes(list(origin), list(direction), length)
+        return RayVolumeHits(
+            ids=cast("NDArray[np.int64]", raw["ids"]),
+            entry=cast("NDArray[np.float64]", raw["entry"]),
+            exit=cast("NDArray[np.float64]", raw["exit"]),
+            facet_entry=cast("NDArray[np.int64]", raw["facet_entry"]),
+            facet_exit=cast("NDArray[np.int64]", raw["facet_exit"]),
+            candidates=cast("int", raw["candidates"]),
         )
 
     # ---- Feature edges and patches -------------------------------------------------------- #
