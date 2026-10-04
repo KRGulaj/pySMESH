@@ -31,8 +31,11 @@ Fixture sizing follows the project rule: a 3 x 7 x 11 box, never a unit cube.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 import pysmesh as ps
 from pysmesh import EntityId, EntityKind, Handoff, PysmeshError, Session
@@ -438,3 +441,133 @@ def test_a_handoff_refusal_names_each_id_once_and_only_faces_on_face_ids() -> No
     listed = _details_by_kind(caught.value.details)
     assert {k: set(v) for k, v in listed.items()} == expected
     assert all(len(v) == len(set(v)) for v in listed.values())
+
+
+# ------------------------------------------ Aliases in the handoff (report §4 C2) --- #
+
+# The seven boolean cases of report §4 C2: two 2 x 2 x 2 boxes, the first at the origin.
+# (operation, origin of the second box, its size). Only "fuse overlapping" and "cut
+# overlapping" were a bijection; the rest were refused with no way out.
+Vec3 = tuple[float, float, float]
+C2_CASES: dict[str, tuple[str, Vec3, Vec3]] = {
+    "common_overlapping": ("common", (1.0, 1.0, 1.0), (2.0, 2.0, 2.0)),
+    "common_coplanar": ("common", (1.0, 0.0, 0.0), (2.0, 2.0, 2.0)),
+    "fuse_overlapping": ("fuse", (1.0, 1.0, 1.0), (2.0, 2.0, 2.0)),
+    "fuse_coplanar": ("fuse", (1.0, 0.0, 0.0), (2.0, 2.0, 2.0)),
+    "fuse_face_touching": ("fuse", (2.0, 0.0, 0.0), (2.0, 2.0, 2.0)),
+    "fuse_tool_inside": ("fuse", (0.5, 0.5, 0.0), (1.0, 1.0, 1.0)),
+    "cut_overlapping": ("cut", (1.0, 1.0, 1.0), (2.0, 2.0, 2.0)),
+}
+C2_TOL: float = 1e-9
+# The two cases a label map cannot express: each operand's split face keeps its own
+# piece and both ids denote the shared piece, so one id is a label on one piece and an
+# alias on another. allow_aliases refuses them by name (escalated as E5 in this
+# phase's ledger).
+C2_UNRESOLVABLE: tuple[str, ...] = ("fuse_coplanar", "fuse_tool_inside")
+C2_RESOLVABLE: tuple[str, ...] = tuple(sorted(set(C2_CASES) - set(C2_UNRESOLVABLE)))
+
+
+def _c2_session(name: str) -> Session:
+    """One C2 case: a boolean of the box at the origin and the second box."""
+    op, origin, size = C2_CASES[name]
+    s = Session()
+    s.add_box(2.0, 2.0, 2.0)
+    first = s.entities(EntityKind.SOLID).tolist()
+    s.add_box(*size, origin=origin)
+    second = [i for i in s.entities(EntityKind.SOLID).tolist() if i not in first]
+    getattr(s, op)(first, second)
+    return s
+
+
+def _resolve(handoff: Handoff, ids: NDArray[np.int64], entity: int) -> list[int]:
+    """The ordinals an id resolves to: those carrying it, or its label for an alias."""
+    label = int(handoff.aliases.get(EntityId(entity), EntityId(entity)))
+    return np.flatnonzero(ids == label).tolist()
+
+
+def _parts(handoff: Handoff) -> dict[EntityKind, tuple[list[Any], NDArray[np.int64]]]:
+    """Per kind: the sub-shapes a reader of the BREP lists, and the id array."""
+    shape = ps.load_brep(handoff.brep)
+
+    def by_id(items: list[Any]) -> list[Any]:
+        return sorted(items, key=lambda x: x.id)
+
+    return {
+        EntityKind.SOLID: (by_id(shape.solids()), handoff.solid_id),
+        EntityKind.FACE: (by_id(shape.faces()), handoff.face_id),
+        EntityKind.EDGE: (by_id(shape.edges()), handoff.edge_id),
+        EntityKind.VERTEX: (by_id(shape.vertices()), handoff.vertex_id),
+    }
+
+
+def _union_box(kind: EntityKind, parts: list[Any]) -> NDArray[np.float64]:
+    """The box of the union of some sub-shapes; a vertex has its point."""
+    if kind == EntityKind.VERTEX:
+        pts = np.array([p.xyz for p in parts])
+        return np.r_[pts.min(axis=0), pts.max(axis=0)]
+    own = np.array([p.bbox for p in parts])
+    return np.r_[own[:, :3].min(axis=0), own[:, 3:].max(axis=0)]
+
+
+def _measure_and_centroid(
+    kind: EntityKind, parts: list[Any]
+) -> tuple[float, NDArray[np.float64]]:
+    """Summed volume or area of some sub-shapes, and their measure-weighted centroid."""
+    solid = kind == EntityKind.SOLID
+    measure = np.array([p.volume if solid else p.area for p in parts])
+    centroids = np.array([p.centroid for p in parts])
+    weighted = (centroids * measure[:, None]).sum(axis=0) / measure.sum()
+    return float(measure.sum()), weighted
+
+
+@pytest.mark.parametrize("name", C2_RESOLVABLE)
+def test_with_aliases_every_live_id_resolves_to_ordinals_of_its_own_geometry(
+    name: str,
+) -> None:
+    """Union box, measure and centroid of each id's ordinals are the id's own (C2)."""
+    s = _c2_session(name)
+
+    handoff = s.export_handoff(allow_aliases=True)
+
+    for kind, (parts, ids) in _parts(handoff).items():
+        boxes = s.bounding_boxes(kind)
+        for entity, box in zip(boxes.ids.tolist(), boxes.bbox, strict=True):
+            mine = [parts[i] for i in _resolve(handoff, ids, entity)]
+            assert mine, (kind, entity)
+            assert _union_box(kind, mine) == pytest.approx(box, abs=C2_TOL)
+            if kind in (EntityKind.SOLID, EntityKind.FACE):
+                table = s.mass_properties([EntityId(entity)])
+                measure, centroid = _measure_and_centroid(kind, mine)
+                assert measure == pytest.approx(float(table.measure[0]), rel=C2_TOL)
+                assert centroid == pytest.approx(table.centroid[0], abs=C2_TOL)
+
+
+@pytest.mark.parametrize("name", C2_UNRESOLVABLE)
+def test_with_aliases_ids_sharing_only_part_of_their_sub_shapes_are_refused(
+    name: str,
+) -> None:
+    """No lossy label map is returned: the refusal names the two ids (C2)."""
+    s = _c2_session(name)
+
+    with pytest.raises(PysmeshError, match="denote different sub-shapes"):
+        s.export_handoff(allow_aliases=True)
+
+
+def test_without_aliases_a_boolean_that_shares_sub_shapes_is_still_refused() -> None:
+    """The default stays the bijection: a coplanar common is refused (C2)."""
+    s = _c2_session("common_coplanar")
+
+    with pytest.raises(PysmeshError, match="not a bijection"):
+        s.export_handoff()
+
+
+def test_a_bijective_export_has_no_aliases() -> None:
+    """A cut that shares nothing gives the same map either way, and no aliases (C2)."""
+    s = _c2_session("cut_overlapping")
+
+    plain = s.export_handoff()
+    aliased = s.export_handoff(allow_aliases=True)
+
+    assert dict(aliased.aliases) == {}
+    assert np.array_equal(plain.face_id, aliased.face_id)
+    assert plain.brep == aliased.brep

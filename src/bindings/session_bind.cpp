@@ -166,7 +166,7 @@ void bind_session(py::module_& m) {
       .def("shape_count", &Session::shape_count, py::arg("entity_id"))
       .def("entity_table", &Session::entity_table, py::arg("kind"))
       .def("brep", &Session::brep)
-      .def("export_handoff", &Session::export_handoff)
+      .def("export_handoff", &Session::export_handoff, py::arg("allow_aliases") = false)
       .def("name_of", &Session::name_of, py::arg("entity_id"))
       .def("origin", &Session::origin, py::arg("entity_id"))
       .def("resolve", &Session::resolve, py::arg("op_index"), py::arg("role"),

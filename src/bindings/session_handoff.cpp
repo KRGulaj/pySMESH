@@ -31,6 +31,7 @@
 
 #include "session/session.hpp"
 
+#include <map>
 #include <set>
 
 namespace pysmesh {
@@ -48,8 +49,10 @@ struct KindManifest {
 
 }  // namespace
 
-py::dict Session::export_handoff() const {
+py::dict Session::export_handoff(bool allow_aliases) const {
   const TopoDS_Shape root = state_.root;
+  // allow_aliases: every other live id of a shape, mapped to the shape's label (report C2).
+  std::map<EntityId, EntityId> aliases;
 
   py::dict out;
   std::vector<EntityId> ambiguous;
@@ -82,6 +85,9 @@ py::dict Session::export_handoff() const {
       if (it->second.size() > 1) {
         for (EntityId id : it->second) {
           m.ambiguous.push_back(id);
+        }
+        if (allow_aliases) {
+          add_aliases(it->second, aliases);
         }
       }
       const EntityId id = it->second.front();
@@ -121,7 +127,7 @@ py::dict Session::export_handoff() const {
   tidy(ambiguous);
   tidy(split);
 
-  if (!ambiguous.empty() || !split.empty()) {
+  if (!allow_aliases && (!ambiguous.empty() || !split.empty())) {
     std::ostringstream detail;
     if (!ambiguous.empty()) {
       detail << ambiguous.size()
@@ -180,7 +186,58 @@ py::dict Session::export_handoff() const {
   }
 
   out["brep"] = py::bytes(stream.str());
+  py::dict alias_dict;
+  for (const auto& [alias, label] : aliases) {
+    alias_dict[py::int_(alias)] = py::int_(label);
+  }
+  out["aliases"] = alias_dict;
   return out;
+}
+
+void Session::add_aliases(const std::vector<EntityId>& ids,
+                          std::map<EntityId, EntityId>& aliases) const {
+  // by_shape lists the ids of a shape ascending, so its label is the front (label_of).
+  const EntityId label = ids.front();
+  ShapeSet label_shapes;
+  for (const TopoDS_Shape& s : state_.registry->alive.at(label).shapes) {
+    label_shapes.Add(s);
+  }
+  for (std::size_t k = 1; k < ids.size(); ++k) {
+    const EntityId alias = ids[k];
+    const auto seen = aliases.find(alias);
+    if (seen != aliases.end() && seen->second == label) {
+      continue;
+    }
+    // One entry alias -> label holds only when the two ids denote the same shapes:
+    // otherwise resolving the alias through its label would gain or lose some of them.
+    ShapeSet alias_shapes;
+    for (const TopoDS_Shape& s : state_.registry->alive.at(alias).shapes) {
+      alias_shapes.Add(s);
+    }
+    int shared = 0;
+    for (int i = 1; i <= alias_shapes.Extent(); ++i) {
+      shared += label_shapes.Contains(alias_shapes.FindKey(i)) ? 1 : 0;
+    }
+    const bool same = seen == aliases.end() && shared == alias_shapes.Extent() &&
+                      shared == label_shapes.Extent();
+    if (!same) {
+      const std::string other =
+          seen == aliases.end() ? std::to_string(label) : std::to_string(seen->second);
+      throw PysmeshError(
+          "Session.export_handoff(allow_aliases=True): id " + std::to_string(alias) +
+              " shares sub-shapes with id " + std::to_string(label) +
+              " but the two denote different sub-shapes (id " + std::to_string(alias) +
+              ": " + std::to_string(alias_shapes.Extent()) + ", id " + std::to_string(label) +
+              ": " + std::to_string(label_shapes.Extent()) + ", shared: " +
+              std::to_string(shared) + "), so no label map can resolve id " +
+              std::to_string(alias) + " to exactly its own sub-shapes (it would also be "
+              "resolved through id " + other + ").",
+          "A boolean of two split faces leaves this: each id keeps its own piece and both "
+          "denote the shared piece. Export without allow_aliases to see every blamed id, "
+          "or drop one of the two ids before handing off.");
+    }
+    aliases[alias] = label;
+  }
 }
 
 }  // namespace session

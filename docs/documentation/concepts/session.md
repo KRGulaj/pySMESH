@@ -189,10 +189,18 @@ mesher.compute()
 `handoff.face_id[i]` is the `EntityId` of the face a reader of `handoff.brep` enumerates at
 position `i`. Pairing that array with a mesh element's sub-shape ordinal (see
 [Meshing model](meshing-model.md)) is what carries a mesh cell back to the session entity it
-came from. `export_handoff` verifies the id-to-sub-shape map is a bijection before it
-returns, and raises rather than handing back a map that has quietly lost some of the
-caller's names: a same-domain merge leaves several live ids on one face, and a split leaves
-one live id on several, and either makes the pairing ambiguous.
+came from. By default `export_handoff` verifies the id-to-sub-shape map is a bijection
+before it returns, and raises rather than handing back a map that has quietly lost some of
+the caller's names. Three causes make the pairing ambiguous: a same-domain merge leaves
+several live ids on one face, a boolean leaves both operands' ids on every sub-shape they
+share (every `common`, and a `fuse` with coincident sub-shapes), and a split leaves one live
+id on several.
+
+`export_handoff(allow_aliases=True)` returns a many-to-one map instead. Each ordinal
+carries its sub-shape's label, the lowest live id that denotes it, so a split id appears at
+every ordinal of its pieces. `handoff.aliases` maps every other live id to its label. An id
+resolves to the ordinals that carry it, or, if it is a key of `aliases`, to the ordinals
+that carry its label; those are exactly the sub-shapes it denotes.
 
 ## Non-finite arguments
 

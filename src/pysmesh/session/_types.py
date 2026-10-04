@@ -12,9 +12,10 @@ defaults with the reasoning for each. No operation lives in this module.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass, field
 from enum import IntEnum, StrEnum
+from types import MappingProxyType
 from typing import Final, NewType, TypeAlias, cast
 
 import numpy as np
@@ -766,11 +767,19 @@ class Handoff:
     outer walls share a centroid exactly, so a centroid-keyed map collides on one of the most
     ordinary features in CAD, and collides *silently*.
 
-    **The map is verified to be a bijection before it is handed over.** Two ordinary session
-    states break it — a same-domain merge leaves several live ids on one face, and a split
-    leaves one live id on several — and either makes "this id is that tag" ambiguous.
+    **By default the map is verified to be a bijection before it is handed over.**
+    Ordinary session states break it: a same-domain merge leaves several live ids on one
+    face, a boolean leaves both operands' ids on every sub-shape they share, and a split
+    leaves one live id on several. Each makes "this id is that tag" ambiguous, and
     :meth:`Session.export_handoff` raises rather than returning a map that quietly loses
     some of the caller's names.
+
+    **With** ``allow_aliases=True`` **the map is many-to-one instead.** Each ordinal
+    carries its sub-shape's label, the lowest live id that denotes it, so a split id
+    appears at every ordinal of its pieces. :attr:`aliases` maps every other live id of
+    a sub-shape to that label. Nothing is lost: an id resolves to the ordinals that
+    carry it, or, if it is a key of :attr:`aliases`, to the ordinals that carry its
+    label, and those are exactly the sub-shapes it denotes.
 
     What remains the consumer's half: enumerate the imported shape in the same per-kind
     order, check the counts agree, and pair by position. This library cannot verify the other
@@ -782,6 +791,8 @@ class Handoff:
         face_id: (F,) int64 — the entity id of each face, in traversal order.
         edge_id: (E,) int64 — the entity id of each edge, in traversal order.
         vertex_id: (V,) int64 — the entity id of each vertex, in traversal order.
+        aliases: Every live id that shares its sub-shapes with a lower id, mapped to
+            that label. Empty for a bijection, the only map the default export returns.
     """
 
     brep: bytes
@@ -789,6 +800,9 @@ class Handoff:
     face_id: NDArray[np.int64]
     edge_id: NDArray[np.int64]
     vertex_id: NDArray[np.int64]
+    aliases: Mapping[EntityId, EntityId] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
 
 
 def _delta(raw: dict[str, object]) -> HistoryDelta:
