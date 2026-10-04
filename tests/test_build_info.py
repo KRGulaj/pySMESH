@@ -17,9 +17,28 @@ environment at all.
 from __future__ import annotations
 
 import importlib
+import re
+import subprocess
 import sys
+import tomllib
+from pathlib import Path
 
 import pytest
+
+_ROOT = Path(__file__).resolve().parent.parent
+# The native classes a consumer reaches (report C6). The native Session and Mesher are
+# private: the documented Python classes of the same names wrap them.
+NATIVE_PUBLIC_CLASSES: tuple[str, ...] = (
+    "Shape",
+    "FaceInfo",
+    "EdgeInfo",
+    "SolidInfo",
+    "VertexInfo",
+    "Mesh",
+    "MeshStats",
+    "PysmeshError",
+    "PysmeshCancelled",
+)
 
 
 def test_build_info_has_expected_fields() -> None:
@@ -71,3 +90,40 @@ def test_import_ignores_a_mismatched_host_vtk(monkeypatch: pytest.MonkeyPatch) -
     module = importlib.import_module("pysmesh")
 
     assert module.Session is not None
+
+
+def test_version_equals_the_version_in_pyproject() -> None:
+    """pysmesh.__version__ is pyproject.toml's [project] version (C6)."""
+    import pysmesh
+
+    expected = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    assert pysmesh.__version__ == expected["project"]["version"]
+
+
+@pytest.mark.parametrize("name", NATIVE_PUBLIC_CLASSES)
+def test_a_public_native_class_has_a_docstring(name: str) -> None:
+    """Every native class a consumer reaches carries a non-empty docstring (C6)."""
+    from pysmesh import _core
+
+    doc = getattr(_core, name).__doc__
+
+    assert isinstance(doc, str)
+    assert doc.strip() != ""
+
+
+def test_every_public_entity_is_documented_and_the_reference_page_counts_them() -> None:
+    """ci/count_documented.py passes, and reference/index.md states its count (C6)."""
+    proc = subprocess.run(
+        [sys.executable, str(_ROOT / "ci" / "count_documented.py")],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    page = (_ROOT / "docs" / "documentation" / "reference" / "index.md").read_text(
+        encoding="utf-8"
+    )
+
+    total = re.search(r"public entities : (\d+)", proc.stdout)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert total is not None
+    assert f"All {total.group(1)} of pySMESH's public entities" in page

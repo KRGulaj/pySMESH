@@ -297,7 +297,9 @@ void mesh_adopt_hypothesis(const py::object& mesh_obj, SMESH_Hypothesis* hyp) {
 }
 
 void bind_mesh(py::module_& m) {
-  py::class_<MeshStats>(m, "MeshStats")
+  py::class_<MeshStats>(m, "MeshStats",
+                        "The counts Mesh.stats() returns: nodes, faces, and the elements on "
+                        "each CAD face.")
       .def_readonly("n_nodes", &MeshStats::n_nodes)
       .def_readonly("n_faces", &MeshStats::n_faces)
       .def_property_readonly(
@@ -314,7 +316,10 @@ void bind_mesh(py::module_& m) {
                " n_faces=" + std::to_string(s.n_faces) + ">";
       });
 
-  py::class_<Mesh>(m, "Mesh")
+  py::class_<Mesh>(m, "Mesh",
+                   "An SMESH surface mesh bound to a Shape, built from nodes and elements the "
+                   "caller supplies: add nodes, classify them on the CAD faces, edges and "
+                   "vertices, add segments and triangles, then validate it.")
       .def(py::init<const py::object&>(), py::arg("shape"),
            "Create an SMESH mesh bound to the given Shape.")
       .def("add_nodes", &Mesh::add_nodes, py::arg("coords"),

@@ -267,6 +267,17 @@ if(NOT DEFINED PYSMESH_GIT_SHA)
     endif()
 endif()
 string(TIMESTAMP PYSMESH_BUILD_DATE "%Y-%m-%dT%H:%M:%SZ" UTC)
+# __version__: pyproject.toml is the one place the version is set, read here so that the
+# in-tree build and the wheel carry the same value (report C6).
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+             ${CMAKE_SOURCE_DIR}/pyproject.toml)
+file(STRINGS ${CMAKE_SOURCE_DIR}/pyproject.toml _pysmesh_version_line
+     REGEX "^version = \"[^\"]+\"" LIMIT_COUNT 1)
+string(REGEX REPLACE "^version = \"([^\"]+)\".*" "\\1" PYSMESH_VERSION
+       "${_pysmesh_version_line}")
+if(NOT PYSMESH_VERSION)
+    message(FATAL_ERROR "pysmesh: pyproject.toml has no 'version = \"...\"' line")
+endif()
 if(NOT DEFINED PYSMESH_WITH_NETGEN)
     set(PYSMESH_WITH_NETGEN "False")
 endif()

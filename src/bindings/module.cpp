@@ -59,8 +59,13 @@ std::string text_of(const char* what) {
 }  // namespace
 
 void register_error_type(py::module_& m) {
-  py::object error_type = py::reinterpret_steal<py::object>(
-      PyErr_NewException("pysmesh._core.PysmeshError", PyExc_RuntimeError, nullptr));
+  py::object error_type = py::reinterpret_steal<py::object>(PyErr_NewExceptionWithDoc(
+      "pysmesh._core.PysmeshError",
+      "Every failure of the library: a refused input, an error of OCCT or SMESH, or an "
+      "invalid result. The message names the operation, the entity and the reason; details "
+      "holds the per-sub-shape text of a failed mesh compute and face_ids the faces that "
+      "failed. A subclass of RuntimeError.",
+      PyExc_RuntimeError, nullptr));
   m.add_object("PysmeshError", error_type);  // module now owns a reference
   g_error_type = error_type;                  // borrowed handle for the translator
 
@@ -68,8 +73,11 @@ void register_error_type(py::module_& m) {
   // rather than a second one: code that only cares that the operation did not happen keeps
   // catching PysmeshError, and code that must tell "the user stopped it" from "it failed"
   // catches this instead.
-  py::object cancelled_type = py::reinterpret_steal<py::object>(PyErr_NewException(
-      "pysmesh._core.PysmeshCancelled", error_type.ptr(), nullptr));
+  py::object cancelled_type = py::reinterpret_steal<py::object>(PyErr_NewExceptionWithDoc(
+      "pysmesh._core.PysmeshCancelled",
+      "An operation that the caller's cancel predicate stopped. A subclass of PysmeshError; "
+      "the state the operation worked on is left as it was before the call.",
+      error_type.ptr(), nullptr));
   m.add_object("PysmeshCancelled", cancelled_type);
   g_cancelled_type = cancelled_type;
 
@@ -117,7 +125,9 @@ void silence_occt_messages() {
 
 PYBIND11_MODULE(_core, m) {
   silence_occt_messages();
-  m.doc() = "pySMESH native core: SMESH ViscousLayers bindings (Tier-1).";
+  m.doc() =
+      "pySMESH native core: SALOME SMESH meshing, Open CASCADE geometry operations and the "
+      "Session, statically linked. Private to the pysmesh package, which wraps it.";
   pysmesh::register_error_type(m);
   pysmesh::bind_shape(m);
   pysmesh::bind_mesh(m);

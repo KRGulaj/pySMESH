@@ -26,6 +26,8 @@ string. ``tests/test_vtk_privacy.py`` enforces this.
 
 from __future__ import annotations
 
+from typing import Final
+
 from . import _build_info as _build_info
 
 from ._core import (
@@ -252,7 +254,11 @@ from .viscous import (
     compute_viscous_layers,
 )
 
+# The package version, from pyproject.toml through the generated build info.
+__version__: Final[str] = _build_info.VERSION
+
 __all__ = [
+    "__version__",
     "Adaptive1D",
     "AdjacencyPairs",
     "Algorithm",

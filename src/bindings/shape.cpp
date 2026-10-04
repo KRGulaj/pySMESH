@@ -364,7 +364,10 @@ std::shared_ptr<ShapeData> shape_data_of(const py::object& shape_obj) {
 }
 
 void bind_shape(py::module_& m) {
-  py::class_<FaceInfo>(m, "FaceInfo")
+  py::class_<FaceInfo>(m, "FaceInfo",
+                       "One face of a Shape, as Shape.faces() lists it: its 1-based id, its "
+                       "area (adaptive, relative precision 1e-6), centroid, the box of its "
+                       "geometry, its UV bounds and the type of its surface.")
       .def_readonly("id", &FaceInfo::id)
       .def_readonly("area", &FaceInfo::area)
       .def_property_readonly(
@@ -379,7 +382,10 @@ void bind_shape(py::module_& m) {
                " area=" + std::to_string(f.area) + ">";
       });
 
-  py::class_<SolidInfo>(m, "SolidInfo")
+  py::class_<SolidInfo>(m, "SolidInfo",
+                        "One solid of a Shape, as Shape.solids() lists it: its 1-based id, "
+                        "its volume (adaptive, relative precision 1e-6), centroid and the box "
+                        "of its geometry.")
       .def_readonly("id", &SolidInfo::id)
       .def_readonly("volume", &SolidInfo::volume)
       .def_property_readonly(
@@ -391,7 +397,10 @@ void bind_shape(py::module_& m) {
                " volume=" + std::to_string(s.volume) + ">";
       });
 
-  py::class_<EdgeInfo>(m, "EdgeInfo")
+  py::class_<EdgeInfo>(m, "EdgeInfo",
+                       "One edge of a Shape, as Shape.edges() lists it: its 1-based id, its "
+                       "length (adaptive, relative precision 1e-6), the box of its geometry "
+                       "and the parameter bounds of its curve.")
       .def_readonly("id", &EdgeInfo::id)
       .def_readonly("length", &EdgeInfo::length)
       .def_property_readonly("bbox",
@@ -403,7 +412,9 @@ void bind_shape(py::module_& m) {
                " length=" + std::to_string(e.length) + ">";
       });
 
-  py::class_<VertexInfo>(m, "VertexInfo")
+  py::class_<VertexInfo>(m, "VertexInfo",
+                         "One vertex of a Shape, as Shape.vertices() lists it: its 1-based "
+                         "id and its position.")
       .def_readonly("id", &VertexInfo::id)
       .def_property_readonly("xyz",
                              [](const VertexInfo& v) { return vec1d(v.xyz.data(), 3); })
@@ -411,7 +422,11 @@ void bind_shape(py::module_& m) {
         return "<VertexInfo id=" + std::to_string(v.id) + ">";
       });
 
-  py::class_<Shape>(m, "Shape")
+  py::class_<Shape>(m, "Shape",
+                    "A shape read from BREP bytes by load_brep. It lists its unique solids, "
+                    "faces, edges and vertices with 1-based ids in TopExp map order, and "
+                    "answers point-to-face distance, face adjacency and face matching "
+                    "queries on them.")
       .def("solids", &Shape::solids,
            "List every unique solid with id (1-based), volume, centroid, bbox.")
       .def("faces", &Shape::faces,
