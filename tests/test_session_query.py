@@ -45,6 +45,7 @@ import numpy as np
 import pytest
 from hypothesis import assume, given, settings
 from hypothesis import strategies as st
+from numpy.typing import NDArray
 
 import pysmesh as ps
 from pysmesh import EntityId, EntityKind, Session
@@ -2009,3 +2010,137 @@ def test_the_distinct_common_of_a_cylinder_and_a_box_has_the_quarter_volume() ->
     volume = float(s.mass_properties(solids).measure.sum())
 
     assert volume == pytest.approx(math.pi / 4.0, rel=DEFAULT_PRECISION)
+
+
+# -------------------------------------- Two-level box query (D1, D2, amendment 5) --- #
+
+# Query boxes per kind and strict value: seeded random boxes over the model, and boxes
+# placed on entity boxes (exactly, larger and smaller by the offset, touching below and
+# above), where a wrong first level would show.
+RANDOM_BOX_QUERIES: int = 12
+PLACED_BOX_QUERIES: int = 6
+PLACED_OFFSET: float = 1e-9
+
+BoxQuery = tuple[tuple[float, float, float], tuple[float, float, float]]
+
+
+def _all_exact_hits(
+    table: ps.BoundsTable, query: BoxQuery, strict: bool
+) -> NDArray[np.int64]:
+    """The all-exact answer: the bounding_boxes numbers against the query, closed."""
+    q_lo, q_hi = np.asarray(query[0]), np.asarray(query[1])
+    lo, hi = table.bbox[:, :3], table.bbox[:, 3:]
+    if strict:
+        keep = np.all(lo >= q_lo, axis=1) & np.all(hi <= q_hi, axis=1)
+    else:
+        keep = np.all(lo <= q_hi, axis=1) & np.all(hi >= q_lo, axis=1)
+    return table.ids[keep]
+
+
+def _box_queries(boxes: NDArray[np.float64], seed: int) -> list[BoxQuery]:
+    """Random boxes over the model's extent, and boxes on and around entity boxes."""
+    rng = np.random.default_rng(seed)
+    low, high = boxes[:, :3].min(axis=0), boxes[:, 3:].max(axis=0)
+    span = high - low
+    raw: list[tuple[NDArray[np.float64], NDArray[np.float64]]] = []
+    for _ in range(RANDOM_BOX_QUERIES):
+        a = low - 0.1 * span + 1.2 * span * rng.random(3)
+        b = low - 0.1 * span + 1.2 * span * rng.random(3)
+        raw.append((np.minimum(a, b), np.maximum(a, b)))
+    count = min(PLACED_BOX_QUERIES, len(boxes))
+    for i in rng.choice(len(boxes), size=count, replace=False):
+        lo, hi = boxes[i, :3], boxes[i, 3:]
+        a, b = lo + PLACED_OFFSET, hi - PLACED_OFFSET
+        flat = a > b
+        mid = 0.5 * (lo + hi)
+        raw += [
+            (lo, hi),
+            (lo - PLACED_OFFSET, hi + PLACED_OFFSET),
+            (np.where(flat, mid, a), np.where(flat, mid, b)),
+            (lo - 1.0, lo),
+            (hi, hi + 1.0),
+        ]
+    return [
+        (
+            (float(a[0]), float(a[1]), float(a[2])),
+            (float(b[0]), float(b[1]), float(b[2])),
+        )
+        for a, b in raw
+    ]
+
+
+def _new_edges(s: Session, before: set[EntityId]) -> list[EntityId]:
+    """Edge ids created since `before`."""
+    return [i for i in ids_of(s, EntityKind.EDGE) if i not in before]
+
+
+def _every_box_branch() -> Session:
+    """The D1/D2 cases and a face or edge of every type the first level bounds.
+
+    Plane, sphere, cylinder, cone, torus, extrusion and B-spline faces; line, circle,
+    ellipse and B-spline edges; and a surface of revolution, which only the exact box
+    bounds. The axes are tilted so that every located bound is transformed.
+    """
+    s = Session()
+    s.add_line((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    s.add_box(1.0, 1.0, 1.0, origin=(5.0, 0.0, 0.0))
+    _naca_spline(s)
+    s.add_sphere(1.0, centre=(0.0, 4.0, 0.0))
+    s.add_cylinder(0.5, 2.0, origin=(-3.0, 0.0, 0.0), axis=(1.0, 0.0, 0.0))
+    s.add_cone(1.0, 0.3, 1.5, origin=(0.0, -4.0, 0.0), axis=(0.0, 1.0, 1.0))
+    s.add_torus(1.5, 0.4, origin=(4.0, 4.0, 1.0), axis=(1.0, 1.0, 0.0))
+    s.add_ellipse((0.0, 0.0, 3.0), (0.0, 0.0, 1.0), 2.0, 0.7, x_dir=(1.0, 1.0, 0.0))
+    s.add_arc((-1.0, -1.0, -2.0), (0.0, -0.5, -2.0), (1.0, -1.0, -2.0))
+    before = set(ids_of(s, EntityKind.EDGE))
+    s.add_bspline(
+        [(-2.0, 2.0, -1.0), (-1.0, 3.0, -1.0), (0.0, 2.5, -1.0), (1.0, 3.0, -1.0)]
+    )
+    s.extrude(_new_edges(s, before), (0.0, 0.0, 1.0))
+    before = set(ids_of(s, EntityKind.EDGE))
+    s.add_bspline([(3.0, -3.0, 0.0), (3.5, -3.0, 0.5), (3.2, -3.0, 1.0)])
+    s.revolve(_new_edges(s, before), (2.0, -3.0, 0.0), (0.0, 0.0, 1.0), math.pi)
+    sections = []
+    for z in (-3.0, -2.5):
+        before = set(ids_of(s, EntityKind.EDGE))
+        s.add_spline([(6.0, -2.0, z), (7.0, -1.5 + 0.2 * z, z), (8.0, -2.0, z)])
+        sections.append(_new_edges(s, before))
+    s.thru_sections(sections, solid=False, ruled=False)
+    return s
+
+
+def _two_level_mismatches(s: Session, kind: EntityKind) -> list[str]:
+    """Every query whose entities_in_box answer differs from the all-exact one."""
+    table = s.bounding_boxes(kind)
+    out = []
+    for query in _box_queries(table.bbox, seed=42):
+        for strict in (True, False):
+            got = s.entities_in_box(kind, query[0], query[1], strict=strict)
+            want = _all_exact_hits(table, query, strict).tolist()
+            if got.tolist() != want:
+                out.append(f"{query} strict={strict}: {got.tolist()} != {want}")
+    return out
+
+
+@pytest.mark.parametrize("kind", [EntityKind.SOLID, EntityKind.FACE, EntityKind.EDGE])
+def test_the_two_level_box_query_equals_the_all_exact_rule_on_every_box_branch(
+    kind: EntityKind,
+) -> None:
+    """entities_in_box returns what the bounding_boxes numbers give (amendment 5)."""
+    s = _every_box_branch()
+
+    mismatches = _two_level_mismatches(s, kind)
+
+    assert mismatches == []
+
+
+@pytest.mark.parametrize("kind", [EntityKind.SOLID, EntityKind.FACE, EntityKind.EDGE])
+def test_the_two_level_box_query_equals_the_all_exact_rule_on_the_production_assembly(
+    industrial_step_brep: bytes, kind: EntityKind
+) -> None:
+    """The same equality on perrinn_f1: 117 solids, 5 606 faces, 13 996 edges."""
+    s = Session()
+    s.add_brep(industrial_step_brep)
+
+    mismatches = _two_level_mismatches(s, kind)
+
+    assert mismatches == []

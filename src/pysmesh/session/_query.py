@@ -472,8 +472,16 @@ class _QueryOps(_SessionBase):
         A bounding-box test, so it over-selects: an entity whose box overlaps but whose
         geometry does not is returned. That is the useful contract for a broad phase — narrow
         it with an exact test on the far smaller result. The entity's box is the box
-        of its geometry, as :class:`BoundsTable` states: under ``strict``, an entity
-        that fits the query box exactly is inside it.
+        of its geometry, the numbers :meth:`bounding_boxes` reports for it. It meets
+        the query box when every interval shares a point with the query's. It lies
+        inside it when every interval lies within the query's. The intervals are
+        closed, so under ``strict`` an entity that fits the query box exactly is inside.
+
+        The test runs in two levels with the same answer. A cheap box, proven to
+        contain the box of each face, free edge and free vertex of the entity, decides
+        first: if it misses the query box, that part cannot help; if it lies inside,
+        that part needs nothing more. Only the parts it cannot decide pay for the box
+        of their geometry.
 
         Args:
             kind: The entity kind to search.

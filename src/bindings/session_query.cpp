@@ -997,6 +997,159 @@ py::dict Session::project_on_face(EntityId face_id, const PointArray& points) co
   return out;
 }
 
+namespace {
+
+// A box as Bnd_Box::Get reports it, with closed intervals: the numbers bounding_boxes returns.
+struct Box6 {
+  double lo[3];
+  double hi[3];
+
+  // Every interval of this box lies inside the other's.
+  bool inside(const Box6& o) const {
+    for (int k = 0; k < 3; ++k) {
+      if (lo[k] < o.lo[k] || hi[k] > o.hi[k]) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Every interval of this box shares a point with the other's.
+  bool meets(const Box6& o) const {
+    for (int k = 0; k < 3; ++k) {
+      if (lo[k] > o.hi[k] || hi[k] < o.lo[k]) {
+        return false;
+      }
+    }
+    return true;
+  }
+};
+
+// The reported numbers of a box that is not void.
+Box6 box6_of(const Bnd_Box& b) {
+  Box6 out{};
+  b.Get(out.lo[0], out.lo[1], out.lo[2], out.hi[0], out.hi[1], out.hi[2]);
+  return out;
+}
+
+// The parts whose boxes BRepBndLib::AddOptimal joins into a shape's box: its faces, its
+// edges outside every face, its vertices outside every edge (BRepBndLib.cxx:265-427). Each
+// part's box is the one AddOptimal computes for it inside the shape, so the shape's box is
+// the union of its parts' boxes.
+void append_box_parts(const TopoDS_Shape& s, std::vector<TopoDS_Shape>& parts) {
+  for (TopExp_Explorer x(s, TopAbs_FACE); x.More(); x.Next()) {
+    parts.push_back(x.Current());
+  }
+  for (TopExp_Explorer x(s, TopAbs_EDGE, TopAbs_FACE); x.More(); x.Next()) {
+    parts.push_back(x.Current());
+  }
+  for (TopExp_Explorer x(s, TopAbs_VERTEX, TopAbs_EDGE); x.More(); x.Next()) {
+    parts.push_back(x.Current());
+  }
+}
+
+// What entities_in_box knows of one part's box E.
+struct PartBox {
+  enum State { kVoid, kUnproven, kCoarse, kExact };
+  State state = kVoid;  // kVoid: E is void, so the part adds nothing
+  Box6 box{};           // kCoarse: a box proven to contain E; kExact: E itself
+};
+
+enum class Verdict { kOut, kIn, kPending };
+
+// The verdict on one entity, the union H of the boxes E of its parts [begin, end). With the
+// coarse box C of a part containing its E (and E void only when C is):
+//   * strict, H inside the query: every E inside it. C inside means E inside; C missing the
+//     query means E is not inside, so H is not.
+//   * otherwise, H meets the query: on each axis, some E reaches below the query's top and
+//     some E reaches above its bottom. A part with C.hi <= top has E.lo <= top; a part with
+//     C.lo >= bottom has E.hi >= bottom. Only a part with C.lo <= top (C.hi >= bottom) can
+//     reach below the top (above the bottom).
+// Every comparison is on the reported numbers, so the verdict equals the one on H.
+// need_exact non-null: first pass, marks the parts whose E the verdict needs, and returns
+// kPending if any. Null: second pass, every needed E known.
+Verdict decide(const std::vector<PartBox>& known, std::size_t begin, std::size_t end,
+               const Box6& q, bool strict, std::vector<bool>* need_exact) {
+  bool any = false;  // H is not void
+  if (strict) {
+    std::vector<std::size_t> open;
+    for (std::size_t j = begin; j < end; ++j) {
+      const PartBox& p = known[j];
+      if (p.state == PartBox::kVoid) {
+        continue;
+      }
+      if (p.state == PartBox::kUnproven) {
+        open.push_back(j);
+        continue;
+      }
+      any = true;
+      if (!p.box.meets(q) || (p.state == PartBox::kExact && !p.box.inside(q))) {
+        return Verdict::kOut;
+      }
+      if (!p.box.inside(q)) {
+        open.push_back(j);
+      }
+    }
+    if (open.empty()) {
+      return any ? Verdict::kIn : Verdict::kOut;
+    }
+    if (need_exact == nullptr) {
+      throw PysmeshError("Session.entities_in_box: internal error, a part box is undecided.");
+    }
+    for (std::size_t j : open) {
+      (*need_exact)[j] = true;
+    }
+    return Verdict::kPending;
+  }
+
+  std::vector<std::size_t> wanted;
+  for (int k = 0; k < 3; ++k) {
+    for (const bool below : {true, false}) {
+      // below: some E.lo <= q.hi[k]; otherwise: some E.hi >= q.lo[k].
+      bool witnessed = false;
+      std::vector<std::size_t> candidates;
+      for (std::size_t j = begin; j < end && !witnessed; ++j) {
+        const PartBox& p = known[j];
+        if (p.state == PartBox::kVoid) {
+          continue;
+        }
+        if (p.state == PartBox::kUnproven) {
+          candidates.push_back(j);
+          continue;
+        }
+        any = true;
+        const Box6& b = p.box;
+        if (p.state == PartBox::kExact) {
+          witnessed = below ? b.lo[k] <= q.hi[k] : b.hi[k] >= q.lo[k];
+        } else if (below ? b.hi[k] <= q.hi[k] : b.lo[k] >= q.lo[k]) {
+          witnessed = true;
+        } else if (below ? b.lo[k] <= q.hi[k] : b.hi[k] >= q.lo[k]) {
+          candidates.push_back(j);
+        }
+      }
+      if (witnessed) {
+        continue;
+      }
+      if (candidates.empty()) {
+        return Verdict::kOut;
+      }
+      wanted.insert(wanted.end(), candidates.begin(), candidates.end());
+    }
+  }
+  if (wanted.empty()) {
+    return any ? Verdict::kIn : Verdict::kOut;
+  }
+  if (need_exact == nullptr) {
+    throw PysmeshError("Session.entities_in_box: internal error, a part box is undecided.");
+  }
+  for (std::size_t j : wanted) {
+    (*need_exact)[j] = true;
+  }
+  return Verdict::kPending;
+}
+
+}  // namespace
+
 py::array_t<std::int64_t> Session::entities_in_box(const std::string& kind, double xmin,
                                                    double ymin, double zmin, double xmax,
                                                    double ymax, double zmax,
@@ -1006,44 +1159,67 @@ py::array_t<std::int64_t> Session::entities_in_box(const std::string& kind, doub
   if (xmax < xmin || ymax < ymin || zmax < zmin) {
     throw PysmeshError("Session.entities_in_box: every max must be >= its min.");
   }
-  Bnd_Box query;
-  query.Update(xmin, ymin, zmin, xmax, ymax, zmax);
+  const Box6 query{{xmin, ymin, zmin}, {xmax, ymax, zmax}};
 
-  // The box of the geometry, not padded by the tolerance (reports D1, D2): an entity
-  // that fits the query box exactly is inside it under strict.
+  // The answer is that of the box of the geometry, not padded by the tolerance (reports D1,
+  // D2), as bounding_boxes reports it: an entity that fits the query box exactly is inside
+  // it under strict. Two levels (brief amendment 5): a coarse box proven to contain the box
+  // of each part decides wherever it can, and only the parts it cannot decide pay for their
+  // exact box. The entity's box is the union of its parts' boxes, so the answer is the same.
   const std::vector<EntityId> ids = ids_of_kind(kind_from_name(kind));
-  std::vector<TopoDS_Shape> all;
+  std::vector<TopoDS_Shape> parts;
   std::vector<std::size_t> first(ids.size() + 1, 0);
   for (std::size_t k = 0; k < ids.size(); ++k) {
-    const EntityRecord& rec = state_.registry->alive.at(ids[k]);
-    first[k] = all.size();
-    all.insert(all.end(), rec.shapes.begin(), rec.shapes.end());
+    first[k] = parts.size();
+    for (const TopoDS_Shape& s : state_.registry->alive.at(ids[k]).shapes) {
+      append_box_parts(s, parts);
+    }
   }
-  first[ids.size()] = all.size();
-  std::vector<Bnd_Box> boxes;
+  first[ids.size()] = parts.size();
+  std::vector<std::optional<Bnd_Box>> coarse;
   {
     py::gil_scoped_release release;
-    boxes = shape_checks::exact_boxes(all);
+    coarse = shape_checks::coarse_boxes(parts);
+  }
+  std::vector<PartBox> known(parts.size());
+  for (std::size_t j = 0; j < parts.size(); ++j) {
+    if (!coarse[j]) {
+      known[j].state = PartBox::kUnproven;
+    } else if (!coarse[j]->IsVoid()) {
+      known[j] = PartBox{PartBox::kCoarse, box6_of(*coarse[j])};
+    }
+  }
+
+  std::vector<Verdict> verdict(ids.size());
+  std::vector<bool> need_exact(parts.size(), false);
+  for (std::size_t k = 0; k < ids.size(); ++k) {
+    verdict[k] = decide(known, first[k], first[k + 1], query, strict, &need_exact);
+  }
+
+  std::vector<TopoDS_Shape> rest;
+  std::vector<std::size_t> rest_of;
+  for (std::size_t j = 0; j < parts.size(); ++j) {
+    if (need_exact[j]) {
+      rest.push_back(parts[j]);
+      rest_of.push_back(j);
+    }
+  }
+  std::vector<Bnd_Box> exact;
+  {
+    py::gil_scoped_release release;
+    exact = shape_checks::exact_boxes(rest);
+  }
+  for (std::size_t r = 0; r < rest.size(); ++r) {
+    known[rest_of[r]] = exact[r].IsVoid() ? PartBox{} : PartBox{PartBox::kExact, box6_of(exact[r])};
   }
 
   std::vector<EntityId> hits;
   for (std::size_t k = 0; k < ids.size(); ++k) {
-    const EntityId id = ids[k];
-    Bnd_Box box;
-    for (std::size_t j = first[k]; j < first[k + 1]; ++j) {
-      box.Add(boxes[j]);
+    if (verdict[k] == Verdict::kPending) {
+      verdict[k] = decide(known, first[k], first[k + 1], query, strict, nullptr);
     }
-    if (box.IsVoid()) {
-      continue;
-    }
-    if (strict) {
-      double a, b, c, d, e, f;
-      box.Get(a, b, c, d, e, f);
-      if (a >= xmin && b >= ymin && c >= zmin && d <= xmax && e <= ymax && f <= zmax) {
-        hits.push_back(id);
-      }
-    } else if (!query.IsOut(box)) {
-      hits.push_back(id);
+    if (verdict[k] == Verdict::kIn) {
+      hits.push_back(ids[k]);
     }
   }
   return ids_array(hits);

@@ -234,6 +234,31 @@ Bnd_Box exact_box(const TopoDS_Shape& s);
 // The boxes of many shapes, computed in parallel, one shape per task.
 std::vector<Bnd_Box> exact_boxes(const std::vector<TopoDS_Shape>& shapes);
 
+// A box proven to contain exact_box(s), as Bnd_Box::Get reports it, at a small fraction of
+// its cost: the first level of entities_in_box (brief amendment 5). It bounds only geometry
+// whose bound follows from the OCCT 8.0.1 source of BRepBndLib::AddOptimal and its helpers:
+//   * a line edge by its two end points; a circle or ellipse edge by its whole curve; a
+//     B-spline or Bezier edge by all its poles (the convex hull property);
+//   * a plane, cylinder, cone or extrusion face by its edges, because AddOptimal bounds such a
+//     face by its edges alone (CanUseEdges, BRepBndLib.cxx:437-443, 283-305);
+//   * a sphere, torus, B-spline or Bezier face by its whole surface and its edges, because
+//     AddOptimal bounds such a face by points of its surface, can only shrink that box toward
+//     its edges (AdjustFaceBox, BRepBndLib.cxx:727-) and falls back to the edges;
+//   * a vertex outside every edge by its point.
+// AddOptimal pads a box beyond the points it evaluates by at most Precision::Confusion()
+// = 1e-7 (GeomBndLib_SplineHelpers.pxx:479/539, GeomBndLib_BSplineSurface.cxx:307/370,
+// GeomBndLib_BezierSurface.cxx:216/279, GeomBndLib_OtherSurface.cxx:187/250), and by 0 for a
+// line, circle, ellipse or sphere. The bound is widened by 1e-6 plus 1e-12 of the
+// coordinate, which covers that pad and the rounding on both sides. BRepBndLib::Add is not
+// used: it samples where its type has no closed form (GeomBndLib_OtherSurface.cxx:37-71,
+// GeomBndLib_BSplineSurface.cxx:154-181), so its box is not proven to contain the geometry.
+// Empty (nullopt) when s holds any other geometry, or a non-finite coordinate: then only
+// exact_box can decide. A void box means that exact_box is void too.
+std::optional<Bnd_Box> coarse_box(const TopoDS_Shape& s);
+
+// The coarse boxes of many shapes, computed in parallel, one shape per task.
+std::vector<std::optional<Bnd_Box>> coarse_boxes(const std::vector<TopoDS_Shape>& shapes);
+
 // How far a wire is from planar: the spread of its points across the plane that fits them
 // best (BRepLib_FindSurface, OnlyPlane: a least-squares plane), as the largest minus the
 // smallest signed distance of 65 points per edge. A wire bowed by w sin(pi x) over a chord

@@ -49,6 +49,11 @@
 #include <IntTools_PntOn2Faces.hxx>
 #include <IntTools_PntOnFace.hxx>
 #include <Geom2d_Curve.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <Geom_BSplineSurface.hxx>
+#include <Geom_BezierCurve.hxx>
+#include <Geom_BezierSurface.hxx>
+#include <Geom_Curve.hxx>
 #include <Geom_Plane.hxx>
 #include <NCollection_Array1.hxx>
 #include <NCollection_IndexedDataMap.hxx>
@@ -71,8 +76,13 @@
 #include <TopoDS_Solid.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <gp.hxx>
+#include <gp_Ax3.hxx>
+#include <gp_Circ.hxx>
 #include <gp_Dir.hxx>
+#include <gp_Elips.hxx>
 #include <gp_Pln.hxx>
+#include <gp_Sphere.hxx>
+#include <gp_Torus.hxx>
 #include <gp_Pnt2d.hxx>
 #include <gp_Vec.hxx>
 #include <math.hxx>
@@ -886,6 +896,217 @@ std::vector<Bnd_Box> exact_boxes(const std::vector<TopoDS_Shape>& shapes) {
   std::vector<Bnd_Box> out(shapes.size());
   OSD_Parallel::For(0, static_cast<int>(shapes.size()), [&](const int i) {
     out[static_cast<std::size_t>(i)] = exact_box(shapes[static_cast<std::size_t>(i)]);
+  });
+  return out;
+}
+
+namespace {
+
+// The widening of a coarse box: covers the 1e-7 pad of AddOptimal and the rounding of the
+// evaluations on both sides (see coarse_box in the header).
+constexpr double kCoarseMarginAbs = 1e-6;
+constexpr double kCoarseMarginRel = 1e-12;
+
+// Adds the bound of every point O + a cos(t) X + b sin(t) Y of a whole circle or ellipse:
+// |P_k - O_k| <= sqrt((a X_k)^2 + (b Y_k)^2) by the Cauchy-Schwarz inequality.
+void add_conic_bound(Bnd_Box& box, const gp_Pnt& o, const gp_Dir& x, const gp_Dir& y,
+                     double a, double b) {
+  double lo[3];
+  double hi[3];
+  for (int k = 1; k <= 3; ++k) {
+    const double amp = std::hypot(a * x.Coord(k), b * y.Coord(k));
+    lo[k - 1] = o.Coord(k) - amp;
+    hi[k - 1] = o.Coord(k) + amp;
+  }
+  box.Update(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+}
+
+// True when [t0, t1] lies inside the curve's own domain, where the convex hull property of
+// its poles holds; a periodic curve has no such limit.
+bool within_domain(const Handle(Geom_Curve) & c, double t0, double t1) {
+  if (c->IsPeriodic()) {
+    return true;
+  }
+  return t0 >= c->FirstParameter() - Precision::PConfusion() &&
+         t1 <= c->LastParameter() + Precision::PConfusion();
+}
+
+// Adds a bound of every point that AddOptimal evaluates on an edge: BndLib_Add3dCurve on
+// BRepAdaptor_Curve over the edge's range (BRepBndLib.cxx:293-306, 401-406). False when the
+// curve type has no bound proven here.
+bool add_edge_bound(const TopoDS_Edge& e, Bnd_Box& box) {
+  const BRepAdaptor_Curve c(e);
+  const double t0 = c.FirstParameter();
+  const double t1 = c.LastParameter();
+  switch (c.GetType()) {
+    case GeomAbs_Line:
+      // Its optimal box is the box of its two end points (GeomBndLib_Line.hxx:59-63).
+      if (Precision::IsInfinite(t0) || Precision::IsInfinite(t1)) {
+        return false;
+      }
+      box.Add(c.Value(t0));
+      box.Add(c.Value(t1));
+      return true;
+    case GeomAbs_Circle: {
+      const gp_Circ k = c.Circle();
+      add_conic_bound(box, k.Location(), k.XAxis().Direction(), k.YAxis().Direction(),
+                      k.Radius(), k.Radius());
+      return true;
+    }
+    case GeomAbs_Ellipse: {
+      const gp_Elips k = c.Ellipse();
+      add_conic_bound(box, k.Location(), k.XAxis().Direction(), k.YAxis().Direction(),
+                      k.MajorRadius(), k.MinorRadius());
+      return true;
+    }
+    case GeomAbs_BezierCurve: {
+      const Handle(Geom_BezierCurve) k = c.Bezier();
+      if (!within_domain(k, t0, t1)) {
+        return false;
+      }
+      for (int i = 1; i <= k->NbPoles(); ++i) {
+        box.Add(k->Pole(i));
+      }
+      return true;
+    }
+    case GeomAbs_BSplineCurve: {
+      const Handle(Geom_BSplineCurve) k = c.BSpline();
+      if (!within_domain(k, t0, t1)) {
+        return false;
+      }
+      for (int i = 1; i <= k->NbPoles(); ++i) {
+        box.Add(k->Pole(i));
+      }
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+// Adds the bound of every pole of a Bezier or B-spline surface.
+template <typename Surface>
+void add_surface_poles(const Handle(Surface) & k, Bnd_Box& box) {
+  for (int i = 1; i <= k->NbUPoles(); ++i) {
+    for (int j = 1; j <= k->NbVPoles(); ++j) {
+      box.Add(k->Pole(i, j));
+    }
+  }
+}
+
+// Adds a bound of a face's part of AddOptimal's box (BRepBndLib.cxx:265-345). False when
+// its surface or one of its edges has no bound proven here.
+bool add_face_bound(const TopoDS_Face& f, Bnd_Box& box) {
+  TopLoc_Location loc;
+  if (BRep_Tool::Surface(f, loc).IsNull()) {
+    return true;  // AddOptimal without the triangulation skips it too (BRepBndLib.cxx:281)
+  }
+  const BRepAdaptor_Surface s(f, false);
+  bool edges_only = false;
+  switch (s.GetType()) {
+    case GeomAbs_Plane:
+    case GeomAbs_Cylinder:
+    case GeomAbs_Cone:
+    case GeomAbs_SurfaceOfExtrusion:
+      edges_only = true;
+      break;
+    case GeomAbs_Sphere: {
+      // A partial sphere's box lies in the whole sphere's (GeomBndLib_Sphere.cxx:39-).
+      const gp_Sphere k = s.Sphere();
+      const gp_Pnt& o = k.Location();
+      const double r = k.Radius();
+      box.Update(o.X() - r, o.Y() - r, o.Z() - r, o.X() + r, o.Y() + r, o.Z() + r);
+      break;
+    }
+    case GeomAbs_Torus: {
+      // P = O + (R + r cos v)(cos u X + sin u Y) + r sin v Z, so
+      // |P_k - O_k| <= (R + r) sqrt(X_k^2 + Y_k^2) + r |Z_k|.
+      const gp_Torus k = s.Torus();
+      const gp_Ax3& p = k.Position();
+      const double big = k.MajorRadius() + k.MinorRadius();
+      double lo[3];
+      double hi[3];
+      for (int i = 1; i <= 3; ++i) {
+        const double amp =
+            big * std::hypot(p.XDirection().Coord(i), p.YDirection().Coord(i)) +
+            k.MinorRadius() * std::abs(p.Direction().Coord(i));
+        lo[i - 1] = p.Location().Coord(i) - amp;
+        hi[i - 1] = p.Location().Coord(i) + amp;
+      }
+      box.Update(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+      break;
+    }
+    case GeomAbs_BezierSurface:
+      add_surface_poles(s.Bezier(), box);
+      break;
+    case GeomAbs_BSplineSurface:
+      // AddOptimal clips the parameters of a non-periodic surface to its bounds
+      // (BRepBndLib.cxx:617-638), so every point it evaluates lies in the poles' hull.
+      add_surface_poles(s.BSpline(), box);
+      break;
+    default:
+      return false;
+  }
+  bool any_edge = false;
+  for (TopExp_Explorer x(f, TopAbs_EDGE); x.More(); x.Next()) {
+    const TopoDS_Edge& e = TopoDS::Edge(x.Current());
+    if (BRep_Tool::Degenerated(e) || !BRep_Tool::IsGeometric(e)) {
+      continue;  // AddOptimal skips these edges of a face too (BRepBndLib.cxx:300, 327)
+    }
+    if (!add_edge_bound(e, box)) {
+      return false;
+    }
+    any_edge = true;
+  }
+  // An edge-bounded type without an edge is bounded by its surface (BRepBndLib.cxx:287-292).
+  return !edges_only || any_edge;
+}
+
+}  // namespace
+
+std::optional<Bnd_Box> coarse_box(const TopoDS_Shape& s) {
+  Bnd_Box box;
+  for (TopExp_Explorer x(s, TopAbs_FACE); x.More(); x.Next()) {
+    if (!add_face_bound(TopoDS::Face(x.Current()), box)) {
+      return std::nullopt;
+    }
+  }
+  for (TopExp_Explorer x(s, TopAbs_EDGE, TopAbs_FACE); x.More(); x.Next()) {
+    const TopoDS_Edge& e = TopoDS::Edge(x.Current());
+    if (!BRep_Tool::IsGeometric(e)) {
+      continue;  // AddOptimal adds nothing for it (BRepBndLib.cxx:401-406)
+    }
+    if (BRep_Tool::Degenerated(e) || !add_edge_bound(e, box)) {
+      return std::nullopt;
+    }
+  }
+  for (TopExp_Explorer x(s, TopAbs_VERTEX, TopAbs_EDGE); x.More(); x.Next()) {
+    box.Add(BRep_Tool::Pnt(TopoDS::Vertex(x.Current())));
+  }
+  if (box.IsVoid()) {
+    return box;
+  }
+  double lo[3];
+  double hi[3];
+  box.Get(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+  for (int k = 0; k < 3; ++k) {
+    if (!std::isfinite(lo[k]) || !std::isfinite(hi[k])) {
+      return std::nullopt;
+    }
+    const double pad =
+        kCoarseMarginAbs + kCoarseMarginRel * std::max(std::abs(lo[k]), std::abs(hi[k]));
+    lo[k] -= pad;
+    hi[k] += pad;
+  }
+  Bnd_Box out;
+  out.Update(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+  return out;
+}
+
+std::vector<std::optional<Bnd_Box>> coarse_boxes(const std::vector<TopoDS_Shape>& shapes) {
+  std::vector<std::optional<Bnd_Box>> out(shapes.size());
+  OSD_Parallel::For(0, static_cast<int>(shapes.size()), [&](const int i) {
+    out[static_cast<std::size_t>(i)] = coarse_box(shapes[static_cast<std::size_t>(i)]);
   });
   return out;
 }
