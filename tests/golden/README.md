@@ -240,3 +240,23 @@ search goes on to a face it can sweep from. The oracle is the volume: the regula
 of circumradius 1 has the area 5/2 sin(72 degrees) = 2.3776412907378837, and the prism is
 1 high, so the cell volumes match it to 1.9e-16 relative. The smallest corner angle is 54
 degrees, and every cell has a positive volume.
+
+## Explained differences since the ids and labelled export group (Phase 4, group 8)
+
+Group 7 changes no probe. Group 8 (report §4 A5, C2, C4) changes one `geometry` probe and
+one `defect` probe:
+
+| Probe | Before | Now | Issue |
+|---|---|---|---|
+| `exchange/step_round_trip.face_labels` | 0 | 1 | C4 |
+| `C2/export_handoff_after_common.details` | names only a same-domain merge; lists no ids | names a boolean as a cause and `allow_aliases=True` as the way out; ends "The ids, by kind: SOLID 1, 28." | A5, C2 |
+
+- `step_round_trip` writes a box with `face_names={1: "inlet"}` and reads it back. OCCT
+  writes and reads a face name only with `write/read.stepcaf.subshapes.name` on, and both
+  are off by default, so the name was lost on the way out. The reader also looked up names
+  on top-level labels only. Now the name is the name of the face's `ADVANCED_FACE` entity,
+  and it reads back on face 1. The count of 1 is the one face named.
+- `export_handoff_after_common` is the overlapping `common` of report §4 C2. Its two solid
+  ids (1 and 28) both denote the result. The refusal keeps its message, `not a bijection`.
+  Its details now list the ids by kind (A5) and name the boolean cause and the
+  `allow_aliases=True` way out (C2).
