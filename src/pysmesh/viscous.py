@@ -4,9 +4,14 @@
 
 """Viscous boundary-layer prism generation (Tier-1).
 
-Public surface: :class:`ExtrusionMethod`, :class:`VLParams`, :class:`VLResult`, and
-:func:`compute_viscous_layers`. These wrap the low-level ``_core.compute_viscous_layers``
-(which returns raw NumPy arrays) in frozen dataclasses and validate parameters up front.
+Public surface: :class:`ExtrusionMethod`, :class:`VLParams`, :class:`VLResult`,
+:func:`compute_viscous_layers` and :func:`first_layer_thickness`. These wrap the
+low-level ``_core`` functions (which return raw NumPy arrays) in frozen dataclasses and
+validate parameters up front.
+
+A stack of ``N`` layers growing by the factor ``f`` and totalling ``T`` has the first
+layer ``t1 = T (f - 1) / (f^N - 1)``, or ``T / N`` when ``f = 1``, and layer ``k`` ends
+at ``t1 (f^k - 1) / (f - 1)`` from the wall (``k t1`` when ``f = 1``).
 
 The connectivity arrays (``prism_connectivity``, ``inner_surface_tris``) hold **0-based row
 indices into** ``node_coords`` / ``node_ids`` — VTK-ready, so a consumer can build a
@@ -25,6 +30,55 @@ from numpy.typing import NDArray
 
 from ._core import Mesh, PysmeshError
 from ._core import compute_viscous_layers as _compute_viscous_layers
+from ._core import first_layer_thickness as _first_layer_thickness
+
+
+def _check_layer_stack(
+    owner: str, total_thickness: float, layer_count: int, stretch_factor: float
+) -> None:
+    """Refuse a layer stack that SMESH would not grow as stated (report L2).
+
+    Upstream checks none of the three (``StdMeshers_ViscousLayers.cxx:1304-1339``): a
+    factor below 1 reads as uniform layers (``Get1stLayerThickness`` answers ``T / N``
+    for any ``f^N - 1 <= 0``), and a thickness or count of 0 builds nothing.
+    """
+    if not total_thickness > 0.0:
+        raise PysmeshError(
+            f"{owner}: total_thickness must be > 0 (got {total_thickness})."
+        )
+    if layer_count < 1:
+        raise PysmeshError(f"{owner}: layer_count must be >= 1 (got {layer_count}).")
+    if not stretch_factor >= 1.0:
+        raise PysmeshError(
+            f"{owner}: stretch_factor must be >= 1, 1 for uniform layers "
+            f"(got {stretch_factor})."
+        )
+
+
+def first_layer_thickness(
+    total_thickness: float, stretch_factor: float, layer_count: int
+) -> float:
+    """The thickness of the first layer of a stack, at the wall.
+
+    ``t1 = T (f - 1) / (f^N - 1)``, or ``T / N`` when ``f = 1``
+    (``StdMeshers_ViscousLayers::Get1stLayerThickness``). This is the inverse a caller
+    with a target first-cell height needs before choosing ``T``.
+
+    Args:
+        total_thickness: Total thickness ``T`` of the stack, > 0.
+        stretch_factor: Ratio ``f`` of one layer's thickness to the one before, >= 1.
+        layer_count: Number of layers ``N``, >= 1.
+
+    Returns:
+        The first layer's thickness.
+
+    Raises:
+        PysmeshError: If ``T <= 0``, ``N < 1``, ``f < 1``, or a value is not finite.
+    """
+    _check_layer_stack(
+        "first_layer_thickness", total_thickness, layer_count, stretch_factor
+    )
+    return float(_first_layer_thickness(total_thickness, stretch_factor, layer_count))
 
 
 class ExtrusionMethod(IntEnum):

@@ -264,6 +264,7 @@ from .viscous import (
     VLParams,
     VLResult,
     compute_viscous_layers,
+    first_layer_thickness,
 )
 
 # The package version, from pyproject.toml through the generated build info.
@@ -465,6 +466,7 @@ __all__ = [
     "block_points",
     "block_shapes",
     "compute_viscous_layers",
+    "first_layer_thickness",
     "free_boundary_edges",
     "gmf_unwritable_types",
     "gmf_writable_group_name",

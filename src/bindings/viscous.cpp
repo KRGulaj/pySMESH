@@ -328,9 +328,23 @@ py::dict compute_viscous_layers(const py::object& mesh_obj, const std::vector<in
   return out;
 }
 
+// The thickness of the first layer of a stack (report L1). The caller has checked the
+// arguments (pysmesh.viscous): upstream answers T / N for any f^N - 1 <= DBL_MIN, so a factor
+// below 1 would read as uniform layers rather than be refused.
+double first_layer_thickness(double total_thickness, double stretch_factor, int layer_count) {
+  require_finite("first_layer_thickness", "total_thickness", total_thickness);
+  require_finite("first_layer_thickness", "stretch_factor", stretch_factor);
+  return StdMeshers_ViscousLayers::Get1stLayerThickness(total_thickness, stretch_factor,
+                                                        layer_count);
+}
+
 }  // namespace
 
 void bind_viscous(py::module_& m) {
+  m.def("first_layer_thickness", &first_layer_thickness, py::arg("total_thickness"),
+        py::arg("stretch_factor"), py::arg("layer_count"),
+        "The first layer of a stack of layer_count layers growing by stretch_factor and "
+        "totalling total_thickness (StdMeshers_ViscousLayers::Get1stLayerThickness).");
   m.def("compute_viscous_layers", &compute_viscous_layers, py::arg("mesh"),
         py::arg("face_ids"), py::arg("is_ignore"), py::arg("total_thickness"),
         py::arg("n_layers"), py::arg("stretch_factor"), py::arg("method"),

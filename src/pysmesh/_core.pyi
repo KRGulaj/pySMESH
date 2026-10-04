@@ -578,6 +578,9 @@ def tessellate(
     ang_defl: float,
     relative: bool = ...,
 ) -> dict[str, object]: ...
+def first_layer_thickness(
+    total_thickness: float, stretch_factor: float, layer_count: int
+) -> float: ...
 def compute_viscous_layers(
     mesh: Mesh,
     face_ids: list[int],
