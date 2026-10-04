@@ -1301,6 +1301,104 @@ def test_scaled_jacobian_of_a_regular_tetrahedron_is_one() -> None:
     assert abs(float(result.values[0])) == pytest.approx(1.0, rel=1e-12)
 
 
+# ---- W3.6 a concurrent assignment ------------------------------------------------- #
+
+
+def _two_boxes() -> ps.Shape:
+    """Two 3 x 7 x 11 boxes, the second at x = 10: one compound of two solids."""
+    session = Session()
+    session.add_box(BOX_DX, BOX_DY, BOX_DZ)
+    session.add_box(BOX_DX, BOX_DY, BOX_DZ, origin=(10.0, 0.0, 0.0))
+    return ps.load_brep(session.brep())
+
+
+def _ordinal_where(
+    items: list[object], lo: tuple[float, ...], hi: tuple[float, ...]
+) -> int:
+    """The ordinal of the item whose bounding box is ``lo`` .. ``hi``."""
+    for item in items:
+        box = item.bbox  # type: ignore[attr-defined]
+        if np.allclose(box[:3], lo, atol=TOL) and np.allclose(box[3:], hi, atol=TOL):
+            return int(item.id)  # type: ignore[attr-defined]
+    raise AssertionError(f"nothing with the box {lo} .. {hi}")
+
+
+def _concurrent_model() -> tuple[ps.Shape, int, int, int]:
+    """The two boxes; the first box's faces x = 0 and y = 0, and the edge they share."""
+    shape = _two_boxes()
+    x0 = _ordinal_where(shape.faces(), (0.0, 0.0, 0.0), (0.0, BOX_DY, BOX_DZ))
+    y0 = _ordinal_where(shape.faces(), (0.0, 0.0, 0.0), (BOX_DX, 0.0, BOX_DZ))
+    edge = _ordinal_where(shape.edges(), (0.0, 0.0, 0.0), (0.0, 0.0, BOX_DZ))
+    return shape, x0, y0, edge
+
+
+def test_a_concurrent_assignment_is_refused_and_leaves_the_model_unchanged() -> None:
+    """3 and 5 segments on two faces that share an edge, then 7 on their solid.
+
+    SMESH reports HYP_CONCURRENT: the shared edge lies on two faces whose 1-D hypotheses
+    differ, so which of them meshes it is undefined (SMESH_subMesh::
+    CheckConcurrentHypothesis). The assignment raises, names the edge, the faces and the
+    hypotheses, and leaves the model as it was: the same assignments, and the same mesh
+    as a mesher that never saw the third assignment.
+    """
+    shape, x0, y0, edge = _concurrent_model()
+
+    def two_faces(mesher: Mesher) -> None:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=2))
+        mesher.assign(NumberOfSegments(count=3), on=SubShape(SubShapeKind.FACE, x0))
+        mesher.assign(NumberOfSegments(count=5), on=SubShape(SubShapeKind.FACE, y0))
+        mesher.assign(Quadrangle2D())
+
+    with Mesher(shape) as mesher:
+        two_faces(mesher)
+        before = mesher.assignments()
+
+        with pytest.raises(PysmeshError, match="HYP_CONCURRENT") as raised:
+            mesher.assign(NumberOfSegments(count=7), on=SubShape(SubShapeKind.SOLID, 1))
+
+        after = mesher.assignments()
+        mesher.compute()
+        refused = mesher.mesh()
+    with Mesher(shape) as plain:
+        two_faces(plain)
+        plain.compute()
+        expected = plain.mesh()
+
+    assert after == before
+    np.testing.assert_array_equal(
+        np.sort(refused.node_coords, axis=0), np.sort(expected.node_coords, axis=0)
+    )
+    text = str(raised.value) + " " + raised.value.details
+    for part in (f"EDGE {edge}", f"FACE {x0}", f"FACE {y0}", "NumberOfSegments"):
+        assert part in text, part
+
+
+def test_a_hypothesis_on_the_shared_edge_settles_the_concurrency() -> None:
+    """The way out: a hypothesis on the shared edge itself has priority over the faces.
+
+    With 4 segments on the edge first, the same 3, 5 and 7 are accepted, and the edge is
+    meshed with its own 4 segments.
+    """
+    shape, x0, y0, edge = _concurrent_model()
+
+    with Mesher(shape) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=2))
+        mesher.assign(NumberOfSegments(count=4), on=SubShape(SubShapeKind.EDGE, edge))
+        mesher.assign(NumberOfSegments(count=3), on=SubShape(SubShapeKind.FACE, x0))
+        mesher.assign(NumberOfSegments(count=5), on=SubShape(SubShapeKind.FACE, y0))
+        mesher.assign(NumberOfSegments(count=7), on=SubShape(SubShapeKind.SOLID, 1))
+        mesher.compute()
+        mesh = mesher.mesh()
+
+    on_edge = (mesh.element_kind == int(SubShapeKind.EDGE)) & (
+        mesh.element_ordinal == edge
+    )
+    on_edge &= mesh.element_type == int(ElementType.EDGE)
+    assert int(np.count_nonzero(on_edge)) == 4
+
+
 # ---- W3.7 smoothing in the parameter space of a periodic face --------------------- #
 
 

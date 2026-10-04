@@ -518,6 +518,61 @@ void Mesher::build_index_map() {
   }
 }
 
+std::string Mesher::describe_concurrency(const TopoDS_Shape& target,
+                                         SMESH_Hypothesis* hyp) const {
+  // The same search as SMESH_subMesh::CheckConcurrentHypothesis: a sub-shape with no
+  // similar hypothesis of its own, whose nearest ancestors of one type carry different
+  // similar hypotheses. Similar: the same type and dimension, not `hyp` itself, and for
+  // an auxiliary hypothesis the same name (getSimilarAttached, SMESH_subMesh.cxx:2227).
+  SMESH_HypoFilter similar(SMESH_HypoFilter::HasType(hyp->GetType()));
+  similar.And(SMESH_HypoFilter::HasDim(hyp->GetDim()));
+  similar.AndNot(SMESH_HypoFilter::Is(hyp));
+  if (hyp->IsAuxiliary()) {
+    similar.And(SMESH_HypoFilter::HasName(hyp->GetName()));
+  } else {
+    similar.AndNot(SMESH_HypoFilter::IsAuxiliary());
+  }
+  auto name_of = [this](const TopoDS_Shape& s) {
+    const std::pair<const char*, int> at = ordinal_of_shape_index(meshDS_->ShapeToIndex(s));
+    return std::string(at.first[0] != 0 ? at.first : "sub-shape") + " " +
+           std::to_string(at.second);
+  };
+  SMESH_subMesh* sub = mesh_->GetSubMesh(target);
+  for (SMESH_subMeshIteratorPtr it = sub->getDependsOnIterator(false, false); it->more();) {
+    SMESH_subMesh* sm = it->next();
+    if (!sm->IsApplicableHypothesis(hyp) ||
+        sm->CheckConcurrentHypothesis(hyp) != SMESH_Hypothesis::HYP_CONCURRENT) {
+      continue;
+    }
+    const TopoDS_Shape& shared = sm->GetSubShape();
+    std::string owners;
+    std::string kinds;
+    TopAbs_ShapeEnum level = TopAbs_SHAPE;
+    for (const TopoDS_Shape& ancestor : mesh_->GetAncestors(shared)) {
+      const SMESH_Hypothesis* found = mesh_->GetHypothesis(ancestor, similar, false);
+      if (found == nullptr) {
+        continue;
+      }
+      if (level == TopAbs_SHAPE) {
+        level = ancestor.ShapeType();
+      } else if (ancestor.ShapeType() != level) {
+        break;
+      }
+      owners += (owners.empty() ? "" : " and ") + name_of(ancestor) + " (" +
+                found->GetName() + ")";
+      kinds = found->GetName();
+    }
+    return name_of(shared) + " lies on " + owners +
+           ", which carry different hypotheses, so which of them meshes it is "
+           "undefined. Assigning '" + hyp->GetName() + "' made SMESH check the sub-shapes "
+           "it governs and find it. Assign one " + kinds + " on " + name_of(shared) +
+           " itself first: a hypothesis on the sub-shape takes priority over those on the "
+           "shapes around it.";
+  }
+  return "SMESH reported HYP_CONCURRENT, but no sub-shape with two different similar "
+         "hypotheses on its ancestors was found under the assigned shape.";
+}
+
 void Mesher::refuse_unread_layers() const {
   // Only some algorithms build layers in their Compute: Hexa_3D, PolyhedronPerSolid_3D and
   // Cartesian_3D read ViscousLayers; Quadrangle_2D, QuadFromMedialAxis_1D2D and MEFISTO_2D
@@ -596,6 +651,17 @@ void Mesher::assign(const std::string& name, const py::dict& params, const std::
     throw PysmeshError("Mesher.assign: SMESH refused '" + name + "' on " +
                            where(kind, ordinal) + " — " + status_text(status) + ".",
                        detail);
+  }
+  if (status == SMESH_Hypothesis::HYP_CONCURRENT) {
+    // An ambiguous model: a sub-shape under `target` is governed by two different
+    // hypotheses of one kind on shapes around it, and which one meshes it is undefined
+    // (SMESH_subMesh::CheckConcurrentHypothesis). Undo the assignment and say where.
+    const std::string why = describe_concurrency(target, hyp);
+    mesh_->RemoveHypothesis(target, hyp_id);
+    throw PysmeshError("Mesher.assign: '" + name + "' on " + where(kind, ordinal) +
+                           " makes the model ambiguous (SMESH status HYP_CONCURRENT); it "
+                           "was not assigned.",
+                       why);
   }
   assigned_.push_back({name, kind, ordinal, hyp_id});
 }

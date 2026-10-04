@@ -49,7 +49,13 @@ class _MeshOps(_MesherBase):
             PysmeshError: If SMESH refuses the assignment. The message names the sub-shape
                 and why — a second algorithm of the same dimension already there, a
                 hypothesis that does not fit the algorithm beside it, a sub-shape whose
-                geometry the algorithm cannot read, and so on.
+                geometry the algorithm cannot read, and so on. Also if the assignment
+                makes the model ambiguous (SMESH's ``HYP_CONCURRENT``): a sub-shape
+                under ``on`` lies on two shapes of one type whose similar hypotheses
+                differ, so which one meshes it is undefined. The details name that
+                sub-shape and the hypotheses, and the assignment is undone, so
+                :meth:`assignments` is unchanged. Assign one hypothesis on that
+                sub-shape itself first: it takes priority over those around it.
         """
         kind = "" if on is None else on.kind.name
         ordinal = 0 if on is None else on.ordinal

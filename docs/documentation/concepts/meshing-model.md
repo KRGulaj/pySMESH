@@ -213,6 +213,22 @@ from pysmesh.mesher import Hexa3D, SubShape, SubShapeKind
 mesher.assign(Hexa3D(), on=SubShape(SubShapeKind.SOLID, 1))
 ```
 
+A hypothesis on a sub-shape takes priority over one on a shape around it. Two hypotheses of
+one kind on two shapes of the same type that share a sub-shape leave that sub-shape
+ambiguous: for example 3 segments on one face and 5 on the face next to it, for their
+common edge. SMESH reports this (`HYP_CONCURRENT`) when a later assignment makes it check
+that edge, and `assign` then raises `PysmeshError`. The details name the edge, the faces
+and their hypotheses. The assignment is undone, so `assignments()` is unchanged. Settle it
+by assigning a hypothesis on the shared edge itself.
+
+`assign` lets four other SMESH statuses pass. A missing hypothesis (`HYP_MISSING`) is the
+normal state while a model is built, and `compute()` names what is still missing. A bad
+parameter (`HYP_BAD_PARAMETER`) is refused when the hypothesis is built, or named by
+`compute()`. A hidden or hiding algorithm (`HYP_HIDDEN_ALGO`, `HYP_HIDING_ALGO`) is SMESH's
+defined priority of an all-dimensional algorithm, and which of the two statuses SMESH
+reports depends only on the order of the assignments; `report.meshed` shows which algorithm
+meshed each sub-shape.
+
 ## Reading `compute()`
 
 `compute()` returns a `ComputeReport`:

@@ -465,6 +465,10 @@ class Mesher {
   // algorithm does not list it among the hypotheses it reads, before anything is computed.
   void refuse_unread_layers() const;
 
+  // The sub-shape where `hyp`, just assigned on `target`, met two different similar
+  // hypotheses (HYP_CONCURRENT), and those hypotheses with where they are assigned.
+  std::string describe_concurrency(const TopoDS_Shape& target, SMESH_Hypothesis* hyp) const;
+
   void clear_mesh();
 
   // The counts and the meshed sub-shapes of a successful compute, as compute() returns
