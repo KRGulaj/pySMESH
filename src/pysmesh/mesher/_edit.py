@@ -473,6 +473,9 @@ class _EditOps(_MesherBase):
         moves the boundary. With ``on_shape`` it moves the rest **in the parameter space of
         the face each node sits on**, which keeps every node on the CAD surface — the
         property a mesh smoothed as raw coordinates loses immediately on any curved face.
+        On a periodic face, such as a cylinder's, a neighbour across the seam is taken
+        at its parameter on the near side of the seam (SMESH 9.16, ``42e25f073``), so a
+        node next to the seam is not pulled to the far side of the surface.
 
         Args:
             method: Laplacian or centroidal.

@@ -47,6 +47,7 @@ from pysmesh import (
     SegmentAroundVertex0D,
     SegmentLengthAroundVertex,
     Session,
+    SmoothMethod,
     SplitMethod,
     SubShape,
     SubShapeKind,
@@ -1296,3 +1297,43 @@ def test_scaled_jacobian_of_a_regular_tetrahedron_is_one() -> None:
         result = mesher.quality(ScaledJacobian())
 
     assert abs(float(result.values[0])) == pytest.approx(1.0, rel=1e-12)
+
+
+# ---- W3.7 smoothing in the parameter space of a periodic face --------------------- #
+
+
+@pytest.mark.parametrize("method", [SmoothMethod.LAPLACIAN, SmoothMethod.CENTROIDAL])
+def test_smoothing_a_uniform_cylinder_mesh_across_its_seam_moves_nothing(
+    method: SmoothMethod,
+) -> None:
+    """A uniform 12 x 12 mapped mesh of a cylinder's side is a fixed point: it stays.
+
+    Every interior node of a uniform grid is the average of its neighbours in (u, v),
+    and the centre of its cells, so either smoother leaves it in place, provided the
+    neighbours across the seam u = 0 = 2 pi are taken on the near side (SMESH 9.16,
+    ``42e25f073``, "Laplacian Smoothing 2D"). Every node stays on the radius-1 surface.
+    """
+    session = Session()
+    session.add_cylinder(1.0, 2.0)
+    shape = ps.load_brep(session.brep())
+    side = next(
+        f.id
+        for f in shape.faces()
+        if abs(f.bbox[2]) < TOL and abs(f.bbox[5] - 2.0) < TOL
+    )
+
+    with Mesher(shape) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=12))
+        mesher.assign(Quadrangle2D(), on=SubShape(SubShapeKind.FACE, side))
+        mesher.compute()
+        before = mesher.mesh()
+        mesher.smooth(method=method, iterations=3, on_shape=True)
+        after = mesher.mesh()
+
+    xyz_before = before.node_coords[np.argsort(before.node_id)]
+    xyz_after = after.node_coords[np.argsort(after.node_id)]
+    assert np.abs(xyz_after - xyz_before).max() < 1e-12
+    np.testing.assert_allclose(
+        np.hypot(xyz_after[:, 0], xyz_after[:, 1]), 1.0, atol=TOL
+    )
