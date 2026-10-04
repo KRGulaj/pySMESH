@@ -31,6 +31,8 @@
 
 #include "session/session.hpp"
 
+#include <set>
+
 namespace pysmesh {
 namespace session {
 
@@ -53,6 +55,8 @@ py::dict Session::export_handoff() const {
   std::vector<EntityId> ambiguous;
   std::vector<EntityId> split;
   std::vector<std::string> unlabelled;
+  // Every blamed id once, under its kind, in the order of kEntityKinds (report A5).
+  std::vector<std::pair<TopAbs_ShapeEnum, std::set<EntityId>>> blamed_by_kind;
 
   for (TopAbs_ShapeEnum kind : kEntityKinds) {
     ShapeSet shapes;
@@ -91,6 +95,11 @@ py::dict Session::export_handoff() const {
       }
     }
 
+    std::set<EntityId> blamed(m.ambiguous.begin(), m.ambiguous.end());
+    blamed.insert(m.split.begin(), m.split.end());
+    if (!blamed.empty()) {
+      blamed_by_kind.emplace_back(kind, std::move(blamed));
+    }
     for (EntityId id : m.ambiguous) {
       ambiguous.push_back(id);
     }
@@ -127,13 +136,24 @@ py::dict Session::export_handoff() const {
     }
     detail << "Resolve the ambiguity before handing off — a merge is settled by exporting "
               "after the ids the caller no longer needs have been dropped, a split by "
-              "treating the pieces as the new entities they are.";
-    std::vector<EntityId> blamed = ambiguous;
-    blamed.insert(blamed.end(), split.begin(), split.end());
+              "treating the pieces as the new entities they are. The ids, by kind:";
+    std::vector<EntityId> faces;
+    for (const auto& [kind, ids] : blamed_by_kind) {
+      detail << " " << kind_name(kind);
+      const char* sep = " ";
+      for (EntityId id : ids) {
+        detail << sep << id;
+        sep = ", ";
+      }
+      detail << ".";
+      if (kind == TopAbs_FACE) {
+        faces.assign(ids.begin(), ids.end());
+      }
+    }
     throw PysmeshError(
         "Session.export_handoff: the entity id to sub-shape map is not a bijection, so the "
         "handoff would silently mis-name entities.",
-        detail.str(), ids_as_int(blamed));
+        detail.str(), ids_as_int(faces));
   }
 
   if (!unlabelled.empty()) {

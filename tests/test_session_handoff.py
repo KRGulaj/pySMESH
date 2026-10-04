@@ -273,7 +273,9 @@ def test_a_split_model_is_refused_naming_the_split_id() -> None:
     with pytest.raises(PysmeshError, match="not a bijection") as excinfo:
         s.export_handoff()
 
-    assert ids[0] in excinfo.value.face_ids
+    # A solid is named in the details under its kind; face_ids holds faces only (A5).
+    assert int(ids[0]) in _details_by_kind(excinfo.value.details)["SOLID"]
+    assert int(ids[0]) not in [int(i) for i in excinfo.value.face_ids]
 
 
 def test_coaxial_walls_defeat_a_centroid_map_but_not_the_shipped_one() -> None:
@@ -367,3 +369,72 @@ def test_the_ordinals_survive_the_round_trip_on_a_real_assembly(
     for ordinal in sample:
         table = s.mass_properties([EntityId(int(handoff.face_id[ordinal]))])
         assert float(table.measure[0]) == pytest.approx(faces[ordinal].area, rel=1e-9)
+
+
+# ------------------------------------------ The refusal's ids (report §2 A5) --- #
+
+# Two 2 x 2 x 2 boxes, the second shifted by 1 along x, fused: coplanar faces merge, and
+# the refusal used to list solids, edges and vertices on face_ids, 8 of them twice. The
+# oracle is independent of the refusal: two ids that denote one shape have the same
+# entity_table row, bit for bit (measure, centroid, box), and a split id has
+# shape_count > 1.
+HANDOFF_KINDS: tuple[EntityKind, ...] = (
+    EntityKind.SOLID,
+    EntityKind.FACE,
+    EntityKind.EDGE,
+    EntityKind.VERTEX,
+)
+
+
+def _coplanar_fuse() -> Session:
+    """The A5 fuse: two shifted boxes with coplanar faces."""
+    s = Session()
+    s.add_box(2.0, 2.0, 2.0)
+    first = s.entities(EntityKind.SOLID).tolist()
+    s.add_box(2.0, 2.0, 2.0, origin=(1.0, 0.0, 0.0))
+    second = [i for i in s.entities(EntityKind.SOLID).tolist() if i not in first]
+    s.fuse(first, second)
+    return s
+
+
+def _blamed_by_kind(s: Session) -> dict[str, set[int]]:
+    """The ids an export must refuse, by kind: aliases and splits."""
+    out: dict[str, set[int]] = {}
+    for kind in HANDOFF_KINDS:
+        table = s.entity_table(kind)
+        rows = np.c_[table.measure, table.centroid, table.bbox]
+        keys = [r.tobytes() for r in rows]
+        ids = {
+            int(i)
+            for i, key, count in zip(table.ids, keys, table.shape_count, strict=True)
+            if keys.count(key) > 1 or int(count) > 1
+        }
+        if ids:
+            out[kind.name] = ids
+    return out
+
+
+def _details_by_kind(details: str) -> dict[str, list[int]]:
+    """The ids the refusal's details list under each kind, in their order."""
+    listing = details.split("The ids, by kind:")[1]
+    out: dict[str, list[int]] = {}
+    for part in listing.split("."):
+        words = part.strip().replace(",", " ").split()
+        if words:
+            out[words[0]] = [int(w) for w in words[1:]]
+    return out
+
+
+def test_a_handoff_refusal_names_each_id_once_and_only_faces_on_face_ids() -> None:
+    """face_ids: the blamed faces, once each; details: every blamed id by kind (A5)."""
+    s = _coplanar_fuse()
+    expected = _blamed_by_kind(s)
+
+    with pytest.raises(PysmeshError) as caught:
+        s.export_handoff()
+
+    face_ids = [int(i) for i in caught.value.face_ids]
+    assert face_ids == sorted(expected["FACE"])
+    listed = _details_by_kind(caught.value.details)
+    assert {k: set(v) for k, v in listed.items()} == expected
+    assert all(len(v) == len(set(v)) for v in listed.values())
