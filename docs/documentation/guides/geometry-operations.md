@@ -11,8 +11,8 @@ for what the ordinals mean and when they change.
 ## STEP: `read_step_xde` / `write_step_xde`
 
 `read_step_xde` imports a STEP file through OCCT's XDE stack, carrying product names,
-per-face colours, and the file's length unit across the boundary, none of which a plain
-geometry transfer preserves:
+per-face names and colours, and the file's length unit across the boundary, none of which a
+plain geometry transfer preserves:
 
 ```python
 import pysmesh
@@ -42,6 +42,10 @@ data = pysmesh.write_step_xde(
 `unit` is required and names the unit the coordinates are already in. It labels them and
 never rescales them. Passing `imported.unit_name` makes the export a round trip. See
 [Units](../concepts/units.md#the-write-contract) for the full contract.
+
+A face name is written as the name of the face's STEP entity, and `read_step_xde` reads it
+back on `face_labels`. To name faces by session id rather than by ordinal, use
+`Session.write_step`; see [Session](../concepts/session.md).
 
 ## IGES: `read_iges` / `write_iges`
 

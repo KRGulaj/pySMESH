@@ -180,6 +180,18 @@ def test_write_step_roundtrip_name_and_color(box_brep: bytes) -> None:
     assert greens[0].color == pytest.approx((0.0, 1.0, 0.0))
 
 
+def test_write_step_face_names_survive_a_read_step_xde_round_trip(
+    box_brep: bytes,
+) -> None:
+    """Each face name written reads back on the same face id (report §4 C4)."""
+    names = {1: "left", 2: "right", 5: "bottom"}
+
+    step_bytes = write_step_xde(box_brep, unit="MM", face_names=names)
+    result = read_step_xde(step_bytes)
+
+    assert {f.id: f.name for f in result.face_labels if f.name} == names
+
+
 def test_write_step_returns_bytes(box_brep: bytes) -> None:
     """The writer returns STEP file content as bytes beginning with the ISO-10303 header."""
     step_bytes = write_step_xde(box_brep, unit="MM", name="part")

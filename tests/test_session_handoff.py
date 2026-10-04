@@ -571,3 +571,81 @@ def test_a_bijective_export_has_no_aliases() -> None:
     assert dict(aliased.aliases) == {}
     assert np.array_equal(plain.face_id, aliased.face_id)
     assert plain.brep == aliased.brep
+
+
+# -------------------------------------- Names keyed by session id (report §4 C4) --- #
+
+# The coplanar fuse of report §4 C2: the top faces of the two boxes (z = 2) and their
+# bottom faces (z = 0) become pieces, one of each denoted by both operands' ids. The
+# oracle is geometric: every face the reader finds in the plane z = 2 is named "top",
+# every face in z = 0 "bottom", and no other face is named.
+C4_TOL: float = 1e-9
+
+
+def _faces_in_plane(s: Session, z: float) -> list[EntityId]:
+    """The live faces of the session that lie in the plane at height z."""
+    table = s.bounding_boxes(EntityKind.FACE)
+    lo, hi = table.bbox[:, 2], table.bbox[:, 5]
+    flat = (np.abs(lo - z) < C4_TOL) & (np.abs(hi - z) < C4_TOL)
+    return [EntityId(int(i)) for i in table.ids[flat]]
+
+
+def _in_plane(bbox: NDArray[np.float64], z: float) -> bool:
+    """True if a box is flat at height z."""
+    return abs(bbox[2] - z) < C4_TOL and abs(bbox[5] - z) < C4_TOL
+
+
+def test_write_step_names_every_face_of_the_named_ids_after_a_fuse() -> None:
+    """Agreeing names on a merged face: read back, each face carries its name (C4)."""
+    s = _c2_session("fuse_coplanar")
+    names = {i: "top" for i in _faces_in_plane(s, 2.0)}
+    names.update({i: "bottom" for i in _faces_in_plane(s, 0.0)})
+
+    data = s.write_step(unit="MM", face_names=names)
+
+    imported = ps.read_step_xde(data)
+    faces = {f.id: f for f in ps.load_brep(imported.brep).faces()}
+    labels = {lab.id: lab.name for lab in imported.face_labels if lab.name}
+    for face_id, face in faces.items():
+        top, bottom = _in_plane(face.bbox, 2.0), _in_plane(face.bbox, 0.0)
+        expected = "top" if top else "bottom" if bottom else None
+        assert labels.get(face_id) == expected, (face_id, face.bbox)
+
+
+def test_write_step_names_a_merged_face_from_its_one_named_id() -> None:
+    """One operand's top named: its piece and the shared piece take it (C4)."""
+    s = _c2_session("fuse_coplanar")
+    table = s.bounding_boxes(EntityKind.FACE)
+    tops = _faces_in_plane(s, 2.0)
+    first = next(i for i in tops if table.bbox[table.ids == i][0][0] < C4_TOL)
+
+    data = s.write_step(unit="MM", face_names={first: "top"})
+
+    imported = ps.read_step_xde(data)
+    faces = {f.id: f for f in ps.load_brep(imported.brep).faces()}
+    labels = {lab.id: lab.name for lab in imported.face_labels if lab.name}
+    for face_id, face in faces.items():
+        mine = _in_plane(face.bbox, 2.0) and face.bbox[3] < 2.0 + C4_TOL
+        assert labels.get(face_id) == ("top" if mine else None), (face_id, face.bbox)
+
+
+def test_write_step_refuses_a_merged_face_whose_ids_give_different_names() -> None:
+    """Two names on one merged face: refused, naming the ids and the names (C4)."""
+    s = _c2_session("fuse_coplanar")
+    tops = _faces_in_plane(s, 2.0)
+    names = {i: f"top {k}" for k, i in enumerate(tops)}
+
+    with pytest.raises(PysmeshError, match="names differ") as caught:
+        s.write_step(unit="MM", face_names=names)
+
+    message = str(caught.value)
+    assert all(f"{i}: 'top {k}'" in message for k, i in enumerate(tops))
+
+
+def test_write_step_refuses_a_name_for_an_id_that_is_not_a_live_face() -> None:
+    """A dead or non-face id in face_names is refused, naming it (C4)."""
+    s = _c2_session("fuse_coplanar")
+    solid = int(s.entities(EntityKind.SOLID)[0])
+
+    with pytest.raises(PysmeshError, match=rf"\[{solid}\]"):
+        s.write_step(unit="MM", face_names={EntityId(solid): "body"})

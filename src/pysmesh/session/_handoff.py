@@ -11,6 +11,7 @@ across per-area translation units; see the package docstring for the whole surfa
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from types import MappingProxyType
 from typing import cast
 
@@ -18,8 +19,9 @@ import numpy as np
 from numpy.typing import NDArray
 
 from .._core import PysmeshError
+from ..step import write_step_xde
 from ._base import _SessionBase
-from ._types import EntityId, Handoff
+from ._types import EntityId, EntityKind, Handoff
 
 
 class _HandoffOps(_SessionBase):
@@ -74,3 +76,63 @@ class _HandoffOps(_SessionBase):
                 {EntityId(k): EntityId(v) for k, v in aliases.items()}
             ),
         )
+
+    def write_step(
+        self,
+        *,
+        unit: str,
+        face_names: Mapping[EntityId, str],
+        name: str = "",
+    ) -> bytes:
+        """Export the live shape to STEP, naming its faces by session id.
+
+        The names are keyed by entity id, so they survive the operations that change the
+        faces' ordinals. A split id names every piece it denotes. A face that several
+        ids denote, as a boolean or a same-domain merge leaves it, takes the name when
+        every named id among them gives the same one, and is refused when they differ:
+        choosing one silently would mislabel the face.
+
+        Args:
+            unit: The unit the coordinates are in, as :func:`write_step_xde` takes it.
+            face_names: Live face id to name. Ids not in it leave their faces unnamed,
+                unless another id of the same face names it.
+            name: Product name for the whole shape (omitted when empty).
+
+        Returns:
+            The STEP file content as bytes. :func:`read_step_xde` reads the names
+            back on its ``face_labels``.
+
+        Raises:
+            PysmeshError: If a key of ``face_names`` is not a live face, if the named
+                ids of one face give different names (the ids and names are listed),
+                or if :func:`write_step_xde` refuses.
+        """
+        faces = {int(i) for i in self._s.entities(str(EntityKind.FACE), False)}
+        unknown = sorted(int(i) for i in face_names if int(i) not in faces)
+        if unknown:
+            raise PysmeshError(
+                f"Session.write_step: face_names names {unknown}, which are not live "
+                "faces."
+            )
+        by_ordinal: dict[int, str] = {}
+        clashes: list[str] = []
+        for ordinal, ids in enumerate(self._s.ordinal_ids(str(EntityKind.FACE)), 1):
+            named = {
+                int(i): face_names[EntityId(int(i))]
+                for i in ids
+                if EntityId(int(i)) in face_names
+            }
+            if len(set(named.values())) > 1:
+                pairs = ", ".join(f"{i}: {n!r}" for i, n in sorted(named.items()))
+                clashes.append(f"face #{ordinal} ({pairs})")
+            elif named:
+                by_ordinal[ordinal] = next(iter(named.values()))
+        if clashes:
+            raise PysmeshError(
+                "Session.write_step: "
+                + str(len(clashes))
+                + " face(s) are each one face denoted by ids whose names differ: "
+                + "; ".join(clashes)
+                + ". Give those ids one name, or name only one of them."
+            )
+        return write_step_xde(self.brep(), unit=unit, name=name, face_names=by_ordinal)

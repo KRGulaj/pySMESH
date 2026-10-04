@@ -42,6 +42,7 @@
 #include <vector>
 
 #include <BRepBuilderAPI_Transform.hxx>
+#include <DESTEP_Parameters.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <IFSelect_ReturnStatus.hxx>
@@ -213,11 +214,17 @@ class StepWriteUnitGuard {
   TCollection_AsciiString previous_;
 };
 
-// Name attached to a shape's XDE label, or "" if none.
+// Name attached to a shape's XDE label, or "" if none. A top-level shape carries its product
+// name on its own label. A face inside one carries its STEP name on a sub-shape label, which
+// the reader adds when it reads sub-shape names (report §4 C4). FindSubShape only looks;
+// XCAFDoc_ShapeTool::Search would add an empty sub-shape label for every unnamed face.
 std::string name_of(const occ::handle<XCAFDoc_ShapeTool>& st, const TopoDS_Shape& s) {
-  const TDF_Label lab = st->FindShape(s, Standard_False);
+  TDF_Label lab = st->FindShape(s, Standard_False);
   if (lab.IsNull()) {
-    return "";
+    const TDF_Label main = st->FindMainShape(s);
+    if (main.IsNull() || !st->FindSubShape(main, s, lab)) {
+      return "";
+    }
   }
   occ::handle<TDataStd_Name> attr;
   if (lab.FindAttribute(TDataStd_Name::GetID(), attr)) {
@@ -238,15 +245,17 @@ bool color_of(const occ::handle<XCAFDoc_ColorTool>& ct, const TopoDS_Shape& s,
 }
 
 // Read a STEP model into `reader`, from bytes (ReadStream) or a filesystem path (ReadFile).
-IFSelect_ReturnStatus read_into(STEPCAFControl_Reader& reader, const py::object& src) {
+// `params` apply to this read only, in place of OCCT's process-wide defaults.
+IFSelect_ReturnStatus read_into(STEPCAFControl_Reader& reader, const DESTEP_Parameters& params,
+                                const py::object& src) {
   if (py::isinstance<py::bytes>(src)) {
     const std::string buffer = src.cast<std::string>();
     std::istringstream stream(buffer);
-    return reader.ReadStream("stepdata", stream);
+    return reader.ChangeReader().ReadStream("stepdata", params, stream);
   }
   if (py::isinstance<py::str>(src)) {
     const std::string path = src.cast<std::string>();
-    return reader.ReadFile(path.c_str());
+    return reader.ReadFile(path.c_str(), params);
   }
   throw PysmeshError("read_step_xde: expected STEP bytes or a path string.");
 }
@@ -256,6 +265,13 @@ py::dict read_step_xde(const py::object& data_or_path) {
   reader.SetNameMode(true);
   reader.SetColorMode(true);
   reader.SetLayerMode(false);
+  // Face names live on the 'Name' attributes of STEP representation items. OCCT reads them
+  // only with read.stepcaf.subshapes.name on. Its default is off, so no face name written by
+  // write_step_xde survived a round trip (report §4 C4). The flag is set on this read's own
+  // parameters; the process-wide static is neither read for it nor written.
+  DESTEP_Parameters params;
+  params.InitFromStatic();
+  params.ReadSubshapeNames = true;
 
   std::string brep_bytes;
   double length_unit = 0.001;  // metres per returned-model unit (native)
@@ -269,7 +285,7 @@ py::dict read_step_xde(const py::object& data_or_path) {
   {
     py::gil_scoped_release release;
 
-    const IFSelect_ReturnStatus status = read_into(reader, data_or_path);
+    const IFSelect_ReturnStatus status = read_into(reader, params, data_or_path);
     if (status != IFSelect_RetDone) {
       throw PysmeshError("read_step_xde: STEP parse failed (IFSelect status " +
                           std::to_string(static_cast<int>(status)) +
@@ -492,8 +508,14 @@ py::bytes write_step_xde(const py::bytes& brep, const std::string& unit,
     STEPCAFControl_Writer writer;
     writer.SetColorMode(true);
     writer.SetNameMode(true);
+    // The writer emits face names only with write.stepcaf.subshapes.name on, which is off
+    // by default (report §4 C4). As on read, the flag goes on this export's own parameters.
+    // InitFromStatic runs inside the unit guard, so the parameters carry the guarded unit.
+    DESTEP_Parameters params;
+    params.InitFromStatic();
+    params.WriteSubshapeNames = true;
 
-    if (!writer.Transfer(doc, STEPControl_AsIs)) {
+    if (!writer.Transfer(doc, params, STEPControl_AsIs)) {
       throw PysmeshError("write_step_xde: STEP transfer failed.");
     }
     std::ostringstream out;

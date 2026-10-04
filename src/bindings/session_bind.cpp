@@ -161,6 +161,7 @@ void bind_session(py::module_& m) {
       .def("snapshot_count", &Session::snapshot_count)
       .def("entities", &Session::entities, py::arg("kind"), py::arg("distinct") = false)
       .def("alias_groups", &Session::alias_groups, py::arg("kind"))
+      .def("ordinal_ids", &Session::ordinal_ids, py::arg("kind"))
       .def("entity_kind", &Session::entity_kind, py::arg("entity_id"))
       .def("entity_state", &Session::entity_state, py::arg("entity_id"))
       .def("shape_count", &Session::shape_count, py::arg("entity_id"))

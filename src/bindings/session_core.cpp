@@ -86,6 +86,19 @@ py::array_t<std::int64_t> Session::entities(const std::string& kind, bool distin
   return ids_array(labels);
 }
 
+py::list Session::ordinal_ids(const std::string& kind) const {
+  ShapeSet shapes;
+  TopExp::MapShapes(state_.root, kind_from_name(kind), shapes);
+  py::list out;
+  for (int i = 1; i <= shapes.Extent(); ++i) {
+    const auto it = state_.registry->by_shape.find(shapes.FindKey(i));
+    // by_shape's id lists are sorted ascending when the registry is published.
+    out.append(ids_array(it == state_.registry->by_shape.end() ? std::vector<EntityId>()
+                                                                : it->second));
+  }
+  return out;
+}
+
 py::list Session::alias_groups(const std::string& kind) const {
   ShapeSet shapes;
   TopExp::MapShapes(state_.root, kind_from_name(kind), shapes);

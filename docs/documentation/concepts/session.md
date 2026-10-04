@@ -76,7 +76,7 @@ other.
 | Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove` |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
-| Handoff | `export_handoff`, `brep` |
+| Handoff | `export_handoff`, `brep`, `write_step` |
 | Identity and introspection | `entities`, `entity_kind`, `is_alive`, `shape_count`, `name_of`, `origin`, `resolve`, `op_count`, `state_op_index`, `issued_id_count`, `entity_count` |
 
 Every mutating operation returns a `HistoryDelta`: which ids it created, deleted, modified,
@@ -201,6 +201,20 @@ carries its sub-shape's label, the lowest live id that denotes it, so a split id
 every ordinal of its pieces. `handoff.aliases` maps every other live id to its label. An id
 resolves to the ordinals that carry it, or, if it is a key of `aliases`, to the ordinals
 that carry its label; those are exactly the sub-shapes it denotes.
+
+`write_step(unit=..., face_names=...)` writes the live shape to STEP with face names keyed
+by entity id, so the names survive the edits that move ordinals. The rules follow the three
+causes above:
+
+- A split id names every piece it denotes.
+- A face that several ids denote takes the name when every named id among them gives the
+  same one. An unnamed id does not block the name of another id.
+- If the named ids of one face give different names, `write_step` raises. The message lists
+  each such face with its ids and their names.
+
+`read_step_xde` reads the names back on `face_labels`. `write_step` reads the ids of each
+face from the registry, not from the `aliases` map, so it also covers the cases that
+`allow_aliases=True` refuses.
 
 ## Non-finite arguments
 

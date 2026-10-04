@@ -143,7 +143,9 @@ def write_step_xde(
             :data:`pysmesh.IGES_UNITS` (``"MM"``, ``"M"``, ``"INCH"``, ...). The same
             vocabulary :func:`write_iges` accepts.
         name: Product name for the whole shape (omitted when empty).
-        face_names: Optional mapping of 1-based face id → name.
+        face_names: Optional mapping of 1-based face id → name. Each name is
+            written as the name of the face's STEP entity; :func:`read_step_xde`
+            reads it back on ``face_labels``.
         face_colors: Optional mapping of 1-based face id → ``(r, g, b)`` in ``[0, 1]``.
 
     Returns:

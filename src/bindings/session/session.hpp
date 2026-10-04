@@ -908,6 +908,11 @@ class Session {
   // those ids, label first; the lists in ascending order of their labels.
   py::list alias_groups(const std::string& kind) const;
 
+  // Per ordinal of one kind in the root, in the order a reader of brep() enumerates them:
+  // every live id that denotes that sub-shape, ascending (report C4). A merged sub-shape
+  // lists all its ids; a split id appears in the list of each of its pieces.
+  py::list ordinal_ids(const std::string& kind) const;
+
   std::string entity_kind(EntityId id) const;
 
   // "alive" or "dead". An id that was never issued is a caller error, not a state: it

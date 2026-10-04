@@ -257,8 +257,8 @@ take and return BREP bytes and NumPy arrays, and key every result to the
 same 1-based ordinals `Shape.faces()` / `.edges()` / `.solids()` use.
 
 - **`read_step_xde` / `write_step_xde`**: STEP import/export through OCCT's
-  XDE stack, preserving product names, per-face colours, and the file's
-  length unit.
+  XDE stack, preserving product names, per-face names and colours, and the
+  file's length unit. `Session.write_step` names faces by session id.
 - **`read_iges` / `write_iges`**: IGES import/export, on the same contract.
 
   Both readers return the geometry in the file's native unit, plus
