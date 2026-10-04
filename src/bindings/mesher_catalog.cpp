@@ -352,10 +352,54 @@ SMESH_Hypothesis* make_area_hypothesis(const std::string& name, Params& p, Facto
     const std::string sy = p.text("spacing_y");
     const std::string sz = p.text("spacing_z");
     const std::string* per_axis[3] = {&sx, &sy, &sz};
+    // Explicit node coordinates per axis (SetGrid, report W2.3), read when sent. An axis takes
+    // either a spacing expression or coordinates: both, or neither, is refused by name.
+    const char* coordinate_keys[3] = {"coordinates_x", "coordinates_y", "coordinates_z"};
+    const char* axis_names[3] = {"x", "y", "z"};
     for (int axis = 0; axis < 3; ++axis) {
-      std::vector<std::string> spacing(1, *per_axis[axis]);
-      std::vector<double> internal(spacing_from);
-      h->SetGridSpacing(spacing, internal, axis);
+      std::vector<double> coords;
+      if (p.has(coordinate_keys[axis])) {
+        coords = p.numbers(coordinate_keys[axis]);
+      }
+      const bool by_spacing = !per_axis[axis]->empty();
+      if (by_spacing == !coords.empty()) {
+        throw PysmeshError(std::string("CartesianParameters3D: give the ") +
+                           axis_names[axis] + " axis either spacing_" + axis_names[axis] +
+                           " or coordinates_" + axis_names[axis] + ", not " +
+                           (by_spacing ? "both." : "neither."));
+      }
+      if (by_spacing) {
+        std::vector<std::string> spacing(1, *per_axis[axis]);
+        std::vector<double> internal(spacing_from);
+        h->SetGridSpacing(spacing, internal, axis);
+      } else {
+        h->SetGrid(coords, axis);
+      }
+    }
+    // A node of the grid at this point (SetFixedPoint), read when sent; empty leaves the
+    // grid where the spacing puts it.
+    if (p.has("fixed_point")) {
+      const std::vector<double> point = p.numbers("fixed_point");
+      if (!point.empty()) {
+        if (point.size() != 3) {
+          throw PysmeshError("CartesianParameters3D: fixed_point needs 3 coordinates (got " +
+                             std::to_string(point.size()) + ").");
+        }
+        h->SetFixedPoint(point.data(), false);
+      }
+    }
+    // The grid axes (SetAxisDirs: x, then y, then z), read when sent. Upstream refuses a
+    // zero, parallel or coplanar set.
+    if (p.has("axis_directions")) {
+      const std::vector<double> dirs = p.numbers("axis_directions");
+      if (dirs.size() != 9) {
+        throw PysmeshError("CartesianParameters3D: axis_directions needs 9 numbers, the x, "
+                           "y and z directions (got " + std::to_string(dirs.size()) + ").");
+      }
+      h->SetAxisDirs(dirs.data());
+    }
+    if (p.has("threshold_for_internal_faces")) {
+      h->SetToUseThresholdForInternalFaces(p.flag("threshold_for_internal_faces"));
     }
     h->SetSizeThreshold(p.number("size_threshold"));
     h->SetToAddEdges(p.flag("add_edges"));

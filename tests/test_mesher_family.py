@@ -314,6 +314,17 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
         ),
         None,
     ),
+    (
+        CartesianParameters3D(
+            coordinates_x=(0.0, 1.0, 3.0),
+            spacing_y="1.0",
+            spacing_z="1.0",
+            fixed_point=(0.5, 0.5, 0.5),
+            axis_directions=(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0),
+            threshold_for_internal_faces=True,
+        ),
+        None,
+    ),
     # Hypotheses naming another part of the model
     (ProjectionSource1D(source_edge=SubShape(SubShapeKind.EDGE, 1)), None),
     (

@@ -13,6 +13,7 @@ about by hand. The native paths behind them keep their own tests in
 
 from __future__ import annotations
 
+import math
 from itertools import pairwise
 
 import numpy as np
@@ -47,6 +48,7 @@ from pysmesh import (
     SubShapeKind,
     UseExisting1D,
     UseExisting2D,
+    Volume,
 )
 
 LINE_LENGTH: float = 10.0
@@ -707,3 +709,151 @@ def test_a_quanta_outside_the_unit_range_is_refused(quanta: float) -> None:
         pytest.raises(PysmeshError, match="quanta must lie in"),
     ):
         mesher.assign(parameters)
+
+
+# ---- W2.3 CartesianParameters3D grid setters -------------------------------------- #
+
+
+def _cartesian_volume(
+    shape: ps.Shape, parameters: CartesianParameters3D
+) -> tuple[ps.MeshData, float]:
+    """Cartesian3D on ``shape``: the mesh and the summed volume of its cells."""
+    with Mesher(shape) as mesher:
+        mesher.assign(Cartesian3D())
+        mesher.assign(parameters)
+        mesher.compute()
+        volume = float(np.sum(mesher.quality(Volume()).values))
+        return mesher.mesh(), volume
+
+
+def test_explicit_coordinates_put_the_grid_planes_where_they_are_given() -> None:
+    """x nodes at exactly 0, 0.5, 2, 3: 3 x 2 x 2 hexahedra filling the 3 x 7 x 11 box.
+
+    Spec (SMESH ``cartesian_algo.rst``): "You can specify the Coordinates of grid
+    nodes" (``StdMeshers_CartesianParameters3D::SetGrid``).
+    """
+    parameters = CartesianParameters3D(
+        coordinates_x=(0.0, 0.5, 2.0, 3.0), spacing_y="3.5", spacing_z="5.5"
+    )
+
+    mesh, volume = _cartesian_volume(_box_shape(), parameters)
+
+    np.testing.assert_array_equal(
+        np.unique(np.round(mesh.node_coords[:, 0], 12)), [0.0, 0.5, 2.0, 3.0]
+    )
+    assert mesh.count_of(ElementType.HEXAHEDRON) == 12
+    assert volume == pytest.approx(BOX_DX * BOX_DY * BOX_DZ, rel=1e-12)
+
+
+@pytest.mark.parametrize(
+    ("spacing", "coordinates", "word"),
+    [("1.0", (0.0, 3.0), "both"), ("", (), "neither")],
+)
+def test_an_axis_with_both_or_neither_grid_definitions_is_refused(
+    spacing: str, coordinates: tuple[float, ...], word: str
+) -> None:
+    """Each axis takes a spacing or coordinates; both, or neither, is refused."""
+    parameters = CartesianParameters3D(
+        spacing_x=spacing, coordinates_x=coordinates, spacing_y="1", spacing_z="1"
+    )
+
+    with (
+        Mesher(_box_shape()) as mesher,
+        pytest.raises(PysmeshError, match=f"spacing_x or coordinates_x, not {word}"),
+    ):
+        mesher.assign(parameters)
+
+
+@pytest.mark.parametrize("fixed", [True, False])
+def test_a_fixed_point_puts_a_grid_node_at_it(fixed: bool) -> None:
+    """Spec (``cartesian_algo.rst``, "Fixed Point"): with every direction by spacing,
+    "there will be a mesh node at the Fixed Point". The unit spacing alone puts none
+    at (0.25, 0.5, 0.75), which is the falsification."""
+    point = (0.25, 0.5, 0.75)
+    parameters = CartesianParameters3D(
+        spacing_x="1",
+        spacing_y="1",
+        spacing_z="1",
+        fixed_point=point if fixed else (),
+    )
+
+    mesh, volume = _cartesian_volume(_box_shape(), parameters)
+
+    at_point = np.all(np.abs(mesh.node_coords - np.array(point)) < TOL, axis=1)
+    assert bool(np.any(at_point)) == fixed
+    assert volume == pytest.approx(BOX_DX * BOX_DY * BOX_DZ, rel=1e-12)
+
+
+def test_axis_directions_align_the_grid_with_a_rotated_box() -> None:
+    """A 4-cube turned 30 degrees about z, grid axes turned with it: 512 whole cubes.
+
+    Spec (``cartesian_algo.rst``, "Directions of Axes"): the grid's axes follow the
+    given directions (``SetAxisDirs``). Aligned with the cube's faces, the 0.5 grid
+    cuts nothing: (4 / 0.5)^3 = 512 hexahedra, no polyhedron, volume 64. With the global
+    axes the same cube is cut at every side face, which leaves polyhedra.
+    """
+    angle = math.radians(30.0)
+    c, s = math.cos(angle), math.sin(angle)
+    session = Session()
+    session.add_box(4.0, 4.0, 4.0)
+    session.rotate((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), angle)
+    shape = ps.load_brep(session.brep())
+    spacing = {"spacing_x": "0.5", "spacing_y": "0.5", "spacing_z": "0.5"}
+
+    turned, volume = _cartesian_volume(
+        shape,
+        CartesianParameters3D(
+            **spacing, axis_directions=(c, s, 0.0, -s, c, 0.0, 0.0, 0.0, 1.0)
+        ),
+    )
+
+    plain, _ = _cartesian_volume(shape, CartesianParameters3D(**spacing))
+    assert turned.count_of(ElementType.HEXAHEDRON) == 512
+    assert turned.count_of(ElementType.POLYHEDRON) == 0
+    assert volume == pytest.approx(64.0, rel=1e-12)
+    assert plain.count_of(ElementType.POLYHEDRON) > 0
+
+
+def test_parallel_axis_directions_are_refused() -> None:
+    """Degenerate input: SetAxisDirs refuses two parallel directions."""
+    parameters = CartesianParameters3D(
+        spacing_x="1",
+        spacing_y="1",
+        spacing_z="1",
+        axis_directions=(1.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 1.0),
+    )
+
+    with (
+        Mesher(_box_shape()) as mesher,
+        pytest.raises(PysmeshError, match="Parallel axis directions"),
+    ):
+        mesher.assign(parameters)
+
+
+@pytest.mark.parametrize(("threshold", "expected"), [(False, 2.0), (True, 1.95)])
+def test_the_threshold_on_a_shared_face_leaves_out_the_thin_slab(
+    threshold: bool, expected: float
+) -> None:
+    """Two unit-section boxes share the face x = 1.05; the 0.5 grid cuts a 0.05 slab.
+
+    Spec (``cartesian_algo.rst``): "Apply Threshold to Shared / Internal Faces"
+    applies the size threshold to the cells the shared face cuts, "that can cause
+    appearance of holes inside the mesh". A 0.05-wide piece of a 0.5 cell is below
+    1 / size_threshold = 1/4, so with the option the slab 1.0 <= x <= 1.05 is left out:
+    volume 2 - 0.05 = 1.95. Without it the mesh fills both boxes: volume 2.
+    """
+    session = Session()
+    session.add_box(1.05, 1.0, 1.0)
+    session.add_box(0.95, 1.0, 1.0, origin=(1.05, 0.0, 0.0))
+    session.fragment(session.entities(ps.EntityKind.SOLID).tolist())
+    parameters = CartesianParameters3D(
+        spacing_x="0.5",
+        spacing_y="0.5",
+        spacing_z="0.5",
+        consider_internal_faces=True,
+        threshold_for_internal_faces=threshold,
+    )
+
+    _, volume = _cartesian_volume(ps.load_brep(session.brep()), parameters)
+
+    assert volume == pytest.approx(expected, rel=1e-12)

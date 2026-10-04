@@ -793,11 +793,13 @@ class CartesianParameters3D(Hypothesis):
 
     Spacing is stated per axis as an expression in the normalised coordinate ``t`` — a plain
     number is a constant spacing, and something like ``"5+10*t"`` grades it across the model.
+    An axis can take explicit node coordinates instead; each axis needs exactly one of
+    the two.
 
     Attributes:
-        spacing_x: Spacing expression along x.
-        spacing_y: Spacing expression along y.
-        spacing_z: Spacing expression along z.
+        spacing_x: Spacing expression along x, or empty when ``coordinates_x`` is given.
+        spacing_y: Spacing expression along y, or empty when ``coordinates_y`` is given.
+        spacing_z: Spacing expression along z, or empty when ``coordinates_z`` is given.
         size_threshold: A cut cell smaller than ``1 / size_threshold`` of a full one is
             merged into its neighbour rather than kept as a sliver.
         spacing_from: The range each spacing expression covers, as fractions of the
@@ -814,13 +816,26 @@ class CartesianParameters3D(Hypothesis):
             follows the boundary less closely.
         quanta: The volume fraction above which ``use_quanta`` replaces a cut cell, in
             ``[1e-6, 1]``. Read only with ``use_quanta``. The default is upstream's.
+        coordinates_x: The grid's node coordinates along x, at least 2, measured along
+            the grid's x axis from the global origin. Empty when ``spacing_x`` is given.
+        coordinates_y: As ``coordinates_x``, along y.
+        coordinates_z: As ``coordinates_x``, along z.
+        fixed_point: ``(x, y, z)`` of a point the grid passes through, or empty. With
+            every axis by spacing there is a grid node at it; with two, a grid line
+            through it; with one, a grid plane (SMESH ``cartesian_algo.rst``).
+        axis_directions: The grid's x, y and z directions as 9 numbers. They need not
+            be unit vectors or orthogonal; SMESH refuses a zero direction, two parallel
+            ones, or three in one plane. The default is the global axes.
+        threshold_for_internal_faces: Apply ``size_threshold`` to the cells that
+            internal or shared faces cut, too. Read with ``consider_internal_faces``. A
+            small piece of such a cell is then left out: a hole at the face.
     """
 
     native_name: ClassVar[str] = "CartesianParameters3D"
 
-    spacing_x: str
-    spacing_y: str
-    spacing_z: str
+    spacing_x: str = ""
+    spacing_y: str = ""
+    spacing_z: str = ""
     size_threshold: float = 4.0
     spacing_from: tuple[float, ...] = (0.0, 1.0)
     add_edges: bool = False
@@ -828,6 +843,12 @@ class CartesianParameters3D(Hypothesis):
     consider_internal_faces: bool = False
     use_quanta: bool = False
     quanta: float = 0.01
+    coordinates_x: tuple[float, ...] = ()
+    coordinates_y: tuple[float, ...] = ()
+    coordinates_z: tuple[float, ...] = ()
+    fixed_point: tuple[float, ...] = ()
+    axis_directions: tuple[float, ...] = (1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+    threshold_for_internal_faces: bool = False
 
 
 # ---- Hypotheses that name another part of the model ------------------------------------ #
