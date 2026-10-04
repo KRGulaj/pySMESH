@@ -323,6 +323,13 @@ class Mesher {
   bool convert_from_quadratic();
   py::dict split_volumes(int method, double nx, double ny, double nz,
                          bool avoid_over_constrained);
+
+  // Create the missing boundary elements of volumes or faces (SMESH_MeshEditor::
+  // MakeBoundaryMesh, report W3.2): faces or edges of volumes, or edges of faces. `elements`
+  // empty means every volume (or face). Returns the ids of the elements it created.
+  py::array_t<std::int64_t> make_boundary_mesh(int dimension,
+                                               const std::vector<std::int64_t>& elements,
+                                               bool around_elements, bool all_elements);
   py::dict split_quadratic_into_linear(const std::vector<std::int64_t>& elements);
   py::dict merge_nodes(double tolerance);
   py::list find_coincident_nodes(double tolerance, const std::vector<std::int64_t>& nodes,

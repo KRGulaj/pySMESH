@@ -194,7 +194,14 @@ from ._block import (
     block_points,
     block_shapes,
 )
-from ._edit import EditReport, RemovalReport, SmoothMethod, SplitMethod, _EditOps
+from ._edit import (
+    BoundaryDimension,
+    EditReport,
+    RemovalReport,
+    SmoothMethod,
+    SplitMethod,
+    _EditOps,
+)
 from ._fill import _FillOps
 from ._medial import BranchEnd, MedialAxis, MedialBranch, medial_axis
 from ._search import (
@@ -383,6 +390,7 @@ __all__ = [
     "Block",
     "BlockParameters",
     "BlockRenumber",
+    "BoundaryDimension",
     "BranchEnd",
     "CancelPredicate",
     "Cartesian3D",

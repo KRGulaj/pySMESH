@@ -24,6 +24,7 @@ import pysmesh as ps
 from pysmesh import (
     Arithmetic1D,
     BlockRenumber,
+    BoundaryDimension,
     Cartesian3D,
     CartesianParameters3D,
     Distribution,
@@ -1013,3 +1014,131 @@ def test_avoid_over_constrained_splits_every_block_cell_through_the_centre_node(
     assert _over_constrained(plain) > 0
     for mesh in (plain, avoided):
         assert _tetra_volume(mesh) == pytest.approx(BOX_DX * BOX_DY * BOX_DZ, rel=1e-12)
+
+
+# ---- W3.2 make_boundary_mesh ------------------------------------------------------ #
+
+GRID: tuple[int, int, int] = (2, 3, 4)
+
+
+def _hexa_grid(mesher: Mesher, a: int, b: int, c: int) -> NDArray[np.int64]:
+    """Fill ``mesher`` with an a x b x c grid of unit hexahedra and no other element."""
+    i, j, k = np.meshgrid(
+        np.arange(a + 1), np.arange(b + 1), np.arange(c + 1), indexing="ij"
+    )
+    points = np.stack([i.ravel(), j.ravel(), k.ravel()], axis=1).astype(np.float64)
+    ids = mesher.add_nodes(points).reshape(a + 1, b + 1, c + 1)
+    cells = [
+        [
+            ids[x, y, z],
+            ids[x + 1, y, z],
+            ids[x + 1, y + 1, z],
+            ids[x, y + 1, z],
+            ids[x, y, z + 1],
+            ids[x + 1, y, z + 1],
+            ids[x + 1, y + 1, z + 1],
+            ids[x, y + 1, z + 1],
+        ]
+        for x in range(a)
+        for y in range(b)
+        for z in range(c)
+    ]
+    return mesher.add_elements(ElementType.HEXAHEDRON, np.array(cells))
+
+
+def test_boundary_faces_of_a_hexahedral_grid_number_2_ab_bc_ca() -> None:
+    """A 2 x 3 x 4 grid has 2 (ab + bc + ca) = 52 free facets: 52 quadrangles made.
+
+    Spec (``SMESH_MeshEditor::MakeBoundaryMesh``, BND_2DFROM3D): a 2-D element on each
+    free facet of the volumes. A second call makes nothing: the faces exist.
+    """
+    a, b, c = GRID
+    with Mesher() as mesher:
+        _hexa_grid(mesher, a, b, c)
+
+        made = mesher.make_boundary_mesh(BoundaryDimension.FACES_OF_VOLUMES)
+
+        again = mesher.make_boundary_mesh(BoundaryDimension.FACES_OF_VOLUMES)
+        mesh = mesher.mesh()
+    assert made.size == 2 * (a * b + b * c + c * a)
+    assert again.size == 0
+    assert mesh.count_of(ElementType.QUADRANGLE) == made.size
+
+
+def test_boundary_edges_of_a_hexahedral_grid_are_the_edges_of_its_surface() -> None:
+    """The edges on the grid's surface: (p+1) q + p (q+1) per box face p x q, less the
+    4 (a + b + c) edges on the box's 12 sides, which two faces share.
+
+    Spec (BND_1DFROM3D): a 1-D element on each edge of each free facet.
+    """
+    a, b, c = GRID
+
+    def on_face(p: int, q: int) -> int:
+        return (p + 1) * q + p * (q + 1)
+
+    expected = 2 * (on_face(a, b) + on_face(b, c) + on_face(a, c)) - 4 * (a + b + c)
+    with Mesher() as mesher:
+        _hexa_grid(mesher, a, b, c)
+
+        made = mesher.make_boundary_mesh(BoundaryDimension.EDGES_OF_VOLUMES)
+
+    assert made.size == expected
+
+
+def test_all_elements_puts_a_face_on_every_facet_shared_or_free() -> None:
+    """Every distinct facet of the grid: a b (c+1) + a (b+1) c + (a+1) b c = 98."""
+    a, b, c = GRID
+    with Mesher() as mesher:
+        _hexa_grid(mesher, a, b, c)
+
+        made = mesher.make_boundary_mesh(
+            BoundaryDimension.FACES_OF_VOLUMES, all_elements=True
+        )
+
+    assert made.size == a * b * (c + 1) + a * (b + 1) * c + (a + 1) * b * c
+
+
+def test_the_boundary_of_one_cell_as_a_set_is_its_six_facets() -> None:
+    """One interior-touching cell, ``around_elements``: its 6 facets, shared or not."""
+    a, b, c = GRID
+    with Mesher() as mesher:
+        cells = _hexa_grid(mesher, a, b, c)
+
+        made = mesher.make_boundary_mesh(
+            BoundaryDimension.FACES_OF_VOLUMES,
+            elements=[int(cells[0])],
+            around_elements=True,
+        )
+
+    assert made.size == 6
+
+
+def test_boundary_edges_of_a_quadrangle_grid_number_2_p_plus_q() -> None:
+    """A 3 x 5 grid of quadrangles has 2 (3 + 5) = 16 free edges (BND_1DFROM2D)."""
+    p, q = 3, 5
+    with Mesher() as mesher:
+        i, j = np.meshgrid(np.arange(p + 1), np.arange(q + 1), indexing="ij")
+        points = np.stack([i.ravel(), j.ravel(), 0 * i.ravel()], axis=1)
+        ids = mesher.add_nodes(points.astype(np.float64)).reshape(p + 1, q + 1)
+        quads = [
+            [ids[x, y], ids[x + 1, y], ids[x + 1, y + 1], ids[x, y + 1]]
+            for x in range(p)
+            for y in range(q)
+        ]
+        mesher.add_quadrangles(np.array(quads))
+
+        made = mesher.make_boundary_mesh(BoundaryDimension.EDGES_OF_FACES)
+
+    assert made.size == 2 * (p + q)
+
+
+def test_a_face_given_to_a_volume_boundary_is_refused() -> None:
+    """Degenerate input: faces of volumes read volumes only, every one is checked."""
+    with Mesher() as mesher:
+        nodes = mesher.add_nodes(np.eye(3, dtype=np.float64))
+        (face,) = mesher.add_triangles(nodes[None, :])
+
+        with pytest.raises(PysmeshError, match="not one of the volumes"):
+            mesher.make_boundary_mesh(
+                BoundaryDimension.FACES_OF_VOLUMES, elements=[int(face)]
+            )

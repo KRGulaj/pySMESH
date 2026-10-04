@@ -142,6 +142,24 @@ from pysmesh.mesher import SplitMethod
 mesher.split_volumes(SplitMethod.HEXA_TO_6)
 ```
 
+With `avoid_over_constrained=True`, `HEXA_TO_5` and `HEXA_TO_6` choose, per cell, a cut
+that makes no tetrahedron whose 4 nodes all lie on 2-D elements. Where no standard cut
+qualifies, the cell is cut through its barycentre, which adds a node.
+
+**Boundary elements.** `make_boundary_mesh(dimension, elements=(), around_elements=False,
+all_elements=False)` creates the missing faces or edges of volumes, or the edges of faces,
+and returns the ids it created. By default only the free boundary gets elements: on an
+a x b x c grid of hexahedra that is 2(ab + bc + ca) quadrangles. `all_elements=True`
+puts one on every facet, shared or free. An element that exists already is not made
+again.
+
+```python
+from pysmesh.mesher import BoundaryDimension
+
+skin = mesher.make_boundary_mesh(BoundaryDimension.FACES_OF_VOLUMES)
+mesher.add_group("skin", ElementDimension.FACE, skin)
+```
+
 **Coincidence and merging.** `find_coincident_nodes(tolerance)` answers what would collapse
 without changing anything; `merge_node_groups(groups)` and `merge_nodes(tolerance)` do the
 collapsing. `find_equal_elements()` and `merge_equal_elements()` do the same for duplicate

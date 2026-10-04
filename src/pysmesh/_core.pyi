@@ -640,6 +640,13 @@ class Mesher:
         nz: float,
         avoid_over_constrained: bool = False,
     ) -> dict[str, object]: ...
+    def make_boundary_mesh(
+        self,
+        dimension: int,
+        elements: Sequence[int],
+        around_elements: bool,
+        all_elements: bool,
+    ) -> NDArray[np.int64]: ...
     def split_quadratic_into_linear(
         self, elements: Sequence[int]
     ) -> dict[str, object]: ...

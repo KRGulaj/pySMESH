@@ -57,6 +57,23 @@ class SplitMethod(IntEnum):
     HEXA_TO_4_PRISMS = 5
 
 
+class BoundaryDimension(IntEnum):
+    """Which boundary :meth:`~pysmesh.Mesher.make_boundary_mesh` builds.
+
+    The integer values are SMESH's own (``SMESH_MeshEditor::Bnd_Dimension``); do not
+    reorder.
+
+    Attributes:
+        FACES_OF_VOLUMES: 2-D elements on the facets of volumes.
+        EDGES_OF_VOLUMES: 1-D elements on the edges of the facets of volumes.
+        EDGES_OF_FACES: 1-D elements on the edges of faces.
+    """
+
+    FACES_OF_VOLUMES = 0
+    EDGES_OF_VOLUMES = 1
+    EDGES_OF_FACES = 2
+
+
 class SmoothMethod(IntEnum):
     """How :meth:`~pysmesh.Mesher.smooth` moves each free node.
 
@@ -287,6 +304,43 @@ class _EditOps(_MesherBase):
             avoid_over_constrained,
         )
         return _report(raw)
+
+    def make_boundary_mesh(
+        self,
+        dimension: BoundaryDimension,
+        *,
+        elements: Iterable[int] = (),
+        around_elements: bool = False,
+        all_elements: bool = False,
+    ) -> NDArray[np.int64]:
+        """Create the missing boundary elements of volumes or of faces.
+
+        By default the boundary is the free one: a facet of a volume that no other
+        volume shares, or an edge of a face that no other face shares. An element that
+        is already there is kept and not made again. On a mesh with a shape, a new
+        element is bound to the face or edge its nodes lie on, where they lie on one.
+
+        Args:
+            dimension: Faces or edges of volumes, or edges of faces.
+            elements: The volumes (or faces) whose boundary to make. Empty means all of
+                them.
+            around_elements: Make the boundary of ``elements`` as a set: a facet shared
+                with an element outside the set is boundary too.
+            all_elements: Make an element on every facet (or edge), shared or free.
+
+        Returns:
+            (K,) int64 — the ids of the elements created, ascending. Pass them to
+            :meth:`~pysmesh.Mesher.add_group` to name them.
+
+        Raises:
+            PysmeshError: If an element of ``elements`` is not a volume (a face, for
+                :attr:`BoundaryDimension.EDGES_OF_FACES`); if the mesh has none to read;
+                or if the mesher has been released.
+        """
+        created = self._m.make_boundary_mesh(
+            int(dimension), [int(i) for i in elements], around_elements, all_elements
+        )
+        return np.asarray(created, dtype=np.int64)
 
     # ---- Coincidence and merging --------------------------------------------------------- #
 

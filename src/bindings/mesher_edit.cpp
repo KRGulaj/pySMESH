@@ -30,6 +30,7 @@
 
 #include "mesher/mesher.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <list>
 #include <set>
@@ -40,7 +41,9 @@
 #include <SMDS_MeshElement.hxx>
 #include <SMDS_MeshNode.hxx>
 #include <SMESHDS_Mesh.hxx>
+#include <SMESHDS_GroupBase.hxx>
 #include <SMESH_ControlsDef.hxx>
+#include <SMESH_Group.hxx>
 #include <SMESH_Mesh.hxx>
 #include <SMESH_MeshEditor.hxx>
 #include <gp_Ax1.hxx>
@@ -263,6 +266,84 @@ py::dict Mesher::split_volumes(int method, double nx, double ny, double nz,
   publish(*meshDS_);
 
   py::dict out = report(before, counts_of(*meshDS_), 0);
+  return out;
+}
+
+// ---- Boundary elements ------------------------------------------------------------------ //
+
+namespace {
+
+// A group that exists for one call: MakeBoundaryMesh reports what it created only by adding
+// it to a group, so one is made for that and removed on every exit path.
+class ScratchGroup {
+ public:
+  ScratchGroup(SMESH_Mesh& mesh, SMDSAbs_ElementType type)
+      : mesh_(mesh), group_(mesh.AddGroup(type, "pysmesh boundary scratch")) {
+    if (group_ == nullptr) {
+      throw PysmeshError("Mesher.make_boundary_mesh: SMESH refused a scratch group.");
+    }
+  }
+  ~ScratchGroup() { mesh_.RemoveGroup(group_->GetID()); }
+  ScratchGroup(const ScratchGroup&) = delete;
+  ScratchGroup& operator=(const ScratchGroup&) = delete;
+  SMESH_Group* get() const { return group_; }
+
+ private:
+  SMESH_Mesh& mesh_;
+  SMESH_Group* group_;
+};
+
+}  // namespace
+
+py::array_t<std::int64_t> Mesher::make_boundary_mesh(int dimension,
+                                                     const std::vector<std::int64_t>& elements,
+                                                     bool around_elements, bool all_elements) {
+  ensure_open();
+  if (dimension < SMESH_MeshEditor::BND_2DFROM3D || dimension > SMESH_MeshEditor::BND_1DFROM2D) {
+    throw PysmeshError("Mesher.make_boundary_mesh: unknown boundary dimension " +
+                       std::to_string(dimension) + ".");
+  }
+  const auto bnd = static_cast<SMESH_MeshEditor::Bnd_Dimension>(dimension);
+  const SMDSAbs_ElementType source =
+      bnd == SMESH_MeshEditor::BND_1DFROM2D ? SMDSAbs_Face : SMDSAbs_Volume;
+  const SMDSAbs_ElementType made =
+      bnd == SMESH_MeshEditor::BND_2DFROM3D ? SMDSAbs_Face : SMDSAbs_Edge;
+  const char* wanted = source == SMDSAbs_Face ? "faces" : "volumes";
+
+  // Upstream checks the type of the first element only (SMESH_MeshEditor.cxx:12996); every
+  // one is checked here, so a mixed list is refused naming the element.
+  TIDSortedElemSet chosen;
+  for (const std::int64_t id : elements) {
+    const SMDS_MeshElement* e = element_of(*meshDS_, id, "Mesher.make_boundary_mesh");
+    if (e->GetType() != source) {
+      throw PysmeshError("Mesher.make_boundary_mesh: element " + std::to_string(id) +
+                         " is not one of the " + wanted + " this dimension reads.");
+    }
+    chosen.insert(e);
+  }
+  if (chosen.empty() && meshDS_->GetMeshInfo().NbElements(source) == 0) {
+    throw PysmeshError(std::string("Mesher.make_boundary_mesh: the mesh has no ") + wanted +
+                       ".");
+  }
+
+  ScratchGroup group(*mesh_, made);
+  try {
+    SMESH_MeshEditor editor(mesh_);
+    editor.MakeBoundaryMesh(chosen, bnd, group.get(), /*targetMesh=*/nullptr,
+                            /*toCopyElements=*/false, /*toCopyExistingBondary=*/false,
+                            /*toAddExistingBondary=*/false, around_elements, all_elements);
+  } catch (const std::exception& e) {
+    throw PysmeshError(std::string("Mesher.make_boundary_mesh: ") + e.what());
+  }
+  publish(*meshDS_);
+
+  std::vector<std::int64_t> created;
+  for (SMDS_ElemIteratorPtr it = group.get()->GetGroupDS()->GetElements(); it->more();) {
+    created.push_back(static_cast<std::int64_t>(it->next()->GetID()));
+  }
+  std::sort(created.begin(), created.end());
+  py::array_t<std::int64_t> out(static_cast<py::ssize_t>(created.size()));
+  std::copy(created.begin(), created.end(), out.mutable_data());
   return out;
 }
 
