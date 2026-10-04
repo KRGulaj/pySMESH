@@ -251,6 +251,12 @@ class Prism3D(Algorithm):
     """Extrude a source face's mesh through a prismatic solid.
 
     Meshes the lateral faces and edges itself, so only the source face needs a 2-D algorithm.
+
+    A side face whose bottom or top side has more than one edge cannot be swept
+    through, for example where a cap edge is split under a whole one: Prism3D projects
+    onto the first edge of a side only. It then tries another face as the source. If
+    none fits, the compute fails and names, for each face, why it is not the source.
+    Split the opposite cap edge too, so that the side face becomes two quadrangles.
     """
 
     native_name: ClassVar[str] = "Prism_3D"
