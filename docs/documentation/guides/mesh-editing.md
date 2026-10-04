@@ -283,13 +283,33 @@ into a boundary's convex corners and keep only the axis proper.
 
 ## Viscous boundary layers
 
-Two different paths grow prism (or, on a face, quadrangle) boundary layers, and they serve
-different situations.
+Three paths grow prism layers (or, in a face, quadrangle layers) on chosen walls. They share
+one stack definition, and they serve different situations.
 
-**Inside a normal `Mesher.compute()`**, assign the `ViscousLayers` (3-D, grown from named
-faces of a solid) or `ViscousLayers2D` (2-D, grown from named edges of a face) hypothesis
-alongside the volume or face algorithm. The layer cells land in the group the hypothesis
-names:
+### The stack
+
+Every path takes the same three numbers: the total thickness `T`, the layer count `N`, and
+the stretch factor `f`, the ratio of one layer's thickness to the one before it. The first
+layer, at the wall, is
+
+    t1 = T (f - 1) / (f^N - 1)        (t1 = T / N when f = 1)
+
+and layer `k` ends at `t1 (f^k - 1) / (f - 1)` from the wall (`k t1` when `f = 1`), so the
+layers add up to `T`. `pysmesh.first_layer_thickness(T, f, N)` returns `t1`. SMESH grows a
+stack only for `T > 0`, `N >= 1` and `f >= 1`; every path refuses other values with a
+`PysmeshError` when you build the parameters, not later in the compute.
+
+Each layer edge runs from a node of the inner mesh to its nearest point on the wall, and the
+layer nodes divide it at the fractions of the closed form. On a plane wall the edge is the
+wall normal, so the layer nodes lie on the closed-form planes. On a curved wall they lie on
+the closed-form offsets along the normal (radially, on a cylinder).
+
+### Path 1: the hypothesis inside a `Mesher`
+
+Assign `ViscousLayers` (grown from faces of a solid) or `ViscousLayers2D` (grown from edges
+of a face) beside the algorithms. `boundary` names the walls by ordinal, or, with
+`ignore=True`, the faces or edges without layers. The layer cells land in the group the
+hypothesis names:
 
 ```python
 from pysmesh.mesher import Hexa3D, Mesher, NumberOfSegments, Quadrangle2D, Regular1D, ViscousLayers
@@ -312,10 +332,58 @@ report = mesher.compute()
 layer_cells = mesher.group("wall_layers")
 ```
 
-**`compute_viscous_layers`** is the standalone, lower-level entry point: it grows layers on
-a surface mesh that was injected onto a `Shape` by hand through the low-level `pysmesh.Mesh`
-class, rather than computed by a `Mesher`. This is the path for a surface mesh that came
-from somewhere else and needs boundary layers added before it is handed to a solver:
+Only some algorithms build the layers in their compute:
+
+| Hypothesis | Algorithms that build it |
+|---|---|
+| `ViscousLayers` | `Hexa3D`, `PolyhedronPerSolid3D`, `Cartesian3D` |
+| `ViscousLayers2D` | `Quadrangle2D`, `QuadFromMedialAxis1D2D`, `Mefisto2D` |
+
+If a layer hypothesis reaches a solid (a face) that another algorithm meshes, `compute()`
+raises before it meshes anything, and names the sub-shape and the algorithm. Without that
+check the layers were dropped with no word (`Prism3D`, `RadialQuadrangle1D2D`), or the compute
+failed after building some of them (`PolygonPerFace2D`), or the process crashed
+(`CompositeHexa3D`). Assign the layers only to the sub-shapes that a building algorithm
+meshes.
+
+`Cartesian3D` grows its layers another way. It shrinks the shape by `T`, lays its grid in
+the shrunk shape, and fills the gap with layer cells. For that inner mesh it keeps every cut
+cell that has volume, whatever `CartesianParameters3D.size_threshold` says, because a dropped
+cell left a hole in the layers.
+
+### Path 2: the two-step builder
+
+`ViscousLayerBuilder` splits the same work in two, so that you choose the mesher of the inner
+volume yourself:
+
+```python
+from pysmesh.mesher import Cartesian3D, CartesianParameters3D, Mesher, ViscousLayerBuilder
+
+builder = ViscousLayerBuilder(0.2, 3, 1.2, boundary=(1,), ignore=False, group_name="bl")
+with Mesher(shape) as outer:
+    shrunk = outer.shrink_geometry(builder)      # the shape offset inward by T
+    with Mesher(shrunk) as inner:
+        inner.assign(Cartesian3D())
+        inner.assign(CartesianParameters3D(spacing_x="0.25", spacing_y="0.25",
+                                           spacing_z="0.25", create_faces=True,
+                                           add_edges=True))
+        inner.compute()
+        outer.add_layers(builder, inner)         # inner mesh + layers, into `outer`
+    mesh = outer.mesh()
+```
+
+Any inner mesher works, provided it meshes the shrunk shape itself. A Cartesian inner mesh
+needs `create_faces=True` and `add_edges=True`, because the layers grow from its boundary
+faces and edges. On a face, `shrink_geometry` offsets the whole wire and `add_layers` grows
+quadrangle rings. `add_layers` refuses a call before `shrink_geometry`, a builder other than
+the one that shrank the shape, and an inner mesher on another shape.
+
+### Path 3: `compute_viscous_layers` on a surface mesh
+
+`compute_viscous_layers` is the standalone, lower-level entry point. It grows layers on a
+surface mesh that was put onto a `Shape` by hand through the low-level `pysmesh.Mesh` class,
+rather than computed by a `Mesher`. Use it for a surface mesh that came from somewhere else
+and needs layers before it goes to a solver:
 
 ```python
 import pysmesh
@@ -339,11 +407,23 @@ result.failed_face_ids         # wall faces that received no layers
 mesh.release()
 ```
 
-Both paths accept the same shape of parameters: `total_thickness`, a layer count, a
-`stretch_factor` (the geometric growth ratio between one layer and the next, greater than
-1), and which faces or edges the layers grow from. `is_ignore=True` on `VLParams` (or
-`ignore=True` on the hypothesis) reads that face or edge list as an exclusion instead: layers
-grow on every other one.
+`is_ignore=True` on `VLParams` reads `face_ids` as the faces without layers.
+
+### Limits that remain
+
+- `CompositeHexa3D` builds no layers. With the hypothesis made readable, the layer cells on
+  its side faces give their grids more rows than the opposite faces have, and its block grid
+  breaks. Use `Hexa3D` for a block with layers.
+- `PolygonPerFace2D` builds no layers: after the layer step it finds too few nodes on the
+  face wire.
+- `ViscousLayers2D` takes no extrusion method; only the 3-D hypothesis has one.
+- `Cartesian3D` with layers: a stack too thick for the shape, so that one shrunk surface
+  meets another, fails the compute on the solid with no message from SMESH, and leaves no
+  cell. At an edge between two walls with layers, the corner cells have warped faces where
+  the grid lines on a wall cross that edge at an angle other than 90 degrees (the caps of a
+  hexagonal prism). The mesh there is conforming, but the `Volume` control
+  splits each warped cell on its own, so its sum can differ from the shape's volume by about
+  1e-4 relative (2.7e-4 on a hexagonal prism with layers on every face).
 
 ---
 *Author: Kajetan R. Gułaj*
