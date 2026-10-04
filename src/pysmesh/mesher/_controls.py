@@ -144,6 +144,33 @@ class Warping(Control):
 
 
 @dataclass(frozen=True)
+class Warping3D(Control):
+    """How far the facets of a 3-D cell depart from being planar, in degrees.
+
+    The largest :class:`Warping` of the cell's facets. Values below 0.1 degrees read as
+    exactly 0, as for :class:`Warping`. Only a facet of exactly 4 nodes has a warping,
+    so a cell with no such facet, a tetrahedron or a quadratic cell, is skipped rather
+    than read as flat. Applies to volumes.
+    """
+
+    native_name: ClassVar[str] = "Warping3D"
+
+
+@dataclass(frozen=True)
+class ScaledJacobian(Control):
+    """The scaled Jacobian of a 3-D cell: 1 for a right-angled cell, 0 when degenerate.
+
+    At each corner, the determinant of the unit vectors along the corner's three edges;
+    the smallest over the corners is reported (a hexahedron also counts its three
+    principal axes, ``SMDS_VolumeTool::GetScaledJacobian``). A tetrahedron is scaled so
+    that a regular one reads 1. Negative means inverted. A polyhedron has no formula and
+    is skipped. Applies to volumes.
+    """
+
+    native_name: ClassVar[str] = "ScaledJacobian"
+
+
+@dataclass(frozen=True)
 class Taper(Control):
     """How unequal a quadrangle's four corner triangles are, in the range ``[0, 1]``.
 

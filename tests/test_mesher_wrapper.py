@@ -43,6 +43,7 @@ from pysmesh import (
     QuadrangleParams,
     RadialQuadrangle1D2D,
     Regular1D,
+    ScaledJacobian,
     SegmentAroundVertex0D,
     SegmentLengthAroundVertex,
     Session,
@@ -52,6 +53,7 @@ from pysmesh import (
     UseExisting1D,
     UseExisting2D,
     Volume,
+    Warping3D,
 )
 
 LINE_LENGTH: float = 10.0
@@ -1207,3 +1209,90 @@ def test_a_ray_volume_query_refuses_a_zero_length() -> None:
     mesher, _ = _block_mesh()
     with mesher, pytest.raises(PysmeshError, match="length must be > 0"):
         mesher.ray_volumes((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), length=0.0)
+
+
+# ---- W3.4 Warping3D and W3.5 ScaledJacobian --------------------------------------- #
+
+
+def _one_cell(points: list[tuple[float, float, float]], kind: ElementType) -> Mesher:
+    """A mesher holding one cell of ``kind`` on ``points``, in that node order."""
+    mesher = Mesher()
+    nodes = mesher.add_nodes(np.array(points, dtype=np.float64))
+    mesher.add_elements(kind, nodes[None, :])
+    return mesher
+
+
+@pytest.mark.parametrize("z", [0.25, 1.0])
+def test_warping_3d_of_a_hexahedron_with_a_saddle_top_is_atan_z(z: float) -> None:
+    """Top corners at heights z, -z, z, -z over a 2 x 2 square: warping atan(z) degrees.
+
+    Spec (SMESH ``warping.rst``): the warp angle of a quadrangle is the arcsine of the
+    corner height ``h`` over the plane through its edge midpoints, divided by the half
+    edge ``l``; ``Warping3D`` (``warping_3d.rst``) takes the largest over the facets. On
+    this saddle every corner has ``h = z`` and ``l = sqrt(1 + z^2)``, so the angle is
+    ``asin(z / sqrt(1 + z^2)) = atan(z)``. The four side facets lie in the planes
+    x = +-1 and y = +-1 and the bottom is flat, so they read 0.
+    """
+    bottom = [
+        (-1.0, -1.0, -2.0),
+        (1.0, -1.0, -2.0),
+        (1.0, 1.0, -2.0),
+        (-1.0, 1.0, -2.0),
+    ]
+    top = [(-1.0, -1.0, z), (1.0, -1.0, -z), (1.0, 1.0, z), (-1.0, 1.0, -z)]
+
+    with _one_cell(bottom + top, ElementType.HEXAHEDRON) as mesher:
+        result = mesher.quality(Warping3D())
+
+    assert result.values.tolist() == pytest.approx([math.degrees(math.atan(z))])
+    assert result.skipped == 0
+
+
+def test_warping_3d_skips_a_tetrahedron_which_has_no_quadrangle_facet() -> None:
+    """A tetrahedron has no 4-node facet, so no warping: skipped, not read as 0."""
+    corners = [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0)]
+
+    with _one_cell(corners, ElementType.TETRAHEDRON) as mesher:
+        result = mesher.quality(Warping3D())
+
+    assert result.values.size == 0
+    assert result.skipped == 1
+
+
+@pytest.mark.parametrize("shear", [0.0, 0.5, 2.0])
+def test_scaled_jacobian_of_a_sheared_block_is_the_cosine_of_its_shear(
+    shear: float,
+) -> None:
+    """A unit square extruded along (s, 0, 1): every cell reads 1 / sqrt(1 + s^2).
+
+    Spec (SMESH ``scaled_jacobian.rst``, ``SMDS_VolumeTool::GetScaledJacobian``): at
+    each corner the determinant of the unit edge vectors, the smallest reported. The
+    cells of the extruded block are parallelepipeds with edges (1, 0, 0), (0, 1, 0) and
+    (s, 0, 1), whose unit vectors span the volume ``1 / sqrt(1 + s^2)``; s = 0 is the
+    right-angled cell, which reads 1.
+    """
+    session = Session()
+    session.add_rectangle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 1.0, 1.0)
+    session.extrude(list(session.entities(ps.EntityKind.FACE)), (shear, 0.0, 1.0))
+
+    with Mesher(ps.load_brep(session.brep())) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=2))
+        mesher.assign(Quadrangle2D())
+        mesher.assign(Hexa3D())
+        mesher.compute()
+        result = mesher.quality(ScaledJacobian())
+
+    assert result.values.size == 8
+    expected = 1.0 / math.sqrt(1.0 + shear**2)
+    np.testing.assert_allclose(result.values, expected, rtol=1e-12)
+
+
+def test_scaled_jacobian_of_a_regular_tetrahedron_is_one() -> None:
+    """A regular tetrahedron reads 1 in magnitude (``scaled_jacobian.rst``)."""
+    corners = [(1.0, 1.0, 1.0), (1.0, -1.0, -1.0), (-1.0, 1.0, -1.0), (-1.0, -1.0, 1.0)]
+
+    with _one_cell(corners, ElementType.TETRAHEDRON) as mesher:
+        result = mesher.quality(ScaledJacobian())
+
+    assert abs(float(result.values[0])) == pytest.approx(1.0, rel=1e-12)

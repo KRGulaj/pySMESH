@@ -42,6 +42,8 @@ over-constrained check needs.
 | `AspectRatio` | Normalised aspect ratio, 1 is regular | Faces, not polygons |
 | `AspectRatio3D` | Normalised aspect ratio, 1 is regular | Volumes, not polyhedra |
 | `Warping` | Departure from planar, degrees | Four-node faces |
+| `Warping3D` | Largest `Warping` of a cell's facets, degrees | Volumes with a four-node facet |
+| `ScaledJacobian` | Smallest corner determinant of unit edge vectors; 1 is right-angled, negative is inverted | Volumes, not polyhedra |
 | `Taper` | Inequality of the four corner triangles, `[0, 1]` | Four-node faces |
 | `Skew` | Departure from right angles, degrees | Faces of 3 or 4 nodes |
 | `MinimumAngle` | Smallest interior angle, degrees | Faces |
