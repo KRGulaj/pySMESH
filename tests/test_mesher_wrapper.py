@@ -573,3 +573,70 @@ def test_an_element_bound_to_a_sub_shape_of_another_dimension_is_refused() -> No
 
         with pytest.raises(PysmeshError, match="dimensions differ"):
             mesher.add_segments(nodes[None, :], on=SubShape(SubShapeKind.FACE, 1))
+
+
+# ---- W2.1 Distribution.BETA_LAW and NumberOfSegments.beta ------------------------- #
+
+
+def _beta_law(beta: float, count: int, length: float) -> NDArray[np.float64]:
+    """Node positions of the beta law on a straight edge, ends included.
+
+    ``x_i / L = 1 + b (1 - r^(1 - i/n)) / (1 + r^(1 - i/n))`` for ``i = 1 .. n-1``, with
+    ``b = |beta|`` and ``r = (b + 1) / (b - 1)``; a negative ``beta`` mirrors them.
+    """
+    b = abs(beta)
+    r = (b + 1.0) / (b - 1.0)
+    power = r ** (1.0 - np.arange(1, count, dtype=np.float64) / count)
+    t = 1.0 + b * (1.0 - power) / (1.0 + power)
+    if beta < 0:
+        t = np.sort(1.0 - t)
+    return np.concatenate(([0.0], t * length, [length]))
+
+
+@pytest.mark.parametrize("beta", [1.01, 1.5, -1.05])
+def test_number_of_segments_beta_law_places_the_nodes_at_the_closed_form(
+    beta: float,
+) -> None:
+    """Ten segments on a 10-long edge sit at the beta law (SMESH ``computeBetaLaw``).
+
+    Spec (SMESH ``1d_meshing_hypo.rst``, "Beta Law Distribution"); a straight edge has
+    an exact arc-length parametrisation, so the positions hold to round-off.
+    """
+    hypothesis = NumberOfSegments(
+        count=10, distribution=Distribution.BETA_LAW, beta=beta
+    )
+
+    with Mesher(_line_shape()) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(hypothesis)
+        mesher.compute()
+        x = _sorted_x(mesher.mesh())
+
+    np.testing.assert_allclose(x, _beta_law(beta, 10, LINE_LENGTH), rtol=0.0, atol=TOL)
+
+
+@pytest.mark.parametrize("beta", [1.0, 0.5, -1.0])
+def test_number_of_segments_beta_law_refuses_a_beta_in_the_unit_interval(
+    beta: float,
+) -> None:
+    """Degenerate input: ``[-1, 1]`` is forbidden for the law's logarithm."""
+    hypothesis = NumberOfSegments(
+        count=10, distribution=Distribution.BETA_LAW, beta=beta
+    )
+
+    with (
+        Mesher(_line_shape()) as mesher,
+        pytest.raises(PysmeshError, match=r"needs \|beta\| > 1"),
+    ):
+        mesher.assign(hypothesis)
+
+
+def test_number_of_segments_ignores_beta_under_another_law() -> None:
+    """A beta under the REGULAR law is not read: five equal segments of 2."""
+    with Mesher(_line_shape()) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=5, beta=3.0))
+        mesher.compute()
+        x = _sorted_x(mesher.mesh())
+
+    np.testing.assert_allclose(np.diff(x), np.full(5, 2.0), atol=TOL)

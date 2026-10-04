@@ -267,6 +267,7 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
         NumberOfSegments(count=4, distribution=Distribution.EXPRESSION, expression="1+t"),
         None,
     ),
+    (NumberOfSegments(count=4, distribution=Distribution.BETA_LAW, beta=1.05), None),
     (Arithmetic1D(start_length=0.5, end_length=2.0), None),
     (StartEndLength(start_length=0.5, end_length=2.0), None),
     (Geometric1D(start_length=0.5, common_ratio=1.2), None),

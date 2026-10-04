@@ -63,17 +63,25 @@ class Distribution(IntEnum):
     that cannot be integrated, such as one with a pole inside ``(0, 1)``, fails the
     edge with a compute error.
 
+    BETA_LAW places node ``i`` of ``n`` at the fraction
+    ``1 + b (1 - r^(1 - i/n)) / (1 + r^(1 - i/n))`` of the edge, with ``b = |beta|``
+    and ``r = (b + 1) / (b - 1)`` (``StdMeshers_Regular_1D::computeBetaLaw``, after
+    gmsh). A ``beta`` just above 1 crowds the nodes at the start of the edge; a
+    negative ``beta`` crowds them at the end.
+
     Attributes:
         REGULAR: Equal segments.
         SCALE: Lengths in geometric progression, set by ``scale_factor``.
         TABLE: Density given as a table of ``(t, density)`` pairs.
         EXPRESSION: Density given as an expression in ``t``.
+        BETA_LAW: The boundary-layer law above, set by ``beta``.
     """
 
     REGULAR = 0
     SCALE = 1
     TABLE = 2
     EXPRESSION = 3
+    BETA_LAW = 4
 
 
 class QuadType(IntEnum):
@@ -392,6 +400,9 @@ class NumberOfSegments(Hypothesis):
             the edge's last vertex to its first. Use it to make a graded chain of
             edges, some defined the other way round, grow the same way along every
             edge.
+        beta: The parameter of :attr:`Distribution.BETA_LAW`, read only for it. It
+            must satisfy ``|beta| > 1``; values in ``[-1, 1]`` are refused, where
+            the law's logarithm is undefined. The default is upstream's, 1.01.
     """
 
     native_name: ClassVar[str] = "NumberOfSegments"
@@ -403,6 +414,7 @@ class NumberOfSegments(Hypothesis):
     expression: str = ""
     conversion_mode: int = 1
     reversed_edges: tuple[int, ...] = ()
+    beta: float = 1.01
 
 
 @dataclass(frozen=True)

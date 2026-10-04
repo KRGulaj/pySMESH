@@ -203,6 +203,8 @@ SMESH_Hypothesis* make_1d_hypothesis(const std::string& name, Params& p, Factory
                            std::to_string(beta) + ").");
       }
       h->SetBeta(beta);
+    } else if (p.has("beta")) {
+      p.number("beta");  // the public dataclass always sends it; read for this law only
     }
     if (distribution == StdMeshers_NumberOfSegments::DT_TabFunc) {
       h->SetConversionMode(p.integer("conversion_mode"));
