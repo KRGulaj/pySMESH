@@ -63,6 +63,7 @@ from pysmesh import (
     HexaFromSkin3D,
     Hypothesis,
     LayerDistribution,
+    LayerDistribution2D,
     LengthFromEdges,
     LocalLength,
     MaxElementArea,
@@ -273,6 +274,7 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
     (Propagation(), SubShape(SubShapeKind.EDGE, 1)),
     (PropagOfDistribution(), SubShape(SubShapeKind.EDGE, 1)),
     (LayerDistribution(distribution=NumberOfSegments(count=3)), None),
+    (LayerDistribution2D(distribution=NumberOfSegments(count=3)), None),
     (QuadraticMesh(), None),
     # 2-D and 3-D hypotheses
     (MaxElementArea(max_area=4.0), None),

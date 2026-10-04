@@ -585,6 +585,25 @@ class LayerDistribution(Hypothesis):
 
 
 @dataclass(frozen=True)
+class LayerDistribution2D(Hypothesis):
+    """Space the rings of :class:`RadialQuadrangle1D2D` by a 1-D hypothesis.
+
+    The 2-D counterpart of :class:`LayerDistribution`. The 1-D law runs along the
+    radius from the outer curve inward, so its first segment is the ring next to the
+    curve.
+
+    Attributes:
+        distribution: The 1-D hypothesis that spaces the radial direction. Its
+            ``reversed_edges`` must stay empty: it spaces rings, not the nodes of an
+            edge of the model.
+    """
+
+    native_name: ClassVar[str] = "LayerDistribution2D"
+
+    distribution: Hypothesis
+
+
+@dataclass(frozen=True)
 class QuadraticMesh(Hypothesis):
     """Generate second-order elements rather than linear ones.
 

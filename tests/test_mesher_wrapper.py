@@ -20,12 +20,15 @@ from numpy.typing import NDArray
 import pysmesh as ps
 from pysmesh import (
     Arithmetic1D,
+    Distribution,
     ElementType,
+    LayerDistribution2D,
     LengthFromEdges,
     Mefisto2D,
     Mesher,
     NumberOfSegments,
     PropagOfDistribution,
+    RadialQuadrangle1D2D,
     Regular1D,
     SegmentAroundVertex0D,
     SegmentLengthAroundVertex,
@@ -36,6 +39,7 @@ from pysmesh import (
 
 LINE_LENGTH: float = 10.0
 SQUARE_SIDE: float = 4.0
+DISK_RADIUS: float = 2.5
 TOL: float = 1e-9
 
 # The trapezoid of the propagation test: a 4-long bottom, a 2-long top, height 2.
@@ -218,3 +222,41 @@ def test_length_from_edges_sizes_the_triangles_by_the_boundary_segment(
     )
     assert _triangle_area(mesh) == pytest.approx(SQUARE_SIDE**2, abs=TOL)
     assert h / 1.5 < _mean_triangle_edge(mesh) < 1.5 * h
+
+
+# ---- W1.5 LayerDistribution2D ----------------------------------------------------- #
+
+
+def _disk_shape() -> ps.Shape:
+    """A disk of radius 2.5 in the z = 0 plane."""
+    session = Session()
+    session.add_circle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), DISK_RADIUS)
+    session.make_face(list(session.entities(ps.EntityKind.EDGE)))
+    return ps.load_brep(session.brep())
+
+
+def test_layer_distribution_2d_spaces_the_rings_by_the_scale_law_inward() -> None:
+    """Ring radii follow the SCALE law laid from the circle to the centre.
+
+    Spec (SMESH ``radial_quadrangle_1D2D_algo.rst``): the layer distribution "can be set
+    with any 1D Hypothesis" and "is applied to the longest radial edge starting from its
+    end lying on the elliptic curve". The SCALE law (``StdMeshers_Regular_1D``,
+    DT_Scale) puts node ``i`` of ``n`` at ``s_i / L = (1 - a^i) / (1 - a^n)`` with
+    ``a = scale^(1 / (n - 1))``. Four layers growing three times from the circle inward
+    put the rings at ``R (1 - s_i / L)``.
+    """
+    inner = NumberOfSegments(count=4, distribution=Distribution.SCALE, scale_factor=3.0)
+    a = 3.0 ** (1.0 / 3.0)
+    i = np.arange(5, dtype=np.float64)
+    expected = np.sort(DISK_RADIUS * (1.0 - (1.0 - a**i) / (1.0 - a**4)))
+
+    with Mesher(_disk_shape()) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=8))
+        mesher.assign(RadialQuadrangle1D2D())
+        mesher.assign(LayerDistribution2D(distribution=inner))
+        mesher.compute()
+        xyz = mesher.mesh().node_coords
+
+    radii = np.unique(np.round(np.hypot(xyz[:, 0], xyz[:, 1]), 9))
+    np.testing.assert_allclose(radii, expected, rtol=0.0, atol=TOL)

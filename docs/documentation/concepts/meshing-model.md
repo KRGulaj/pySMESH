@@ -78,7 +78,7 @@ native `StdMeshers` source or from a test that computes a real mesh with it.
 | `Projection2D` | Copies a face's mesh from another face. This is how a periodic pair is made to match node for node. | A 1-D algorithm and hypothesis on its own edges, matching the source face's edge counts | `ProjectionSource2D` (required) |
 | `Projection1D2D` | Projects a face's mesh **and** its boundary discretisation from another face. | Nothing: it supplies its own 1-D layer from the source | `ProjectionSource2D` (required) |
 | `QuadFromMedialAxis1D2D` | Quad-dominant meshing of a thin face, built on its medial axis. The only algorithm in the catalogue that reports true progress. | A 1-D algorithm and hypothesis on its edges | None beyond the 1-D layer |
-| `RadialQuadrangle1D2D` | Radial quadrangle meshing of a disk or an annulus. | A 1-D algorithm and hypothesis on the boundary edge | `NumberOfLayers2D`, or a 1-D hypothesis applied to the radial direction |
+| `RadialQuadrangle1D2D` | Radial quadrangle meshing of a disk or an annulus. | A 1-D algorithm and hypothesis on the boundary edge | `NumberOfLayers2D`, `LayerDistribution2D` (a 1-D hypothesis laid along the radius from the curve inward), or a 1-D hypothesis applied to the radial direction |
 
 ### Three 2-D limits, measured
 
