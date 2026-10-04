@@ -251,6 +251,10 @@ class Prism3D(Algorithm):
     """Extrude a source face's mesh through a prismatic solid.
 
     Meshes the lateral faces and edges itself, so only the source face needs a 2-D algorithm.
+    It sweeps from a face that is already meshed: to choose the source, assign the 2-D
+    algorithm on that face alone (``on=SubShape(SubShapeKind.FACE, face_id)``). With a
+    global 2-D algorithm only, a face that is not a quadrangle marks the source. If
+    every face reads as a quadrangle, Prism3D tries the faces in turn.
 
     A side face whose bottom or top side has more than one edge cannot be swept
     through, for example where a cap edge is split under a whole one: Prism3D projects

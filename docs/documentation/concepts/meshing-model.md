@@ -87,6 +87,26 @@ native `StdMeshers` source or from a test that computes a real mesh with it.
 | `Projection3D` | Copies a solid's mesh from another solid. | Nothing beyond the source solid's own mesh | `ProjectionSource3D` (required) |
 | `PolyhedronPerSolid3D` | One polyhedral element per solid, from the face mesh bounding it. Meshes every dimension itself; hides a lower-dimension algorithm beside it. Unlike `Cartesian3D`, it does consume an existing boundary mesh where one is present. | Nothing required; uses a boundary mesh if present | None |
 
+### `Prism3D`: the source face, and a side face it cannot sweep through
+
+`Prism3D` sweeps from a face that is already meshed. Assign the 2-D algorithm on one face
+alone, with a `SubShape`, and that face is meshed first and becomes the source. On two unit
+boxes stacked and fused, every face a quadrangle, with 3 segments on every edge,
+`Quadrangle2D` on the base face alone gives 3 x 3 x 6 = 54 hexahedra of volume 2. On the top
+face alone it gives the same mesh.
+
+With a global 2-D algorithm only, a face with more or fewer than four edges marks the
+source. If every face reads as a quadrangle, `Prism3D` tries the faces in turn. Up to 4.2.2
+it then reported the error of a face it had rejected, even when a later face worked: the
+stacked boxes failed with "Wrong source face".
+
+A side face whose bottom or top side has more than one edge cannot be swept through. This
+happens where a cap edge is split under a whole one: the side face between them has 5
+edges. `Prism3D` projects onto the first edge of a side only. If another face fits as the
+source, it sweeps from that face; otherwise the compute fails and names, for each face, why
+it is not the source. To sweep between the caps, split the opposite cap edge too, so that
+the side face becomes two quadrangles.
+
 ### Hypotheses that name another part of the model
 
 `ProjectionSource1D`, `ProjectionSource2D` and `ProjectionSource3D` each carry a `SubShape`

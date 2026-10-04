@@ -2,7 +2,7 @@
 # Copyright (C) 2026 Kajetan R. Gulaj
 # Created: 2026-10-04
 
-"""Gates for Prism3D on a prism whose one side face spans a split bottom edge.
+"""Gates for Prism3D: a side face over a split edge (B1), and the source face (S4).
 
 Report ``defect_sweep_4.2.2.md`` §3 B1: a straight prism on a regular n-gon
 (circumradius 1, height 1), one bottom edge split at its midpoint, the top edge above it
@@ -21,6 +21,17 @@ half-edge, so that every face can be structured.
   its top side, and Prism3D projects only onto the first edge of a top side
   (``StdMeshers_Prism_3D.cxx`` computeWalls), so it cannot mesh that face. The message
   must say so for that face, not report the error of a rejected candidate.
+
+Report §8 S4: two unit boxes stacked and fused, so every face is a quadrangle and each
+side is two faces. Nothing marks a source face, so Prism3D tries the faces in turn.
+
+* **The search meshes it.** It failed with "Wrong source face", the error of a rejected
+  candidate, though a later face was meshed from (the B1 cause).
+* **A 2-D algorithm on one face makes it the source.** SMESH sweeps from a face that is
+  already meshed (``StdMeshers_Prism_3D.cxx`` Compute; ``prism_3d_algo.rst``: "It is
+  enough to define a sub-mesh on either the top or the base face").
+The oracle is the closed form: with n segments on every edge, n x n x 2n hexahedra fill
+the volume 2.
 """
 
 from __future__ import annotations
@@ -33,6 +44,7 @@ from numpy.typing import NDArray
 
 import pysmesh as ps
 from pysmesh import (
+    ElementType,
     EntityKind,
     MaxElementArea,
     Mefisto2D,
@@ -150,3 +162,53 @@ def test_a_split_edge_hexagon_prism_is_refused_naming_the_composite_side(
         "has 1 EDGE(s) on its bottom side and 2 on its top side; "
         "a composite horizontal side is not supported"
     ) in details
+
+
+# Segments on every edge of the stacked boxes.
+STACK_SEGMENTS: int = 3
+STACK_VOLUME: float = 2.0
+# Finds the base face by its box; above the 1e-7 tolerance pad of older boxes.
+FACE_TOL: float = 1e-6
+
+
+def _stacked_boxes() -> ps.Shape:
+    """Two unit boxes, one on the other, fused into one solid of 10 quadrangles."""
+    s = Session()
+    s.add_box(1.0, 1.0, 1.0)
+    lower = s.entities(EntityKind.SOLID).tolist()
+    s.add_box(1.0, 1.0, 1.0, origin=(0.0, 0.0, 1.0))
+    upper = [i for i in s.entities(EntityKind.SOLID).tolist() if i not in lower]
+    s.fuse(lower, upper)
+    return ps.load_brep(s.brep())
+
+
+def _stacked_mesh(source: str) -> tuple[NDArray[np.float64], int]:
+    """Cell volumes and hexahedra; Quadrangle2D on every face or on the base only."""
+    shape = _stacked_boxes()
+    base = [f.id for f in shape.faces() if f.bbox[5] < FACE_TOL]
+    with Mesher(shape) as m:
+        m.assign(Regular1D())
+        m.assign(NumberOfSegments(count=STACK_SEGMENTS))
+        if source == "base":
+            m.assign(Quadrangle2D(), on=SubShape(SubShapeKind.FACE, base[0]))
+        else:
+            m.assign(Quadrangle2D())
+        m.assign(Prism3D())
+        m.compute()
+        volumes = m.quality(ps.Volume()).values
+        types = m.mesh().element_type
+    return volumes, int(np.count_nonzero(types == int(ElementType.HEXAHEDRON)))
+
+
+@pytest.mark.parametrize("source", ["base", "search"])
+def test_stacked_boxes_fill_volume_2_with_the_closed_form_hexahedra(
+    source: str,
+) -> None:
+    """n x n x 2n hexahedra, positive, of volume 2; base assigned or searched (S4)."""
+    n = STACK_SEGMENTS
+
+    volumes, hexahedra = _stacked_mesh(source)
+
+    assert hexahedra == n * n * 2 * n == len(volumes)
+    assert float(volumes.min()) > 0.0
+    assert float(volumes.sum()) == pytest.approx(STACK_VOLUME, rel=VOLUME_RTOL)
