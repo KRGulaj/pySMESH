@@ -411,8 +411,10 @@ class _EditOps(_MesherBase):
             target_aspect_ratio: Stop early once the worst element's aspect ratio is at or
                 below this. 1 is a regular element, so the default means "run every pass".
             on_shape: Move nodes in the parameter space of their face rather than in model
-                space. Requires the mesh to be bound to geometry; on a mesh with no CAD it
-                has no effect.
+                space. Requires the mesh to be bound to geometry: on a mesher built
+                without a shape (:meth:`Mesher.from_arrays`, :meth:`Mesher.from_mesh`)
+                it raises, rather than move the nodes in model space and report
+                success. Pass ``on_shape=False`` there.
             elements: The elements whose nodes may move. Empty means the whole mesh.
             fixed_nodes: Extra nodes to hold still, beyond the boundary ones.
 
@@ -422,7 +424,8 @@ class _EditOps(_MesherBase):
 
         Raises:
             PysmeshError: If ``iterations`` is below 1, if ``target_aspect_ratio`` is below
-                1, if an id names nothing, or if the mesher has been released.
+                1, if ``on_shape`` is True on a mesher with no shape, if an id names
+                nothing, or if the mesher has been released.
         """
         return _report(
             self._m.smooth(

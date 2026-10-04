@@ -422,6 +422,19 @@ def test_smooth_refuses_zero_iterations(surface_mesher: Mesher) -> None:
         surface_mesher.smooth(iterations=0)
 
 
+def test_smooth_on_shape_is_refused_by_name_on_a_mesher_with_no_shape(
+    surface_mesher: Mesher,
+) -> None:
+    """With no CAD, on_shape=True raises naming it; on_shape=False smooths (N2)."""
+    with Mesher.from_mesh(surface_mesher.mesh()) as bare:
+        with pytest.raises(PysmeshError, match=r"smooth\(on_shape=True\)"):
+            bare.smooth(on_shape=True)
+
+        report = bare.smooth(on_shape=False)
+
+    assert report.nodes_after == report.nodes_before
+
+
 # Report §8 S6: a 3 x 7 x 11 box meshed by Mefisto2D with 1 m edges and 1 m2 areas.
 # On SMESH 9.16 its two 3 x 11 faces hold triangles of 0.187 degrees, two nodes on one
 # boundary edge and one interior node. One smoothing pass, of either method, moves the

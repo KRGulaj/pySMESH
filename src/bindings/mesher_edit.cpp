@@ -392,7 +392,7 @@ py::dict Mesher::smooth(int method, int iterations, double target_aspect_ratio,
     // Smoothing in parameter space moves each node on the CAD surface its face lies on, so
     // there has to be one. Refused here rather than silently falling back to model space,
     // which would move the nodes somewhere else and report success.
-    ensure_shape("Mesher.smooth(in_uv_space=True)");
+    ensure_shape("Mesher.smooth(on_shape=True)");
   }
 
   TIDSortedElemSet chosen = element_set(*meshDS_, elements, "Mesher.smooth");
