@@ -204,17 +204,22 @@ class Quadrangle2D(Algorithm):
 
 @dataclass(frozen=True)
 class Mefisto2D(Algorithm):
-    """Free triangle meshing of a face. Sized by :class:`MaxElementArea`.
+    """Free triangle meshing of a face, sized by its boundary or by MaxElementArea.
+
+    The target edge length is the mean boundary segment (with no 2-D hypothesis, or with
+    :class:`LengthFromEdges`). With :class:`MaxElementArea` it is 1.06 times the side of
+    an equilateral triangle of area ``max_area``, capped at the longest boundary
+    segment: the bound refines the face below the boundary segments, and never coarsens
+    it past them. Along boundary segments too long for the bound the triangles stay
+    larger than ``max_area``; the compute then succeeds with a
+    :class:`~pysmesh.mesher.ComputeWarning` on the face that names the largest area.
 
     Its own quality step (``teamqt``, ``mefisto2/trte.c:4903``, called at
-    ``aptrte.cxx:594-612``) can leave slivers beside a boundary edge. On a 3 x 7 x 11
-    box with ``LocalLength(1.0)`` and ``MaxElementArea(1.0)``, the two 3 x 11 faces hold
-    triangles of 0.187 degrees, two nodes on one boundary edge and one interior node; 4
-    of 440 triangles are below 5 degrees and 44 below 20 (SMESH 9.16). Run
-    :meth:`~pysmesh.Mesher.smooth` after it: one pass, Laplacian or centroidal, lifts
-    the minimum angle there to 18.43 degrees, atan(1/3), the worst triangle left having
-    only boundary nodes; no triangle stays below 5 degrees, 4 below 20. More passes
-    change nothing on that box.
+    ``aptrte.cxx:594-612``) can leave slivers beside a boundary edge. On the 4 x 4
+    square with 16 segments per side, sized by its boundary, 20 of 494 triangles are
+    below 5 degrees and the smallest is 0.99 degrees (SMESH 9.16). Run
+    :meth:`~pysmesh.Mesher.smooth` after it: one pass lifts the smallest angle there to
+    15.45 degrees (Laplacian) or 24.93 degrees (centroidal), with no triangle below 5.
     """
 
     native_name: ClassVar[str] = "MEFISTO_2D"
@@ -706,11 +711,14 @@ class NotConformAllowed(Hypothesis):
 class MaxElementArea(Hypothesis):
     """An upper bound on a 2-D element's area.
 
-    It is a *bound*, not a target: a free mesher sizes its interior from the boundary
-    discretisation, so this only binds where that boundary would otherwise produce elements
-    larger than ``max_area``. Refining a face means refining what bounds it — a 1-D
-    hypothesis, or :class:`LocalLength` scoped to the face.
-
+    It is a *bound*, not a target. With :class:`Mefisto2D` it refines the face below the
+    boundary segments where it asks for smaller triangles, and it never coarsens the
+    face past the longest boundary segment, so a looser bound never gives a finer mesh.
+    A triangle on a boundary segment keeps that segment as an edge, so where the
+    segments are too long for the bound those triangles stay larger than ``max_area``:
+    the compute reports a :class:`~pysmesh.mesher.ComputeWarning` naming the largest
+    area. Refine what bounds the face there — a 1-D hypothesis, or :class:`LocalLength`
+    scoped to the face.
     Attributes:
         max_area: Largest element area allowed.
     """

@@ -33,6 +33,8 @@ from pysmesh import (
     Hypothesis,
     LayerDistribution2D,
     LengthFromEdges,
+    LocalLength,
+    MaxElementArea,
     Mefisto2D,
     Mesher,
     NotConformAllowed,
@@ -1337,3 +1339,113 @@ def test_smoothing_a_uniform_cylinder_mesh_across_its_seam_moves_nothing(
     np.testing.assert_allclose(
         np.hypot(xyz_after[:, 0], xyz_after[:, 1]), 1.0, atol=TOL
     )
+
+
+# ---- E6 MaxElementArea on Mefisto2D ----------------------------------------------- #
+
+MEFISTO_BOUNDS: tuple[float, ...] = (4.0, 1.0, 0.25, 0.0625)
+
+
+def _triangle_areas(mesh: ps.MeshData) -> NDArray[np.float64]:
+    """The area of each triangle of ``mesh``."""
+    rows = [
+        mesh.nodes_of(i)
+        for i in range(mesh.element_count)
+        if int(mesh.element_type[i]) == int(ElementType.TRIANGLE)
+    ]
+    tri = np.asarray(rows, dtype=np.int64)
+    p0, p1, p2 = (mesh.node_coords[tri[:, k]] for k in range(3))
+    return 0.5 * np.linalg.norm(np.cross(p1 - p0, p2 - p0), axis=1)
+
+
+def _mefisto(
+    shape: ps.Shape, edge_sizing: Hypothesis, *face_sizing: Hypothesis
+) -> tuple[ps.MeshData, ps.ComputeReport]:
+    """MEFISTO on ``shape``: Regular1D with ``edge_sizing``, then ``face_sizing``."""
+    with Mesher(shape) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(edge_sizing)
+        mesher.assign(Mefisto2D())
+        for hypothesis in face_sizing:
+            mesher.assign(hypothesis)
+        report = mesher.compute()
+        return mesher.mesh(), report
+
+
+def test_max_element_area_bounds_every_mefisto_triangle_as_it_tightens() -> None:
+    """The 4 x 4 square, 8 segments per side, max_area 4, 1, 0.25 and 0.0625.
+
+    Spec (SMESH ``2d_meshing_hypo.rst``, "Max Element Area"): the hypothesis sets "the
+    maximum area of mesh faces". So every triangle has an area of at most A, triangles
+    that fill the area 16 number at least 16 / A, and a smaller A never gives fewer
+    triangles. The bounds 0.25 and 0.0625 ask for triangles at and below the boundary
+    segment of 0.5, where MEFISTO used to clamp the bound back to the boundary size.
+    """
+    counts = []
+    reports = []
+    for bound in MEFISTO_BOUNDS:
+        mesh, report = _mefisto(
+            _square_shape(), NumberOfSegments(count=8), MaxElementArea(max_area=bound)
+        )
+
+        areas = _triangle_areas(mesh)
+        assert areas.max() <= bound * (1.0 + TOL), bound
+        assert areas.size >= SQUARE_SIDE**2 / bound, bound
+        assert areas.sum() == pytest.approx(SQUARE_SIDE**2, rel=TOL)
+        counts.append(int(areas.size))
+        reports.append(report)
+    assert counts == sorted(counts)
+    assert all(report.warnings == () for report in reports)
+
+
+@pytest.mark.parametrize("bound", [1.0, 4.0])
+def test_a_max_element_area_the_boundary_already_meets_leaves_the_mesh_alone(
+    bound: float,
+) -> None:
+    """The 3 x 7 x 11 box with LocalLength(1.0): the boundary-sized mesh has every
+    triangle within 1.0, so a bound of 1.0 or 4.0 changes nothing.
+
+    A bound limits the triangles; it is not a size to grow them to. MEFISTO used to keep
+    an edge bound up to 2.05 times the longest boundary segment, so MaxElementArea(1.0)
+    grew the interior past the 1 m boundary: 440 triangles, the largest of area 1.77,
+    slivers of 0.187 degrees, against 1136 triangles with MaxElementArea(4.0).
+    """
+    plain, _ = _mefisto(_box_shape(), LocalLength(length=1.0))
+
+    mesh, report = _mefisto(
+        _box_shape(), LocalLength(length=1.0), MaxElementArea(max_area=bound)
+    )
+
+    np.testing.assert_array_equal(
+        np.sort(mesh.node_coords, axis=0), np.sort(plain.node_coords, axis=0)
+    )
+    assert _triangle_areas(mesh).max() <= bound
+    assert report.warnings == ()
+
+
+def test_a_max_element_area_the_boundary_cannot_meet_is_a_warning() -> None:
+    """The 4 x 4 square with 2 segments per side and max_area 0.25.
+
+    A triangle on a boundary segment of length 2 has an area of 0.25 only if its third
+    node lies within 0.25 of that segment; MEFISTO's triangles there are larger. The
+    mesh is kept, and the compute reports a warning on the face, naming the bound and
+    the largest area, which does exceed the bound.
+    """
+    bound = 0.25
+
+    mesh, report = _mefisto(
+        _square_shape(), NumberOfSegments(count=2), MaxElementArea(max_area=bound)
+    )
+
+    largest = float(_triangle_areas(mesh).max())
+    assert largest > bound
+    assert _triangle_areas(mesh).sum() == pytest.approx(SQUARE_SIDE**2, rel=TOL)
+    assert len(report.warnings) == 1
+    warning = report.warnings[0]
+    assert (warning.kind, warning.ordinal, warning.algorithm) == (
+        SubShapeKind.FACE,
+        1,
+        "MEFISTO_2D",
+    )
+    assert f"MaxElementArea {bound:g} is not met" in warning.text
+    assert f"{largest:.6g}" in warning.text

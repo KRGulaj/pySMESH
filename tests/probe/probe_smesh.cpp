@@ -2699,6 +2699,67 @@ void probe_p4_cartesian_layers() {
   }
 }
 
+
+// ------------------------------------------------------------------------------ P4MEF ---- //
+
+// MEFISTO_2D on the 4 x 4 square with n segments per side and MaxElementArea(max_area):
+// whether it computed, the triangle count, the largest triangle area, and whether the face
+// carries a COMPERR_WARNING.
+struct MefistoRun {
+  bool computed = false;
+  int triangles = 0;
+  double largest = 0.0;
+  bool warned = false;
+};
+
+MefistoRun mefisto_square(int segments, double max_area) {
+  const TopoDS_Face face =
+      BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 0, 4, 0, 4).Face();
+  Session s(face);
+  StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+  StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+  n->SetNumberOfSegments(segments);
+  StdMeshers_MEFISTO_2D* a2 = s.make<StdMeshers_MEFISTO_2D>();
+  StdMeshers_MaxElementArea* area = s.make<StdMeshers_MaxElementArea>();
+  area->SetMaxArea(max_area);
+  MefistoRun run;
+  run.computed = s.assign(face, a1) && s.assign(face, n) && s.assign(face, a2) &&
+                 s.assign(face, area) && s.compute();
+  for (SMDS_FaceIteratorPtr it = s.meshDS()->facesIterator(); it->more();) {
+    const SMDS_MeshElement* f = it->next();
+    const gp_XYZ p0(f->GetNode(0)->X(), f->GetNode(0)->Y(), f->GetNode(0)->Z());
+    const gp_XYZ p1(f->GetNode(1)->X(), f->GetNode(1)->Y(), f->GetNode(1)->Z());
+    const gp_XYZ p2(f->GetNode(2)->X(), f->GetNode(2)->Y(), f->GetNode(2)->Z());
+    run.largest = std::max(run.largest, 0.5 * ((p1 - p0) ^ (p2 - p0)).Modulus());
+    ++run.triangles;
+  }
+  const SMESH_ComputeErrorPtr err = s.mesh().GetSubMesh(face)->GetComputeError();
+  run.warned = err && err->myName == COMPERR_WARNING;
+  return run;
+}
+
+// MEFISTO_2D_max_element_area.patch: aptrte clamped the edge bound to the boundary segments,
+// so MaxElementArea had no effect below their size; a bound the boundary cannot meet is a
+// compute warning on the face.
+void probe_p4_mefisto_max_element_area() {
+  section("P4MEF", "MaxElementArea bounds the MEFISTO_2D triangles");
+  const MefistoRun tight = mefisto_square(8, 0.0625);
+  char msg[200];
+  std::snprintf(msg, sizeof(msg),
+                "P4MEF 8 segments per side, max_area 0.0625: %d triangles (>= 256), largest "
+                "%.4f (<= 0.0625; 134 and 0.1758 before), no warning",
+                tight.triangles, tight.largest);
+  check(tight.computed && tight.triangles >= 256 && tight.largest <= 0.0625 * (1 + 1e-9) &&
+            !tight.warned,
+        msg);
+  const MefistoRun coarse = mefisto_square(2, 0.25);
+  std::snprintf(msg, sizeof(msg),
+                "P4MEF 2 segments per side, max_area 0.25: computed with a COMPERR_WARNING "
+                "on the face (largest %.4f)",
+                coarse.largest);
+  check(coarse.computed && coarse.warned && coarse.largest > 0.25, msg);
+}
+
 }  // namespace
 
 void run_smesh_probe() {
@@ -2720,4 +2781,5 @@ void run_smesh_probe() {
   probe_p4_hypothesis_status();
   probe_p4_layer_builder_lifecycle();
   probe_p4_cartesian_layers();
+  probe_p4_mefisto_max_element_area();
 }

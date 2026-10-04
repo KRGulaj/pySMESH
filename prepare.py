@@ -119,6 +119,7 @@ PATCH_MANIFEST: Final[tuple[tuple[str, str], ...]] = (
     ("smesh/StdMeshers_Cartesian_3D_offset_small_cells.patch", "src/SMESH"),
     ("smesh/StdMeshers_Cartesian_VL_offset_makers_leak.patch", "src/SMESH"),
     ("smesh/SMDS_UnstructuredGrid_links_leak.patch", "src/SMESH"),
+    ("smesh/MEFISTO_2D_max_element_area.patch", "src/SMESH"),
     # --- OCCT 8.0 layer (conda) : root staged/ ---
     ("occt8/0003-boost-regex-str-enum.patch", "."),
     ("occt8/0004-occt-8.0-compat.patch", "."),

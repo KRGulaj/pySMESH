@@ -74,7 +74,7 @@ native `StdMeshers` source or from a test that computes a real mesh with it.
 | Algorithm | What it does | Needs beneath | Hypotheses it reads |
 |---|---|---|---|
 | `Quadrangle2D` | Mapped quadrangle meshing of a face bounded by four logical sides. Refuses a face it cannot read as four sides. | A 1-D algorithm and hypothesis on its edges | `QuadrangleParams` (base vertex, corner vertices, how to resolve mismatched sides), `QuadranglePreference` |
-| `Mefisto2D` | Free triangle meshing of a face. | A 1-D algorithm and hypothesis on its edges | `MaxElementArea` (a bound, not a target: it only binds where the boundary would otherwise produce larger elements), `LengthFromEdges` (the mean boundary segment as the target edge length; the default when no 2-D hypothesis applies) |
+| `Mefisto2D` | Free triangle meshing of a face. | A 1-D algorithm and hypothesis on its edges | `MaxElementArea` (a bound, not a target: it refines the face below the boundary segments where it asks for that, and never coarsens it past the longest one; where the boundary segments are too long for the bound, the compute reports a `ComputeWarning` naming the largest triangle area), `LengthFromEdges` (the mean boundary segment as the target edge length; the default when no 2-D hypothesis applies) |
 | `PolygonPerFace2D` | One polygonal element per face, using the edge discretisation directly as its boundary. | A 1-D algorithm and hypothesis on its edges | None |
 | `Projection2D` | Copies a face's mesh from another face. This is how a periodic pair is made to match node for node. | A 1-D algorithm and hypothesis on its own edges, matching the source face's edge counts | `ProjectionSource2D` (required) |
 | `Projection1D2D` | Projects a face's mesh **and** its boundary discretisation from another face. | Nothing: it supplies its own 1-D layer from the source | `ProjectionSource2D` (required) |
@@ -101,14 +101,13 @@ The measurements are on SMESH 9.16. The first two are on a planar NACA 0012 cap 
 The way out for such a face is a better block topology: for example, a C-shaped strip
 along the camber line plus a nose block. Or mesh it with triangles.
 
-The third is `Mefisto2D` on a plain box. Its own quality step (`teamqt`,
-`mefisto2/trte.c:4903`) can leave slivers beside a boundary edge. On a 3 x 7 x 11 box with
-`LocalLength(1.0)` and `MaxElementArea(1.0)`, the two 3 x 11 faces hold triangles of 0.187
-degrees, each with two nodes on one boundary edge and one interior node. 4 of 440 triangles
-are below 5 degrees, and 44 are below 20. Run `Mesher.smooth` after `Mefisto2D`. One pass,
-Laplacian or centroidal, lifts the minimum angle there to 18.43 degrees, which is
-atan(1/3): the worst triangle left has only boundary nodes, and smoothing never moves
-those. No triangle stays below 5 degrees, and 4 stay below 20.
+The third is `Mefisto2D` on a plain face. Its own quality step (`teamqt`,
+`mefisto2/trte.c:4903`) can leave slivers beside a boundary edge. On the 4 x 4 square with
+16 segments per side, sized by its boundary, 20 of 494 triangles are below 5 degrees and the
+smallest is 0.99 degrees. Run `Mesher.smooth` after `Mefisto2D`. One pass lifts the
+smallest angle there to 15.45 degrees (Laplacian) or 24.93 degrees (centroidal), and no
+triangle stays below 5 degrees. After 3 passes the smallest angle is 21.35 degrees
+(Laplacian) or 29.13 degrees (centroidal).
 
 ### 3-D algorithms
 
