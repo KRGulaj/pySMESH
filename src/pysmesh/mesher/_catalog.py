@@ -558,6 +558,20 @@ class Propagation(Hypothesis):
 
 
 @dataclass(frozen=True)
+class PropagOfDistribution(Hypothesis):
+    """Carry the relative node spacing of one edge to every edge opposite it.
+
+    Assign it on the edge whose 1-D hypothesis is to be repeated, as for
+    :class:`Propagation`. :class:`Propagation` carries the hypothesis itself, so an
+    opposite edge of another length gets another node count. This one carries the
+    result: each opposite edge gets the same number of nodes, at the same fractions of
+    its own length.
+    """
+
+    native_name: ClassVar[str] = "PropagOfDistribution"
+
+
+@dataclass(frozen=True)
 class LayerDistribution(Hypothesis):
     """Space the layers of :class:`RadialPrism3D` by a 1-D hypothesis.
 

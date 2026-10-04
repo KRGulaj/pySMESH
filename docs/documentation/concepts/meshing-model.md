@@ -64,7 +64,7 @@ native `StdMeshers` source or from a test that computes a real mesh with it.
 
 | Algorithm | What it does | Hypotheses it reads |
 |---|---|---|
-| `Regular1D` | Discretises every edge it governs, spaced by whichever 1-D hypothesis applies there. The usual base of any assignment. | `NumberOfSegments`, `Arithmetic1D`, `StartEndLength`, `Geometric1D`, `FixedPoints1D`, `Adaptive1D`, `AutomaticLength`, `Deflection1D`, `LocalLength`, `MaxLength`, `SegmentLengthAroundVertex` (vertex-scoped, read only with `SegmentAroundVertex0D` on the vertex), `Propagation` (edge-scoped) |
+| `Regular1D` | Discretises every edge it governs, spaced by whichever 1-D hypothesis applies there. The usual base of any assignment. | `NumberOfSegments`, `Arithmetic1D`, `StartEndLength`, `Geometric1D`, `FixedPoints1D`, `Adaptive1D`, `AutomaticLength`, `Deflection1D`, `LocalLength`, `MaxLength`, `SegmentLengthAroundVertex` (vertex-scoped, read only with `SegmentAroundVertex0D` on the vertex), `Propagation` and `PropagOfDistribution` (edge-scoped: the first carries the hypothesis to the opposite edges, the second its node fractions) |
 | `CompositeSegment1D` | Discretises a chain of C1-continuous edges as if it were one edge. Useful where an import split one geometric curve into several edges. | The same 1-D hypotheses as `Regular1D`, applied to the whole chain |
 | `Projection1D` | Copies an edge's discretisation from another edge. | `ProjectionSource1D` (required) |
 

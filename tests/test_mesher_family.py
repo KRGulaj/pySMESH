@@ -83,6 +83,7 @@ from pysmesh import (
     ProjectionSource2D,
     ProjectionSource3D,
     Propagation,
+    PropagOfDistribution,
     QuadFromMedialAxis1D2D,
     Quadrangle2D,
     QuadrangleParams,
@@ -269,6 +270,7 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
     (MaxLength(length=2.0), None),
     (SegmentLengthAroundVertex(length=0.5), SubShape(SubShapeKind.VERTEX, 1)),
     (Propagation(), SubShape(SubShapeKind.EDGE, 1)),
+    (PropagOfDistribution(), SubShape(SubShapeKind.EDGE, 1)),
     (LayerDistribution(distribution=NumberOfSegments(count=3)), None),
     (QuadraticMesh(), None),
     # 2-D and 3-D hypotheses
