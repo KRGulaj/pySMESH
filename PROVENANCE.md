@@ -88,20 +88,28 @@ The Fortran sources `trte.f` and `areteideale.f` are not carried. `trte.c` (abov
 `patches/smesh/mefisto.patch` gives it the f2c signature. These files are licensed LGPL-2.1,
 same as SMESH itself.
 
-`prepare.py` stages them where `V9_9_0` kept them (`MEFISTO2/` and `StdMeshers/`). They
-compile against the `V9_16_0` API with no change beyond the two that already applied on
-`V9_9_0`: `mefisto.patch` and the `StdMeshers_MEFISTO_2D.cxx` hunk of the OCCT 8.0 pass. So
-`Mefisto2D` meshes exactly as before: the golden probes `2d/mefisto_box` and
-`2d/mefisto_sphere` are unchanged.
+`prepare.py` stages them where `V9_9_0` kept them (`MEFISTO2/` and `StdMeshers/`). Three
+patches change them:
+
+- `mefisto.patch` (looooo) wires the f2c `trte.c` in.
+- The `StdMeshers_MEFISTO_2D.cxx` hunk of the OCCT 8.0 pass (`occt8/0004`) ports it to OCCT 8.
+- `MEFISTO_2D_max_element_area.patch` (pySMESH) makes `MaxElementArea` bound the triangles.
+  Before it, `aptrte` clamped the bound to the boundary edge lengths, so the hypothesis had no
+  effect. A face with no 2-D hypothesis, or with `LengthFromEdges`, meshes as on `V9_9_0`.
 
 ## Patches
 
-`patches/{kernel,geom,smesh,occt8}/*.patch`, applied by `prepare.py` in that order. Most come
-from looooo/SMESH's own patch set (Windows/MSVC fixes, the MED strip); the `occt8/` pair comes
-from conda-forge's `smesh-feedstock` recipe, which is the only place we found a working OCCT
-8.0 compatibility pass for this codebase. Six are pySMESH's own: four for code that is new
-in `V9_16_0`, and two that make `Adaptive1D` keep the rules its documentation states.
-NETGEN-related patches are left out — we don't build NETGEN.
+`patches/{kernel,geom,smesh,occt8}/*.patch`: 36 patches, applied by `prepare.py` in the order
+of its `PATCH_MANIFEST`, which the index below follows.
+
+- 12 come from looooo/SMESH's own patch set: the Windows/MSVC fixes and the MED strip.
+- 2, the `occt8/` pair, come from conda-forge's `smesh-feedstock` recipe. It is the only working
+  OCCT 8.0 compatibility pass for this code base that we found.
+- 22 are pySMESH's own. Two make `V9_16_0` build (`geom/GEOMUtils_GEOMAlgo`,
+  `smesh/SMESH_Gen_no_qt`). The other 20 fix SMESH defects. Each header states the defect, the
+  root cause with the upstream lines, and what does not change.
+
+NETGEN-related patches are left out, because pySMESH does not build NETGEN.
 
 `patches/occt801/` is a different kind: it patches OCCT itself, not SMESH, and
 `ci/build_occt.py` applies it, not `prepare.py`. See
@@ -220,32 +228,34 @@ family is exercised by the `v2_probe` target (`tests/probe`).
 
 ## OCCT toolkits linked & bundled
 
-`_core.pyd` links OCCT dynamically; the wheel bundles (at delvewheel-repair time) every OCCT
-toolkit it needs directly or transitively. All come from our own build of OCCT 8.0.1 (see
-[How OCCT is built](#how-occt-is-built)), LGPL-2.1 with the exception (see
-[NOTICE.md](NOTICE.md)); this records *which* toolkits and *why*, not a new source. Up to
-4.2.2 they came from the conda-forge package `occt=8.0.0`.
+`_core.pyd` links OCCT dynamically. At repair time `delvewheel` bundles every OCCT toolkit in
+its DLL closure. All of them come from our own build of OCCT 8.0.1 (see
+[How OCCT is built](#how-occt-is-built)), under LGPL-2.1 with the exception (see
+[NOTICE.md](NOTICE.md)). This section records which toolkits ship and why; it adds no source.
+Up to 4.2.2 they came from the conda-forge package `occt=8.0.0`.
 
-- Modelling / meshing (present since B2–B3): TKernel, TKMath, TKG2d, TKG3d, TKGeomBase,
-  TKGeomAlgo, TKBRep, TKTopAlgo, TKPrim, TKBO, TKMesh, TKShHealing, TKOffset, plus the
-  DataExchange STL toolkit **TKDESTL** (the OCCT-8.0 rename of TKSTL, which
-  `cmake/SMESH/CMakeLists.txt` links for `DriverSTL`).
-  TKBool and TKFillet were already bundled transitively (TKOffset pulls `BRepFill_PipeShell`
-  from TKBool; TKShHealing/TKTopAlgo pull TKFillet).
-- **v2 Tier-C modelling (added by the ground-zero pass)**: **TKPrim**, **TKBO** and
-  **TKFillet** are now linked *explicitly* by `_core` rather than relied on transitively, and
-  **TKFeat** (`BRepFeat_SplitShape`), **TKHelix** (`HelixBRep_BuilderHelix`) and **TKDEIGES**
-  (`IGES{,CAF}Control_Reader`) are added to the link line. TKBool is deliberately *not* linked:
-  OCCT 8.0 keeps `BRepAlgoAPI_*` in TKBO, and TKBool carries only the legacy `TopOpeBRep`
-  engine plus `BRepFill_*`, both reached through facades in other toolkits.
-- **DataExchange + OCAF/XDE (added for B1 `read_step_xde`/`write_step_xde`)**: **TKDESTEP**
-  (STEP reader/writer; OCCT-8.0 rename of TKSTEP, mirroring the TKSTL→TKDESTL precedent),
-  **TKXCAF**/**TKVCAF** (XDE shape/colour/name tools), **TKLCAF**/**TKCAF**/**TKCDF** (OCAF
-  document core), **TKXSBase** (data-exchange base). Explicitly listed in the root
-  `CMakeLists.txt` `_core` link block. `ci/check_wheel.py` asserts these are bundled.
-- **SMESH 9.16** adds no toolkit to the bundle. Its new `SMESH_DriverShape.cxx` reads and
-  writes STEP through `STEPControl`, so `cmake/SMESH` links **TKDESTEP** and **TKXSBase**
-  into the SMESH library; `_core` already linked both.
+The root `CMakeLists.txt` names the toolkits that the bindings call. The wheel ships 29:
+
+| Toolkits | Why |
+|---|---|
+| TKernel, TKMath, TKG2d, TKG3d, TKGeomBase, TKGeomAlgo, TKBRep | foundation classes and geometry |
+| TKTopAlgo, TKPrim, TKBO, TKFillet, TKOffset, TKShHealing, TKHelix | the session's modelling operations: `BRepBuilderAPI_*`, primitives, booleans (`BRepAlgoAPI_*`), fillet and chamfer, sweeps and offsets, healing, helices |
+| TKBool | `BRepFill_PipeShell`, which `BRepOffsetAPI_MakePipeShell` reaches |
+| TKMesh | `BRepMesh_IncrementalMesh`, the tessellation |
+| TKExpress | `ExprIntrp`, which the mesher's expression-based 1-D distributions reach |
+| TKDE, TKXSBase, TKDESTEP, TKDEIGES | STEP and IGES read and write |
+| TKXCAF, TKVCAF, TKLCAF, TKCAF, TKCDF | the OCAF and XDE document behind the STEP names and labels |
+| TKV3d, TKService, TKHLR | pulled in by TKVCAF (TKV3d, TKService) and by TKV3d (TKHLR); pySMESH calls none of their API |
+
+MSVC records an import only for a DLL whose import library supplies a symbol. A toolkit that the
+link line names but that no binding calls is therefore no dependency, and `delvewheel` does not
+bundle it. Today that is **TKFeat** (`BRepFeat_SplitShape`, proven usable by the `v2_probe`
+target) and **TKDESTL** (`cmake/SMESH` links it for `DriverSTL`, which no binding calls).
+`ci/check_wheel.py` asserts the toolkits that ship. Add a toolkit there in the same commit as the
+binding that first calls it.
+
+SMESH `V9_16_0` adds no toolkit. Its `SMESH_DriverShape.cxx` reads and writes STEP through
+`STEPControl`, so `cmake/SMESH` links TKDESTEP and TKXSBase, which `_core` links already.
 
 ## How OCCT is built
 
@@ -306,10 +316,15 @@ it. So the wheel bundles no FreeType DLL.
 
 ## Reference-only repositories
 
-Several other SMESH-adjacent projects were used for guidance but never copied from directly:
-[trelau/SMESH](https://github.com/trelau/SMESH), [trelau/pySMESH](https://github.com/trelau/pySMESH)
-(the closest thing to a prior pybind11 binding for this library — useful for cross-checking API names),
-[trelau/pyOCCT](https://github.com/trelau/pyOCCT), SalomePlatform's [shaper](https://github.com/SalomePlatform/shaper)
-and [geom](https://github.com/SalomePlatform/geom) (Phase 2, unrelated to the current milestones), and
-[FreeCAD/FreeCAD](https://github.com/FreeCAD/FreeCAD) (kept only for one older NETGENPlugin file used to
-confirm an API usage pattern). None of it ships in the wheel.
+These projects were read for guidance. Nothing in the wheel is copied from them, except the two
+looooo/SMESH files and the patches that the sections above name.
+
+| Project | Used for |
+|---|---|
+| [looooo/SMESH](https://github.com/looooo/SMESH) | the standalone Windows build, and the source of the **L** patches |
+| [conda-forge/smesh-feedstock](https://github.com/conda-forge/smesh-feedstock) | the source of the **C** patches (the OCCT 8.0 pass) |
+| [montylab3d/smesh](https://github.com/montylab3d/smesh) | a second standalone SMESH build, to cross-check build fixes |
+| [trelau/SMESH](https://github.com/trelau/SMESH), [trelau/pySMESH](https://github.com/trelau/pySMESH) | a prior binding of this library, to cross-check API names |
+| [trelau/pyOCCT](https://github.com/trelau/pyOCCT) | OCCT binding patterns |
+| [SalomePlatform/geom](https://github.com/SalomePlatform/geom), [SalomePlatform/shaper](https://github.com/SalomePlatform/shaper) | SALOME geometry modules, to check how upstream calls GEOM and OCCT |
+| [FreeCAD/FreeCAD](https://github.com/FreeCAD/FreeCAD) (`src/3rdParty/salomesmesh`) | FreeCAD's bundled SMESH copy, to compare its fixes with ours |

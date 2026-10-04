@@ -12,6 +12,13 @@ production meshing and geometry kernel, through plain NumPy arrays and BREP
 bytes. It does not replace SALOME. It exposes the parts of SMESH and OCCT a
 pipeline needs, as a normal `pip`-installable module.
 
+Its core is SMESH's **structured meshing**: mapped quadrangle faces,
+block-structured hexahedra, swept and extruded prisms, radial O-grids and
+projected mesh patterns, with exact control of the node spacing on every
+edge and boundary layers grown from named walls. A model is meshed per
+sub-shape, so structured blocks and free or body-fitted regions share one
+conformal mesh. See [Meshing capabilities](#meshing-capabilities).
+
 Meta:
 
 - **License:** LGPL-2.1-only (see [LICENSE](LICENSE), [NOTICE.md](NOTICE.md))
@@ -28,9 +35,11 @@ pySMESH covers three areas:
   keeps a persistent id across every edit. See
   [CAD modelling](#cad-modelling).
 - **`Mesher`**: SMESH's full meshing pipeline. Assign algorithms and
-  hypotheses per sub-shape, compute a mesh, then edit, query, and check its
-  quality. It also accepts a mesh it did not build: a discrete body with no
-  B-rep goes in as plain arrays. See
+  hypotheses per sub-shape: the structured, body-fitted and free algorithms,
+  the 1-D spacing laws and the boundary layers listed in
+  [Meshing capabilities](#meshing-capabilities). Compute a mesh, then edit,
+  query, and check its quality. It also accepts a mesh it did not build: a
+  discrete body with no B-rep goes in as plain arrays. See
   [Mesh generation and editing](#mesh-generation-and-editing) and
   [Discrete meshes](#discrete-meshes-no-cad).
 - **Standalone OCCT geometry operations**: STEP and IGES import/export,
@@ -39,9 +48,104 @@ pySMESH covers three areas:
   [Geometry operations](#geometry-operations).
 
 Two entry points serve one-shot work outside a session. `compute_viscous_layers`
-wraps `StdMeshers_ViscousLayers` for 3-D boundary-layer prism meshing.
+grows boundary-layer prisms on a surface mesh that you supply.
 `unify_same_domain` wraps `ShapeUpgrade_UnifySameDomain` for B-rep face
 merging that removes STEP import seams.
+
+## Meshing capabilities
+
+pySMESH binds SALOME SMESH `V9_16_0`: its algorithms, its hypotheses and its
+assignment model. Each algorithm is a typed class in `pysmesh.mesher`, and
+each hypothesis is a frozen dataclass whose fields are the SMESH parameters.
+An algorithm and its hypotheses go on the whole model or on one sub-shape (a
+solid, a face, an edge, a vertex). So one model can mix the families below.
+
+### Structured meshing
+
+These algorithms build structured meshes: each face or block is mapped onto
+a logical grid, and the node spacing follows the edge discretisation exactly.
+
+| Class | What it meshes |
+|---|---|
+| `Quadrangle2D` | A face with four logical sides, by a mapped (transfinite) grid. `QuadrangleParams` sets the corners, the base vertex of a three-sided face, the transition for unequal opposite sides, and enforced nodes. |
+| `Hexa3D` | A block (a solid with six logical faces) into hexahedra in i, j, k order. `BlockRenumber` numbers the cells and nodes like a structured grid. |
+| `CompositeHexa3D` | A block whose six logical sides are each made of several faces. |
+| `Prism3D` | A prismatic solid, by extruding a source face's mesh through it, layer by layer. The source face may be meshed by any 2-D algorithm. |
+| `RadialPrism3D` | An O-grid between an inner and an outer shell, such as a pipe wall. `NumberOfLayers` or `LayerDistribution` spaces the layers. |
+| `RadialQuadrangle1D2D` | A disk or an annulus, by radial quadrangles. `NumberOfLayers2D` or `LayerDistribution2D` spaces the rings. |
+| `QuadFromMedialAxis1D2D` | A thin face, by quadrangles built on its medial axis. |
+| `HexaFromSkin3D` | A solid, from its existing all-quadrangle surface mesh. |
+| `Projection1D`, `Projection2D`, `Projection1D2D`, `Projection3D` | An edge, face or solid, by copying the mesh pattern of a source shape. |
+
+The 1-D discretisation drives every structured mesh. `Regular1D` takes one
+spacing law per edge:
+
+- `NumberOfSegments`: a fixed count, spaced uniformly, by a scale factor, by a
+  density table, by a density expression, or by the beta law that clusters
+  nodes towards a wall.
+- `Arithmetic1D`, `Geometric1D`, `StartEndLength`: graded segments between
+  stated lengths. `FixedPoints1D`: nodes at named positions.
+- `reversed_edges` on each graded law makes a chain of edges grade in one
+  direction, whatever the orientation of each edge.
+- `Propagation` carries an edge's law to every opposite edge of a structured
+  region. `PropagOfDistribution` carries its relative spacing instead.
+
+```python
+from pysmesh import Session, load_brep
+from pysmesh.mesher import (BlockRenumber, Distribution, Hexa3D, Mesher, NumberOfSegments,
+                            Propagation, Quadrangle2D, Regular1D, SubShape, SubShapeKind)
+
+s = Session()
+s.add_box(1.0, 2.0, 3.0)
+mesher = Mesher(load_brep(s.export_handoff().brep))
+mesher.assign(Regular1D())
+mesher.assign(NumberOfSegments(count=10))
+# Cluster 40 nodes towards one end of edge 1, and carry that spacing to its opposite edges.
+wall = SubShape(SubShapeKind.EDGE, 1)
+mesher.assign(NumberOfSegments(count=40, distribution=Distribution.BETA_LAW, beta=1.02), on=wall)
+mesher.assign(Propagation(), on=wall)
+mesher.assign(Quadrangle2D())
+mesher.assign(Hexa3D())
+mesher.assign(BlockRenumber())
+report = mesher.compute()    # 40 x 10 x 10 = 4 000 hexahedra
+```
+
+### Boundary layers
+
+Viscous layers grow from named walls, with the first layer, the growth factor
+and the total thickness in a closed form (`first_layer_thickness`). There are
+three ways to build them:
+
+- **Inside a `Mesher`:** `ViscousLayers` on a solid, with `Hexa3D`,
+  `PolyhedronPerSolid3D` or `Cartesian3D`. `ViscousLayers2D` on a face, with
+  `Quadrangle2D`, `QuadFromMedialAxis1D2D` or `Mefisto2D`. An algorithm that
+  cannot build layers refuses them by name.
+- **In two steps, with `ViscousLayerBuilder`:** `Mesher.shrink_geometry` returns
+  the shape shrunk by the layer thickness. Mesh it with any algorithm, then
+  `Mesher.add_layers` adds the layers onto the original shape.
+- **On your own surface mesh:** `compute_viscous_layers` grows prisms on a
+  classified surface mesh. See `examples/box_bl.py`.
+
+### Body-fitted and free meshing
+
+| Class | What it meshes |
+|---|---|
+| `Cartesian3D` | Any solid, by a body-fitted Cartesian grid: hexahedra inside, cut polyhedra at the wall. `CartesianParameters3D` sets the grid (spacing functions, explicit coordinates, axes, a fixed point) and the quanta that turn small cut cells into hexahedra. Takes viscous layers. |
+| `Mefisto2D` | Any face, by free triangles sized by `MaxElementArea` or by `LengthFromEdges`. |
+| `PolygonPerFace2D`, `PolyhedronPerSolid3D` | One polygon per face, one polyhedron per solid. |
+
+Free 1-D sizing: `LocalLength`, `MaxLength`, `AutomaticLength`, and the
+curvature-driven `Deflection1D` and `Adaptive1D`. `MaxElementVolume` bounds
+3-D cells, and `QuadraticMesh` makes second-order elements. The build carries
+no free tetrahedral volume mesher; NETGEN is planned.
+
+### Reporting
+
+`compute()` returns a `ComputeReport` with the element counts per sub-shape
+and the warnings SMESH raised. A failed compute raises `PysmeshError` that
+names each failed sub-shape and the reason: a missing algorithm, a missing
+hypothesis, or the algorithm's own error. Hypotheses that conflict where
+their sub-shapes meet are refused at `assign`, naming the shared sub-shape.
 
 ## Install
 
@@ -193,19 +297,21 @@ mesh = mesher.mesh()
 Once a mesh exists:
 
 - **Quality controls** measure and classify cells: aspect ratio, skew,
-  orientation, and more.
+  warping, the scaled Jacobian, orientation, and more.
 - **Groups** name sets of elements. A group survives edits, so a wall named
   on a coarse mesh is still the wall after conversion to second order.
 - **The editor** smooths, merges coincident nodes, reorients cells, splits
-  and fuses faces, converts between linear and quadratic, sews free borders,
-  offsets a surface, and deletes elements and nodes.
-- **Search** locates elements at a point, casts rays through the mesh, finds
-  sharp edges, and classifies a point as inside or outside a closed surface.
+  and fuses faces, splits volumes, converts between linear and quadratic,
+  builds the missing boundary faces or edges, sews free borders, offsets a
+  surface, and deletes elements and nodes.
+- **Search** locates elements at a point, casts rays through the faces or
+  the volume cells of the mesh, finds sharp edges, and classifies a point as
+  inside or outside a closed surface.
 - **The medial axis** of a face reports its centreline and local wall
   thickness. A face can also be decomposed into blocks or have a pattern
   mapped onto it.
-- **`compute_viscous_layers`** grows prism boundary layers on a classified
-  surface mesh. See `examples/box_bl.py` for the end-to-end walkthrough.
+- **Boundary layers** come in three forms; see
+  [Boundary layers](#boundary-layers).
 
 See `src/pysmesh/mesher/__init__.py` for the full model and
 `src/pysmesh/_core.pyi` for the typed API.
@@ -348,14 +454,13 @@ the host's, even at an identical version string.
 [tests/test_vtk_privacy.py](tests/test_vtk_privacy.py) fails the build if a
 binding ever exports one.
 
-> **Binary size:** the 4.0.0 wheel is **41 MB**, holding 75 bundled DLLs.
-> OCCT is the largest share at 18.7 MB; private VTK costs 15.7 MB. That is
-> the deliberate trade for zero native footprint in the host environment.
-> `_core` links only three VTK components (`CommonCore`, `CommonDataModel`,
-> `FiltersVerdict`), so the bundle carries no rendering, IO, or
-> Python-wrapper modules: 17 VTK DLLs out of the 187 MB a full VTK install
-> would put in your environment. CI reports the breakdown on every build and
-> fails if the wheel would exceed PyPI's 100 MB limit.
+> **Binary size:** the wheel is **38.1 MB**, holding 52 bundled DLLs. OCCT
+> is the largest share at 18.8 MB, and private VTK costs 15.7 MB. That is the
+> deliberate trade for zero native footprint in the host environment. `_core`
+> links only three VTK components (`CommonCore`, `CommonDataModel`,
+> `FiltersVerdict`), so the bundle carries 17 VTK DLLs and no rendering, IO
+> or Python-wrapper module. CI reports the breakdown on every build and fails
+> if the wheel would exceed PyPI's 100 MB limit.
 
 ## Build from source
 
