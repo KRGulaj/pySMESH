@@ -260,3 +260,41 @@ one `defect` probe:
   ids (1 and 28) both denote the result. The refusal keeps its message, `not a bijection`.
   Its details now list the ids by kind (A5) and name the boolean cause and the
   `allow_aliases=True` way out (C2).
+
+## Explained differences since the viscous layer and MEFISTO group (Phase 4, group 10)
+
+Group 9 changes no probe. Group 10 (brief §6 L1-L7, amendment 8 for C2, amendment 9 for E6,
+amendments 10-12) changes no `geometry` probe, 5 `mesh` probes and 1 `defect` probe. The
+Cartesian layer patches, the leak patches, the layer refusals, the offset error of amendment
+11 and the refusal of a concurrent assignment (amendment 10) change no probe: no probe builds
+Cartesian layers, assigns layers to an algorithm that does not build them, or makes a
+concurrent assignment.
+
+| Probe | Before | Now | Issue |
+|---|---|---|---|
+| `2d/mefisto_box` | 440 triangles, 222 nodes, smallest angle 0.187 degrees, largest aspect ratio 314 | 1136 triangles, 570 nodes, smallest angle 9.61 degrees, largest aspect ratio 4.01 | E6 |
+| `edit/smooth_merge_quad_to_tri` | the 440-triangle mesh; smallest angle 0.187 before and 18.43 after smoothing | the 1136-triangle mesh; 9.61 before and 20.46 after | E6 |
+| `2d/projection_opposite_faces`, `2d/projection_1d2d_opposite_faces` | counts as now; aspect sum 364.71, angle sum 4051.70 | aspect sum 357.52, angle sum 4050.75 | E6 |
+| `3d/prism_extruded_triangle` | counts as now; smallest cell volume 1.068, smallest angle 14.36 degrees | smallest cell volume 1.254, smallest angle 16.23 degrees | E6 |
+| `C2/export_handoff_after_common.details` | ends "... and Handoff.aliases maps every other id to it." | names `Handoff.face_ids_of` (and the same for the other kinds) as the list of every live id of each sub-shape | C2, E5 |
+
+- All four E6 probes mesh with `MaxElementArea`. MEFISTO turns the area `A` into the edge
+  bound 1.5 sqrt(2 A / sqrt 3) and used to clamp it: a bound up to 2.05 times the longest
+  boundary edge was kept, so the interior grew coarser than the boundary. Now the bound is
+  capped at the longest boundary edge (`MEFISTO_2D_max_element_area.patch`). Measured in
+  `g10/e6_s6_*.txt` and `g10/e6_golden.txt` of the phase record.
+- `mefisto_box` is the 3 x 7 x 11 box with 1 m boundary edges and `MaxElementArea(1.0)`.
+  The bound of 1.61 m was kept, and the triangles grew to an area of 1.77 with 0.187 degree
+  slivers. Capped at 1 m, the mesh is the one the boundary alone gives (1136 triangles, the
+  same as with `MaxElementArea(4.0)` or no 2-D hypothesis), and every triangle has an area of
+  at most 0.573. The smoothing probe meshes the same box, so its angles follow.
+- The projection probes mesh the box with 3 segments per edge and `MaxElementArea(3.0)`. On
+  the two 3 x 7 faces the bound of 2.79 is now capped at their longest edge, 2.33, and the
+  largest triangle goes from 2.68 to 2.30; the counts stay. On the other four faces the 3.67
+  boundary edges are too long for the bound (largest triangles 5.26 and 4.12, as before),
+  which the compute now reports as 4 warnings; their meshes do not change.
+- The prism probe meshes its 6 x 5 triangle base with `MaxElementArea(3.0)`: the bound of
+  2.79 is capped at the longest base edge, 2.60. The base keeps its 11 triangles, the largest
+  goes from 2.147 to 2.153, both within 3, and the cells are better shaped.
+- `export_handoff_after_common` refuses as before (`not a bijection`). Amendment 8 replaced
+  `Handoff.aliases` with per-ordinal id lists, and the details name them.
