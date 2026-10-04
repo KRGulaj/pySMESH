@@ -223,3 +223,20 @@ patched OCCT, on one commit, gave a golden capture with 0 differences at rtol 0.
 - `fixed_rule_wing_volume.fixed` calls `mass_properties` without a precision, which is now
   the adaptive rule at 1e-6. The section integral of the wing is 0.132908562138116; the new
   value is 3.6e-10 relative above it.
+
+## Explained differences since the Prism3D and limits group (Phase 4, group 6)
+
+The two-level `entities_in_box` (amendment 5), the Prism_3D patch of report §3 B1 and the
+documentation of §8 S3-S6 change no `geometry` or `mesh` probe. One `defect` probe changes:
+
+| Probe | Before | Now | Issue |
+|---|---|---|---|
+| `B1/prism_unequal_edge_counts` | raises, "Composite 'horizontal' edges are not supported" | meshed: 225 nodes, 128 hexahedra, 160 quadrangles, 68 edges; cell volumes sum to 2.377641290737884 | B1 |
+
+The probe is the n = 5 prism of report §3 B1. Prism_3D used to reject the 5-edge side face
+as the source, mesh the solid from another face and still report the rejected face's error.
+The patch clears that error, refuses a side face with a composite horizontal side, and the
+search goes on to a face it can sweep from. The oracle is the volume: the regular pentagon
+of circumradius 1 has the area 5/2 sin(72 degrees) = 2.3776412907378837, and the prism is
+1 high, so the cell volumes match it to 1.9e-16 relative. The smallest corner angle is 54
+degrees, and every cell has a positive volume.
