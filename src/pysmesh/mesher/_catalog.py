@@ -614,6 +614,20 @@ class QuadraticMesh(Hypothesis):
     native_name: ClassVar[str] = "QuadraticMesh"
 
 
+@dataclass(frozen=True)
+class NotConformAllowed(Hypothesis):
+    """Allow a non-conformal mesh between local algorithms that mesh their own boundary.
+
+    Global only: SMESH refuses it on a sub-shape (``SMESH_Mesh.cxx:658-670``), and
+    :meth:`~pysmesh.Mesher.assign` raises. It lets two such algorithms sit on adjacent
+    sub-shapes, so that their meshes need not share nodes on the common boundary. With
+    the algorithms of this catalogue, no combination is known in which it changes the
+    mesh: a conformal mesh stays exactly as it is.
+    """
+
+    native_name: ClassVar[str] = "NotConformAllowed"
+
+
 # ---- 2-D and 3-D hypotheses ------------------------------------------------------------ #
 
 

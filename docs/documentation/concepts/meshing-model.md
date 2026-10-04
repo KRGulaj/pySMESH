@@ -155,6 +155,10 @@ choice is a rotated mesh.
 changes what the algorithms build, so it is not the same as converting an existing linear
 mesh in place with `Mesher.convert_to_quadratic`.
 
+`NotConformAllowed` is global only: `assign` refuses it on a sub-shape. It allows a
+non-conformal mesh between local algorithms that mesh their own boundary. With the
+algorithms of this catalogue, no combination is known in which it changes the mesh.
+
 ## A verified worked example: an O-grid
 
 This is the recipe a test in this repository computes and checks. It builds a solid between

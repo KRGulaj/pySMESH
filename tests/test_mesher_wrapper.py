@@ -22,12 +22,17 @@ from pysmesh import (
     Arithmetic1D,
     Distribution,
     ElementType,
+    Hexa3D,
+    Hypothesis,
     LayerDistribution2D,
     LengthFromEdges,
     Mefisto2D,
     Mesher,
+    NotConformAllowed,
     NumberOfSegments,
     PropagOfDistribution,
+    PysmeshError,
+    Quadrangle2D,
     RadialQuadrangle1D2D,
     Regular1D,
     SegmentAroundVertex0D,
@@ -40,6 +45,9 @@ from pysmesh import (
 LINE_LENGTH: float = 10.0
 SQUARE_SIDE: float = 4.0
 DISK_RADIUS: float = 2.5
+BOX_DX: float = 3.0
+BOX_DY: float = 7.0
+BOX_DZ: float = 11.0
 TOL: float = 1e-9
 
 # The trapezoid of the propagation test: a 4-long bottom, a 2-long top, height 2.
@@ -260,3 +268,46 @@ def test_layer_distribution_2d_spaces_the_rings_by_the_scale_law_inward() -> Non
 
     radii = np.unique(np.round(np.hypot(xyz[:, 0], xyz[:, 1]), 9))
     np.testing.assert_allclose(radii, expected, rtol=0.0, atol=TOL)
+
+
+# ---- W1.7 NotConformAllowed ------------------------------------------------------- #
+
+
+def _box_shape() -> ps.Shape:
+    """The 3 x 7 x 11 box."""
+    session = Session()
+    session.add_box(BOX_DX, BOX_DY, BOX_DZ)
+    return ps.load_brep(session.brep())
+
+
+def _hexa_box(*extra: Hypothesis) -> ps.MeshData:
+    """Hexa3D on the box, 3 segments per edge, ``extra`` assigned globally first."""
+    with Mesher(_box_shape()) as mesher:
+        for hypothesis in extra:
+            mesher.assign(hypothesis)
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=3))
+        mesher.assign(Quadrangle2D())
+        mesher.assign(Hexa3D())
+        mesher.compute()
+        return mesher.mesh()
+
+
+def test_not_conform_allowed_on_a_sub_shape_is_refused() -> None:
+    """Spec: the hypothesis "can be only global" (``SMESH_Mesh.cxx:658-670``)."""
+    with (
+        Mesher(_box_shape()) as mesher,
+        pytest.raises(PysmeshError, match="NotConformAllowed"),
+    ):
+        mesher.assign(NotConformAllowed(), on=SubShape(SubShapeKind.FACE, 1))
+
+
+def test_not_conform_allowed_globally_keeps_a_conformal_mesh() -> None:
+    """Accepted globally; the 3 x 3 x 3 block mesh is node for node the plain one."""
+    allowed = _hexa_box(NotConformAllowed())
+
+    plain = _hexa_box()
+    assert allowed.count_of(ElementType.HEXAHEDRON) == 27
+    np.testing.assert_array_equal(
+        np.sort(allowed.node_coords, axis=0), np.sort(plain.node_coords, axis=0)
+    )
