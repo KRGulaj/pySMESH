@@ -79,6 +79,7 @@ class SMESHDS_Mesh;
 class SMESH_Gen;
 class SMESH_Hypothesis;
 class SMESH_Mesh;
+class StdMeshers_ViscousLayerBuilder;
 
 namespace pysmesh {
 namespace mesher {
@@ -413,6 +414,14 @@ class Mesher {
   py::dict de_merge(std::int64_t element, const py::list& groups) const;
   py::dict make_slot(double width, const std::vector<std::int64_t>& segments);
 
+  // ---- Viscous layers by the two-step builder (mesher_viscous.cpp, report L4) ---------- //
+  // shrink_geometry offsets this mesher's shape inward and returns the shrunk shape as a
+  // Python Shape. add_layers fills this mesher with the inner mesher's mesh plus the layers.
+  // Both take the builder's parameters; add_layers refuses parameters other than the
+  // shrink's, an inner mesher on another shape, and a call with no shrink before it.
+  py::object shrink_geometry(const py::dict& params);
+  py::dict add_layers(const py::dict& params, Mesher& inner);
+
   // ---- Pattern mapping (mesher_block.cpp) ----------------------------------------------- //
   std::string pattern_from_face(int face_ordinal, bool project);
   py::dict apply_pattern_to_face(const std::string& text, int face_ordinal, int vertex_ordinal,
@@ -454,6 +463,23 @@ class Mesher {
 
   void clear_mesh();
 
+  // The counts and the meshed sub-shapes of a successful compute, as compute() returns
+  // them (mesher_core.cpp).
+  py::dict success_report(const py::list& warnings) const;
+
+  // One viscous-layer builder request, as the Python ViscousLayerBuilder sends it.
+  struct LayerRequest {
+    double total_thickness = 0.0;
+    int layer_count = 0;
+    double stretch_factor = 0.0;
+    std::vector<int> boundary;
+    bool ignore = true;
+    std::string group_name;
+    bool operator==(const LayerRequest& other) const;
+  };
+  LayerRequest layer_request(const py::dict& values, const char* op) const;
+  const TopoDS_Shape& layer_shape(const char* op) const;
+
   struct Assignment {
     std::string name;
     std::string kind;
@@ -467,6 +493,12 @@ class Mesher {
   SMESHDS_Mesh* meshDS_ = nullptr;  // owned by mesh_
   std::vector<std::unique_ptr<SMESH_Hypothesis>> owned_;
   std::vector<Assignment> assigned_;
+
+  // The two-step builder, owned by owned_ (it is an SMESH_Hypothesis), and what the last
+  // shrink_geometry was given and returned.
+  StdMeshers_ViscousLayerBuilder* vl_builder_ = nullptr;
+  LayerRequest vl_request_;
+  TopoDS_Shape vl_shrunk_;
 
   // SMESHDS shape index -> (kind, ordinal), built once from ShapeData so a harvest of a
   // million elements does not do a map lookup per element through OCCT.

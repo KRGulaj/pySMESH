@@ -189,6 +189,7 @@ pybind11_add_module(_core
     src/bindings/mesher_medial.cpp
     src/bindings/mesher_block.cpp
     src/bindings/mesher_gmf.cpp
+    src/bindings/mesher_viscous.cpp
     src/bindings/mesher_bind.cpp)
 target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
 # TKShHealing (ShapeUpgrade_UnifySameDomain), TKOffset (BRepOffsetAPI_*), and TKTopAlgo

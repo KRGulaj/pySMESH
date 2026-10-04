@@ -221,6 +221,7 @@ from ._search import (
 )
 from ._gmf import GmfMesh, gmf_unwritable_types, gmf_writable_group_name, read_gmf, write_gmf
 from ._group import _GroupOps
+from ._layers import ViscousLayerBuilder, _LayerOps
 from ._mesh import _MeshOps
 
 # The hook aliases belong to the session, which defines them; the mesher shares them
@@ -243,7 +244,14 @@ from ._types import (
 
 
 class Mesher(
-    _MeshOps, _FillOps, _QualityOps, _GroupOps, _EditOps, _SearchOps, _PatternOps
+    _MeshOps,
+    _FillOps,
+    _QualityOps,
+    _GroupOps,
+    _EditOps,
+    _SearchOps,
+    _PatternOps,
+    _LayerOps,
 ):
     """A mesh, and everything that builds, measures, names, edits and searches it.
 
@@ -511,6 +519,7 @@ __all__ = [
     "UseExisting1D",
     "UseExisting2D",
     "ViscousLayers",
+    "ViscousLayerBuilder",
     "ViscousLayers2D",
     "Volume",
     "Warping",

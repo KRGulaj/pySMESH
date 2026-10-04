@@ -46,6 +46,8 @@ void bind_mesher(py::module_& m) {
       .def("convert_from_quadratic", &Mesher::convert_from_quadratic)
       .def("split_volumes", &Mesher::split_volumes, py::arg("method"), py::arg("nx"),
            py::arg("ny"), py::arg("nz"), py::arg("avoid_over_constrained") = false)
+      .def("shrink_geometry", &Mesher::shrink_geometry, py::arg("params"))
+      .def("add_layers", &Mesher::add_layers, py::arg("params"), py::arg("inner"))
       .def("make_boundary_mesh", &Mesher::make_boundary_mesh, py::arg("dimension"),
            py::arg("elements"), py::arg("around_elements"), py::arg("all_elements"))
       .def("split_quadratic_into_linear", &Mesher::split_quadratic_into_linear,

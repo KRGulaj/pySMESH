@@ -1,0 +1,78 @@
+pySMESH: StdMeshers_ViscousLayerBuilder owns and frees what it makes, and refuses AddLayers
+before GetShrinkGeometry (SMESH V9_16_0).
+
+Defect: the two-step viscous-layer API (SMESH d3c3260cd, 2023-07-25, bos #35147) leaks and
+can read an unset pointer.
+
+Symptom:
+* ~StdMeshers_ViscousLayerBuilder is empty (StdMeshers_ViscousLayerBuilder.cxx:110-112):
+  the StdMeshers_ViscousLayers2D made in the constructor and the
+  StdMeshers_Cartesian_VL::ViscousBuilder made by GetShrinkGeometry, with the TmpMesh it
+  owns (StdMeshers_Cartesian_VL.cxx:828, freed only by ~ViscousBuilder at :884), leak.
+* AddLayers called before GetShrinkGeometry dereferences _vlBuilder, which nothing set:
+  undefined behaviour.
+* A second GetShrinkGeometry replaces _vlBuilder without freeing the first.
+* The constructor gives the inner StdMeshers_ViscousLayers2D the builder's own id. Every
+  SMESH_Hypothesis enters itself in the generator's map by id (SMESH_Hypothesis.cxx:51-55),
+  so the inner one overwrites the builder's entry, and ~SMESH_Gen, which nullifies the
+  generator pointer of each hypothesis in its map, misses the builder: a builder that
+  outlives its generator then writes to the freed map in its destructor.
+
+Change, in StdMeshers_ViscousLayerBuilder.hxx/.cxx only:
+* _vlBuilder starts as nullptr.
+* The inner hypothesis takes gen->GetANewId().
+* The destructor deletes _vlBuilder and _hyp.
+* GetShrinkGeometry deletes the previous _vlBuilder before it makes a new one.
+* AddLayers throws SALOME_Exception when GetShrinkGeometry was not called.
+
+Not changed: how the shrink geometry and the layers are computed.
+diff --git a/src/StdMeshers/StdMeshers_ViscousLayerBuilder.hxx b/src/StdMeshers/StdMeshers_ViscousLayerBuilder.hxx
+--- a/src/StdMeshers/StdMeshers_ViscousLayerBuilder.hxx
++++ b/src/StdMeshers/StdMeshers_ViscousLayerBuilder.hxx
+@@ -97,7 +97,7 @@
+     
+     
+     StdMeshers_ViscousLayers2D*                     _hyp;
+-    StdMeshers_Cartesian_VL::ViscousBuilder*  _vlBuilder;
++    StdMeshers_Cartesian_VL::ViscousBuilder*  _vlBuilder = nullptr; // pySMESH: set by GetShrinkGeometry
+ 
+     BRepOffset_MakeOffset                     _makeOffset;
+     BRepOffset_Offset                     _makeFaceOffset;
+diff --git a/src/StdMeshers/StdMeshers_ViscousLayerBuilder.cxx b/src/StdMeshers/StdMeshers_ViscousLayerBuilder.cxx
+--- a/src/StdMeshers/StdMeshers_ViscousLayerBuilder.cxx
++++ b/src/StdMeshers/StdMeshers_ViscousLayerBuilder.cxx
+@@ -45,7 +45,9 @@
+   : SMESH_2D_Algo(hypId, gen)
+ {
+   _name = "StdMeshers_ViscousLayerBuilder";
+-  _hyp    = new StdMeshers_ViscousLayers2D( hypId, gen );  
++  // pySMESH: a fresh id. The builder's own id would overwrite the builder's entry in the
++  // generator's map (SMESH_Hypothesis.cxx:51-55), so ~SMESH_Gen would not nullify it.
++  _hyp    = new StdMeshers_ViscousLayers2D( gen ? gen->GetANewId() : hypId, gen );
+ }
+ 
+ bool StdMeshers_ViscousLayerBuilder::CheckHypothesis(SMESH_Mesh&                          aMesh,
+@@ -109,10 +111,14 @@
+ 
+ StdMeshers_ViscousLayerBuilder::~StdMeshers_ViscousLayerBuilder()
+ {
++  // pySMESH: free what the builder owns (the offset builder holds its TmpMesh).
++  delete _vlBuilder;
++  delete _hyp;
+ }
+ 
+ TopoDS_Shape StdMeshers_ViscousLayerBuilder::GetShrinkGeometry( SMESH_Mesh & theMesh, const TopoDS_Shape& theShape )
+ {
++  delete _vlBuilder; // pySMESH: a second call frees the builder of the first
+   _vlBuilder  = new StdMeshers_Cartesian_VL::ViscousBuilder( _hyp, theMesh, theShape );
+ 
+   std::string error = "";
+@@ -125,6 +131,8 @@
+ 
+ bool StdMeshers_ViscousLayerBuilder::AddLayers( SMESH_Mesh & shrinkMesh, SMESH_Mesh & theMesh, const TopoDS_Shape& theShape )
+ {
++  if ( !_vlBuilder ) // pySMESH: there is no offset shape to build on yet
++    throw SALOME_Exception( "AddLayers() needs GetShrinkGeometry() to be called first." );
+   bool success = _vlBuilder->MakeViscousLayers( shrinkMesh, theMesh, theShape );
+   
+   if ( !success )

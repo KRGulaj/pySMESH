@@ -643,6 +643,10 @@ class Mesher:
         nz: float,
         avoid_over_constrained: bool = False,
     ) -> dict[str, object]: ...
+    def shrink_geometry(self, params: dict[str, object]) -> Shape: ...
+    def add_layers(
+        self, params: dict[str, object], inner: Mesher
+    ) -> dict[str, object]: ...
     def make_boundary_mesh(
         self,
         dimension: int,

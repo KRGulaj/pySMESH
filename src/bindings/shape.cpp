@@ -363,6 +363,12 @@ std::shared_ptr<ShapeData> shape_data_of(const py::object& shape_obj) {
   return shape_obj.cast<Shape&>().data();
 }
 
+// Exposed to mesher_viscous.cpp: a Shape on a shape OCCT built, with no BREP round trip, so
+// a mesher built on it meshes that very shape (report L4).
+py::object shape_object_of(const TopoDS_Shape& shape) {
+  return py::cast(Shape(std::make_shared<ShapeData>(shape)));
+}
+
 void bind_shape(py::module_& m) {
   py::class_<FaceInfo>(m, "FaceInfo",
                        "One face of a Shape, as Shape.faces() lists it: its 1-based id, its "

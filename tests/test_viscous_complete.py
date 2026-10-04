@@ -25,8 +25,13 @@ from numpy.typing import NDArray
 
 import pysmesh as ps
 from pysmesh import (
+    Area,
+    Cartesian3D,
+    CartesianParameters3D,
+    ElementType,
     ExtrusionMethod,
     Hexa3D,
+    Mefisto2D,
     Mesh,
     Mesher,
     NumberOfSegments,
@@ -34,9 +39,11 @@ from pysmesh import (
     Quadrangle2D,
     Regular1D,
     Session,
+    ViscousLayerBuilder,
     ViscousLayers,
     ViscousLayers2D,
     VLParams,
+    Volume,
     compute_viscous_layers,
     first_layer_thickness,
 )
@@ -363,3 +370,241 @@ def test_ignore_on_the_catalogue_path_grows_layers_on_the_other_faces_every_time
             hits = [any(abs(p - e) < TOL for p in planes) for e in ends]
             assert all(hits) == (side != 0), (side, planes)
         assert ignored["nodes"] == listed["nodes"]
+
+
+# ---- L4 the two-step builder ------------------------------------------------------- #
+
+
+def _inner_hexa(mesher: Mesher) -> None:
+    """Assign a 2 x 2 x 2 structured mesh to ``mesher``."""
+    mesher.assign(Regular1D())
+    mesher.assign(NumberOfSegments(count=2))
+    mesher.assign(Quadrangle2D())
+    mesher.assign(Hexa3D())
+
+
+def _inner_cartesian(mesher: Mesher) -> None:
+    """A Cartesian mesh on ``mesher``, with the faces and edges add_layers reads."""
+    mesher.assign(Cartesian3D())
+    mesher.assign(
+        CartesianParameters3D(
+            spacing_x="0.35",
+            spacing_y="0.5",
+            spacing_z="0.5",
+            create_faces=True,
+            add_edges=True,
+        )
+    )
+
+
+def _build_box(
+    builder: ViscousLayerBuilder, inner_kind: str
+) -> tuple[ps.Shape, ps.MeshData, float, dict[str, int]]:
+    """Shrink the unit box, mesh the shrunk box, add the layers; volume and groups."""
+    box = _unit_box()
+    with Mesher(box) as outer:
+        shrunk = outer.shrink_geometry(builder)
+        with Mesher(shrunk) as inner:
+            (_inner_hexa if inner_kind == "hexa" else _inner_cartesian)(inner)
+            inner.compute()
+            outer.add_layers(builder, inner)
+        mesh = outer.mesh()
+        volume = float(np.sum(outer.quality(Volume()).values))
+        groups = {g.name: int(g.element_ids.size) for g in outer.groups()}
+    return shrunk, mesh, volume, groups
+
+
+@pytest.mark.parametrize("inner_kind", ["hexa", "cartesian"])
+@pytest.mark.parametrize("factor", [1.0, 1.2])
+def test_builder_layers_on_one_face_of_a_box_sit_at_the_closed_form(
+    inner_kind: str, factor: float
+) -> None:
+    """Layers on x = 0: shrunk box [T, 1] x [0, 1]^2, planes at the closed form.
+
+    Spec (SMESH ``additional_hypo.rst``, "Viscous Layers API";
+    ``test_vlapi_growthlayer``): the builder offsets the boundary faces inward by ``T``,
+    the inner mesh fills the shrunk shape, and ``AddLayers`` fills the gap with N
+    layers. The wall face carries a 2 x 2 quadrangle mesh, so the group holds N x 4
+    prisms, and the mesh fills the box: volume 1.
+    """
+    total, count = STACK
+    x0 = _at_x0(_unit_box().faces())
+    builder = ViscousLayerBuilder(
+        total_thickness=total,
+        layer_count=count,
+        stretch_factor=factor,
+        boundary=(x0,),
+        ignore=False,
+        group_name="layers",
+    )
+
+    shrunk, mesh, volume, groups = _build_box(builder, inner_kind)
+
+    boxes = np.array([f.bbox for f in shrunk.faces()])
+    corners = np.r_[boxes[:, :3].min(axis=0), boxes[:, 3:].max(axis=0)]
+    np.testing.assert_allclose(corners, [total, 0, 0, 1, 1, 1], atol=TOL)
+    np.testing.assert_allclose(
+        _planes(mesh.node_coords, total), _layer_ends(total, factor, count), atol=TOL
+    )
+    assert groups == {"layers": count * 4}
+    assert volume == pytest.approx(1.0, rel=1e-9)
+
+
+def test_builder_ignore_form_grows_layers_on_every_other_face() -> None:
+    """``ignore=True``, x = 0 listed: the stack on the five other faces only."""
+    total, count = STACK
+    x0 = _at_x0(_unit_box().faces())
+    builder = ViscousLayerBuilder(
+        total_thickness=total,
+        layer_count=count,
+        stretch_factor=1.2,
+        boundary=(x0,),
+        group_name="layers",
+    )
+
+    _, mesh, volume, groups = _build_box(builder, "hexa")
+
+    ends = _layer_ends(total, 1.2, count)
+    xyz = mesh.node_coords
+    for axis in range(3):
+        values = np.unique(np.round(xyz[:, axis], 12))
+        far = np.sort(1.0 - values[values >= 1.0 - total - TOL])[1:]
+        np.testing.assert_allclose(far, ends, atol=TOL)
+        near = values[(values > TOL) & (values <= total + TOL)]
+        if axis == 0:
+            assert near.size == 0
+        else:
+            np.testing.assert_allclose(near, ends, atol=TOL)
+    assert groups == {"layers": count * 4 * 5}
+    assert volume == pytest.approx(1.0, rel=1e-9)
+
+
+def _rings(
+    shape: ps.Shape, builder: ViscousLayerBuilder, inner_2d: object, segments: int
+) -> tuple[ps.Shape, ps.MeshData, int, float, dict[str, int]]:
+    """Shrink a face, mesh it with ``inner_2d``, add the layers."""
+    with Mesher(shape) as outer:
+        shrunk = outer.shrink_geometry(builder)
+        with Mesher(shrunk) as inner:
+            inner.assign(Regular1D())
+            inner.assign(NumberOfSegments(count=segments))
+            inner.assign(inner_2d)  # type: ignore[arg-type]
+            inner.compute()
+            inner_faces = inner.compute().faces
+            outer.add_layers(builder, inner)
+        mesh = outer.mesh()
+        area = float(np.sum(outer.quality(Area()).values))
+        groups = {g.name: int(g.element_ids.size) for g in outer.groups()}
+    return shrunk, mesh, inner_faces, area, groups
+
+
+def test_builder_in_a_square_grows_rings_at_the_closed_form() -> None:
+    """A 1 x 1 square, 2 layers 0.2 thick: the shrunk square [0.2, 0.8]^2, rings at 0.1
+    and 0.2 from each edge, 4 x 3 x 2 = 24 layer quadrangles in the group, area 1.
+
+    The second check is the upstream count (``test_vlapi_growthlayer.py``): the layers
+    add 4 x (segments per edge) x (layers) faces to the inner mesh.
+    """
+    builder = ViscousLayerBuilder(
+        total_thickness=0.2, layer_count=2, stretch_factor=1.0, group_name="rings"
+    )
+
+    shrunk, mesh, inner_faces, area, groups = _rings(
+        _unit_square(), builder, Quadrangle2D(), 3
+    )
+
+    np.testing.assert_allclose(
+        shrunk.faces()[0].bbox, [0.2, 0.2, 0, 0.8, 0.8, 0], atol=TOL
+    )
+    for axis in range(2):
+        values = np.unique(np.round(mesh.node_coords[:, axis], 12))
+        np.testing.assert_allclose(values[:3], [0.0, 0.1, 0.2], atol=TOL)
+        np.testing.assert_allclose(values[-3:], [0.8, 0.9, 1.0], atol=TOL)
+    assert groups == {"rings": 24}
+    assert mesh.count_of(ElementType.QUADRANGLE) == inner_faces + 4 * 3 * 2
+    assert area == pytest.approx(1.0, rel=1e-9)
+
+
+def test_builder_in_a_disk_grows_circular_rings() -> None:
+    """A disk of radius 5, 6 layers 0.5 thick at f = 1.2, 12 segments on its circle.
+
+    The rings stand at the radii ``5 - (closed form)``, measured on the nodes; the
+    layers add segments x layers = 72 faces (``test_vlapi_growthlayer.py``, the disk
+    case).
+    """
+    total, count, factor = 0.5, 6, 1.2
+    session = Session()
+    session.add_circle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 5.0)
+    session.make_face(list(session.entities(ps.EntityKind.EDGE)))
+    builder = ViscousLayerBuilder(
+        total_thickness=total, layer_count=count, stretch_factor=factor
+    )
+
+    _, mesh, inner_faces, _, _ = _rings(
+        ps.load_brep(session.brep()), builder, Mefisto2D(), 12
+    )
+
+    radii = np.unique(np.round(np.hypot(*mesh.node_coords[:, :2].T), 9))
+    np.testing.assert_allclose(
+        np.sort(5.0 - radii[radii >= 5.0 - total - TOL])[1:],
+        _layer_ends(total, factor, count),
+        atol=1e-9,
+    )
+    assert mesh.element_count - mesh.count_of(ElementType.EDGE) == (
+        inner_faces + 12 * count
+    )
+
+
+def test_a_second_shrink_replaces_the_first_and_the_layers_follow_it() -> None:
+    """Two shrinks on one mesher: add_layers builds on the second (lifecycle patch)."""
+    x0 = _at_x0(_unit_box().faces())
+    first = ViscousLayerBuilder(0.2, 2, 1.0, boundary=(x0,), ignore=False)
+    second = ViscousLayerBuilder(0.3, 3, 1.0, boundary=(x0,), ignore=False)
+
+    with Mesher(_unit_box()) as outer:
+        outer.shrink_geometry(first)
+        shrunk = outer.shrink_geometry(second)
+        with Mesher(shrunk) as inner:
+            _inner_hexa(inner)
+            inner.compute()
+            outer.add_layers(second, inner)
+        xyz = outer.mesh().node_coords
+
+    np.testing.assert_allclose(_planes(xyz, 0.3), [0.1, 0.2, 0.3], atol=TOL)
+
+
+def test_add_layers_before_shrink_geometry_is_refused() -> None:
+    """There is no shrunk shape yet; upstream read an unset pointer here."""
+    builder = ViscousLayerBuilder(0.2, 2, 1.0)
+
+    with (
+        Mesher(_unit_box()) as outer,
+        Mesher(_unit_box()) as inner,
+        pytest.raises(PysmeshError, match="call shrink_geometry"),
+    ):
+        outer.add_layers(builder, inner)
+
+
+def test_add_layers_refuses_an_inner_mesher_on_another_shape() -> None:
+    """The inner mesh is paired with the shrunk shape by TopExp index: refused."""
+    builder = ViscousLayerBuilder(0.2, 2, 1.0)
+
+    with Mesher(_unit_box()) as outer, Mesher(_unit_box()) as inner:
+        outer.shrink_geometry(builder)
+        _inner_hexa(inner)
+        inner.compute()
+
+        with pytest.raises(PysmeshError, match="not on the shape"):
+            outer.add_layers(builder, inner)
+
+
+def test_add_layers_refuses_a_builder_other_than_the_shrinks() -> None:
+    """The layers must be built with the parameters the shape was shrunk by."""
+    with Mesher(_unit_box()) as outer:
+        shrunk = outer.shrink_geometry(ViscousLayerBuilder(0.2, 2, 1.0))
+        with Mesher(shrunk) as inner:
+            _inner_hexa(inner)
+            inner.compute()
+
+            with pytest.raises(PysmeshError, match="differs"):
+                outer.add_layers(ViscousLayerBuilder(0.3, 2, 1.0), inner)

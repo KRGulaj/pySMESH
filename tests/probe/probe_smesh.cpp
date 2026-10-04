@@ -86,6 +86,7 @@
 #include <StdMeshers_MaxElementArea.hxx>
 #include <StdMeshers_MaxElementVolume.hxx>
 #include <StdMeshers_NumberOfSegments.hxx>
+#include <StdMeshers_ViscousLayerBuilder.hxx>
 #include <StdMeshers_PolyhedronPerSolid_3D.hxx>
 #include <StdMeshers_Prism_3D.hxx>
 #include <StdMeshers_Projection_2D.hxx>
@@ -2588,6 +2589,33 @@ void probe_p4_hypothesis_status() {
   check(before && status == SMESH_Hypothesis::HYP_CONCURRENT, msg);
 }
 
+// StdMeshers_ViscousLayerBuilder_lifecycle.patch: AddLayers before GetShrinkGeometry throws
+// instead of reading an unset pointer; a second GetShrinkGeometry replaces the first; the
+// builder is in the generator's map under its own id, so it can outlive the generator.
+void probe_p4_layer_builder_lifecycle() {
+  section("P4VLB", "the two-step viscous-layer builder owns what it makes");
+  const TopoDS_Shape box = BRepPrimAPI_MakeBox(1.0, 1.0, 1.0).Shape();
+  Session s(box);
+  StdMeshers_ViscousLayerBuilder* b = s.make<StdMeshers_ViscousLayerBuilder>();
+  b->SetTotalThickness(0.2);
+  b->SetNumberLayers(2);
+  b->SetStretchFactor(1.0);
+  b->SetBndShapes(std::vector<int>(), /*toIgnore=*/true);
+  bool refused = false;
+  try {
+    b->AddLayers(s.mesh(), s.mesh(), box);
+  } catch (const SALOME_Exception&) {
+    refused = true;
+  }
+  check(refused, "P4VLB AddLayers before GetShrinkGeometry throws SALOME_Exception");
+  const TopoDS_Shape first = b->GetShrinkGeometry(s.mesh(), box);
+  const TopoDS_Shape second = b->GetShrinkGeometry(s.mesh(), box);
+  check(!first.IsNull() && !second.IsNull(),
+        "P4VLB two GetShrinkGeometry calls in a row both give a shrunk solid");
+  check(s.gen().GetStudyContext()->mapHypothesis[b->GetID()] == b,
+        "P4VLB the builder keeps its own entry in the generator's map");
+}
+
 }  // namespace
 
 void run_smesh_probe() {
@@ -2607,4 +2635,5 @@ void run_smesh_probe() {
   probe_cat916_3d_additions();
   probe_p4_distributions();
   probe_p4_hypothesis_status();
+  probe_p4_layer_builder_lifecycle();
 }

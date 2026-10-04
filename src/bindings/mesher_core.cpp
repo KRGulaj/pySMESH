@@ -737,6 +737,10 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
                        details, failed_faces);
   }
 
+  return success_report(warnings);
+}
+
+py::dict Mesher::success_report(const py::list& warnings) const {
   py::dict out;
   out["nodes"] = static_cast<std::int64_t>(meshDS_->NbNodes());
   out["edges"] = static_cast<std::int64_t>(meshDS_->NbEdges());
