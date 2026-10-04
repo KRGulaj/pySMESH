@@ -21,6 +21,7 @@
 #include <SMESH_Algo.hxx>
 #include <SMESH_ComputeError.hxx>
 #include <SMESH_Gen.hxx>
+#include <SMESH_HypoFilter.hxx>
 #include <SMESH_Hypothesis.hxx>
 #include <SMESH_Mesh.hxx>
 #include <SMESH_subMesh.hxx>
@@ -517,6 +518,58 @@ void Mesher::build_index_map() {
   }
 }
 
+void Mesher::refuse_unread_layers() const {
+  // Only some algorithms build layers in their Compute: Hexa_3D, PolyhedronPerSolid_3D and
+  // Cartesian_3D read ViscousLayers; Quadrangle_2D, QuadFromMedialAxis_1D2D and MEFISTO_2D
+  // read ViscousLayers2D. The compatible lists do not tell: RadialQuadrangle_1D2D inherits
+  // ViscousLayers2D from Quadrangle_2D and builds no layer. Any other algorithm meshes the
+  // sub-shape with no layer and no word (Prism_3D, RadialQuadrangle_1D2D), fails after
+  // building half of them (PolygonPerFace_2D), or crashed (CompositeHexa_3D).
+  struct LayerKind {
+    TopAbs_ShapeEnum type;
+    const char* kind_name;
+    const char* hypothesis;
+    std::set<std::string> builders;
+    const char* listed;
+  };
+  const LayerKind kinds[] = {
+      {TopAbs_SOLID, "SOLID", "ViscousLayers",
+       {"Hexa_3D", "PolyhedronPerSolid_3D", "Cartesian_3D"},
+       "Hexa_3D, PolyhedronPerSolid_3D and Cartesian_3D"},
+      {TopAbs_FACE, "FACE", "ViscousLayers2D",
+       {"Quadrangle_2D", "QuadFromMedialAxis_1D2D", "MEFISTO_2D"},
+       "Quadrangle_2D, QuadFromMedialAxis_1D2D and MEFISTO_2D"},
+  };
+  for (const LayerKind& kind : kinds) {
+    SMESH_HypoFilter filter(SMESH_HypoFilter::HasName(kind.hypothesis));
+    for (TopExp_Explorer ex(data_->shape, kind.type); ex.More(); ex.Next()) {
+      if (mesh_->GetHypothesis(ex.Current(), filter, /*andAncestors=*/true) == nullptr) {
+        continue;
+      }
+      SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
+      SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
+      if (algo == nullptr || algo->GetName() == nullptr) {
+        continue;  // no algorithm of its own: the compute reports what is missing
+      }
+      const std::string name = algo->GetName();
+      if (kind.builders.count(name) != 0) {
+        continue;
+      }
+      const std::pair<const char*, int> at =
+          ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current()));
+      throw PysmeshError(
+          std::string("Mesher.compute: ") + kind.hypothesis + " reaches " +
+              (at.first[0] != 0 ? at.first : kind.kind_name) + " " +
+              std::to_string(at.second) + ", whose algorithm " + name +
+              " does not build viscous layers.",
+          std::string("Only ") + kind.listed + " build " + kind.hypothesis +
+              "; with " + name + " the layers would be missing, or the compute would fail "
+              "after building some. Assign one of those algorithms there, or assign the "
+              "layers only to the sub-shapes such an algorithm meshes.");
+    }
+  }
+}
+
 std::pair<const char*, int> Mesher::ordinal_of_shape_index(int shape_index) const {
   if (shape_index <= 0 ||
       static_cast<std::size_t>(shape_index) >= index_to_ordinal_.size()) {
@@ -584,6 +637,8 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
     throw PysmeshError("Mesher.compute: nothing is assigned. Assign at least an algorithm "
                        "before computing.");
   }
+
+  refuse_unread_layers();
 
   ProgressHooks hooks;
   if (!progress.is_none()) {

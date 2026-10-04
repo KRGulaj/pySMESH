@@ -461,6 +461,10 @@ class Mesher {
   // rather than failing later on a null shape.
   void ensure_shape(const char* op) const;
 
+  // Raise if a ViscousLayers (ViscousLayers2D) hypothesis reaches a SOLID (FACE) whose
+  // algorithm does not list it among the hypotheses it reads, before anything is computed.
+  void refuse_unread_layers() const;
+
   void clear_mesh();
 
   // The counts and the meshed sub-shapes of a successful compute, as compute() returns

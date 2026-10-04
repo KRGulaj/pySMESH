@@ -31,15 +31,22 @@ from pysmesh import (
     BareBorderVolume,
     Cartesian3D,
     CartesianParameters3D,
+    CompositeHexa3D,
     ElementType,
     ExtrusionMethod,
     Hexa3D,
+    Hypothesis,
     Mefisto2D,
     Mesh,
     Mesher,
     NumberOfSegments,
+    PolygonPerFace2D,
+    PolyhedronPerSolid3D,
+    Prism3D,
     PysmeshError,
+    QuadFromMedialAxis1D2D,
     Quadrangle2D,
+    RadialQuadrangle1D2D,
     Regular1D,
     Session,
     ViscousLayerBuilder,
@@ -868,3 +875,241 @@ def test_a_failed_cartesian_layer_compute_leaves_no_cell() -> None:
 
         assert "SOLID 1" in raised.value.details
         assert mesher.mesh().element_count == 0
+
+
+# ---- L6 the algorithms that build viscous layers ----------------------------------- #
+
+# Group sizes of a stack of STACK[1] layers on one wall: 4 x 4 quadrangles on the box
+# face x = 0 (4 segments, or grid spacing 0.25), 4 segments on the square edge x = 0, 8
+# on the long edge of the 4 x 1 strip.
+_LAYERS_3D: tuple[str, ...] = ("Hexa3D", "PolyhedronPerSolid3D", "Cartesian3D")
+
+
+def _assign_3d(mesher: Mesher, algorithm: str) -> None:
+    """``algorithm`` on the unit box: 4 segments per edge, or a 0.25 Cartesian grid."""
+    if algorithm == "Cartesian3D":
+        mesher.assign(Cartesian3D())
+        mesher.assign(
+            CartesianParameters3D(spacing_x="0.25", spacing_y="0.25", spacing_z="0.25")
+        )
+        return
+    mesher.assign(Regular1D())
+    mesher.assign(NumberOfSegments(count=4))
+    mesher.assign(Quadrangle2D())
+    mesher.assign(
+        {
+            "Hexa3D": Hexa3D,
+            "PolyhedronPerSolid3D": PolyhedronPerSolid3D,
+            "CompositeHexa3D": CompositeHexa3D,
+            "Prism3D": Prism3D,
+        }[algorithm]()
+    )
+
+
+@pytest.mark.parametrize("algorithm", _LAYERS_3D)
+def test_a_3d_layer_algorithm_grows_the_stack_at_the_closed_form(
+    algorithm: str,
+) -> None:
+    """ViscousLayers on the face x = 0 of the unit box: 3 planes, 4 x 4 x 3 cells."""
+    total, count = STACK
+    box = _unit_box()
+
+    with Mesher(box) as mesher:
+        _assign_3d(mesher, algorithm)
+        mesher.assign(
+            ViscousLayers(
+                total_thickness=total,
+                layer_count=count,
+                stretch_factor=1.2,
+                boundary=(_at_x0(box.faces()),),
+                group_name="bl",
+            )
+        )
+        report = mesher.compute()
+        xyz = mesher.mesh().node_coords
+        groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
+
+    np.testing.assert_allclose(
+        _planes(xyz, total), _layer_ends(total, 1.2, count), atol=TOL
+    )
+    assert groups == {"bl": 4 * 4 * count}
+    assert report.warnings == ()
+
+
+def _strip() -> ps.Shape:
+    """A 4 x 1 strip at the origin, in z = 0: two long sides and two short ends."""
+    session = Session()
+    session.add_rectangle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 4.0, 1.0)
+    return ps.load_brep(session.brep())
+
+
+def _at_y0(items: list[object]) -> int:
+    """The ordinal of the edge that lies on the line y = 0."""
+    for item in items:
+        box = item.bbox  # type: ignore[attr-defined]
+        if abs(box[1]) < TOL and abs(box[4]) < TOL:
+            return int(item.id)  # type: ignore[attr-defined]
+    raise AssertionError("nothing on y = 0")
+
+
+@pytest.mark.parametrize(
+    ("algorithm", "segments"), [("Quadrangle2D", 4), ("QuadFromMedialAxis1D2D", 8)]
+)
+def test_a_2d_layer_algorithm_grows_the_stack_at_the_closed_form(
+    algorithm: str, segments: int
+) -> None:
+    """ViscousLayers2D on the edge y = 0: 3 lines, one cell per segment per layer.
+
+    Quadrangle2D on the unit square, 4 segments per edge; QuadFromMedialAxis1D2D on the
+    4 x 1 strip, the face it is made for, 8 segments per edge.
+    """
+    total, count = STACK
+    face = _unit_square() if algorithm == "Quadrangle2D" else _strip()
+
+    with Mesher(face) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=segments))
+        mesher.assign(
+            Quadrangle2D() if algorithm == "Quadrangle2D" else QuadFromMedialAxis1D2D()
+        )
+        mesher.assign(
+            ViscousLayers2D(
+                total_thickness=total,
+                layer_count=count,
+                stretch_factor=1.2,
+                boundary=(_at_y0(face.edges()),),
+                group_name="bl",
+            )
+        )
+        report = mesher.compute()
+        y = np.unique(np.round(mesher.mesh().node_coords[:, 1], 12))
+        groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
+
+    np.testing.assert_allclose(
+        y[(y > TOL) & (y <= total + TOL)], _layer_ends(total, 1.2, count), atol=TOL
+    )
+    assert groups == {"bl": segments * count}
+    assert report.warnings == ()
+
+
+def _disk() -> ps.Shape:
+    """A disk of radius 2 at the origin, in z = 0."""
+    session = Session()
+    session.add_circle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 2.0)
+    session.make_face(list(session.entities(ps.EntityKind.EDGE)))
+    return ps.load_brep(session.brep())
+
+
+@pytest.mark.parametrize(
+    "algorithm", ["Prism3D", "PolygonPerFace2D", "RadialQuadrangle1D2D"]
+)
+def test_an_algorithm_that_builds_no_layers_refuses_them_before_computing(
+    algorithm: str,
+) -> None:
+    """The layers were dropped with no word (Prism3D, RadialQuadrangle1D2D: no group, no
+    layer planes), or PolygonPerFace2D built them and then failed ("Less that 3 nodes on
+    the wire") with the layer cells left in the mesh. Now the compute refuses, names the
+    algorithm, and meshes nothing.
+    """
+    total, count = STACK
+    shape = {
+        "Prism3D": _unit_box,
+        "PolygonPerFace2D": _unit_square,
+        "RadialQuadrangle1D2D": _disk,
+    }[algorithm]()
+    with Mesher(shape) as mesher:
+        if algorithm == "Prism3D":
+            _assign_3d(mesher, algorithm)
+            layers: Hypothesis = ViscousLayers(
+                total_thickness=total,
+                layer_count=count,
+                stretch_factor=1.2,
+                boundary=(1,),
+                group_name="bl",
+            )
+        else:
+            mesher.assign(Regular1D())
+            mesher.assign(NumberOfSegments(count=8))
+            mesher.assign(
+                PolygonPerFace2D()
+                if algorithm == "PolygonPerFace2D"
+                else RadialQuadrangle1D2D()
+            )
+            layers = ViscousLayers2D(
+                total_thickness=total,
+                layer_count=count,
+                stretch_factor=1.2,
+                boundary=(1,),
+                group_name="bl",
+            )
+        mesher.assign(layers)
+
+        with pytest.raises(
+            PysmeshError, match="does not build viscous layers"
+        ) as raised:
+            mesher.compute()
+
+        assert mesher.mesh().element_count == 0
+    native = {
+        "Prism3D": "Prism_3D",
+        "PolygonPerFace2D": "PolygonPerFace_2D",
+        "RadialQuadrangle1D2D": "RadialQuadrangle_1D2D",
+    }[algorithm]
+    assert native in str(raised.value)
+
+
+# The child assigns ViscousLayers with CompositeHexa3D on the unit box and computes. On
+# the reference the process died with an access violation: the layers fail there, and
+# CompositeHexa_3D then read a null proxy mesh.
+_COMPOSITE_CHILD: str = """
+import os, sys
+occt = os.environ.get("PYSMESH_OCCT_BIN")
+if occt:
+    os.add_dll_directory(occt)
+lib = os.path.join(sys.prefix, "Library", "bin")
+if os.path.isdir(lib):
+    os.add_dll_directory(lib)
+sys.path.insert(0, sys.argv[1])
+import pysmesh as ps
+
+s = ps.Session()
+s.add_box(1.0, 1.0, 1.0)
+with ps.Mesher(ps.load_brep(s.brep())) as m:
+    m.assign(ps.Regular1D())
+    m.assign(ps.NumberOfSegments(count=4))
+    m.assign(ps.Quadrangle2D())
+    m.assign(ps.CompositeHexa3D())
+    m.assign(ps.ViscousLayers(total_thickness=0.3, layer_count=3, stretch_factor=1.2,
+                              boundary=(1,), group_name="bl"))
+    try:
+        m.compute()
+        print("COMPOSITE-RESULT computed")
+    except ps.PysmeshError as e:
+        print("COMPOSITE-RESULT refused " + str(e))
+"""
+
+
+def test_composite_hexa_3d_refuses_layers_instead_of_crashing() -> None:
+    """In a child process: CompositeHexa3D with ViscousLayers raises, it does not crash.
+
+    Made to read the hypothesis, CompositeHexa_3D still cannot use the layers: the layer
+    quadrangles give the side faces more rows than the opposite faces, and its box grid
+    gets null nodes (StdMeshers_CompositeHexa_3D_viscous_layers.patch).
+    """
+    package_root = str(Path(ps.__file__).resolve().parent.parent)
+
+    proc = subprocess.run(
+        [sys.executable, "-c", _COMPOSITE_CHILD, package_root],
+        capture_output=True,
+        text=True,
+        timeout=300.0,
+        env=dict(os.environ),
+        check=False,
+    )
+
+    assert proc.returncode == 0, (proc.returncode, proc.stderr[-2000:])
+    line = next(
+        ln for ln in proc.stdout.splitlines() if ln.startswith("COMPOSITE-RESULT ")
+    )
+    assert line.startswith("COMPOSITE-RESULT refused ")
+    assert "CompositeHexa_3D does not build viscous layers" in line

@@ -131,6 +131,9 @@ class _MeshOps(_MesherBase):
                 with SMESH's own reason and the algorithm that reported it, and ``.face_ids``
                 carries the ordinals of the failed faces. The partial mesh is **kept** here
                 rather than cleared, because how far the assignment got is the diagnostic.
+                Also before anything is meshed, if a :class:`ViscousLayers` or
+                :class:`ViscousLayers2D` reaches a solid or a face whose algorithm does
+                not build layers; the message names the sub-shape and the algorithm.
         """
         return _report(self._m.compute(progress, cancel))
 

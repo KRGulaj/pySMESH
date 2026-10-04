@@ -953,6 +953,10 @@ class ProjectionSource3D(Hypothesis):
 class ViscousLayers(Hypothesis):
     """Prism layers grown inward from named faces of a solid.
 
+    :class:`Hexa3D`, :class:`PolyhedronPerSolid3D` and :class:`Cartesian3D` build
+    them. On a solid that another algorithm meshes, :meth:`~pysmesh.Mesher.compute`
+    raises before it meshes anything.
+
     Attributes:
         total_thickness: Total height of the layer stack.
         layer_count: Number of layers.
@@ -988,6 +992,9 @@ class ViscousLayers2D(Hypothesis):
     """Quadrangle layers grown inward from named edges of a face.
 
     The 2-D counterpart of :class:`ViscousLayers`, and the only 2-D form in the stack.
+    :class:`Quadrangle2D`, :class:`QuadFromMedialAxis1D2D` and :class:`Mefisto2D`
+    build them. On a face that another algorithm meshes,
+    :meth:`~pysmesh.Mesher.compute` raises before it meshes anything.
 
     Attributes:
         total_thickness: Total height of the layer stack.

@@ -80,6 +80,7 @@
 
 #include <StdMeshers_Cartesian_3D.hxx>
 #include <StdMeshers_CartesianParameters3D.hxx>
+#include <StdMeshers_CompositeHexa_3D.hxx>
 #include <StdMeshers_Hexa_3D.hxx>
 #include <StdMeshers_Import_1D2D.hxx>
 #include <StdMeshers_MEFISTO_2D.hxx>
@@ -2760,6 +2761,47 @@ void probe_p4_mefisto_max_element_area() {
   check(coarse.computed && coarse.warned && coarse.largest > 0.25, msg);
 }
 
+
+// ------------------------------------------------------------------------------ P4L6 ----- //
+
+// StdMeshers_CompositeHexa_3D_viscous_layers.patch: CompositeHexa_3D with ViscousLayers used
+// to read a null proxy mesh and crash; it now fails the compute with an error that says so.
+void probe_p4_composite_hexa_layers() {
+  section("P4L6", "CompositeHexa_3D refuses viscous layers instead of crashing");
+  // Under a compound root, as load_brep gives a shape: on a bare SOLID, SMESH refuses the
+  // hypothesis at assignment (HYP_INCOMPATIBLE), and Compute never sees it.
+  BRep_Builder builder;
+  TopoDS_Compound box;
+  builder.MakeCompound(box);
+  builder.Add(box, BRepPrimAPI_MakeBox(1.0, 1.0, 1.0).Shape());
+  Session s(box);
+  StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+  StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+  n->SetNumberOfSegments(4);
+  StdMeshers_Quadrangle_2D* a2 = s.make<StdMeshers_Quadrangle_2D>();
+  StdMeshers_CompositeHexa_3D* a3 = s.make<StdMeshers_CompositeHexa_3D>();
+  StdMeshers_ViscousLayers* layers = s.make<StdMeshers_ViscousLayers>();
+  layers->SetTotalThickness(0.3);
+  layers->SetNumberLayers(3);
+  layers->SetStretchFactor(1.2);
+  layers->SetBndShapes(std::vector<int>(1, s.meshDS()->ShapeToIndex(
+                           TopExp_Explorer(box, TopAbs_FACE).Current())),
+                       /*toIgnore=*/false);
+  const bool assigned = s.assign(box, a1) && s.assign(box, n) && s.assign(box, a2) &&
+                        s.assign(box, a3) && s.assign(box, layers);
+  const bool computed = s.compute();
+  TopExp_Explorer solid(box, TopAbs_SOLID);
+  const SMESH_ComputeErrorPtr err = s.mesh().GetSubMesh(solid.Current())->GetComputeError();
+  const bool named = err && err->myComment.find("does not build viscous layers") !=
+                                std::string::npos;
+  char msg[300];
+  std::snprintf(msg, sizeof(msg),
+                "P4L6 CompositeHexa_3D + ViscousLayers: the compute fails on the SOLID, naming "
+                "the reason (it crashed before); assigned %d computed %d error '%s'",
+                int(assigned), int(computed), err ? err->myComment.c_str() : "(none)");
+  check(assigned && !computed && named, msg);
+}
+
 }  // namespace
 
 void run_smesh_probe() {
@@ -2782,4 +2824,5 @@ void run_smesh_probe() {
   probe_p4_layer_builder_lifecycle();
   probe_p4_cartesian_layers();
   probe_p4_mefisto_max_element_area();
+  probe_p4_composite_hexa_layers();
 }
