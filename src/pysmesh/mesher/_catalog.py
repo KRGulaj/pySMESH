@@ -331,6 +331,11 @@ class CompositeHexa3D(Algorithm):
 
     The counterpart of :class:`Hexa3D` for a block an import has cut into more than six
     faces.
+
+    It builds no viscous layers. With :class:`ViscousLayers` on its solid,
+    :meth:`~pysmesh.Mesher.compute` raises before it meshes anything; SMESH's own
+    compute crashed there, because the layer cells on the side faces break its block
+    grid. Use :class:`Hexa3D` for a block with layers.
     """
 
     native_name: ClassVar[str] = "CompositeHexa_3D"

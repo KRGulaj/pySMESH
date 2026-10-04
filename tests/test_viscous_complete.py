@@ -971,24 +971,31 @@ def _at_y0(items: list[object]) -> int:
 
 
 @pytest.mark.parametrize(
-    ("algorithm", "segments"), [("Quadrangle2D", 4), ("QuadFromMedialAxis1D2D", 8)]
+    ("algorithm", "segments"),
+    [("Quadrangle2D", 4), ("Mefisto2D", 4), ("QuadFromMedialAxis1D2D", 8)],
 )
 def test_a_2d_layer_algorithm_grows_the_stack_at_the_closed_form(
     algorithm: str, segments: int
 ) -> None:
     """ViscousLayers2D on the edge y = 0: 3 lines, one cell per segment per layer.
 
-    Quadrangle2D on the unit square, 4 segments per edge; QuadFromMedialAxis1D2D on the
-    4 x 1 strip, the face it is made for, 8 segments per edge.
+    Quadrangle2D and Mefisto2D on the unit square, 4 segments per edge;
+    QuadFromMedialAxis1D2D on the 4 x 1 strip, the face it is made for, 8 segments per
+    edge. Mefisto2D, carried forward from SMESH V9_9_0, lists ViscousLayers2D as
+    compatible and builds the layers in its compute (amendment 12, E8).
     """
     total, count = STACK
-    face = _unit_square() if algorithm == "Quadrangle2D" else _strip()
+    face = _strip() if algorithm == "QuadFromMedialAxis1D2D" else _unit_square()
 
     with Mesher(face) as mesher:
         mesher.assign(Regular1D())
         mesher.assign(NumberOfSegments(count=segments))
         mesher.assign(
-            Quadrangle2D() if algorithm == "Quadrangle2D" else QuadFromMedialAxis1D2D()
+            {
+                "Quadrangle2D": Quadrangle2D,
+                "Mefisto2D": Mefisto2D,
+                "QuadFromMedialAxis1D2D": QuadFromMedialAxis1D2D,
+            }[algorithm]()
         )
         mesher.assign(
             ViscousLayers2D(
