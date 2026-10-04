@@ -304,6 +304,12 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
         CartesianParameters3D(spacing_x="1.0", spacing_y="1.0", spacing_z="1.0"),
         None,
     ),
+    (
+        CartesianParameters3D(
+            spacing_x="1.0", spacing_y="1.0", spacing_z="1.0", use_quanta=True, quanta=0.5
+        ),
+        None,
+    ),
     # Hypotheses naming another part of the model
     (ProjectionSource1D(source_edge=SubShape(SubShapeKind.EDGE, 1)), None),
     (

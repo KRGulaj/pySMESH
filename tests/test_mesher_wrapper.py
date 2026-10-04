@@ -23,6 +23,8 @@ import pysmesh as ps
 from pysmesh import (
     Arithmetic1D,
     BlockRenumber,
+    Cartesian3D,
+    CartesianParameters3D,
     Distribution,
     ElementType,
     Hexa3D,
@@ -640,3 +642,68 @@ def test_number_of_segments_ignores_beta_under_another_law() -> None:
         x = _sorted_x(mesher.mesh())
 
     np.testing.assert_allclose(np.diff(x), np.full(5, 2.0), atol=TOL)
+
+
+# ---- W2.2 CartesianParameters3D.use_quanta and quanta ----------------------------- #
+
+
+def _sphere_shape() -> ps.Shape:
+    """A sphere of radius 2."""
+    session = Session()
+    session.add_sphere(2.0)
+    return ps.load_brep(session.brep())
+
+
+def _cartesian(shape: ps.Shape, parameters: CartesianParameters3D) -> ps.MeshData:
+    """Cartesian3D on ``shape`` with ``parameters``."""
+    with Mesher(shape) as mesher:
+        mesher.assign(Cartesian3D())
+        mesher.assign(parameters)
+        mesher.compute()
+        return mesher.mesh()
+
+
+def test_use_quanta_turns_every_cut_cell_of_a_sphere_into_one_hexahedron() -> None:
+    """At quanta 1e-6 no polyhedron is left: each became one hexahedron of its cell.
+
+    Spec (SMESH ``cartesian_algo.rst``, "Set Quanta"): a boundary polyhedron is
+    replaced by a hexahedron "if the volume of the polyhedron divided by the
+    equivalent hexahedron is bigger than Quanta". At 1e-6 every cut cell qualifies, so
+    the hexahedron count becomes the old hexahedra plus the old polyhedra, and each
+    hexahedron fits in one 0.5 cell of the grid.
+    """
+    spacing = {"spacing_x": "0.5", "spacing_y": "0.5", "spacing_z": "0.5"}
+    plain = _cartesian(_sphere_shape(), CartesianParameters3D(**spacing))
+
+    quantized = _cartesian(
+        _sphere_shape(), CartesianParameters3D(**spacing, use_quanta=True, quanta=1e-6)
+    )
+
+    polyhedra = plain.count_of(ElementType.POLYHEDRON)
+    assert polyhedra > 0
+    assert quantized.count_of(ElementType.POLYHEDRON) == 0
+    assert quantized.count_of(ElementType.HEXAHEDRON) == (
+        plain.count_of(ElementType.HEXAHEDRON) + polyhedra
+    )
+    hexa = np.flatnonzero(quantized.element_type == int(ElementType.HEXAHEDRON))
+    extents = np.array([np.ptp(_xyz_of(quantized, i), axis=0) for i in hexa])
+    assert np.all(extents > 0.0)
+    assert np.all(extents <= 0.5 + TOL)
+
+
+@pytest.mark.parametrize("quanta", [0.0, 1.5])
+def test_a_quanta_outside_the_unit_range_is_refused(quanta: float) -> None:
+    """Degenerate input: SetQuanta accepts ``[1e-6, 1]`` only."""
+    parameters = CartesianParameters3D(
+        spacing_x="0.5",
+        spacing_y="0.5",
+        spacing_z="0.5",
+        use_quanta=True,
+        quanta=quanta,
+    )
+
+    with (
+        Mesher(_sphere_shape()) as mesher,
+        pytest.raises(PysmeshError, match="quanta must lie in"),
+    ):
+        mesher.assign(parameters)

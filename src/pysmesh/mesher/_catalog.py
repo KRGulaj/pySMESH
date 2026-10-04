@@ -800,9 +800,20 @@ class CartesianParameters3D(Hypothesis):
         spacing_z: Spacing expression along z.
         size_threshold: A cut cell smaller than ``1 / size_threshold`` of a full one is
             merged into its neighbour rather than kept as a sliver.
+        spacing_from: The range each spacing expression covers, as fractions of the
+            shape's bounding box along its axis. With one expression per axis the range
+            is the whole box, ``(0.0, 1.0)``; SMESH refuses any other value
+            (``StdMeshers_CartesianParameters3D.cxx:158``).
         add_edges: Also create the 1-D elements on the model's edges.
         create_faces: Also create the 2-D elements on the model's faces.
         consider_internal_faces: Treat faces interior to a solid as boundaries to cut on.
+        use_quanta: Replace a cut cell by a hexahedron when its volume is more than
+            ``quanta`` times the volume of the hexahedron that replaces it. The
+            hexahedron is built on the cell's corners, a corner outside the body taken
+            where its grid line meets the boundary. So the mesh has fewer polyhedra and
+            follows the boundary less closely.
+        quanta: The volume fraction above which ``use_quanta`` replaces a cut cell, in
+            ``[1e-6, 1]``. Read only with ``use_quanta``. The default is upstream's.
     """
 
     native_name: ClassVar[str] = "CartesianParameters3D"
@@ -815,6 +826,8 @@ class CartesianParameters3D(Hypothesis):
     add_edges: bool = False
     create_faces: bool = False
     consider_internal_faces: bool = False
+    use_quanta: bool = False
+    quanta: float = 0.01
 
 
 # ---- Hypotheses that name another part of the model ------------------------------------ #
