@@ -819,6 +819,35 @@ def test_a_cancelled_compute_leaves_no_partial_mesh() -> None:
         assert mesher.mesh().element_count == 0
 
 
+def test_a_mesher_computes_again_after_a_cancel_that_reached_the_generator() -> None:
+    """A cancel sets SMESH_Gen's cancel flag; only SMESH_Gen::PrepareCompute clears it.
+
+    SALOME calls PrepareCompute before every Compute (SMESH_Gen_i::Compute). Without it,
+    after one cancel that reached the generator, every later compute of the same Mesher
+    stopped at its first sub-mesh and failed with no error text. The cancel lands at the
+    second poll, so it goes through SMESH_Gen::CancelCompute, not through the first,
+    synchronous question.
+    """
+    asked = [0]
+
+    def cancel_at_the_second_poll() -> bool:
+        asked[0] += 1
+        return asked[0] > 1
+
+    with Mesher(_bored_block_shape()) as fresh:
+        _slow_cartesian(fresh, spacing="0.12")
+        expected = fresh.compute()
+
+    with Mesher(_bored_block_shape()) as mesher:
+        _slow_cartesian(mesher, spacing="0.12")
+        with pytest.raises(PysmeshCancelled):
+            mesher.compute(cancel=cancel_at_the_second_poll)
+        report = mesher.compute()
+
+    assert asked[0] == 2
+    assert (report.nodes, report.volumes) == (expected.nodes, expected.volumes)
+
+
 def test_a_raising_progress_callback_cancels_and_the_caller_gets_its_own_exception() -> None:
     class Stop(RuntimeError):
         """Raised by the hook under test."""

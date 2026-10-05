@@ -808,6 +808,12 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
     py::gil_scoped_release release;
     netgen_lock = std::unique_lock<std::mutex>(netgen_mutex());
   }
+  // SMESH_Gen::CancelCompute sets a flag that only PrepareCompute clears, and Compute stops
+  // at the first sub-mesh while it is set. SALOME calls PrepareCompute before every Compute
+  // (SMESH_Gen_i::Compute); without it, one cancel made every later compute of this mesher
+  // fail with no error text. Called before the driver starts, so it never clears a cancel
+  // of this run.
+  gen_->PrepareCompute(*mesh_, data_->shape);
   ComputeDriver driver(*mesh_, *gen_, data_->shape, hooks);
   bool ok = false;
   if (!driver.cancelled()) {
