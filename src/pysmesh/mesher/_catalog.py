@@ -101,8 +101,8 @@ class QuadType(IntEnum):
 class Fineness(IntEnum):
     """How fine NETGEN meshes: a preset of three sizing values.
 
-    The integer values are NETGENPlugin's (``NETGENPlugin_Hypothesis::Fineness``); do not
-    reorder. A preset sets the growth rate, the segments per edge and the segments per
+    The integer values are NETGENPlugin's (``NETGENPlugin_Hypothesis::Fineness``); do
+    not reorder. A preset sets the growth rate, the segments per edge and the segments per
     radius of curvature together (``NETGENPlugin_Hypothesis.cxx``, ``SetFineness``):
 
     ===============  ===========  =================  ===================
@@ -313,7 +313,7 @@ class RadialQuadrangle1D2D(Algorithm):
 
 @dataclass(frozen=True)
 class Netgen1D2D(Algorithm):
-    """Mesh a face and its edges with NETGEN, in one algorithm: segments, then triangles.
+    """Mesh a face and its edges with NETGEN in one algorithm: segments, then triangles.
 
     With ``quad_allowed`` it makes a quad-dominant mesh instead. It reads
     :class:`NetgenParameters2D` or :class:`NetgenSimpleParameters2D`, and
@@ -326,10 +326,11 @@ class Netgen1D2D(Algorithm):
 
 @dataclass(frozen=True)
 class Netgen2D(Algorithm):
-    """Mesh a face with NETGEN from the segments of its edges, which a 1-D algorithm makes.
+    """Mesh a face with NETGEN from the segments of its edges, made by a 1-D algorithm.
 
     It reads :class:`MaxElementArea`, :class:`LengthFromEdges`,
-    :class:`QuadranglePreference`, :class:`NetgenParameters2D` and :class:`ViscousLayers2D`.
+    :class:`QuadranglePreference`, :class:`NetgenParameters2D` and
+    :class:`ViscousLayers2D`.
     With no hypothesis the size comes from the boundary segments, as with
     :class:`LengthFromEdges`. It reads one of :class:`MaxElementArea`,
     :class:`LengthFromEdges` and :class:`NetgenParameters2D` per face: a second one on
@@ -973,12 +974,12 @@ class CartesianParameters3D(Hypothesis):
     threshold_for_internal_faces: bool = False
 
 
-# ---- NETGEN hypotheses ----------------------------------------------------------------- #
+# ---- NETGEN hypotheses -------------------------------------------------------------- #
 
 
 @dataclass(frozen=True)
 class _OptionalFields(Hypothesis):
-    """A hypothesis whose fields left None are not sent: the plugin keeps its own value."""
+    """A hypothesis whose fields left None are not sent: the plugin keeps its value."""
 
     def params(self) -> dict[str, object]:
         """The parameter dict, without the fields that are None.
@@ -1114,7 +1115,8 @@ class _NetgenSizing(_OptionalFields):
 class NetgenParameters(_NetgenSizing):
     """The parameters of :class:`Netgen1D2D3D` and :class:`Netgen3D`.
 
-    The fields of :class:`NetgenParameters2D`, and two that only the volume mesher reads.
+    The fields of :class:`NetgenParameters2D`, and two that only the volume mesher
+    reads.
 
     Attributes:
         volume_optimization_steps: How many volume improvement passes, when
@@ -1156,10 +1158,10 @@ class NetgenSimpleParameters2D(_OptionalFields):
     The edges get a segment count or a segment length; the faces get an area bound, or a
     size taken from the edges.
 
-    The count is a target, met exactly where the edges have one length. The plugin sizes
-    each edge as its length divided by ``number_of_segments - 0.4``, and the smaller size
-    of a shorter neighbour reaches into a longer edge near their common vertex: a
-    1 x 2 x 3 box with 4 gets 3 to 5 segments per edge
+    The count is a target, met exactly where the edges have one length. The plugin
+    sizes each edge as its length divided by ``number_of_segments - 0.4``, and the
+    smaller size of a shorter neighbour reaches into a longer edge near their common
+    vertex: a 1 x 2 x 3 box with 4 gets 3 to 5 segments per edge
     (``NETGENPlugin_Mesher.cxx``, ``SetBasicMeshParameters``).
 
     Attributes:
