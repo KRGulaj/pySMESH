@@ -2893,6 +2893,55 @@ void probe_p5_salome_exception_text() {
   }
 }
 
+// ------------------------------------------------------------------------------ P5HYP ---- //
+
+// SMESH_subMesh_remove_hypothesis_state.patch: Hexa_3D takes one ViscousLayers; a second one
+// on the compound root leaves the SOLID MISSING_HYP. Removing it checks the algorithm again,
+// so the SOLID is HYP_OK and meshes; upstream it stayed MISSING_HYP and meshed nothing.
+void probe_p5_remove_hypothesis_state() {
+  section("P5HYP", "removing a hypothesis checks a MISSING_HYP sub-mesh again");
+  BRep_Builder builder;
+  TopoDS_Compound box;
+  builder.MakeCompound(box);
+  builder.Add(box, BRepPrimAPI_MakeBox(1.0, 1.0, 1.0).Shape());
+  Session s(box);
+  StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+  StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+  n->SetNumberOfSegments(4);
+  StdMeshers_Quadrangle_2D* a2 = s.make<StdMeshers_Quadrangle_2D>();
+  StdMeshers_Hexa_3D* a3 = s.make<StdMeshers_Hexa_3D>();
+  TopExp_Explorer face(box, TopAbs_FACE);
+  const int first = s.meshDS()->ShapeToIndex(face.Current());
+  face.Next();
+  const int second = s.meshDS()->ShapeToIndex(face.Current());
+  StdMeshers_ViscousLayers* la = s.make<StdMeshers_ViscousLayers>();
+  StdMeshers_ViscousLayers* lb = s.make<StdMeshers_ViscousLayers>();
+  for (auto [layers, wall] : {std::pair{la, first}, std::pair{lb, second}}) {
+    layers->SetTotalThickness(0.2);
+    layers->SetNumberLayers(2);
+    layers->SetStretchFactor(1.0);
+    layers->SetBndShapes(std::vector<int>(1, wall), /*toIgnore=*/false);
+  }
+  const bool assigned = s.assign(box, a1) && s.assign(box, n) && s.assign(box, a2) &&
+                        s.assign(box, a3) && s.assign(box, la) && s.assign(box, lb);
+  TopExp_Explorer solid(box, TopAbs_SOLID);
+  SMESH_subMesh* sm = s.mesh().GetSubMesh(solid.Current());
+  const bool missing = sm->GetAlgoState() == SMESH_subMesh::MISSING_HYP;
+  s.mesh().RemoveHypothesis(box, lb->GetID());
+  const bool ok_again = sm->GetAlgoState() == SMESH_subMesh::HYP_OK;
+  const bool computed = s.compute();
+  const smIdType volumes = s.meshDS()->NbVolumes();
+  char msg[300];
+  std::snprintf(msg, sizeof(msg),
+                "P5HYP Hexa_3D with two ViscousLayers is MISSING_HYP, and HYP_OK once one is "
+                "removed; then it meshes 4x4x4 + 4x4x2 hexahedra: assigned %d missing %d "
+                "ok_again %d computed %d volumes %lld",
+                int(assigned), int(missing), int(ok_again), int(computed),
+                static_cast<long long>(volumes));
+  check(assigned && missing && ok_again && computed && volumes == 4 * 4 * 4 + 4 * 4 * 2,
+        msg);
+}
+
 }  // namespace
 
 void run_smesh_probe() {
@@ -2917,4 +2966,5 @@ void run_smesh_probe() {
   probe_p4_mefisto_max_element_area();
   probe_p4_composite_hexa_layers();
   probe_p5_salome_exception_text();
+  probe_p5_remove_hypothesis_state();
 }
