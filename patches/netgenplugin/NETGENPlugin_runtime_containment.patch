@@ -1,0 +1,396 @@
+pySMESH: NETGENPlugin runs inside a host process: no working-directory change, no file,
+no redirect of std::cout, and netgen silent at the source (NETGENPlugin V9_16_0; applies
+after NETGENPlugin_local_size_by_subshape.patch).
+
+Why: pySMESH is embedded in a host application, and every NETGEN compute broke the host's
+process state:
+* NETGENPlugin_NetgenLibWrapper changed the process's working directory into a new
+  temporary directory for its whole life (ChdirRAII, SALOMEDS_Tool::GetTmpDir), and never
+  removed that directory.
+* It created a second temporary directory for the netgen log, and pointed std::cout at
+  that log for the whole process (setOutputFile); KEEP_NETGEN_OUTPUT left netgen's
+  progress on the console instead (129 lines for one cylinder at message level 3).
+* ReadErrors read "test.out" from the working directory, and RemoveTmpFiles deleted
+  "test.out", "problemfaces" and "occmesh.rep" from it: in the host's own working
+  directory, once the chdir is gone. With netgen 6.2.2101 test.out was never written
+  anyway (ngcore initialises testout to a null stream, and the wrapper opened the file
+  only when testout was null), so ReadErrors found nothing.
+* SALOME_NETGEN_DISABLE_MULTITHREADING overrode the hypothesis's thread count.
+SALOMEDS_Tool (the temporary-directory helpers) is also part of SALOME's study layer,
+which pySMESH does not build.
+
+Change:
+* NETGENPlugin_Mesher.hxx: ChdirRAII and the SALOMEDS_Tool include are gone. The wrapper
+  keeps netgen's debug stream in memory (_testout) and the stream it replaced; the log
+  file members and functions (setOutputFile, getOutputFileName, removeOutputFile,
+  RemoveTmpFiles) are gone. New static TestOutput() returns the debug text of the live
+  wrapper.
+* NETGENPlugin_Mesher.cxx: the wrapper sets netgen's message level to 0, points netgen's
+  message streams (mycout, myerr: PrintMessage, PrintWarning, PrintError) at a stream
+  with no buffer, turns ngcore's logger (std::clog) off, and points netgen::testout at
+  its own memory stream, restored in the destructor. ReadErrors parses that text with the
+  same cursor rules as SMESH_File (TextCursor), so the bad edges and the intersecting
+  triangles that netgen reports still reach the compute error. SetDefaultParameters no
+  longer reads SALOME_NETGEN_DISABLE_MULTITHREADING. The SMESH_File and SALOMEDS_Tool
+  includes are gone.
+
+The netgen globals that the wrapper sets are private to the netgen copy that pySMESH links
+statically into _core.pyd; the binding serializes every NETGEN compute with one
+process-wide lock. A mesh does not change: only output and files do.
+
+diff --git a/src/NETGENPlugin/NETGENPlugin_Mesher.hxx b/src/NETGENPlugin/NETGENPlugin_Mesher.hxx
+--- a/src/NETGENPlugin/NETGENPlugin_Mesher.hxx
++++ b/src/NETGENPlugin/NETGENPlugin_Mesher.hxx
+@@ -35,7 +35,6 @@
+ #include <SMDS_MeshElement.hxx>
+ #include <SMESH_Algo.hxx>
+ #include <SMESH_ProxyMesh.hxx>
+-#include <SALOMEDS_Tool.hxx>
+ #include "Basics_Utils.hxx"
+ #include "SALOME_Basics.hxx"
+ #include <TopTools_IndexedMapOfShape.hxx>
+@@ -54,6 +53,7 @@
+ #include <map>
+ #include <vector>
+ #include <set>
++#include <sstream>
+ 
+ class NETGENPlugin_Hypothesis;
+ class NETGENPlugin_Internals;
+@@ -71,31 +71,6 @@
+   extern MeshingParameters mparam;
+ }
+ 
+-// Class for temporary folder switching
+-class ChdirRAII
+-{
+-  public:
+-#ifndef WIN32
+-    ChdirRAII(const std::string& wd):_wd(wd) { if(_wd.empty()) return ; char *pwd(get_current_dir_name()); _od = pwd; free(pwd); chdir(_wd.c_str()); }
+-    ~ChdirRAII() { if(_od.empty()) return ; chdir(_od.c_str()); }
+-#else
+-    ChdirRAII(const std::string& wd) : _wd(wd) {
+-      if (_wd.empty())
+-        return;
+-      TCHAR pwd[MAX_PATH];
+-      GetCurrentDirectory(sizeof(pwd), pwd);
+-      _od = Kernel_Utils::utf8_encode_s(pwd);
+-      SetCurrentDirectory(Kernel_Utils::utf8_decode_s(_wd).c_str());
+-    }
+-    ~ChdirRAII() {
+-      if (_od.empty()) return;
+-      SetCurrentDirectory(Kernel_Utils::utf8_decode_s(_od).c_str());
+-    }
+-#endif
+-  private:
+-    std::string _wd;
+-    std::string _od;
+-};
+ //=============================================================================
+ /*!
+  * \brief Struct storing nb of entities in netgen mesh
+@@ -140,21 +115,17 @@
+ 
+   static void CalcLocalH( netgen::Mesh * ngMesh );
+ 
+-  static void RemoveTmpFiles();
+   static int& instanceCounter();
+-  void setOutputFile(std::string);
++
++  // pySMESH: what netgen wrote to its debug stream (netgen::testout) in the wrapper that
++  // is alive, the text NETGENPlugin_Mesher::ReadErrors parses. Empty with no wrapper.
++  static std::string TestOutput();
+ 
+  private:
+-  std::string getOutputFileName();
+-  void        removeOutputFile();
+-  std::string _outputFileName;
+-  // This will change current directory when the class is instanciated and switch
+-  ChdirRAII _tmpDir;
+-
+-
+-  ostream *       _ngcout;
+-  ostream *       _ngcerr;
+-  std::streambuf* _coutBuffer;   // to re-/store cout.rdbuf()
++  // pySMESH: netgen's debug stream for the life of this wrapper, kept in memory, and the
++  // stream it replaced.
++  std::ostringstream _testout;
++  std::ostream*      _savedTestout;
+ };
+ 
+ //=============================================================================
+diff --git a/src/NETGENPlugin/NETGENPlugin_Mesher.cxx b/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
+--- a/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
++++ b/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
+@@ -40,15 +40,12 @@
+ #include <SMESH_Comment.hxx>
+ #include <SMESH_ComputeError.hxx>
+ #include <SMESH_ControlPnt.hxx>
+-#include <SMESH_File.hxx>
+ #include <SMESH_Gen.hxx>
+ #include <SMESH_Mesh.hxx>
+ #include <SMESH_MesherHelper.hxx>
+ #include <SMESH_subMesh.hxx>
+ #include <StdMeshers_QuadToTriaAdaptor.hxx>
+ #include <StdMeshers_ViscousLayers2D.hxx>
+-
+-#include <SALOMEDS_Tool.hxx>
+ 
+ #include <utilities.h>
+ 
+@@ -136,6 +133,64 @@
+ 
+ namespace
+ {
++  //================================================================================
++  /*!
++   * \brief pySMESH: a stream that writes nowhere (no buffer), for netgen's messages
++   */
++  //================================================================================
++
++  std::ostream& silentStream()
++  {
++    static std::ostream stream( nullptr );
++    return stream;
++  }
++
++  //================================================================================
++  /*!
++   * \brief pySMESH: the parts of SMESH_File's text cursor that ReadErrors uses, over a
++   *        string in memory instead of a mapped file, with the same semantics
++   */
++  //================================================================================
++
++  class TextCursor
++  {
++  public:
++    explicit TextCursor( const std::string& text )
++      : _begin( text.c_str() ), _pos( text.c_str() ), _end( text.c_str() + text.size() ) {}
++    operator const char*() const { return _pos; }
++    TextCursor& operator++() { ++_pos; return *this; }
++    TextCursor& operator+=( int n ) { _pos += n; return *this; }
++    bool eof() const { return _pos >= _end; }
++    void setPos( const char* pos ) { if ( pos > _begin && pos < _end ) _pos = pos; }
++    // skip till the current line end
++    void getLine()
++    {
++      while ( !eof() )
++        if ( *(++_pos) == '\n' )
++          break;
++      if ( !eof() ) ++_pos;
++    }
++    // read ints.size() integers, skipping what is not a digit before each
++    bool getInts( std::vector<int>& ints )
++    {
++      size_t i = 0;
++      while ( i < ints.size() )
++      {
++        while ( !eof() && !isdigit( (unsigned char) *_pos )) ++_pos;
++        if ( eof() ) break;
++        if ( _pos > _begin && _pos[-1] == '-' ) --_pos;
++        char* next = 0;
++        ints[ i++ ] = (int) strtol( _pos, &next, 10 );
++        _pos = next;
++      }
++      return ( i == ints.size() );
++    }
++  private:
++    const char* _begin;
++    const char* _pos;
++    const char* _end;
++  };
++
+   inline void NOOP_Deleter(void *) { ; }
+ 
+   //=============================================================================
+@@ -618,12 +673,8 @@
+ #ifdef NETGEN_V6
+ 
+   mparams.nthreads = NETGENPlugin_Hypothesis::GetDefaultNbThreads();
+-
+-  if ( getenv( "SALOME_NETGEN_DISABLE_MULTITHREADING" ))
+-  {
+-    mparams.nthreads = 1;
+-    mparams.parallel_meshing = false;
+-  }
++  // pySMESH: SALOME_NETGEN_DISABLE_MULTITHREADING is not read. The thread count is the
++  // hypothesis's NbThreads, and no environment variable of the host overrides it.
+ #endif
+ }
+ 
+@@ -4090,7 +4141,10 @@
+   SMESH_BadInputElements* err =
+     new SMESH_BadInputElements( nodeVec.back()->GetMesh(), COMPERR_BAD_INPUT_MESH,
+                                 "Some edges multiple times in surface mesh");
+-  SMESH_File file("test.out");
++  // pySMESH: netgen's debug output is in the memory of NETGENPlugin_NetgenLibWrapper,
++  // not in "test.out" in the working directory
++  const std::string testOutput = NETGENPlugin_NetgenLibWrapper::TestOutput();
++  TextCursor file( testOutput );
+   vector<int> two(2);
+   vector<int> three1(3), three2(3);
+   const char* badEdgeStr = " multiple times in surface mesh";
+@@ -4708,25 +4762,31 @@
+ //================================================================================
+ 
+ NETGENPlugin_NetgenLibWrapper::NETGENPlugin_NetgenLibWrapper():
+-  _ngMesh(0),_tmpDir(SALOMEDS_Tool::GetTmpDir())
++  _ngMesh(0)
+ {
+   if ( instanceCounter() == 0 )
+   {
+     Ng_Init();
+-    if ( !netgen::testout )
+-      netgen::testout = new ofstream( "test.out" );
+   }
+ 
+   ++instanceCounter();
+ 
+   _isComputeOk      = false;
+-  _coutBuffer       = NULL;
+-  _ngcout           = NULL;
+-  _ngcerr           = NULL;
+-  if ( !getenv( "KEEP_NETGEN_OUTPUT" ))
+-  {
+-    setOutputFile(getOutputFileName());
+-  }
++
++  // pySMESH: netgen is silenced at the source, and nothing changes the process: no
++  // working directory, no redirect of std::cout, no file. SALOME instead moved the
++  // process into a new temporary directory, wrote the netgen log and "test.out" there,
++  // and pointed std::cout at the log; KEEP_NETGEN_OUTPUT left the log on the console.
++  // Here the message streams (PrintMessage, PrintWarning, PrintError) write nowhere,
++  // ngcore's logger (std::clog) is off, and the debug stream that ReadErrors parses
++  // stays in this wrapper's memory. The netgen globals are private to the library that
++  // pySMESH links statically, and one process-wide lock serializes their users.
++  netgen::printmessage_importance = 0;
++  netgen::mycout = &silentStream();
++  netgen::myerr  = &silentStream();
++  ngcore::Logger::SetGlobalLoggingLevel( ngcore::level::off );
++  _savedTestout   = netgen::testout;
++  netgen::testout = &_testout;
+ 
+   setMesh( Ng_NewMesh() );
+ }
+@@ -4743,13 +4803,19 @@
+ 
+   Ng_DeleteMesh( ngMesh() );
+   Ng_Exit();
+-  RemoveTmpFiles();
+-  if ( _coutBuffer )
+-    std::cout.rdbuf( _coutBuffer );
+-#ifdef _DEBUG_
+-  if( _isComputeOk )
+-#endif
+-    removeOutputFile();
++  netgen::testout = _savedTestout;
++}
++
++//================================================================================
++/*!
++ * \brief pySMESH: what netgen wrote to its debug stream in the live wrapper
++ */
++//================================================================================
++
++std::string NETGENPlugin_NetgenLibWrapper::TestOutput()
++{
++  const std::ostringstream* text = dynamic_cast<const std::ostringstream*>( netgen::testout );
++  return text ? text->str() : std::string();
+ }
+ 
+ //================================================================================
+@@ -4826,94 +4892,3 @@
+ #endif
+ }
+ 
+-//================================================================================
+-/*!
+- * \brief Return a unique file name
+- */
+-//================================================================================
+-
+-std::string NETGENPlugin_NetgenLibWrapper::getOutputFileName()
+-{
+-  std::string aTmpDir = SALOMEDS_Tool::GetTmpDir();
+-
+-  TCollection_AsciiString aGenericName = aTmpDir.c_str();
+-  aGenericName += "NETGEN_";
+-#ifndef WIN32
+-  aGenericName += getpid();
+-#else
+-  aGenericName += _getpid();
+-#endif
+-  aGenericName += "_";
+-  aGenericName += Abs((Standard_Integer)(long) aGenericName.ToCString());
+-  aGenericName += ".out";
+-
+-  return aGenericName.ToCString();
+-}
+-//================================================================================
+-/*!
+- * \brief Set output file name for netgen log
+- */
+-//================================================================================
+-
+-void NETGENPlugin_NetgenLibWrapper::setOutputFile(std::string outputfile)
+-{
+-  // redirect all netgen output (mycout,myerr,cout) to _outputFileName
+-  _outputFileName = outputfile;
+-  _ngcout         = netgen::mycout;
+-  _ngcerr         = netgen::myerr;
+-  netgen::mycout  = new ofstream ( _outputFileName.c_str() );
+-  netgen::myerr   = netgen::mycout;
+-  _coutBuffer     = std::cout.rdbuf();
+-#ifdef _DEBUG_
+-  std::cout << "NOTE: netgen output is redirected to file " << _outputFileName << std::endl;
+-#else
+-  std::cout.rdbuf( netgen::mycout->rdbuf() );
+-#endif
+-}
+-
+-//================================================================================
+-/*!
+- * \brief Remove "test.out" and "problemfaces" files in current directory
+- */
+-//================================================================================
+-
+-void NETGENPlugin_NetgenLibWrapper::RemoveTmpFiles()
+-{
+-  bool rm =  SMESH_File("test.out").remove() ;
+-#ifndef WIN32
+-  if ( rm && netgen::testout && instanceCounter() == 0 )
+-  {
+-    delete netgen::testout;
+-    netgen::testout = 0;
+-  }
+-#endif
+-  SMESH_File("problemfaces").remove();
+-  SMESH_File("occmesh.rep").remove();
+-}
+-
+-//================================================================================
+-/*!
+- * \brief Remove file with netgen output
+- */
+-//================================================================================
+-
+-void NETGENPlugin_NetgenLibWrapper::removeOutputFile()
+-{
+-  if ( !_outputFileName.empty() )
+-  {
+-    if ( _ngcout )
+-    {
+-      delete netgen::mycout;
+-      netgen::mycout = _ngcout;
+-      netgen::myerr  = _ngcerr;
+-      _ngcout        = 0;
+-    }
+-    string    tmpDir = SALOMEDS_Tool::GetDirFromPath ( _outputFileName );
+-    string aFileName = SALOMEDS_Tool::GetNameFromPath( _outputFileName ) + ".out";
+-    SALOMEDS_Tool::ListOfFiles aFiles;
+-    aFiles.reserve(1);
+-    aFiles.push_back(aFileName.c_str());
+-
+-    SALOMEDS_Tool::RemoveTemporaryFiles( tmpDir.c_str(), aFiles, true );
+-  }
+-}

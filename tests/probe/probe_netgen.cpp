@@ -2,10 +2,11 @@
 // Copyright (C) 2026 Kajetan R. Gulaj
 // Created: 2026-10-05
 
-// pySMESH v2 capability probe — netgen 6.2.2101, linked statically, meshing OCCT 8.0.1
-// shapes through the nglib OCC API.
+// pySMESH v2 capability probe — netgen 6.2.2101 and NETGENPlugin V9_16_0, linked
+// statically, meshing OCCT 8.0.1 shapes: through the nglib OCC API (section NG3), and through
+// SMESH with the NETGEN_2D3D algorithm of the plugin (section NP2).
 //
-// The checks are the mesh oracles of the netgen tests, on two shapes whose answer is known:
+// The checks are the mesh oracles of the netgen tests, on shapes whose answer is known:
 //
 //   1. Conformity: every face of a tetrahedron belongs to one or two tetrahedra; the faces
 //      that belong to one are exactly the surface triangles; every point is a corner of a
@@ -23,7 +24,7 @@
 //      edge.
 //
 // nglib reads geometry from a file only, so each shape goes through a BREP file in the
-// temp directory, removed after the load.
+// temp directory, removed after the load. The plugin reads the shape from SMESH.
 
 #include "probe.hpp"
 
@@ -33,6 +34,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -41,6 +43,15 @@
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepTools.hxx>
 #include <TopoDS_Shape.hxx>
+
+#include <SMDS_MeshElement.hxx>
+#include <SMDS_MeshNode.hxx>
+#include <SMESHDS_Mesh.hxx>
+#include <SMESH_Gen.hxx>
+#include <SMESH_Mesh.hxx>
+
+#include <NETGENPlugin_Hypothesis.hxx>
+#include <NETGENPlugin_NETGEN_2D3D.hxx>
 
 #include <meshing.hpp>
 
@@ -90,10 +101,8 @@ double dihedral(const Point& pi, const Point& pj, const Point& pk, const Point& 
 }
 
 struct NetgenMesh {
-  int result_local_size = -99;
-  int result_edges = -99;
-  int result_surface = -99;
-  int result_volume = -99;
+  bool generated = false;
+  std::string how;                     // the results of the mesher calls, for the log
   std::vector<Point> points;           // 0-based copy of netgen's 1-based points
   std::vector<std::array<int, 4>> tets;  // 0-based point indices
   std::vector<Face> triangles;         // 0-based point indices
@@ -118,10 +127,14 @@ NetgenMesh mesh_with_nglib(const TopoDS_Shape& shape, const std::string& name, d
   nglib::Ng_Mesh* mesh = nglib::Ng_NewMesh();
   nglib::Ng_Meshing_Parameters mp;
   mp.maxh = maxh;
-  out.result_local_size = nglib::Ng_OCC_SetLocalMeshSize(geo, mesh, &mp);
-  out.result_edges = nglib::Ng_OCC_GenerateEdgeMesh(geo, mesh, &mp);
-  out.result_surface = nglib::Ng_OCC_GenerateSurfaceMesh(geo, mesh, &mp);
-  out.result_volume = nglib::Ng_GenerateVolumeMesh(mesh, &mp);
+  const int r1 = nglib::Ng_OCC_SetLocalMeshSize(geo, mesh, &mp);
+  const int r2 = nglib::Ng_OCC_GenerateEdgeMesh(geo, mesh, &mp);
+  const int r3 = nglib::Ng_OCC_GenerateSurfaceMesh(geo, mesh, &mp);
+  const int r4 = nglib::Ng_GenerateVolumeMesh(mesh, &mp);
+  out.generated = r1 == nglib::NG_OK && r2 == nglib::NG_OK && r3 == nglib::NG_OK &&
+                  r4 == nglib::NG_OK;
+  out.how = "nglib results " + std::to_string(r1) + " " + std::to_string(r2) + " " +
+            std::to_string(r3) + " " + std::to_string(r4);
 
   const int np = nglib::Ng_GetNP(mesh);
   for (int i = 1; i <= np; ++i) {
@@ -150,21 +163,71 @@ NetgenMesh mesh_with_nglib(const TopoDS_Shape& shape, const std::string& name, d
   return out;
 }
 
+// The same shape meshed by NETGENPlugin's NETGEN_2D3D inside SMESH, with a
+// NETGEN_Parameters hypothesis of the given max size, read back from SMESHDS. The teardown
+// order is the one src/bindings/mesh.cpp established: the mesh, the generator, then the
+// hypotheses.
+NetgenMesh mesh_with_plugin(const TopoDS_Shape& shape, double max_size) {
+  NetgenMesh out;
+  auto gen = std::make_unique<SMESH_Gen>();
+  SMESH_Mesh* mesh = gen->CreateMesh(false);
+  mesh->ShapeToMesh(shape);
+  std::vector<std::unique_ptr<SMESH_Hypothesis>> owned;
+  auto* algo = new NETGENPlugin_NETGEN_2D3D(gen->GetANewId(), gen.get());
+  owned.emplace_back(algo);
+  auto* hyp = new NETGENPlugin_Hypothesis(gen->GetANewId(), gen.get());
+  owned.emplace_back(hyp);
+  hyp->SetMaxSize(max_size);
+  const SMESH_Hypothesis::Hypothesis_Status s1 = mesh->AddHypothesis(shape, algo->GetID());
+  const SMESH_Hypothesis::Hypothesis_Status s2 = mesh->AddHypothesis(shape, hyp->GetID());
+  const bool assigned =
+      !SMESH_Hypothesis::IsStatusFatal(s1) && !SMESH_Hypothesis::IsStatusFatal(s2);
+  out.generated = assigned && gen->Compute(*mesh, shape);
+  out.how = "assign status " + std::to_string(int(s1)) + " " + std::to_string(int(s2)) +
+            ", compute " + (out.generated ? "true" : "false");
+
+  SMESHDS_Mesh* ds = mesh->GetMeshDS();
+  std::map<smIdType, int> row;
+  for (SMDS_NodeIteratorPtr it = ds->nodesIterator(); it->more();) {
+    const SMDS_MeshNode* n = it->next();
+    row[n->GetID()] = static_cast<int>(out.points.size());
+    out.points.push_back({n->X(), n->Y(), n->Z()});
+  }
+  for (SMDS_ElemIteratorPtr it = ds->elementsIterator(SMDSAbs_Volume); it->more();) {
+    const SMDS_MeshElement* e = it->next();
+    if (e->GetEntityType() != SMDSEntity_Tetra) {
+      ++out.non_tets;
+      continue;
+    }
+    out.tets.push_back({row[e->GetNode(0)->GetID()], row[e->GetNode(1)->GetID()],
+                        row[e->GetNode(2)->GetID()], row[e->GetNode(3)->GetID()]});
+  }
+  for (SMDS_ElemIteratorPtr it = ds->elementsIterator(SMDSAbs_Face); it->more();) {
+    const SMDS_MeshElement* e = it->next();
+    if (e->GetEntityType() != SMDSEntity_Triangle) {
+      ++out.non_triangles;
+      continue;
+    }
+    out.triangles.push_back({row[e->GetNode(0)->GetID()], row[e->GetNode(1)->GetID()],
+                             row[e->GetNode(2)->GetID()]});
+  }
+  delete mesh;
+  gen.reset();
+  owned.clear();
+  return out;
+}
+
 // Oracles 1 to 3 on one mesh. `exact_volume` is the CAD volume. `cylinder_height` 0 asks for
 // the planar bound (1e-9 relative); a positive height asks for the inscribed-cylinder bound
 // of the file comment.
 void check_mesh(const NetgenMesh& m, const std::string& id, double exact_volume,
                 double cylinder_height) {
   char msg[512];
-  const bool generated = m.result_local_size == nglib::NG_OK &&
-                         m.result_edges == nglib::NG_OK &&
-                         m.result_surface == nglib::NG_OK && m.result_volume == nglib::NG_OK;
   std::snprintf(msg, sizeof(msg),
-                "%s: nglib meshes the shape (results %d %d %d %d; %zu points, %zu tetrahedra, "
-                "%zu surface triangles)",
-                id.c_str(), m.result_local_size, m.result_edges, m.result_surface,
-                m.result_volume, m.points.size(), m.tets.size(), m.triangles.size());
-  check(generated && !m.tets.empty() && !m.triangles.empty(), msg);
+                "%s: meshed (%s; %zu points, %zu tetrahedra, %zu surface triangles)",
+                id.c_str(), m.how.c_str(), m.points.size(), m.tets.size(),
+                m.triangles.size());
+  check(m.generated && !m.tets.empty() && !m.triangles.empty(), msg);
   if (m.tets.empty()) {
     return;
   }
@@ -285,5 +348,12 @@ void run_netgen_probe() {
   const double height = 3.0;
   const TopoDS_Shape cylinder = BRepPrimAPI_MakeCylinder(radius, height).Shape();
   check_mesh(mesh_with_nglib(cylinder, "cylinder", 0.3), "NG3 cylinder R 1 H 3, maxh 0.3",
+             kPi * radius * radius * height, height);
+
+  section("NP2", "NETGENPlugin V9_16_0 (static): NETGEN_2D3D meshes through SMESH");
+  check_mesh(mesh_with_plugin(box, 6.0), "NP2 box 10 x 20 x 30, NETGEN_2D3D max size 6",
+             6000.0, 0.0);
+  check_mesh(mesh_with_plugin(cylinder, 0.3),
+             "NP2 cylinder R 1 H 3, NETGEN_2D3D max size 0.3",
              kPi * radius * radius * height, height);
 }

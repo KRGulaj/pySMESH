@@ -1,0 +1,110 @@
+conda-forge/smesh-feedstock recipe/patches/0004-occt-8.0-compat.patch, the NETGENPlugin
+part: the OCCT 8.0 pass on NETGENPlugin (NETGENPlugin V9_16_0).
+
+Source: conda-forge/smesh-feedstock, `recipe/patches/0004-occt-8.0-compat.patch`, commit
+c54d26ae6 ("Fix build against OCCT 8.0.0", 2026-06-23), its sections on
+`src/SMESH/src/NETGENPlugin/src/NETGENPlugin/`. pySMESH dropped them from
+`patches/occt8/0004-occt-8.0-compat.patch` while NETGEN was not built (git 682b7ff4f).
+
+Re-ported to NETGENPlugin V9_16_0 by pySMESH. Every hunk applies at fuzz 0. The OCCT 8.0
+changes:
+
+* Bnd_B3d.hxx is gone; Bnd_B3.hxx declares `using Bnd_B3d = Bnd_B3<double>`
+  (NETGENPlugin_Mesher.cxx, NETGENPlugin_Remesher_2D.cxx).
+* The TopTools_*Iterator* instantiation headers are gone; the collection headers declare
+  the iterators (NETGENPlugin_Mesher.cxx, NETGENPlugin_NETGEN_3D.cxx, which also includes
+  TopTools_MapOfShape.hxx that OCCT 8 headers no longer pull in).
+* Standard_Failure::DynamicType()->Name() becomes Standard_Failure::ExceptionType()
+  (NETGENPlugin_Mesher.cxx, NETGENPlugin_NETGEN_2D_ONLY.cxx, NETGENPlugin_NETGEN_3D.cxx
+  twice).
+
+Changes from the conda-forge text: the sections are re-based on V9_16_0 (the line numbers
+moved); the conda hunk that adds TopTools_MapOfShape.hxx to NETGENPlugin_NETGEN_2D_ONLY.cxx
+is not needed there and is left out; the looooo/SMESH NETGENPlugin_occt781.patch (the
+Link hasher of NCollection_Map) is upstream in V9_16_0 (NETGENPlugin_Mesher.cxx:159-180).
+
+diff --git a/src/NETGENPlugin/NETGENPlugin_Mesher.cxx b/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
+--- a/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
++++ b/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
+@@ -58,7 +58,7 @@
+ #include <BRepMesh_IncrementalMesh.hxx>
+ #include <BRep_Builder.hxx>
+ #include <BRep_Tool.hxx>
+-#include <Bnd_B3d.hxx>
++#include <Bnd_B3.hxx>
+ #include <GeomLib_IsPlanarSurface.hxx>
+ #include <GeomAdaptor_Surface.hxx>
+ #include <NCollection_Map.hxx>
+@@ -69,8 +69,6 @@
+ #include <TopExp.hxx>
+ #include <TopExp_Explorer.hxx>
+ #include <TopLoc_Location.hxx>
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeInteger.hxx>
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeShape.hxx>
+ #include <TopTools_DataMapOfShapeInteger.hxx>
+ #include <TopTools_DataMapOfShapeShape.hxx>
+ #include <TopTools_MapOfShape.hxx>
+@@ -2846,7 +2844,7 @@
+   {
+     SMESH_Comment str("Exception in netgen::OCCGenerateMesh()");
+     str << " at " << netgen::multithread.task
+-        << ": " << ex.DynamicType()->Name();
++        << ": " << ex.ExceptionType();
+     if ( ex.GetMessageString() && strlen( ex.GetMessageString() ))
+       str << ": " << ex.GetMessageString();
+     return str;
+diff --git a/src/NETGENPlugin/NETGENPlugin_NETGEN_2D_ONLY.cxx b/src/NETGENPlugin/NETGENPlugin_NETGEN_2D_ONLY.cxx
+--- a/src/NETGENPlugin/NETGENPlugin_NETGEN_2D_ONLY.cxx
++++ b/src/NETGENPlugin/NETGENPlugin_NETGEN_2D_ONLY.cxx
+@@ -1133,7 +1133,7 @@
+         err = 1;
+         str << "Exception in  netgen::OCCGenerateMesh()"
+             << " at " << netgen::multithread.task
+-            << ": " << ex.DynamicType()->Name();
++            << ": " << ex.ExceptionType();
+         if ( ex.GetMessageString() && strlen( ex.GetMessageString() ))
+           str << ": " << ex.GetMessageString();
+       }
+diff --git a/src/NETGENPlugin/NETGENPlugin_NETGEN_3D.cxx b/src/NETGENPlugin/NETGENPlugin_NETGEN_3D.cxx
+--- a/src/NETGENPlugin/NETGENPlugin_NETGEN_3D.cxx
++++ b/src/NETGENPlugin/NETGENPlugin_NETGEN_3D.cxx
+@@ -53,7 +53,8 @@
+ #include <GProp_GProps.hxx>
+ #include <TopExp.hxx>
+ #include <TopExp_Explorer.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
++#include <TopTools_MapOfShape.hxx>
+ #include <TopoDS.hxx>
+ 
+ #include <Standard_Failure.hxx>
+@@ -522,7 +523,7 @@
+   {
+     SMESH_Comment str("Exception in  netgen::OCCGenerateMesh()");
+     str << " at " << netgen::multithread.task
+-        << ": " << ex.DynamicType()->Name();
++        << ": " << ex.ExceptionType();
+     if ( ex.GetMessageString() && strlen( ex.GetMessageString() ))
+       str << ": " << ex.GetMessageString();
+     error(str);
+@@ -726,7 +727,7 @@
+   {
+     SMESH_Comment str("Exception in  netgen::OCCGenerateMesh()");
+     str << " at " << netgen::multithread.task
+-        << ": " << ex.DynamicType()->Name();
++        << ": " << ex.ExceptionType();
+     if ( ex.GetMessageString() && strlen( ex.GetMessageString() ))
+       str << ": " << ex.GetMessageString();
+     error(str);
+diff --git a/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx b/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx
+--- a/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx
++++ b/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx
+@@ -40,7 +40,7 @@
+ #include <SMESH_MeshEditor.hxx>
+ #include <SMESH_subMesh.hxx>
+ 
+-#include <Bnd_B3d.hxx>
++#include <Bnd_B3.hxx>
+ #include <Precision.hxx>
+ 
+ #include <occgeom.hpp>

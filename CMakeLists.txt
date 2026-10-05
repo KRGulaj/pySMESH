@@ -2,9 +2,9 @@
 #
 # Layout:
 #   extern/{smesh,kernel,geom,mefisto2,pthread}  pristine vendored upstream (never edited)
-#   extern/{netgen,zlib}                         pristine vendored upstream (never edited)
+#   extern/{netgen,netgenplugin,zlib}            pristine vendored upstream (never edited)
 #   prepare.py                                   stages + patches -> staged/
-#   cmake/{Kernel,Geom,SMESH,Netgen}/CMakeLists.txt  per-module static-lib definitions
+#   cmake/{Kernel,Geom,SMESH,Netgen,NETGENPlugin}/CMakeLists.txt  static-lib definitions
 #   src/bindings/                                pybind11 module
 #
 # OCCT + VTK + Boost are dynamic and are all build-time only: every one of their DLLs is
@@ -152,6 +152,8 @@ include(${CMAKE_SOURCE_DIR}/cmake/Geom/CMakeLists.txt)
 include(${CMAKE_SOURCE_DIR}/cmake/SMESH/CMakeLists.txt)
 # netgen 6.2.2101, ngcore, nglib and zlib, static (NETGEN_STATIC_LIBS).
 include(${CMAKE_SOURCE_DIR}/cmake/Netgen/CMakeLists.txt)
+# NETGENPlugin V9_16_0, static (NETGENPLUGIN_STATIC_LIBS).
+include(${CMAKE_SOURCE_DIR}/cmake/NETGENPlugin/CMakeLists.txt)
 
 # --------------------------------------------------------------------------- #
 # Python extension module
@@ -219,7 +221,7 @@ target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
 # deliberately NOT listed: OCCT 8.0 keeps BRepAlgoAPI_* in TKBO, and TKBool holds the legacy
 # TopOpeBRep engine plus BRepFill_PipeShell, which is reached only through TKOffset's facade.
 target_link_libraries(_core PRIVATE
-    ${SMESH_STATIC_LIBS} Geom Kernel
+    ${NETGENPLUGIN_STATIC_LIBS} ${SMESH_STATIC_LIBS} Geom Kernel
     ${NETGEN_STATIC_LIBS}
     VTK::CommonCore VTK::CommonDataModel VTK::FiltersVerdict
     TKShHealing
@@ -321,13 +323,14 @@ if(PYSMESH_BUILD_V2_PROBE)
         tests/probe/probe_smesh.cpp
         tests/probe/probe_netgen.cpp)
     target_include_directories(v2_probe PRIVATE ${CMAKE_SOURCE_DIR}/tests/probe)
-    # probe_netgen.cpp includes netgen headers, so it gets netgen's own define set.
+    # probe_netgen.cpp includes netgen and NETGENPlugin headers, so it gets netgen's own
+    # define set.
     set_source_files_properties(tests/probe/probe_netgen.cpp PROPERTIES
         COMPILE_DEFINITIONS "${PYSMESH_NETGEN_DEFINITIONS}"
         COMPILE_OPTIONS "${PYSMESH_NETGEN_OPTIONS}"
-        INCLUDE_DIRECTORIES "${PYSMESH_NETGEN_INCLUDE_DIRS}")
+        INCLUDE_DIRECTORIES "${PYSMESH_NETGEN_INCLUDE_DIRS};${NETGENPLUGIN_SRC_DIR}")
     target_link_libraries(v2_probe PRIVATE
-        ${SMESH_STATIC_LIBS} Geom Kernel
+        ${NETGENPLUGIN_STATIC_LIBS} ${SMESH_STATIC_LIBS} Geom Kernel
         ${NETGEN_STATIC_LIBS}
         VTK::CommonCore VTK::CommonDataModel VTK::FiltersVerdict
         TKShHealing TKMesh TKOffset TKTopAlgo TKPrim TKBO TKFillet TKFeat TKHelix

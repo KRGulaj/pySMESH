@@ -14,6 +14,8 @@ modified. Every SALOME tree is at tag ``V9_16_0``:
   ``V9_9_0`` (SALOME removed it in 2022), and looooo's f2c translation ``trte.c``.
 * ``extern/netgen``: netgen at tag ``v6.2.2101``, a sparse copy of ``libsrc/``,
   ``nglib/`` and the licence.
+* ``extern/netgenplugin``: SALOME NETGENPlugin at tag ``V9_16_0``, a sparse copy of
+  ``src/NETGENPlugin/`` and the licence.
 
 ``extern/zlib`` (zlib 1.3.2, the top-level files of the release) is compiled where it is
 and is not staged: no patch touches it.
@@ -30,7 +32,10 @@ looooo/SMESH patch series expects. Then it applies the patches and the source ed
 4. The netgen series (``patches/netgen/*.patch``): SALOME's ``netgen62ForSalome.patch``
    verbatim, then the OCCT 8 port from looooo/SMESH and conda-forge, then the pySMESH
    patches.
-5. The source edits in this file that no patch carries (see ``_apply_source_edits``).
+5. The NETGENPlugin series (``patches/netgenplugin/*.patch``): the OCCT 8 port from
+   conda-forge, then the pySMESH patches that remove CORBA and SALOMEDS and keep the
+   plugin inside the host process's contract.
+6. The source edits in this file that no patch carries (see ``_apply_source_edits``).
 
 Every patch is re-ported to its tree and must apply exactly: every hunk at fuzz 0. A
 hunk that fails, is already applied, or targets a file that is not staged stops the run.
@@ -137,6 +142,10 @@ PATCH_MANIFEST: Final[tuple[tuple[str, str], ...]] = (
     ("netgen/0004-occt-8.0-netgen-partition.patch", "."),
     ("netgen/0005-occt-8.0-netgen-occ.patch", "."),
     ("netgen/occgeom_save_without_stl.patch", "src/Netgen"),
+    # --- NETGENPlugin V9_16_0 : root staged/src/NETGENPlugin (looooo's layout) ---
+    ("netgenplugin/NETGENPlugin_occt8.patch", "src/NETGENPlugin"),
+    ("netgenplugin/NETGENPlugin_local_size_by_subshape.patch", "src/NETGENPlugin"),
+    ("netgenplugin/NETGENPlugin_runtime_containment.patch", "src/NETGENPlugin"),
 )
 
 # netgen slice: the directories of extern/netgen that prepare.py copies to
@@ -177,6 +186,12 @@ def _stage_sources() -> None:
     logger.info("staging netgen slice (extern/netgen)")
     for name in NETGEN_SLICE:
         _copytree(EXTERN / "netgen" / name, STAGED / "src/Netgen" / name)
+
+    logger.info("staging NETGENPlugin sources (extern/netgenplugin)")
+    _copytree(
+        EXTERN / "netgenplugin/src/NETGENPlugin",
+        STAGED / "src/NETGENPlugin/src/NETGENPlugin",
+    )
 
 
 def _apply(patch_rel: str, root_rel: str) -> None:

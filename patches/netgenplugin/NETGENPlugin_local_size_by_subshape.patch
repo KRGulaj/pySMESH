@@ -1,0 +1,59 @@
+pySMESH: NETGENPlugin resolves a local size by sub-shape through the mesh, not through the
+SALOME study (NETGENPlugin V9_16_0; applies after NETGENPlugin_occt8.patch).
+
+Why: NETGENPlugin_Mesher::SetParameters looked each local-size entry up in the SALOME
+study through CORBA (SMESH_Gen_i, SALOMEDS::SObject, GEOM::GEOM_Object), which pySMESH
+does not have. looooo/SMESH `patch/NETGENPlugin_Mesher.patch` (commit 479b7ad70) is the
+template for removing the CORBA part; it comments the whole local-size block out, which
+drops the feature.
+
+Change, in NETGENPlugin_Mesher.cxx only:
+* SMESH_Gen_i.hxx (the CORBA servant) becomes SMESH_Gen.hxx.
+* Each entry of NETGENPlugin_Hypothesis::GetLocalSizesAndEntries() is resolved with
+  SMESH_Mesh::GetShapeByEntry, which asks the mesh's call-up. pySMESH's call-up resolves
+  "KIND:ordinal" (SOLID, FACE, EDGE, VERTEX and a 1-based ordinal of the meshed shape),
+  as for BlockRenumber. An entry that names no sub-shape raises SALOME_Exception: the
+  binding builds every entry from a checked ordinal, so this is a guard. The sizes then
+  go through the unchanged setLocalSize(), so a local size on a vertex, an edge, a face or
+  a solid acts as in SALOME.
+
+diff --git a/src/NETGENPlugin/NETGENPlugin_Mesher.cxx b/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
+--- a/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
++++ b/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
+@@ -41,7 +41,7 @@
+ #include <SMESH_ComputeError.hxx>
+ #include <SMESH_ControlPnt.hxx>
+ #include <SMESH_File.hxx>
+-#include <SMESH_Gen_i.hxx>
++#include <SMESH_Gen.hxx>
+ #include <SMESH_Mesh.hxx>
+ #include <SMESH_MesherHelper.hxx>
+ #include <SMESH_subMesh.hxx>
+@@ -678,21 +678,17 @@
+     const NETGENPlugin_Hypothesis::TLocalSize& localSizes = hyp->GetLocalSizesAndEntries();
+     if ( !localSizes.empty() )
+     {
+-      SMESH_Gen_i* smeshGen_i = SMESH_Gen_i::GetSMESHGen();
++      // pySMESH: an entry names a sub-shape of the meshed shape as "KIND:ordinal", and
++      // the mesh's call-up resolves it. SALOME looked a study entry up through CORBA.
+       NETGENPlugin_Hypothesis::TLocalSize::const_iterator it = localSizes.begin();
+       for ( ; it != localSizes.end() ; it++)
+       {
+         std::string entry = (*it).first;
+         double        val = (*it).second;
+-        // --
+-        GEOM::GEOM_Object_var aGeomObj;
+-        SALOMEDS::SObject_var aSObj = SMESH_Gen_i::GetSMESHGen()->getStudyServant()->FindObjectID( entry.c_str() );
+-        if ( !aSObj->_is_nil() ) {
+-          CORBA::Object_var obj = aSObj->GetObject();
+-          aGeomObj = GEOM::GEOM_Object::_narrow(obj);
+-          aSObj->UnRegister();
+-        }
+-        TopoDS_Shape S = smeshGen_i->GeomObjectToShape( aGeomObj.in() );
++        TopoDS_Shape S = _mesh->GetShapeByEntry( entry );
++        if ( S.IsNull() )
++          throw SALOME_Exception(( "NETGEN local size: '" + entry +
++                                   "' names no sub-shape of the meshed shape" ).c_str() );
+         setLocalSize(S, val);
+       }
+     }
