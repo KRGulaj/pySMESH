@@ -1,0 +1,90 @@
+pySMESH: a chordal error limits the size on cylinder and torus faces again under OCCT 8
+(NETGENPlugin V9_16_0; applies after NETGENPlugin_face_maxh_index.patch).
+
+Defect: SetLocalSizeForChordalError reads a face's curvature with
+Max( Abs( surfProp.MaxCurvature()), Abs( surfProp.MinCurvature() )) right after
+surfProp.SetParameters(u, v), at three places. In OCCT 7, MaxCurvature() computed the
+curvature first (LProp_SLProps.gxx: IsCurvatureDefined(), then return myMaxCurv). In
+OCCT 8.0.1, BRepLProp_SLProps is GeomLProp_SLPropsBase<BRepAdaptor_Surface>, and
+MaxCurvature() is RequireCurvature(*this, myMaxCurv): the cached value is copied into the
+by-value argument before RequireCurvature calls IsCurvatureDefined()
+(GeomLProp_SurfaceUtils.hxx:701, unchanged on OCCT master). So the first of the two reads
+returns the curvature cached for the previous parameters, 0 on a fresh object, and only the
+second is current. MSVC reads MinCurvature() first. For a cylinder, sphere or torus face
+the plugin reads once, on a fresh object, and gets max(0, |MaxCurvature|): 0 for a
+cylinder (curvatures 0 and -1/R), so an infinite size and no effect at all; the smaller
+curvature for a torus, so a size too large; the right value for a sphere only because its
+two curvatures are equal. Measured: a chordal error of 0.002 on a cylinder of radius 1 at
+max_size 0.4 left the lateral face's mesh unchanged, mean triangle edge 0.411, largest
+centroid deviation 0.031 (tests/test_mesher_netgen_face_size.py). On other curved faces
+one of the two curvatures of each sample came from the sample before.
+
+Change, in NETGENPlugin_Mesher.cxx only: one helper, maxCurvatureMagnitude(), calls
+IsCurvatureDefined() before it reads the two curvatures, and throws LProp_NotDefined where
+the curvature is not defined, as OCCT 7's MaxCurvature() did. The three reads call it. A
+mesh with no chordal error does not change.
+
+diff --git a/src/NETGENPlugin/NETGENPlugin_Mesher.cxx b/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
+--- a/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
++++ b/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
+@@ -52,6 +52,7 @@
+ #include <BRepAdaptor_Surface.hxx>
+ #include <BRepBuilderAPI_Copy.hxx>
+ #include <BRepLProp_SLProps.hxx>
++#include <LProp_NotDefined.hxx>
+ #include <BRepMesh_IncrementalMesh.hxx>
+ #include <BRep_Builder.hxx>
+ #include <BRep_Tool.hxx>
+@@ -498,6 +499,25 @@
+     if ( 2 * radius < chordalError )
+       return 1.5 * radius;
+     return Sqrt( 3 ) * Sqrt( chordalError * ( 2 * radius - chordalError ));
++  }
++
++  //================================================================================
++  /*!
++   * \brief Return the larger principal curvature magnitude at the parameters last set
++   *
++   * pySMESH: OCCT 8 returns the cached curvature of the previous parameters from
++   * MaxCurvature() and MinCurvature() unless IsCurvatureDefined() runs first:
++   * GeomLProp_SurfaceUtils::RequireCurvature() takes the cached value by value, before it
++   * computes the new one. OCCT 7 computed it inside MaxCurvature(). Throws
++   * LProp_NotDefined where the curvature is not defined, as OCCT 7's MaxCurvature() did.
++   */
++  //================================================================================
++
++  double maxCurvatureMagnitude( BRepLProp_SLProps& surfProp )
++  {
++    if ( !surfProp.IsCurvatureDefined() )
++      throw LProp_NotDefined();
++    return Max( Abs( surfProp.MaxCurvature()), Abs( surfProp.MinCurvature() ));
+   }
+ 
+   //=============================================================================
+@@ -884,7 +904,7 @@
+     {
+       surfProp.SetSurface( surfAd );
+       surfProp.SetParameters( 0, 0 );
+-      double maxCurv = Max( Abs( surfProp.MaxCurvature()), Abs( surfProp.MinCurvature() ));
++      double maxCurv = maxCurvatureMagnitude( surfProp );
+       double    size = elemSizeForChordalError( _chordalError, 1 / maxCurv );
+ #ifdef NETGEN_V6
+       // pySMESH: 1-based, as above.
+@@ -981,7 +1001,7 @@
+           else 
+           {
+             surfProp.SetParameters(uv[n].X(), uv[n].Y());
+-            maxCurv = Max(Abs(surfProp.MaxCurvature()), Abs(surfProp.MinCurvature()));
++            maxCurv = maxCurvatureMagnitude( surfProp );
+             prevMaxCurv = maxCurv;
+           }
+           size[n] = elemSizeForChordalError(_chordalError, 1 / maxCurv);
+@@ -1010,7 +1030,7 @@
+               gp_XY uvj = uv[n1] + r * uvVec;
+ 
+               surfProp.SetParameters( uvj.X(), uvj.Y() );
+-              double maxCurv = Max( Abs( surfProp.MaxCurvature()), Abs( surfProp.MinCurvature() ));
++              double maxCurv = maxCurvatureMagnitude( surfProp );
+               double       h = elemSizeForChordalError( _chordalError, 1 / maxCurv );
+ 
+               const gp_Pnt& pj = surfProp.Value();
