@@ -47,7 +47,7 @@ def test_build_info_has_expected_fields() -> None:
     assert isinstance(_build_info.VTK_VERSION, str)
     assert isinstance(_build_info.OCCT_VERSION, str)
     assert isinstance(_build_info.BOOST_VERSION, str)
-    assert _build_info.WITH_NETGEN is False
+    assert _build_info.WITH_NETGEN is True
 
 
 def test_build_info_records_a_real_vtk_version() -> None:

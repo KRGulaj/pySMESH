@@ -195,8 +195,16 @@ pybind11_add_module(_core
     src/bindings/mesher_block.cpp
     src/bindings/mesher_gmf.cpp
     src/bindings/mesher_viscous.cpp
+    src/bindings/mesher_netgen.cpp
     src/bindings/mesher_bind.cpp)
 target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
+# mesher_netgen.cpp includes the NETGENPlugin headers, and through them netgen's own, so it
+# compiles with netgen's define set (cmake/Netgen/CMakeLists.txt). No other binding file
+# includes a netgen header.
+set_source_files_properties(src/bindings/mesher_netgen.cpp PROPERTIES
+    COMPILE_DEFINITIONS "${PYSMESH_NETGEN_DEFINITIONS}"
+    COMPILE_OPTIONS "${PYSMESH_NETGEN_OPTIONS}"
+    INCLUDE_DIRECTORIES "${PYSMESH_NETGEN_INCLUDE_DIRS};${NETGENPLUGIN_SRC_DIR}")
 # TKShHealing (ShapeUpgrade_UnifySameDomain), TKOffset (BRepOffsetAPI_*), and TKTopAlgo
 # (BRepClass3d_SolidClassifier) are pulled in transitively via the SMESH static libs, but the
 # bindings call them directly, so link them explicitly rather than lean on a transitive edge.
@@ -285,9 +293,8 @@ string(REGEX REPLACE "^version = \"([^\"]+)\".*" "\\1" PYSMESH_VERSION
 if(NOT PYSMESH_VERSION)
     message(FATAL_ERROR "pysmesh: pyproject.toml has no 'version = \"...\"' line")
 endif()
-if(NOT DEFINED PYSMESH_WITH_NETGEN)
-    set(PYSMESH_WITH_NETGEN "False")
-endif()
+# NETGEN (netgen 6.2.2101 and NETGENPlugin V9_16_0) is part of every build.
+set(PYSMESH_WITH_NETGEN "True")
 
 # Local-dev / in-tree layout: the pybind extension and the generated _build_info.py must
 # sit INSIDE the pysmesh package dir for the package's relative imports (`from ._core

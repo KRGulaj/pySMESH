@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <list>
 #include <map>
 #include <set>
 #include <utility>
@@ -251,6 +252,8 @@ std::pair<std::string, int> Params::subshape(const char* key) {
 }
 
 py::dict Params::nested(const char* key) { return take(key).cast<py::dict>(); }
+
+py::list Params::list(const char* key) { return take(key).cast<py::list>(); }
 
 void Params::done() const {
   std::vector<std::string> extra;
@@ -625,6 +628,15 @@ void Mesher::refuse_unread_layers() const {
   }
 }
 
+bool Mesher::uses_netgen() const {
+  for (const Assignment& a : assigned_) {
+    if (is_netgen_algorithm(a.name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 std::pair<const char*, int> Mesher::ordinal_of_shape_index(int shape_index) const {
   if (shape_index <= 0 ||
       static_cast<std::size_t>(shape_index) >= index_to_ordinal_.size()) {
@@ -663,7 +675,74 @@ void Mesher::assign(const std::string& name, const py::dict& params, const std::
                            "was not assigned.",
                        why);
   }
+  // A NETGEN algorithm judges the hypotheses it reads together in its own CheckHypothesis:
+  // NETGEN_2D_ONLY reads at most one of MaxElementArea, LengthFromEdges and
+  // NETGEN_Parameters_2D on a face, and QuadranglePreference not beside the parameters
+  // (HYP_CONCURRENT, HYP_INCOMPAT_HYPS). For a hypothesis assigned on the face SMESH
+  // returns that status. For one assigned on an ancestor of the face it does not: the face
+  // only turns MISSING_HYP and AddHypothesis returns HYP_OK (SMESH_subMesh.cxx,
+  // AlgoStateEngine, ADD_FATHER_HYP), and the conflict surfaces at compute. So the NETGEN
+  // algorithms that now read `hyp` are asked here, and a conflict undoes the assignment.
+  int conflict_status = SMESH_Hypothesis::HYP_OK;
+  const std::string conflict = netgen_conflict(target, hyp, conflict_status);
+  if (!conflict.empty()) {
+    mesh_->RemoveHypothesis(target, hyp_id);
+    const auto st = static_cast<SMESH_Hypothesis::Hypothesis_Status>(conflict_status);
+    throw PysmeshError("Mesher.assign: '" + name + "' on " + where(kind, ordinal) +
+                           " gives a NETGEN algorithm hypotheses it cannot combine (SMESH "
+                           "status " + std::string(st == SMESH_Hypothesis::HYP_CONCURRENT
+                                                       ? "HYP_CONCURRENT"
+                                                       : "HYP_INCOMPAT_HYPS") +
+                           ": " + status_text(st) + "); it was not assigned.",
+                       conflict);
+  }
   assigned_.push_back({name, kind, ordinal, hyp_id});
+}
+
+std::string Mesher::netgen_conflict(const TopoDS_Shape& target, SMESH_Hypothesis* hyp,
+                                    int& status) const {
+  SMESH_subMesh* top = mesh_->GetSubMesh(target);
+  for (SMESH_subMeshIteratorPtr it = top->getDependsOnIterator(/*includeSelf=*/true,
+                                                               /*complexFirst=*/false);
+       it->more();) {
+    SMESH_subMesh* sm = it->next();
+    SMESH_Algo* algo = sm->GetAlgo();
+    if (algo == nullptr || algo->GetName() == nullptr ||
+        !is_netgen_algorithm(algo->GetName())) {
+      continue;
+    }
+    const TopoDS_Shape& shape = sm->GetSubShape();
+    const std::list<const SMESHDS_Hypothesis*>& used =
+        algo->GetUsedHypothesis(*mesh_, shape, /*ignoreAuxiliary=*/false);
+    if (std::find(used.begin(), used.end(), hyp) == used.end()) {
+      continue;
+    }
+    SMESH_Hypothesis::Hypothesis_Status st = SMESH_Hypothesis::HYP_OK;
+    algo->CheckHypothesis(*mesh_, shape, st);
+    if (st != SMESH_Hypothesis::HYP_CONCURRENT && st != SMESH_Hypothesis::HYP_INCOMPAT_HYPS) {
+      continue;
+    }
+    status = st;
+    std::string names;
+    for (const SMESHDS_Hypothesis* h : algo->GetUsedHypothesis(*mesh_, shape, false)) {
+      names += (names.empty() ? "" : ", ") + std::string(h->GetName());
+    }
+    const std::pair<const char*, int> at = ordinal_of_shape_index(meshDS_->ShapeToIndex(shape));
+    std::string text = std::string(algo->GetName()) + " on " +
+                       (at.first[0] != 0 ? at.first : "sub-shape") + " " +
+                       std::to_string(at.second) + " would read " + names + ".";
+    const SMESH_ComputeErrorPtr reason = algo->GetComputeError();
+    if (reason && !reason->myComment.empty()) {
+      text += " " + reason->myComment + ".";
+    }
+    if (std::string(algo->GetName()) == "NETGEN_2D_ONLY") {
+      text += " NETGEN_2D_ONLY reads at most one of MaxElementArea, LengthFromEdges and "
+              "NETGEN_Parameters_2D on a face, and QuadranglePreference not beside "
+              "NETGEN_Parameters_2D (NETGENPlugin_NETGEN_2D_ONLY.cxx, CheckHypothesis).";
+    }
+    return text;
+  }
+  return std::string();
 }
 
 void Mesher::unassign(const std::string& name, const std::string& kind, int ordinal) {
@@ -720,6 +799,15 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
     hooks.should_cancel = cancel;
   }
 
+  // netgen keeps its state in globals, so a compute that runs a NETGEN algorithm holds the
+  // process-wide NETGEN lock for its whole run. The lock is taken before the progress
+  // driver starts: a cancel then reaches netgen's global cancel flag only while this
+  // compute owns netgen. Declared first, it is released last.
+  std::unique_lock<std::mutex> netgen_lock;
+  if (uses_netgen()) {
+    py::gil_scoped_release release;
+    netgen_lock = std::unique_lock<std::mutex>(netgen_mutex());
+  }
   ComputeDriver driver(*mesh_, *gen_, data_->shape, hooks);
   bool ok = false;
   if (!driver.cancelled()) {
