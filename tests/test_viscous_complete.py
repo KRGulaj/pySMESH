@@ -1426,3 +1426,52 @@ def test_unsmoothed_layers_on_two_adjacent_walls_stop_short_with_a_warning(
     depth = np.minimum(layer_xyz[:, 0], layer_xyz[:, 1])
     assert float(depth.max()) <= total + TOL
     assert groups == {"bl": 2 * 4 * 4 * count}
+
+
+# ---- VL8 the "thickness not reached" warning ---------------------------------------- #
+
+
+def _slab(gap: float) -> ps.Shape:
+    """A 1 x 1 x ``gap`` box at the origin: two walls ``gap`` apart."""
+    session = Session()
+    session.add_box(1.0, 1.0, gap)
+    return ps.load_brep(session.brep())
+
+
+@pytest.mark.parametrize("total", [0.12, 0.3])
+@pytest.mark.parametrize("algorithm", ["Hexa3D", "PolyhedronPerSolid3D"])
+def test_layers_in_a_narrow_gap_stop_at_half_of_it_with_a_warning(
+    algorithm: str, total: float
+) -> None:
+    """Layers of T on both walls of a slab 0.2 thick, T above half of it.
+
+    SMESH limits the stacks locally so that they do not collide
+    (``StdMeshers_ViscousLayers.cxx:5005-5015``), and states it as a warning on the solid,
+    with the average thickness reached. The warning reaches ``ComputeReport.warnings``;
+    the thickness it states, and the depth of every layer node from its wall, are at most
+    half the gap; the cells fill the slab exactly.
+    """
+    gap = 0.2
+    shape = _slab(gap)
+    walls = tuple(int(f.id) for f in shape.faces() if abs(f.bbox[2] - f.bbox[5]) < TOL)
+
+    with Mesher(shape) as mesher:
+        _assign_3d(mesher, algorithm)
+        mesher.assign(_layer_set(total, 3, 1.2, walls, "bl"))
+        report = mesher.compute()
+        mesh = mesher.mesh()
+        layer_ids = {int(i) for g in mesher.groups() for i in g.element_ids}
+        volume = float(mesher.quality(Volume()).values.sum())
+        inverted = mesher.select(BadOrientedVolume()).count
+
+    (warning,) = report.warnings
+    assert (warning.kind, warning.ordinal) == (ps.SubShapeKind.SOLID, 1)
+    head = f"Thickness {total:g} of viscous layers not reached, "
+    assert warning.text.startswith(head + "average reached thickness is ")
+    assert 0.0 < float(warning.text.rsplit(" ", 1)[1]) <= gap / 2
+    rows = [r for r in range(mesh.element_count) if int(mesh.element_id[r]) in layer_ids]
+    z = mesh.node_coords[np.unique(np.concatenate([mesh.nodes_of(r) for r in rows])), 2]
+    assert len(rows) == 2 * 4 * 4 * 3
+    assert float(np.minimum(z, gap - z).max()) <= gap / 2 + TOL
+    assert volume == pytest.approx(gap, rel=1e-12)
+    assert inverted == 0

@@ -430,6 +430,10 @@ mesh.release()
 - `PolygonPerFace2D` builds no layers: after the layer step it finds too few nodes on the
   face wire.
 - `ViscousLayers2D` takes no extrusion method; only the 3-D hypothesis has one.
+- Between two walls with layers that are closer than `2 T`, SMESH stops each stack before
+  the stacks meet, at half the gap or less. The compute succeeds with a warning on the solid
+  in `ComputeReport.warnings`: "Thickness T of viscous layers not reached, average reached
+  thickness is ...". The closed form then holds only where the stack reached `T`.
 - `ExtrusionMethod.FACE_OFFSET` and `NODE_OFFSET` do not smooth the layers. Where two walls
   with layers meet at an edge, the two stacks collide there, and SMESH stops the inflation
   short of `T`. The compute succeeds with a warning in `ComputeReport.warnings` that states
