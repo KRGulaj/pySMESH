@@ -1,0 +1,87 @@
+pySMESH: PolygonPerFace_2D builds the ViscousLayers2D it is given (SMESH V9_16_0).
+
+Defect: PolygonPerFace_2D with a ViscousLayers2D hypothesis builds the layer quadrangles and
+then fails the FACE with "Less that 3 nodes on the wire", the layer cells left in the mesh. A
+ViscousLayers2D hypothesis assigned on the FACE itself is refused as incompatible.
+
+Symptom: the unit square, Regular_1D with 4 segments, PolygonPerFace_2D, ViscousLayers2D (0.3
+thick, 3 layers) on one edge: "Less that 3 nodes on the wire". The same through the
+PolygonPerFace_2D inside PolyhedronPerSolid_3D, with the layers on a face of a box.
+
+Root cause: Compute builds the layers (StdMeshers_ViscousLayers2D::Compute, :85) and takes the
+wire through the proxy mesh, whose EDGEs with layers, and EDGEs that the layers shrank, are
+proxy sub-meshes. It reads the wire with StdMeshers_FaceSide::GetOrderedNodes() (:97). For a
+proxy sub-mesh, GetOrderedNodes() keys each point by the previous EDGEs' share of the wire plus
+the point's normalized parameter on its own EDGE, neither scaled to the EDGE's share nor
+oriented (StdMeshers_FaceSide.cxx:708-714), unlike GetUVPtStruct(), which does both (:540-559)
+and counts the proxy points (:415-424). The keys collide, the count check then clears the list
+(:786-791), and Compute finds no node. The hypothesis is also missing from the compatible list,
+and CheckHypothesis accepts everything without the layer check. The algorithm is from SMESH
+fe7d1d576 (2015-06-30, "23070: [CEA 1502] Create the 2D mesh from the 1D mesh with one mesh
+face for each geom face"); upstream master at 83f8bf482 (2026-09-14) has the same code.
+GetOrderedNodes() is not changed here: six other algorithms call it.
+
+Change, in StdMeshers_PolygonPerFace_2D.cxx only:
+* the constructor lists ViscousLayers2D as compatible, as Quadrangle_2D does (:101);
+* CheckHypothesis runs StdMeshers_ViscousLayers2D::CheckHypothesis, as Quadrangle_2D does
+  (:200);
+* Compute reads a wire that holds a proxy sub-mesh with GetUVPtStruct().
+
+Not changed: a FACE with no ViscousLayers2D: its wire has no proxy sub-mesh and is read with
+GetOrderedNodes() as before, and CheckHypothesis finds no layer hypothesis, so its mesh is the
+same, bit for bit.
+
+diff --git a/src/StdMeshers/StdMeshers_PolygonPerFace_2D.cxx b/src/StdMeshers/StdMeshers_PolygonPerFace_2D.cxx
+--- a/src/StdMeshers/StdMeshers_PolygonPerFace_2D.cxx
++++ b/src/StdMeshers/StdMeshers_PolygonPerFace_2D.cxx
+@@ -53,6 +53,7 @@
+   :SMESH_2D_Algo(hypId, gen)
+ {
+   _name = "PolygonPerFace_2D";
++  _compatibleHypothesis.push_back("ViscousLayers2D"); // pySMESH: Compute builds them
+ }
+ 
+ //=======================================================================
+@@ -60,12 +61,14 @@
+ //purpose  : 
+ //=======================================================================
+ 
+-bool StdMeshers_PolygonPerFace_2D::CheckHypothesis(SMESH_Mesh&                          /*theMesh*/,
+-                                                   const TopoDS_Shape&                  /*theShape*/,
++bool StdMeshers_PolygonPerFace_2D::CheckHypothesis(SMESH_Mesh&                          theMesh,
++                                                   const TopoDS_Shape&                  theShape,
+                                                    SMESH_Hypothesis::Hypothesis_Status& theStatus)
+ {
+   theStatus = HYP_OK;
+-  return true;
++  // pySMESH: check the ViscousLayers2D hypotheses, as Quadrangle_2D does
++  error( StdMeshers_ViscousLayers2D::CheckHypothesis( theMesh, theShape, theStatus ));
++  return theStatus == HYP_OK;
+ }
+ 
+ //=======================================================================
+@@ -94,7 +97,23 @@
+   if ( wires.size() != 1 )
+     return error( COMPERR_BAD_SHAPE, SMESH_Comment("One wire required, not ") << wires.size() );
+ 
+-  vector<const SMDS_MeshNode*> nodes = wires[0]->GetOrderedNodes();
++  // pySMESH: with viscous layers, the EDGEs that carry them, or that they shrank, come as
++  // proxy sub-meshes. GetOrderedNodes() takes their points with a normalized parameter that
++  // is neither scaled to the EDGE's share of the wire nor oriented, so its sorted list lost
++  // nodes and was then cleared ("Less that 3 nodes on the wire"). GetUVPtStruct() scales
++  // and orients them, as Quadrangle_2D reads such a wire. A wire with no proxy sub-mesh is
++  // read as before.
++  vector<const SMDS_MeshNode*> nodes;
++  if ( proxyMesh->NbProxySubMeshes() > 0 )
++  {
++    const UVPtStructVec& points = wires[0]->GetUVPtStruct();
++    for ( size_t i = 0; i < points.size(); ++i )
++      nodes.push_back( points[i].node );
++  }
++  else
++  {
++    nodes = wires[0]->GetOrderedNodes();
++  }
+   int nbNodes = int( nodes.size() ) - 1; // 1st node is repeated at end
+ 
+   switch ( nbNodes ) {

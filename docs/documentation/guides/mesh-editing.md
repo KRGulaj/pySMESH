@@ -337,14 +337,18 @@ Only some algorithms build the layers in their compute:
 | Hypothesis | Algorithms that build it |
 |---|---|
 | `ViscousLayers` | `Hexa3D`, `PolyhedronPerSolid3D`, `Cartesian3D` |
-| `ViscousLayers2D` | `Quadrangle2D`, `QuadFromMedialAxis1D2D`, `Mefisto2D` |
+| `ViscousLayers2D` | `Quadrangle2D`, `QuadFromMedialAxis1D2D`, `Mefisto2D`, `PolygonPerFace2D` |
 
 If a layer hypothesis reaches a solid (a face) that another algorithm meshes, `compute()`
 raises before it meshes anything, and names the sub-shape and the algorithm. Without that
-check the layers were dropped with no word (`Prism3D`, `RadialQuadrangle1D2D`), or the compute
-failed after building some of them (`PolygonPerFace2D`), or the process crashed
-(`CompositeHexa3D`). Assign the layers only to the sub-shapes that a building algorithm
-meshes.
+check the layers were dropped with no word (`Prism3D`, `RadialQuadrangle1D2D`), or the process
+crashed (`CompositeHexa3D`). Assign the layers only to the sub-shapes that a building
+algorithm meshes.
+
+`PolygonPerFace2D` grows the layer quadrangles first, and then fills the rest of the face
+with one polygon whose sides are the inner sides of the layer cells. Up to 5.0.0 it was
+refused: after the layer step it read the face wire wrong and failed with "Less that 3
+nodes on the wire".
 
 A face counts as meshed by another algorithm when an algorithm of its solid meshes it
 itself. `Cartesian3D` and `PolyhedronPerSolid3D` mesh every face of their solid, whatever 2-D
@@ -437,8 +441,6 @@ mesh.release()
 - `CompositeHexa3D` builds no layers. With the hypothesis made readable, the layer cells on
   its side faces give their grids more rows than the opposite faces have, and its block grid
   breaks. Use `Hexa3D` for a block with layers.
-- `PolygonPerFace2D` builds no layers: after the layer step it finds too few nodes on the
-  face wire.
 - `ViscousLayers2D` takes no extrusion method; only the 3-D hypothesis has one.
 - Between two walls with layers that are closer than `2 T`, SMESH stops each stack before
   the stacks meet, at half the gap or less. The compute succeeds with a warning on the solid

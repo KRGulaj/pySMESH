@@ -579,11 +579,12 @@ std::string Mesher::describe_concurrency(const TopoDS_Shape& target,
 
 void Mesher::refuse_unread_layers() const {
   // Only some algorithms build layers in their Compute: Hexa_3D, PolyhedronPerSolid_3D and
-  // Cartesian_3D read ViscousLayers; Quadrangle_2D, QuadFromMedialAxis_1D2D and MEFISTO_2D
-  // read ViscousLayers2D. The compatible lists do not tell: RadialQuadrangle_1D2D inherits
+  // Cartesian_3D read ViscousLayers; Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D and
+  // PolygonPerFace_2D (StdMeshers_PolygonPerFace_2D_viscous_layers.patch) read
+  // ViscousLayers2D. The compatible lists do not tell: RadialQuadrangle_1D2D inherits
   // ViscousLayers2D from Quadrangle_2D and builds no layer. Any other algorithm meshes the
-  // sub-shape with no layer and no word (Prism_3D, RadialQuadrangle_1D2D), fails after
-  // building half of them (PolygonPerFace_2D), or crashed (CompositeHexa_3D).
+  // sub-shape with no layer and no word (Prism_3D, RadialQuadrangle_1D2D), or crashed
+  // (CompositeHexa_3D).
   //
   // A building algorithm can still refuse the layer hypotheses that reach it: Hexa_3D
   // takes one ViscousLayers per solid (StdMeshers_Hexa_3D.cxx:136-147) and Cartesian_3D
@@ -607,8 +608,8 @@ void Mesher::refuse_unread_layers() const {
        "Hexa_3D, PolyhedronPerSolid_3D and Cartesian_3D",
        {"Hexa_3D", "Cartesian_3D"}},
       {TopAbs_FACE, "FACE", "ViscousLayers2D",
-       {"Quadrangle_2D", "QuadFromMedialAxis_1D2D", "MEFISTO_2D"},
-       "Quadrangle_2D, QuadFromMedialAxis_1D2D and MEFISTO_2D",
+       {"Quadrangle_2D", "QuadFromMedialAxis_1D2D", "MEFISTO_2D", "PolygonPerFace_2D"},
+       "Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D and PolygonPerFace_2D",
        {}},
   };
   for (const LayerKind& kind : kinds) {
@@ -711,8 +712,8 @@ void Mesher::refuse_face_layers_meshed_from_above(const TopoDS_Shape& face,
           "Mesher.compute: ViscousLayers2D reaches " + place +
               ", which has no 2-D algorithm of its own: " + name + " of " + solid +
               " meshes it and builds no 2-D layers.",
-          "Only Quadrangle_2D, QuadFromMedialAxis_1D2D and MEFISTO_2D build "
-          "ViscousLayers2D. With " + name + ", assign one of them on that face alone, "
+          "Only Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D and PolygonPerFace_2D "
+          "build ViscousLayers2D. With " + name + ", assign one of them on that face alone, "
           "with the layers there: the sweep starts from it and carries its layers "
           "through the solid.");
     }

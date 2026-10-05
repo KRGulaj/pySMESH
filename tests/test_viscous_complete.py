@@ -1025,23 +1025,16 @@ def _disk() -> ps.Shape:
     return ps.load_brep(session.brep())
 
 
-@pytest.mark.parametrize(
-    "algorithm", ["Prism3D", "PolygonPerFace2D", "RadialQuadrangle1D2D"]
-)
+@pytest.mark.parametrize("algorithm", ["Prism3D", "RadialQuadrangle1D2D"])
 def test_an_algorithm_that_builds_no_layers_refuses_them_before_computing(
     algorithm: str,
 ) -> None:
     """The layers were dropped with no word (Prism3D, RadialQuadrangle1D2D: no group, no
-    layer planes), or PolygonPerFace2D built them and then failed ("Less that 3 nodes on
-    the wire") with the layer cells left in the mesh. Now the compute refuses, names the
-    algorithm, and meshes nothing.
+    layer planes). Now the compute refuses, names the algorithm, and meshes nothing.
+    PolygonPerFace2D left this list when it began to build the layers (VLb).
     """
     total, count = STACK
-    shape = {
-        "Prism3D": _unit_box,
-        "PolygonPerFace2D": _unit_square,
-        "RadialQuadrangle1D2D": _disk,
-    }[algorithm]()
+    shape = {"Prism3D": _unit_box, "RadialQuadrangle1D2D": _disk}[algorithm]()
     with Mesher(shape) as mesher:
         if algorithm == "Prism3D":
             _assign_3d(mesher, algorithm)
@@ -1055,11 +1048,7 @@ def test_an_algorithm_that_builds_no_layers_refuses_them_before_computing(
         else:
             mesher.assign(Regular1D())
             mesher.assign(NumberOfSegments(count=8))
-            mesher.assign(
-                PolygonPerFace2D()
-                if algorithm == "PolygonPerFace2D"
-                else RadialQuadrangle1D2D()
-            )
+            mesher.assign(RadialQuadrangle1D2D())
             layers = ViscousLayers2D(
                 total_thickness=total,
                 layer_count=count,
@@ -1075,11 +1064,9 @@ def test_an_algorithm_that_builds_no_layers_refuses_them_before_computing(
             mesher.compute()
 
         assert mesher.mesh().element_count == 0
-    native = {
-        "Prism3D": "Prism_3D",
-        "PolygonPerFace2D": "PolygonPerFace_2D",
-        "RadialQuadrangle1D2D": "RadialQuadrangle_1D2D",
-    }[algorithm]
+    native = {"Prism3D": "Prism_3D", "RadialQuadrangle1D2D": "RadialQuadrangle_1D2D"}[
+        algorithm
+    ]
     assert native in str(raised.value)
 
 
@@ -1792,3 +1779,139 @@ def test_layer_cells_that_fold_over_are_refused() -> None:
     assert folded["left"] == 0
     assert near.get("error") is None, near
     assert (near["inverted"], near["bare"]) == (0, 0)
+
+
+# ---- VLb PolygonPerFace2D with ViscousLayers2D ------------------------------------- #
+
+
+def _hexagon_face() -> ps.Shape:
+    """A regular hexagon face, circumradius 1, in z = 0, a corner on the x axis."""
+    corners = np.array(
+        [[math.cos(k * math.pi / 3), math.sin(k * math.pi / 3), 0.0] for k in range(6)],
+        dtype=np.float64,
+    )
+    session = Session()
+    session.add_polyline(corners, closed=True)
+    session.make_face(list(session.entities(ps.EntityKind.EDGE)))
+    return ps.load_brep(session.brep())
+
+
+def _loose_edges(mesh: ps.MeshData, on_boundary: NDArray[np.bool_]) -> tuple[int, int]:
+    """Edges used by one face that are not on the boundary, and edges used by more than
+    two faces: both 0 on a conforming face mesh."""
+    count: dict[tuple[int, int], int] = {}
+    for row in range(mesh.element_count):
+        if int(mesh.element_type[row]) not in _SURFACE:
+            continue
+        ring = mesh.nodes_of(row)
+        for a, b in zip(ring, np.roll(ring, -1), strict=True):
+            key = (int(min(a, b)), int(max(a, b)))
+            count[key] = count.get(key, 0) + 1
+    loose = sum(
+        1
+        for (a, b), n in count.items()
+        if n == 1 and not (on_boundary[a] and on_boundary[b])
+    )
+    return loose, sum(1 for n in count.values() if n > 2)
+
+
+@pytest.mark.parametrize("factor", [1.0, 1.2])
+@pytest.mark.parametrize("walls", ["y0", "y0_and_x0"])
+def test_polygon_per_face_grows_layers_on_a_square(walls: str, factor: float) -> None:
+    """PolygonPerFace2D with ViscousLayers2D on the unit square, 4 segments per edge.
+
+    The layers on y = 0 lie on the lines y = d_k, away from the wall x = 0; with x = 0
+    too, the layers on x = 0 lie on x = d_k, away from y = 0. One cell per segment per
+    layer, and one polygon inside, whose sides are the inner sides of the layer cells:
+    the mesh conforms (every edge used by one face is on the square's boundary). The
+    cells cover the square exactly, and none is inverted.
+    """
+    total, count = STACK
+    square = _unit_square()
+    chosen = [_at_y0(square.edges())]
+    if walls == "y0_and_x0":
+        chosen.append(_at_x0(square.edges()))
+
+    with Mesher(square) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=4))
+        mesher.assign(PolygonPerFace2D())
+        mesher.assign(
+            ViscousLayers2D(
+                total_thickness=total,
+                layer_count=count,
+                stretch_factor=factor,
+                boundary=tuple(chosen),
+                group_name="bl",
+            )
+        )
+        report = mesher.compute()
+        mesh = mesher.mesh()
+        areas = mesher.quality(Area()).values
+        groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
+
+    xyz = mesh.node_coords
+    ends = _layer_ends(total, factor, count)
+    away = xyz[xyz[:, 0] > total + TOL] if len(chosen) == 2 else xyz
+    y = np.unique(np.round(away[:, 1], 12))
+    np.testing.assert_allclose(y[(y > TOL) & (y <= total + TOL)], ends, atol=TOL)
+    if len(chosen) == 2:
+        x = np.unique(np.round(xyz[xyz[:, 1] > total + TOL, 0], 12))
+        np.testing.assert_allclose(x[(x > TOL) & (x <= total + TOL)], ends, atol=TOL)
+    boundary = (np.abs(xyz[:, 0]) < TOL) | (np.abs(xyz[:, 0] - 1.0) < TOL)
+    boundary |= (np.abs(xyz[:, 1]) < TOL) | (np.abs(xyz[:, 1] - 1.0) < TOL)
+    polygons = int(np.sum(mesh.element_type == int(ElementType.POLYGON)))
+    assert groups == {"bl": len(chosen) * 4 * count}
+    assert polygons == 1
+    assert _loose_edges(mesh, boundary) == (0, 0)
+    assert float(areas.sum()) == pytest.approx(1.0, rel=1e-12)
+    assert float(areas.min()) > 0.0
+    assert report.warnings == ()
+
+
+def test_polygon_per_face_grows_layers_on_an_inclined_hexagon_edge() -> None:
+    """PolygonPerFace2D with ViscousLayers2D (0.2, 3, 1.2) on one edge of a regular
+    hexagon (circumradius 1, 4 segments per edge): the edge between the corners at 0 and
+    60 deg, on the line at the apothem cos(30 deg) from the centre, normal 30 deg. The
+    layer nodes near the middle of the wall lie at the depths d_k; the cells cover the
+    hexagon, area 3 sqrt(3) / 2, exactly; none is inverted; the mesh conforms.
+    """
+    hexagon = _hexagon_face()
+    normal = np.array([math.cos(math.pi / 6), math.sin(math.pi / 6), 0.0])
+    apothem = math.cos(math.pi / 6)
+    wall = next(
+        int(e.id)
+        for e in hexagon.edges()
+        if abs(e.bbox[0] - 0.5) < 1e-6 and abs(e.bbox[3] - 1.0) < 1e-6
+    )
+
+    with Mesher(hexagon) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=4))
+        mesher.assign(PolygonPerFace2D())
+        mesher.assign(
+            ViscousLayers2D(
+                total_thickness=0.2,
+                layer_count=3,
+                stretch_factor=1.2,
+                boundary=(wall,),
+                group_name="bl",
+            )
+        )
+        mesher.compute()
+        mesh = mesher.mesh()
+        areas = mesher.quality(Area()).values
+
+    xyz = mesh.node_coords
+    depth = apothem - xyz @ normal
+    along = xyz @ np.array([-normal[1], normal[0], 0.0])
+    near = (np.abs(along) < 0.2) & (depth > TOL) & (depth <= 0.2 + TOL)
+    np.testing.assert_allclose(
+        np.unique(np.round(depth[near], 9)), _layer_ends(0.2, 1.2, 3), atol=1e-9
+    )
+    radius = np.hypot(xyz[:, 0], xyz[:, 1])
+    angle = np.mod(np.arctan2(xyz[:, 1], xyz[:, 0]), math.pi / 3) - math.pi / 6
+    on_rim = np.abs(radius * np.cos(angle) - apothem) < 1e-9
+    assert _loose_edges(mesh, on_rim) == (0, 0)
+    assert float(areas.sum()) == pytest.approx(1.5 * math.sqrt(3.0), rel=1e-12)
+    assert float(areas.min()) > 0.0

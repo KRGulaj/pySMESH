@@ -227,7 +227,12 @@ class Mefisto2D(Algorithm):
 
 @dataclass(frozen=True)
 class PolygonPerFace2D(Algorithm):
-    """One polygonal element per face, using the edge discretisation as its boundary."""
+    """One polygonal element per face, using the edge discretisation as its boundary.
+
+    With :class:`ViscousLayers2D` it grows the quadrangle layers on the chosen edges
+    first, and the polygon fills the rest of the face, its sides the inner sides of the
+    layer cells.
+    """
 
     native_name: ClassVar[str] = "PolygonPerFace_2D"
 
@@ -1014,8 +1019,8 @@ class ViscousLayers2D(Hypothesis):
     """Quadrangle layers grown inward from named edges of a face.
 
     The 2-D counterpart of :class:`ViscousLayers`, and the only 2-D form in the stack.
-    :class:`Quadrangle2D`, :class:`QuadFromMedialAxis1D2D` and :class:`Mefisto2D`
-    build them. On a face that another algorithm meshes,
+    :class:`Quadrangle2D`, :class:`QuadFromMedialAxis1D2D`, :class:`Mefisto2D` and
+    :class:`PolygonPerFace2D` build them. On a face that another algorithm meshes,
     :meth:`~pysmesh.Mesher.compute` raises before it meshes anything. That includes a
     face of a solid that :class:`Cartesian3D` or :class:`PolyhedronPerSolid3D` meshes
     (they mesh every dimension themselves), and a face of a :class:`Prism3D` solid
