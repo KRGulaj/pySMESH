@@ -256,6 +256,8 @@ std::pair<std::string, int> Params::subshape(const char* key) {
 
 py::dict Params::nested(const char* key) { return take(key).cast<py::dict>(); }
 
+py::list Params::list(const char* key) { return take(key).cast<py::list>(); }
+
 void Params::done() const {
   std::vector<std::string> extra;
   for (const auto& item : values_) {
@@ -436,6 +438,19 @@ void Mesher::ensure_open() const {
   }
 }
 
+void Mesher::refuse_without_shape(const char* op, const std::string& name,
+                                  const std::string& kind) const {
+  if (!works_without_shape(name)) {
+    throw PysmeshError(std::string(op) + ": this mesher has no shape, so '" + name +
+                           "' has nothing to run on.",
+                       "A mesher built from arrays takes only the NETGEN remesher "
+                       "(NetgenRemesher2D with NetgenRemesherParameters2D), which meshes "
+                       "the mesh's own triangles again.");
+  }
+  throw PysmeshError(std::string(op) + ": this mesher has no shape, so '" + name +
+                     "' goes on the whole mesh (on=None), not on " + kind + ".");
+}
+
 void Mesher::ensure_shape(const char* op) const {
   if (data_ != nullptr) {
     return;
@@ -579,10 +594,12 @@ std::string Mesher::describe_concurrency(const TopoDS_Shape& target,
 
 void Mesher::refuse_unread_layers() const {
   // Only some algorithms build layers in their Compute: Hexa_3D, CompositeHexa_3D
-  // (StdMeshers_CompositeHexa_3D_viscous_layers.patch), PolyhedronPerSolid_3D and
-  // Cartesian_3D read ViscousLayers; Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D and
-  // PolygonPerFace_2D (StdMeshers_PolygonPerFace_2D_viscous_layers.patch) read
-  // ViscousLayers2D. The compatible lists do not tell: RadialQuadrangle_1D2D inherits
+  // (StdMeshers_CompositeHexa_3D_viscous_layers.patch), PolyhedronPerSolid_3D,
+  // Cartesian_3D, NETGEN_3D and NETGEN_2D3D read ViscousLayers; Quadrangle_2D,
+  // QuadFromMedialAxis_1D2D, MEFISTO_2D, PolygonPerFace_2D
+  // (StdMeshers_PolygonPerFace_2D_viscous_layers.patch), NETGEN_2D and NETGEN_2D_ONLY
+  // read ViscousLayers2D. The NETGEN algorithms take several ViscousLayers per solid
+  // (NETGENPlugin_NETGEN_3D.cxx, CheckHypothesis). The compatible lists do not tell: RadialQuadrangle_1D2D inherits
   // ViscousLayers2D from Quadrangle_2D and builds no layer. Any other algorithm meshes the
   // sub-shape with no layer and no word (Prism_3D, RadialQuadrangle_1D2D).
   //
@@ -605,12 +622,16 @@ void Mesher::refuse_unread_layers() const {
   };
   const LayerKind kinds[] = {
       {TopAbs_SOLID, "SOLID", "ViscousLayers",
-       {"Hexa_3D", "CompositeHexa_3D", "PolyhedronPerSolid_3D", "Cartesian_3D"},
-       "Hexa_3D, CompositeHexa_3D, PolyhedronPerSolid_3D and Cartesian_3D",
+       {"Hexa_3D", "CompositeHexa_3D", "PolyhedronPerSolid_3D", "Cartesian_3D", "NETGEN_3D",
+        "NETGEN_2D3D"},
+       "Hexa_3D, CompositeHexa_3D, PolyhedronPerSolid_3D, Cartesian_3D, NETGEN_3D and "
+       "NETGEN_2D3D",
        {"Hexa_3D", "CompositeHexa_3D", "Cartesian_3D"}},
       {TopAbs_FACE, "FACE", "ViscousLayers2D",
-       {"Quadrangle_2D", "QuadFromMedialAxis_1D2D", "MEFISTO_2D", "PolygonPerFace_2D"},
-       "Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D and PolygonPerFace_2D",
+       {"Quadrangle_2D", "QuadFromMedialAxis_1D2D", "MEFISTO_2D", "PolygonPerFace_2D",
+        "NETGEN_2D", "NETGEN_2D_ONLY"},
+       "Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D, PolygonPerFace_2D, NETGEN_2D "
+       "and NETGEN_2D_ONLY",
        {}},
   };
   for (const LayerKind& kind : kinds) {
@@ -675,6 +696,15 @@ void Mesher::refuse_unread_layers() const {
   }
 }
 
+bool Mesher::uses_netgen() const {
+  for (const Assignment& a : assigned_) {
+    if (is_netgen_algorithm(a.name)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 void Mesher::refuse_face_layers_meshed_from_above(const TopoDS_Shape& face,
                                                   const std::string& place,
                                                   const SMESH_Algo* own) const {
@@ -713,8 +743,9 @@ void Mesher::refuse_face_layers_meshed_from_above(const TopoDS_Shape& face,
           "Mesher.compute: ViscousLayers2D reaches " + place +
               ", which has no 2-D algorithm of its own: " + name + " of " + solid +
               " meshes it and builds no 2-D layers.",
-          "Only Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D and PolygonPerFace_2D "
-          "build ViscousLayers2D. With " + name + ", assign one of them on that face alone, "
+          "Only Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D, PolygonPerFace_2D, "
+          "NETGEN_2D and NETGEN_2D_ONLY build ViscousLayers2D. With " + name +
+          ", assign one of them on that face alone, "
           "with the layers there: the sweep starts from it and carries its layers "
           "through the solid.");
     }
@@ -776,8 +807,23 @@ std::pair<const char*, int> Mesher::ordinal_of_shape_index(int shape_index) cons
 void Mesher::assign(const std::string& name, const py::dict& params, const std::string& kind,
                     int ordinal) {
   ensure_open();
-  ensure_shape("Mesher.assign");
-  const TopoDS_Shape& target = sub_shape(kind, ordinal);  // validates kind and ordinal
+  // A mesher with no shape takes the NETGEN remesher and its parameters, on the whole mesh:
+  // SMESH holds them on its pseudo-shape (SMESH_Mesh::PseudoShape) and computes them on the
+  // mesh alone. Everything else needs a shape.
+  if (data_ == nullptr && !(kind.empty() && works_without_shape(name))) {
+    refuse_without_shape("Mesher.assign", name, kind);
+  }
+  // The remesher and its parameters only work on a mesh alone: on a shape, NETGEN_Remesher_2D
+  // computes nothing and returns false (NETGENPlugin_Remesher_2D.cxx).
+  if (data_ != nullptr && works_without_shape(name)) {
+    throw PysmeshError("Mesher.assign: '" + name + "' remeshes a mesher with no shape; this "
+                       "one has a shape.",
+                       "Build the mesher with shape=None (or Mesher.from_arrays) from the "
+                       "triangles to remesh. On a shape, mesh the faces with Netgen1D2D or "
+                       "Netgen2D.");
+  }
+  const TopoDS_Shape& target =
+      data_ == nullptr ? mesh_->GetShapeToMesh() : sub_shape(kind, ordinal);  // validates
 
   SMESH_Hypothesis* hyp = build(name, params);  // ownership taken inside build()
   const int hyp_id = hyp->GetID();
@@ -803,14 +849,84 @@ void Mesher::assign(const std::string& name, const py::dict& params, const std::
                            "was not assigned.",
                        why);
   }
+  // A NETGEN algorithm judges the hypotheses it reads together in its own CheckHypothesis:
+  // NETGEN_2D_ONLY reads at most one of MaxElementArea, LengthFromEdges and
+  // NETGEN_Parameters_2D on a face, and QuadranglePreference not beside the parameters
+  // (HYP_CONCURRENT, HYP_INCOMPAT_HYPS). For a hypothesis assigned on the face SMESH
+  // returns that status. For one assigned on an ancestor of the face it does not: the face
+  // only turns MISSING_HYP and AddHypothesis returns HYP_OK (SMESH_subMesh.cxx,
+  // AlgoStateEngine, ADD_FATHER_HYP), and the conflict surfaces at compute. So the NETGEN
+  // algorithms that now read `hyp` are asked here, and a conflict undoes the assignment.
+  int conflict_status = SMESH_Hypothesis::HYP_OK;
+  const std::string conflict = netgen_conflict(target, hyp, conflict_status);
+  if (!conflict.empty()) {
+    mesh_->RemoveHypothesis(target, hyp_id);
+    const auto st = static_cast<SMESH_Hypothesis::Hypothesis_Status>(conflict_status);
+    throw PysmeshError("Mesher.assign: '" + name + "' on " + where(kind, ordinal) +
+                           " gives a NETGEN algorithm hypotheses it cannot combine (SMESH "
+                           "status " + std::string(st == SMESH_Hypothesis::HYP_CONCURRENT
+                                                       ? "HYP_CONCURRENT"
+                                                       : "HYP_INCOMPAT_HYPS") +
+                           ": " + status_text(st) + "); it was not assigned.",
+                       conflict);
+  }
   assigned_.push_back({name, kind, ordinal, hyp_id, params});
+}
+
+std::string Mesher::netgen_conflict(const TopoDS_Shape& target, SMESH_Hypothesis* hyp,
+                                    int& status) const {
+  SMESH_subMesh* top = mesh_->GetSubMesh(target);
+  for (SMESH_subMeshIteratorPtr it = top->getDependsOnIterator(/*includeSelf=*/true,
+                                                               /*complexFirst=*/false);
+       it->more();) {
+    SMESH_subMesh* sm = it->next();
+    SMESH_Algo* algo = sm->GetAlgo();
+    if (algo == nullptr || algo->GetName() == nullptr ||
+        !is_netgen_algorithm(algo->GetName())) {
+      continue;
+    }
+    const TopoDS_Shape& shape = sm->GetSubShape();
+    const std::list<const SMESHDS_Hypothesis*>& used =
+        algo->GetUsedHypothesis(*mesh_, shape, /*ignoreAuxiliary=*/false);
+    if (std::find(used.begin(), used.end(), hyp) == used.end()) {
+      continue;
+    }
+    SMESH_Hypothesis::Hypothesis_Status st = SMESH_Hypothesis::HYP_OK;
+    algo->CheckHypothesis(*mesh_, shape, st);
+    if (st != SMESH_Hypothesis::HYP_CONCURRENT && st != SMESH_Hypothesis::HYP_INCOMPAT_HYPS) {
+      continue;
+    }
+    status = st;
+    std::string names;
+    for (const SMESHDS_Hypothesis* h : algo->GetUsedHypothesis(*mesh_, shape, false)) {
+      names += (names.empty() ? "" : ", ") + std::string(h->GetName());
+    }
+    const std::pair<const char*, int> at = ordinal_of_shape_index(meshDS_->ShapeToIndex(shape));
+    std::string text = std::string(algo->GetName()) + " on " +
+                       (at.first[0] != 0 ? at.first : "sub-shape") + " " +
+                       std::to_string(at.second) + " would read " + names + ".";
+    const SMESH_ComputeErrorPtr reason = algo->GetComputeError();
+    if (reason && !reason->myComment.empty()) {
+      text += " " + reason->myComment + ".";
+    }
+    if (std::string(algo->GetName()) == "NETGEN_2D_ONLY") {
+      text += " NETGEN_2D_ONLY reads at most one of MaxElementArea, LengthFromEdges and "
+              "NETGEN_Parameters_2D on a face, and QuadranglePreference not beside "
+              "NETGEN_Parameters_2D (NETGENPlugin_NETGEN_2D_ONLY.cxx, CheckHypothesis).";
+    }
+    return text;
+  }
+  return std::string();
 }
 
 void Mesher::unassign(const std::string& name, const py::dict& params, const std::string& kind,
                       int ordinal) {
   ensure_open();
-  ensure_shape("Mesher.unassign");
-  const TopoDS_Shape& target = sub_shape(kind, ordinal);
+  if (data_ == nullptr && !(kind.empty() && works_without_shape(name))) {
+    refuse_without_shape("Mesher.unassign", name, kind);
+  }
+  const TopoDS_Shape& target =
+      data_ == nullptr ? mesh_->GetShapeToMesh() : sub_shape(kind, ordinal);
   std::vector<std::vector<Assignment>::iterator> named;
   for (auto it = assigned_.begin(); it != assigned_.end(); ++it) {
     if (it->name == name && it->kind == kind && it->ordinal == ordinal) {
@@ -863,13 +979,31 @@ py::list Mesher::assignments() const {
 
 py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
   ensure_open();
-  ensure_shape("Mesher.compute");
+  // With no shape only the NETGEN remesher computes: on the mesh's own triangles, on the
+  // pseudo-shape that holds it (Mesher::assign).
+  const bool shape_free = data_ == nullptr;
+  if (shape_free) {
+    bool remesher = false;
+    for (const Assignment& a : assigned_) {
+      remesher = remesher || a.name == "NETGEN_Remesher_2D";
+    }
+    if (!remesher) {
+      ensure_shape("Mesher.compute");
+    }
+    if (meshDS_->NbFaces() == 0) {
+      throw PysmeshError("Mesher.compute: the NETGEN remesher has nothing to remesh: this "
+                         "mesher holds no face.");
+    }
+    check_remesher_input(*mesh_);
+  }
   if (assigned_.empty()) {
     throw PysmeshError("Mesher.compute: nothing is assigned. Assign at least an algorithm "
                        "before computing.");
   }
 
-  refuse_unread_layers();
+  if (!shape_free) {
+    refuse_unread_layers();
+  }
 
   ProgressHooks hooks;
   if (!progress.is_none()) {
@@ -885,11 +1019,37 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
     hooks.should_cancel = cancel;
   }
 
-  ComputeDriver driver(*mesh_, *gen_, data_->shape, hooks);
+  // netgen keeps its state in globals, so a compute that runs a NETGEN algorithm holds the
+  // process-wide NETGEN lock for its whole run. The lock is taken before the progress
+  // driver starts: a cancel then reaches netgen's global cancel flag only while this
+  // compute owns netgen. Declared first, it is released last.
+  std::unique_lock<std::mutex> netgen_lock;
+  if (uses_netgen()) {
+    py::gil_scoped_release release;
+    netgen_lock = std::unique_lock<std::mutex>(netgen_mutex());
+  }
+  // SMESH_Gen::CancelCompute sets a flag that only PrepareCompute clears, and Compute stops
+  // at the first sub-mesh while it is set. SALOME calls PrepareCompute before every Compute
+  // (SMESH_Gen_i::Compute); without it, one cancel made every later compute of this mesher
+  // fail with no error text. Called before the driver starts, so it never clears a cancel
+  // of this run.
+  const TopoDS_Shape& target = shape_free ? mesh_->GetShapeToMesh() : data_->shape;
+  // The remesher marks the pseudo-shape always computed once it has replaced the mesh
+  // (NETGENPlugin_Remesher_2D.cxx); a set mark before the run means SMESH runs nothing.
+  SMESH_subMesh* const pseudo = shape_free ? mesh_->GetSubMesh(target) : nullptr;
+  const bool remeshed_before = pseudo != nullptr && pseudo->IsAlwaysComputed();
+  // A failed or cancelled remesh leaves the pseudo-shape FAILED_TO_COMPUTE, and SMESH
+  // computes nothing there until its algorithm state changes. The mesh is the input either
+  // way, so the state is reset and the remesher runs on it again.
+  if (shape_free && !remeshed_before) {
+    pseudo->ComputeStateEngine(SMESH_subMesh::MODIF_ALGO_STATE);
+  }
+  gen_->PrepareCompute(*mesh_, target);
+  ComputeDriver driver(*mesh_, *gen_, target, hooks);
   bool ok = false;
   if (!driver.cancelled()) {
     py::gil_scoped_release release;
-    ok = gen_->Compute(*mesh_, data_->shape);
+    ok = gen_->Compute(*mesh_, target);
   }
   // finish() re-raises an exception a hook threw, with its own type. A raising hook is a
   // cancel, so the mesh is cleared first: a cancel leaves no partial mesh, and before this
@@ -905,12 +1065,26 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
   // landing late gives a complete mesh and the same `false`, and an ordinary failure gives
   // `false` with no cancel at all. Checked before the failure path so a cancelled run is not
   // reported as an impossible assignment.
+  if (driver.cancelled() && shape_free) {
+    // The remesher replaces the mesh only after netgen finished, and binds nothing to a
+    // sub-shape, so there is nothing to clear: the mesh is the input or the whole result.
+    const bool replaced = !remeshed_before && pseudo->IsAlwaysComputed();
+    throw CancelledError("Mesher.compute: cancelled by the caller.",
+                         replaced ? "The cancel came after the NETGEN remesher replaced the "
+                                    "mesh: the mesh is the remeshed one."
+                                  : "The NETGEN remesher did not replace the mesh: the mesh "
+                                    "is as it was before this compute.");
+  }
   if (driver.cancelled()) {
     clear_mesh();
     throw CancelledError("Mesher.compute: cancelled by the caller.",
                          "The mesh was cleared: nothing partial is returned. Cancellation is "
                          "not preemptive — only a few algorithms poll it inside their own "
                          "loop, so a long single algorithm runs to its end before stopping.");
+  }
+
+  if (shape_free) {
+    return shape_free_outcome(ok);
   }
 
   // SMESH_ComputeError is attached to the sub-mesh that actually failed, not to the
@@ -1062,6 +1236,30 @@ py::dict Mesher::success_report(const py::list& warnings) const {
   }
   out["meshed"] = meshed;
   out["warnings"] = warnings;
+  return out;
+}
+
+py::dict Mesher::shape_free_outcome(bool ok) const {
+  // The remesher reports on the pseudo-shape's sub-mesh. Its only warning ("No faces in
+  // input mesh") cannot arise, since compute() refuses a mesh with no face first, so any
+  // error text there is a failure.
+  SMESH_subMesh* sub = mesh_->GetSubMesh(mesh_->GetShapeToMesh());
+  const SMESH_ComputeErrorPtr err = sub != nullptr ? sub->GetComputeError() : nullptr;
+  if (!ok || (err && !err->IsOK())) {
+    std::string details =
+        err && !err->myComment.empty() ? err->myComment : std::string("no message");
+    if (err && err->myAlgo != nullptr && err->myAlgo->GetName() != nullptr) {
+      details += std::string(" (algorithm ") + err->myAlgo->GetName() + ")";
+    }
+    throw PysmeshError("Mesher.compute: remeshing failed.", details);
+  }
+  py::dict out;
+  out["nodes"] = static_cast<std::int64_t>(meshDS_->NbNodes());
+  out["edges"] = static_cast<std::int64_t>(meshDS_->NbEdges());
+  out["faces"] = static_cast<std::int64_t>(meshDS_->NbFaces());
+  out["volumes"] = static_cast<std::int64_t>(meshDS_->NbVolumes());
+  out["meshed"] = py::list();
+  out["warnings"] = py::list();
   return out;
 }
 

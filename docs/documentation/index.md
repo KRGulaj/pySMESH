@@ -2,7 +2,8 @@
 
 pySMESH is a standalone Windows Python wheel. It exposes SALOME SMESH's meshing operations
 and Open CASCADE's (OCCT) geometry operations through NumPy arrays and BREP bytes. SMESH,
-OCCT, Boost and VTK are statically linked or bundled into one extension module, `_core.pyd`.
+NETGEN, OCCT, Boost and VTK are statically linked or bundled into one extension module,
+`_core.pyd`.
 Installing the wheel adds one pip entry and no other native dependency.
 
 pySMESH is for a CFD or CAD preprocessing pipeline that needs a production meshing and
@@ -41,8 +42,8 @@ documentation.
 pip install pysmesh
 ```
 
-That is the whole procedure. The wheel is self-contained: SMESH, OCCT, Boost and VTK all
-ship inside it. NumPy is the only thing pip pulls in.
+That is the whole procedure. The wheel is self-contained: SMESH, NETGEN, OCCT, Boost and
+VTK all ship inside it. NumPy is the only thing pip pulls in.
 
 pySMESH targets Windows x64, CPython 3.11 to 3.14. There is one wheel per interpreter and
 none for other platforms. Pip picks the matching wheel and refuses to install on anything
@@ -65,6 +66,7 @@ is load-bearing for anyone integrating pySMESH beside their own VTK.
 | [Getting started](guides/getting-started.md) | Install, then a complete worked example from a box to a computed mesh. |
 | [Geometry operations](guides/geometry-operations.md) | The standalone OCCT surface: STEP/IGES, tessellation, offsets, distance, `Shape`. |
 | [Mesh editing](guides/mesh-editing.md) | Quality controls, groups, the editor, search, the medial axis, and viscous layers. |
+| [Free meshing with NETGEN](guides/netgen.md) | NETGEN triangles and tetrahedra: the algorithms, the sizes, layers with tetrahedra, and the remesher of a surface with no CAD. |
 | [API reference](reference/index.md) | The generated reference: every public class and function, with its docstring and typed signature. |
 
 ---

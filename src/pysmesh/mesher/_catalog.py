@@ -98,6 +98,36 @@ class QuadType(IntEnum):
     REDUCED = 4
 
 
+class Fineness(IntEnum):
+    """How fine NETGEN meshes: a preset of three sizing values.
+
+    The integer values are NETGENPlugin's (``NETGENPlugin_Hypothesis::Fineness``); do
+    not reorder. A preset sets the growth rate, the segments per edge and the segments
+    per radius of curvature together (``NETGENPlugin_Hypothesis.cxx``, ``SetFineness``):
+
+    ===============  ===========  =================  ===================
+    preset           growth rate  segments per edge  segments per radius
+    ===============  ===========  =================  ===================
+    ``VERY_COARSE``  0.7          0.3                1
+    ``COARSE``       0.5          0.5                1.5
+    ``MODERATE``     0.3          1                  2
+    ``FINE``         0.2          2                  3
+    ``VERY_FINE``    0.1          3                  5
+    ===============  ===========  =================  ===================
+
+    ``USER_DEFINED`` takes the three values from the hypothesis's own fields
+    ``growth_rate``, ``segments_per_edge`` and ``segments_per_radius``; a field left
+    ``None`` keeps the ``MODERATE`` value.
+    """
+
+    VERY_COARSE = 0
+    COARSE = 1
+    MODERATE = 2
+    FINE = 3
+    VERY_FINE = 4
+    USER_DEFINED = 5
+
+
 # ---- 0-D algorithms ---------------------------------------------------------------- #
 
 
@@ -286,6 +316,56 @@ class RadialQuadrangle1D2D(Algorithm):
     native_name: ClassVar[str] = "RadialQuadrangle_1D2D"
 
 
+@dataclass(frozen=True)
+class Netgen1D2D(Algorithm):
+    """Mesh a face and its edges with NETGEN in one algorithm: segments, then triangles.
+
+    With ``quad_allowed`` it makes a quad-dominant mesh instead. It reads
+    :class:`NetgenParameters2D` or :class:`NetgenSimpleParameters2D`, and
+    :class:`ViscousLayers2D`. An edge that another 1-D algorithm meshes, assigned on the
+    edge, keeps that mesh: NETGEN builds the faces on its nodes.
+    """
+
+    native_name: ClassVar[str] = "NETGEN_2D"
+
+
+@dataclass(frozen=True)
+class Netgen2D(Algorithm):
+    """Mesh a face with NETGEN from the segments of its edges, made by a 1-D algorithm.
+
+    It reads :class:`MaxElementArea`, :class:`LengthFromEdges`,
+    :class:`QuadranglePreference`, :class:`NetgenParameters2D` and
+    :class:`ViscousLayers2D`.
+    With no hypothesis the size comes from the boundary segments, as with
+    :class:`LengthFromEdges`. It reads one of :class:`MaxElementArea`,
+    :class:`LengthFromEdges` and :class:`NetgenParameters2D` per face: a second one on
+    the same sub-shape is refused, and one on a nearer sub-shape governs a face over one
+    on an enclosing shape. :class:`QuadranglePreference` does not go with
+    :class:`NetgenParameters2D` (``NETGENPlugin_NETGEN_2D_ONLY.cxx``,
+    ``CheckHypothesis``). Each refusal raises from :meth:`~pysmesh.Mesher.assign` and
+    leaves the model as it was.
+    """
+
+    native_name: ClassVar[str] = "NETGEN_2D_ONLY"
+
+
+@dataclass(frozen=True)
+class NetgenRemesher2D(Algorithm):
+    """Mesh the triangles of a mesher with no shape again, with NETGEN.
+
+    It is the one algorithm a mesher built with ``shape=None`` takes, assigned on the
+    whole mesh (``on=None``). NETGEN reads the triangles (a quadrangle as two) as an STL
+    surface, splits it into charts at its feature edges, and meshes each chart anew. The
+    result replaces the mesh, bound to no sub-shape. It reads
+    :class:`NetgenRemesherParameters2D`; with none, the size is the bounding-box
+    diagonal over 10. A cancel leaves the input mesh, or the whole remesh when it came
+    after the remesher replaced the mesh; the details of the PysmeshCancelled say
+    which.
+    """
+
+    native_name: ClassVar[str] = "NETGEN_Remesher_2D"
+
+
 # ---- 3-D algorithms -------------------------------------------------------------------- #
 
 
@@ -419,6 +499,30 @@ class PolyhedronPerSolid3D(Algorithm):
     """
 
     native_name: ClassVar[str] = "PolyhedronPerSolid_3D"
+
+
+@dataclass(frozen=True)
+class Netgen1D2D3D(Algorithm):
+    """Mesh a solid with NETGEN in one algorithm: segments, triangles, then tetrahedra.
+
+    It reads :class:`NetgenParameters` or :class:`NetgenSimpleParameters3D`, and
+    :class:`ViscousLayers`. A face or an edge that another algorithm meshes, assigned on
+    that sub-shape, keeps its mesh: NETGEN builds on its nodes.
+    """
+
+    native_name: ClassVar[str] = "NETGEN_2D3D"
+
+
+@dataclass(frozen=True)
+class Netgen3D(Algorithm):
+    """Fill a solid with NETGEN tetrahedra from the mesh of its boundary faces.
+
+    The faces need a 2-D algorithm of their own. Where they carry quadrangles, the
+    tetrahedra meet them through pyramids. It reads :class:`NetgenParameters`,
+    :class:`MaxElementVolume` and :class:`ViscousLayers`.
+    """
+
+    native_name: ClassVar[str] = "NETGEN_3D"
 
 
 # ---- 1-D hypotheses -------------------------------------------------------------------- #
@@ -910,6 +1014,339 @@ class CartesianParameters3D(Hypothesis):
     threshold_for_internal_faces: bool = False
 
 
+# ---- NETGEN hypotheses ------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class _OptionalFields(Hypothesis):
+    """A hypothesis whose fields left None are not sent: the plugin keeps its value."""
+
+    def params(self) -> dict[str, object]:
+        """The parameter dict, without the fields that are None.
+
+        Returns:
+            One entry per field that has a value, encoded for the C++ side.
+        """
+        return {
+            name: value
+            for name, value in super().params().items()
+            if getattr(self, name) is not None
+        }
+
+
+def _check_positive(owner: str, name: str, value: float | None) -> None:
+    """Refuse a value that must be > 0 when it is given."""
+    if value is not None and not value > 0.0:
+        raise PysmeshError(f"{owner}: {name} must be > 0 (got {value}).")
+
+
+@dataclass(frozen=True)
+class _NetgenSizing(_OptionalFields):
+    """The NETGEN parameters that the 2-D and the 3-D hypotheses share.
+
+    Attributes:
+        max_size: The largest element edge.
+        min_size: The smallest element edge NETGEN refines to; 0 for no limit.
+        fineness: The preset of the growth rate and of the segments per edge and per
+            radius of curvature; see :class:`Fineness`.
+        growth_rate: How fast the size may grow from one element to the next, in
+            ``(0, 1]``: 0.1 grades slowly, 0.7 fast. Only with
+            :attr:`Fineness.USER_DEFINED`; None keeps the ``MODERATE`` value 0.3.
+        segments_per_edge: The fewest segments on an edge. Only with
+            :attr:`Fineness.USER_DEFINED`; None keeps the ``MODERATE`` value 1.
+        segments_per_radius: Segments per radius of curvature, for curved edges and
+            faces. Only with :attr:`Fineness.USER_DEFINED`; None keeps the ``MODERATE``
+            value 2.
+        chordal_error: The distance between a curved face and its triangles that
+            NETGEN sizes the face for, from its curvature. It is a target: the mean
+            deviation keeps within it, single triangles can exceed it. None for none.
+        local_sizes: ``(sub-shape, size)`` pairs: the element size near a vertex, along
+            an edge, on a face or in a solid of the meshed shape.
+        second_order: Make quadratic elements, with mid-edge nodes on the geometry.
+        optimize: Improve the mesh after each step.
+        quad_allowed: Make a quad-dominant surface mesh.
+        surface_curvature: Refine where the faces are curved.
+        fuse_edges: Merge the edges that meet smoothly at a vertex of degree 2.
+        surface_optimization_steps: How many surface improvement passes, when
+            ``optimize``.
+        element_size_weight: The weight of the size against the shape of an element in
+            the improvement passes.
+        worst_element_measure: The power of the measure the improvement passes reduce;
+            higher values weigh the worst element more.
+        check_overlapping: Check the surface mesh for overlapping triangles.
+        check_chart_boundary: Check the chart boundaries when NETGEN meshes a face.
+        threads: Threads NETGEN may use; None for one per hardware thread. The mesh does
+            not depend on it.
+    """
+
+    max_size: float = 1000.0
+    min_size: float = 0.0
+    fineness: Fineness = Fineness.MODERATE
+    growth_rate: float | None = None
+    segments_per_edge: float | None = None
+    segments_per_radius: float | None = None
+    chordal_error: float | None = None
+    local_sizes: tuple[tuple[SubShape, float], ...] = ()
+    second_order: bool = False
+    optimize: bool = True
+    quad_allowed: bool = False
+    surface_curvature: bool = True
+    fuse_edges: bool = True
+    surface_optimization_steps: int = 3
+    element_size_weight: float = 0.2
+    worst_element_measure: int = 2
+    check_overlapping: bool = True
+    check_chart_boundary: bool = True
+    threads: int | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse a size, a step count or a preset field the plugin would misread."""
+        owner = type(self).__name__
+        _check_positive(owner, "max_size", self.max_size)
+        if not 0.0 <= self.min_size <= self.max_size:
+            raise PysmeshError(
+                f"{owner}: min_size must lie in [0, max_size] "
+                f"(got {self.min_size}, max_size {self.max_size})."
+            )
+        for name in ("growth_rate", "segments_per_edge", "segments_per_radius"):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            if self.fineness != Fineness.USER_DEFINED:
+                raise PysmeshError(
+                    f"{owner}: {name} is set by the fineness preset "
+                    f"({self.fineness.name}); give it only with "
+                    "Fineness.USER_DEFINED."
+                )
+            _check_positive(owner, name, value)
+        if self.growth_rate is not None and self.growth_rate > 1.0:
+            raise PysmeshError(
+                f"{owner}: growth_rate must lie in (0, 1] (got {self.growth_rate})."
+            )
+        _check_positive(owner, "chordal_error", self.chordal_error)
+        for where, size in self.local_sizes:
+            if not isinstance(where, SubShape):
+                raise PysmeshError(
+                    f"{owner}: a local size names its sub-shape as a SubShape "
+                    f"(got {where!r})."
+                )
+            _check_positive(
+                owner, f"the local size on {where.kind.name} {where.ordinal}", size
+            )
+        if self.surface_optimization_steps < 0:
+            raise PysmeshError(
+                f"{owner}: surface_optimization_steps cannot be negative "
+                f"(got {self.surface_optimization_steps})."
+            )
+        if self.element_size_weight < 0.0:
+            raise PysmeshError(
+                f"{owner}: element_size_weight cannot be negative "
+                f"(got {self.element_size_weight})."
+            )
+        if self.worst_element_measure < 1:
+            raise PysmeshError(
+                f"{owner}: worst_element_measure must be >= 1 "
+                f"(got {self.worst_element_measure})."
+            )
+        if self.threads is not None and self.threads < 1:
+            raise PysmeshError(f"{owner}: threads must be >= 1 (got {self.threads}).")
+
+
+@dataclass(frozen=True)
+class NetgenParameters(_NetgenSizing):
+    """The parameters of :class:`Netgen1D2D3D` and :class:`Netgen3D`.
+
+    The fields of :class:`NetgenParameters2D`, and two that only the volume mesher
+    reads.
+
+    Attributes:
+        volume_optimization_steps: How many volume improvement passes, when
+            ``optimize``.
+        use_delaunay: Start the volume mesh with a Delaunay pass; False uses the
+            advancing front only.
+    """
+
+    native_name: ClassVar[str] = "NETGEN_Parameters"
+
+    volume_optimization_steps: int = 3
+    use_delaunay: bool = True
+
+    def __post_init__(self) -> None:
+        """Check the shared fields, and the volume improvement passes."""
+        super().__post_init__()
+        if self.volume_optimization_steps < 0:
+            raise PysmeshError(
+                "NetgenParameters: volume_optimization_steps cannot be negative "
+                f"(got {self.volume_optimization_steps})."
+            )
+
+
+@dataclass(frozen=True)
+class NetgenParameters2D(_NetgenSizing):
+    """The parameters of :class:`Netgen1D2D` and :class:`Netgen2D`.
+
+    The fields are documented on the shared base, ``_NetgenSizing``; :class:`Fineness`
+    gives the presets.
+    """
+
+    native_name: ClassVar[str] = "NETGEN_Parameters_2D"
+
+
+@dataclass(frozen=True)
+class NetgenSimpleParameters2D(_OptionalFields):
+    """A short form of :class:`NetgenParameters2D` for :class:`Netgen1D2D`.
+
+    The edges get a segment count or a segment length; the faces get an area bound, or a
+    size taken from the edges.
+
+    The count is a target, met exactly where the edges have one length. The plugin
+    sizes each edge as its length divided by ``number_of_segments - 0.4``, and the
+    smaller size of a shorter neighbour reaches into a longer edge near their common
+    vertex: a 1 x 2 x 3 box with 4 gets 3 to 5 segments per edge
+    (``NETGENPlugin_Mesher.cxx``, ``SetBasicMeshParameters``).
+
+    Attributes:
+        number_of_segments: Segments on every edge. Give this or ``local_length``.
+        local_length: The segment length on every edge. Give this or
+            ``number_of_segments``.
+        max_element_area: The largest triangle area; None takes the size from the
+            boundary segments.
+        allow_quadrangles: Make a quad-dominant mesh.
+    """
+
+    native_name: ClassVar[str] = "NETGEN_SimpleParameters_2D"
+
+    number_of_segments: int | None = None
+    local_length: float | None = None
+    max_element_area: float | None = None
+    allow_quadrangles: bool = False
+
+    def __post_init__(self) -> None:
+        """Refuse no segment rule or two, and a size that is not positive."""
+        owner = type(self).__name__
+        if (self.number_of_segments is None) == (self.local_length is None):
+            raise PysmeshError(
+                f"{owner}: give exactly one of number_of_segments and local_length."
+            )
+        if self.number_of_segments is not None and self.number_of_segments < 1:
+            raise PysmeshError(
+                f"{owner}: number_of_segments must be >= 1 "
+                f"(got {self.number_of_segments})."
+            )
+        _check_positive(owner, "local_length", self.local_length)
+        _check_positive(owner, "max_element_area", self.max_element_area)
+
+
+@dataclass(frozen=True)
+class NetgenSimpleParameters3D(NetgenSimpleParameters2D):
+    """A short form of :class:`NetgenParameters` for :class:`Netgen1D2D3D`.
+
+    Attributes:
+        max_element_volume: The largest tetrahedron volume; None takes the size from the
+            boundary faces.
+    """
+
+    native_name: ClassVar[str] = "NETGEN_SimpleParameters_3D"
+
+    max_element_volume: float | None = None
+
+    def __post_init__(self) -> None:
+        """Check the 2-D fields, and the volume bound."""
+        super().__post_init__()
+        _check_positive(
+            type(self).__name__, "max_element_volume", self.max_element_volume
+        )
+
+
+@dataclass(frozen=True)
+class NetgenRemesherParameters2D(_OptionalFields):
+    """The parameters of :class:`NetgenRemesher2D`.
+
+    The remesher meshes the triangles as an STL surface. Feature edges cut it into
+    charts, and each chart is meshed as one surface. Each ``*_factor`` field turns
+    on one way of limiting the element size, with that factor; None turns it off.
+    The defaults are the plugin's (``NETGENPlugin_RemesherHypothesis_2D``).
+
+    Attributes:
+        max_size: The largest element edge.
+        min_size: The smallest element size NETGEN refines to; 0 for no limit.
+        quad_allowed: Make a quad-dominant mesh.
+        ridge_angle: The angle in degrees between the normals of two adjacent triangles
+            above which their shared edge is a feature edge. Feature edges bound the
+            charts, and the new mesh keeps them as edges.
+        edge_corner_angle: The angle in degrees between two adjacent chart boundary
+            edges above which their shared point ends a boundary curve.
+        chart_angle: The angle in degrees between the normals of adjacent triangles
+            under which an edge that is not a feature edge does not bound a chart.
+        outer_chart_angle: The angle in degrees for the overlapping parts of a chart.
+        chart_distance_factor: Limit the size by the distance to the next chart.
+        line_length_factor: Limit the size near the ends of a chart boundary curve by
+            the length of that curve.
+        surface_curvature_factor: Limit the size by the curvature of the surface.
+        edge_angle_factor: Limit the size by the curvature of the chart boundary curves.
+        surface_mesh_curvature_factor: Elements per radius of curvature of the input
+            triangles.
+        keep_existing_edges: Keep the segments of the input mesh as chart boundaries.
+        make_groups_of_surfaces: Put the new faces of each chart into a FACE group named
+            ``Surface_<n>``.
+        fixed_edges: The name of a group of EDGE elements of the same mesher. Each node
+            of these edges that lies on a feature edge stays a node of the new mesh:
+            a feature line ends there. A node elsewhere is not kept. None for no
+            group. The remesh removes the old edges, so the group is empty after.
+    """
+
+    native_name: ClassVar[str] = "NETGEN_RemesherParameters_2D"
+
+    max_size: float = 1000.0
+    min_size: float = 0.0
+    quad_allowed: bool = False
+    ridge_angle: float = 30.0
+    edge_corner_angle: float = 60.0
+    chart_angle: float = 15.0
+    outer_chart_angle: float = 70.0
+    chart_distance_factor: float | None = 1.2
+    line_length_factor: float | None = 0.5
+    surface_curvature_factor: float | None = None
+    edge_angle_factor: float | None = None
+    surface_mesh_curvature_factor: float | None = None
+    keep_existing_edges: bool = False
+    make_groups_of_surfaces: bool = False
+    fixed_edges: str | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse a size, an angle or a factor the plugin would misread."""
+        owner = type(self).__name__
+        _check_positive(owner, "max_size", self.max_size)
+        if not 0.0 <= self.min_size <= self.max_size:
+            raise PysmeshError(
+                f"{owner}: min_size must lie in [0, max_size] "
+                f"(got {self.min_size}, max_size {self.max_size})."
+            )
+        for name in (
+            "ridge_angle",
+            "edge_corner_angle",
+            "chart_angle",
+            "outer_chart_angle",
+        ):
+            value = getattr(self, name)
+            if not 0.0 < value <= 180.0:
+                raise PysmeshError(
+                    f"{owner}: {name} must lie in (0, 180] degrees (got {value})."
+                )
+        for name in (
+            "chart_distance_factor",
+            "line_length_factor",
+            "surface_curvature_factor",
+            "edge_angle_factor",
+            "surface_mesh_curvature_factor",
+        ):
+            _check_positive(owner, name, getattr(self, name))
+        if self.fixed_edges is not None and not self.fixed_edges:
+            raise PysmeshError(
+                f"{owner}: fixed_edges names a group; it cannot be empty."
+            )
+
+
 # ---- Hypotheses that name another part of the model ------------------------------------ #
 
 
@@ -981,14 +1418,15 @@ class ProjectionSource3D(Hypothesis):
 class ViscousLayers(Hypothesis):
     """Prism layers grown inward from named faces of a solid.
 
-    :class:`Hexa3D`, :class:`CompositeHexa3D`, :class:`PolyhedronPerSolid3D` and
-    :class:`Cartesian3D` build them. On a solid that another algorithm meshes,
-    :meth:`~pysmesh.Mesher.compute` raises before it meshes anything.
+    :class:`Hexa3D`, :class:`CompositeHexa3D`, :class:`PolyhedronPerSolid3D`,
+    :class:`Cartesian3D`, :class:`Netgen3D` and :class:`Netgen1D2D3D` build them. On a
+    solid that another algorithm meshes, :meth:`~pysmesh.Mesher.compute` raises before
+    it meshes anything.
 
     Several hypotheses can reach one solid, each with its own face set and stack (a
-    thickness per face set). :class:`PolyhedronPerSolid3D` grows each stack on its own
-    faces. :class:`Hexa3D`, :class:`CompositeHexa3D` and :class:`Cartesian3D` read one
-    hypothesis per solid, so
+    thickness per face set). :class:`PolyhedronPerSolid3D`, :class:`Netgen3D` and
+    :class:`Netgen1D2D3D` grow each stack on its own faces. :class:`Hexa3D`,
+    :class:`CompositeHexa3D` and :class:`Cartesian3D` read one hypothesis per solid, so
     :meth:`~pysmesh.Mesher.compute` refuses a second one there. SMESH also refuses two
     face sets that share a face, and two that hold faces sharing an edge with a
     different ``layer_count``; :meth:`~pysmesh.Mesher.compute` raises with SMESH's
@@ -1030,9 +1468,10 @@ class ViscousLayers2D(Hypothesis):
     """Quadrangle layers grown inward from named edges of a face.
 
     The 2-D counterpart of :class:`ViscousLayers`, and the only 2-D form in the stack.
-    :class:`Quadrangle2D`, :class:`QuadFromMedialAxis1D2D`, :class:`Mefisto2D` and
-    :class:`PolygonPerFace2D` build them. On a face that another algorithm meshes,
-    :meth:`~pysmesh.Mesher.compute` raises before it meshes anything. That includes a
+    :class:`Quadrangle2D`, :class:`QuadFromMedialAxis1D2D`, :class:`Mefisto2D`,
+    :class:`PolygonPerFace2D`, :class:`Netgen1D2D` and :class:`Netgen2D` build them. On
+    a face that another algorithm meshes, :meth:`~pysmesh.Mesher.compute` raises before
+    it meshes anything. That includes a
     face of a solid that :class:`Cartesian3D` or :class:`PolyhedronPerSolid3D` meshes
     (they mesh every dimension themselves), and a face of a :class:`Prism3D` solid
     without a 2-D algorithm assigned on that face alone. With :class:`Prism3D`, assign

@@ -31,6 +31,9 @@ pytest does not collect this folder. No file here is named `test_*.py`.
 * **`mesh`** (SMESH): every 1-D distribution; every 2-D and 3-D algorithm with a working
   recipe; viscous layers, both through the hypothesis and through
   `compute_viscous_layers`; mesh editing; the medial axis.
+* **`netgen`** (netgen 6.2.2101 through NETGENPlugin, since Phase 5): each NETGEN
+  algorithm on the primitives, with the counts, the volume error against the exact volume
+  and the smallest angles. See the Phase 5 section below.
 * **`defect`**: the reproductions in `docs/reports/defect_sweep_4.2.2.md`. These are
   expected to change in Phase 4. They are reported apart from the other groups and do not
   block.
@@ -321,3 +324,48 @@ Prism_3D now sweeps between the caps. The oracle is the structure of a straight 
 - the cap boundaries take 2 x 20 segments, and the 5 vertical edges 4 each: 60 edges;
 - the cell volumes sum to the prism volume 5/2 sin(72 degrees) = 2.3776412907378837
   (1.9e-16 relative), and every cell has a positive volume.
+
+## The NETGEN probes (Phase 5, NETGEN item, group 2)
+
+Phase 5 links netgen 6.2.2101 and NETGENPlugin V9_16_0 into `_core`. The capture records
+`with_netgen: True` in `meta` (False before), and a new group, `netgen`, of 12 probes. No
+`geometry`, `mesh` or `defect` value changes: the capture equals the reference at
+`--rtol 0 --atol 0`. The reference is the Phase 5 SMESH item's capture (main after its
+merge), and the Phase 4 capture before it. The 12 NETGEN values are the same in both. `compare.py` prints a probe that the baseline lacks with its values,
+and it does not block: it has no baseline value to differ from. Before Phase 5 the script
+printed only four named groups.
+
+Each probe runs `_mesh_stats` (counts by type, the quality controls) and adds two values:
+
+* `volume_rel_error`: |sum of the cell volumes - exact volume| / exact volume, for a solid
+  primitive. A planar-faced solid gives 0 to round-off. A curved one gives the deficit of its
+  chords, which grows with `max_size` over the radius.
+* `min_dihedral_deg`: the smallest dihedral angle of the tetrahedra, linear or quadratic
+  (corners only); `null` for a surface mesh.
+
+The shapes are the primitives of the `geometry` group: the 3 x 7 x 11 box, the cylinder of
+radius 1.5 and height 4, the sphere of radius 1.7 and the torus (3, 0.8).
+
+| Probe | Nodes | Faces | Volumes | `volume_rel_error` | Smallest face angle (deg) | `min_dihedral_deg` |
+|---|---|---|---|---|---|---|
+| `1d2d3d_box` (max 2.0) | 80 | 156 | 166 | 0 | 28.9 | 24.8 |
+| `1d2d3d_cylinder` (max 0.6) | 192 | 314 | 576 | 2.09e-2 | 39.6 | 19.7 |
+| `1d2d3d_sphere` (max 0.5) | 212 | 340 | 639 | 3.35e-2 | 42.8 | 15.9 |
+| `1d2d3d_torus` (max 0.4) | 950 | 1688 | 2633 | 3.31e-2 | 35.3 | 3.2 |
+| `1d2d_then_3d_partitioned_box` (2 x 1 x 1 in two solids, max 0.3) | 139 | 242 | 431 | 1.1e-16 | 33.4 | 22.7 |
+| `regular_2d_3d_cylinder` (LocalLength 0.6) | 178 | 330 | 454 | 2.10e-2 | 37.4 | 16.6 |
+| `quadrangle_faces_3d_box` (4 segments, quadrangles, pyramids) | 154 | 96 | 455 | 0 | 90.0 | 7.9 |
+| `1d2d_sphere_surface` (max 0.4) | 260 | 516 | 0 | - | 40.6 | - |
+| `simple_3d_box` (4 segments per edge) | 173 | 216 | 606 | 0 | 11.1 | 22.3 |
+| `second_order_sphere` (max 0.6) | 649 | 230 | 289 | - | 41.8 | 12.1 |
+| `local_size_on_face_box` (0.5 on face 1, max 2.0) | 921 | 1132 | 3561 | 0 | 23.7 | 17.0 |
+| `chordal_error_cylinder_surface` (0.01, max 0.6) | 617 | 1230 | 0 | - | 36.8 | - |
+
+- netgen gives one mesh at any thread count and on repeat (`tests/test_mesher_netgen_threads.py`),
+  so these values do not depend on the machine's thread count.
+- `simple_3d_box` gives every edge 4 segments, so the 3 m and the 11 m edges make long thin
+  triangles: 11.1 degrees.
+- `quadrangle_faces_3d_box` keeps the 96 quadrangles of `Quadrangle2D`. NETGEN_3D puts a
+  pyramid on each and fills the rest with tetrahedra.
+- `second_order_sphere` and the two surface probes have no `volume_rel_error`: a quadratic
+  cell's volume and a surface mesh have no exact counterpart here.

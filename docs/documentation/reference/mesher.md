@@ -4,7 +4,8 @@ Generated from `pysmesh.mesher`. See [Meshing model](../concepts/meshing-model.m
 algorithm and hypothesis assignment model this API implements, and
 [Discrete meshes](../concepts/discrete-meshes.md) for `Mesher` with no B-rep behind it. The
 quality controls, groups, editor, search surface, and medial axis are covered in
-[Mesh editing](../guides/mesh-editing.md).
+[Mesh editing](../guides/mesh-editing.md). The NETGEN algorithms and their parameters are
+covered in [Free meshing with NETGEN](../guides/netgen.md).
 
 ::: pysmesh.mesher
     options:

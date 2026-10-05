@@ -40,11 +40,14 @@ mesher.assign(Hexa3D())                    # 3-D: mesh every solid from its face
 mesher.compute()
 ```
 
-**Three algorithms break that rule on purpose**, because they mesh every dimension of their
-sub-shape themselves: `Cartesian3D`, `PolyhedronPerSolid3D`, and `Prism3D` (for its lateral
-faces and edges; the source face beneath it still needs its own 2-D algorithm). A
-lower-dimension algorithm assigned beside one of these three is accepted, not refused, and
-then **hidden**: it has no effect where the all-dimensional algorithm governs. SMESH treats
+**Five algorithms break that rule on purpose**, because they mesh every dimension of their
+sub-shape themselves: `Cartesian3D`, `PolyhedronPerSolid3D`, `Netgen1D2D3D`, `Netgen1D2D`
+and `Prism3D` (for its lateral faces and edges; the source face beneath it still needs its
+own 2-D algorithm). A lower-dimension algorithm assigned beside one of these five is
+accepted, not refused, and then **hidden**: it has no effect where the all-dimensional
+algorithm governs. A global `Regular1D` with 3 segments beside a global `Netgen1D2D3D`
+leaves NETGEN's own segments on every edge. The two NETGEN algorithms keep the mesh of
+an algorithm assigned on the edge or the face itself. SMESH treats
 this as a normal state, because refusing it would break the ordinary pattern of setting a
 model-wide default and overriding it on one solid. Read `ComputeReport.meshed` after
 `compute()` to see which sub-shapes actually received elements from which assignment.
@@ -80,6 +83,9 @@ native `StdMeshers` source or from a test that computes a real mesh with it.
 | `Projection1D2D` | Projects a face's mesh **and** its boundary discretisation from another face. | Nothing: it supplies its own 1-D layer from the source | `ProjectionSource2D` (required) |
 | `QuadFromMedialAxis1D2D` | Quad-dominant meshing of a thin face, built on its medial axis. The only algorithm in the catalogue that reports true progress. | A 1-D algorithm and hypothesis on its edges | `ViscousLayers2D` |
 | `UseExisting2D` | Takes the faces a script made on the face, bound to it by `on`, as the face's mesh. Creates nothing itself. | Nodes and faces made by a script | None |
+| `Netgen1D2D` | Free triangle meshing of a face and its edges by NETGEN, in one algorithm. With `quad_allowed`, a quad-dominant mesh. An edge with its own 1-D algorithm keeps that mesh. | Nothing: it meshes the edges itself | `NetgenParameters2D` or `NetgenSimpleParameters2D`, `ViscousLayers2D` |
+| `Netgen2D` | Free triangle meshing of a face by NETGEN, from the segments of its edges. | A 1-D algorithm and hypothesis on its edges | One of `MaxElementArea`, `LengthFromEdges` and `NetgenParameters2D` per face (none: the size comes from the boundary segments), `QuadranglePreference` (not with `NetgenParameters2D`), `ViscousLayers2D` |
+| `NetgenRemesher2D` | Meshes the triangles of a mesher with no shape again (see [Discrete meshes](discrete-meshes.md)). The only algorithm such a mesher takes. | A surface mesh from arrays | `NetgenRemesherParameters2D` |
 | `RadialQuadrangle1D2D` | Radial quadrangle meshing of a disk or an annulus. | A 1-D algorithm and hypothesis on the boundary edge | `NumberOfLayers2D`, `LayerDistribution2D` (a 1-D hypothesis laid along the radius from the curve inward), or a 1-D hypothesis applied to the radial direction |
 
 ### Three 2-D limits, measured
@@ -120,6 +126,8 @@ triangle stays below 5 degrees. After 3 passes the smallest angle is 21.35 degre
 | `Prism3D` | Extrudes a source face's mesh through a prismatic solid. Meshes the lateral faces and edges itself. | A 1-D and 2-D algorithm on the source face only | None of its own; it sweeps the `ViscousLayers2D` of its source face |
 | `RadialPrism3D` | An O-grid between an inner and an outer shell: a pipe wall, an annulus. Needs the two shells' meshes to already match, typically via `Projection2D`. | Matching 2-D meshes on the inner and outer shell | `NumberOfLayers` or `LayerDistribution` |
 | `Projection3D` | Copies a solid's mesh from another solid. | Nothing beyond the source solid's own mesh | `ProjectionSource3D` (required) |
+| `Netgen1D2D3D` | Free tetrahedral meshing of a solid by NETGEN: segments, triangles, then tetrahedra, in one algorithm. A face or an edge with its own algorithm keeps that mesh. | Nothing: it meshes the faces and edges itself | `NetgenParameters` or `NetgenSimpleParameters3D`, `ViscousLayers` (one or several, each with its own face set) |
+| `Netgen3D` | Free tetrahedral meshing of a solid by NETGEN, from the mesh of its faces. Pyramids join quadrangle faces to the tetrahedra. | A 2-D algorithm on every face | `NetgenParameters`, `MaxElementVolume`, `ViscousLayers` (one or several, each with its own face set) |
 | `PolyhedronPerSolid3D` | One polyhedral element per solid, from the face mesh bounding it. Meshes every dimension itself; hides a lower-dimension algorithm beside it. Unlike `Cartesian3D`, it does consume an existing boundary mesh where one is present. | Nothing required; uses a boundary mesh if present | `ViscousLayers` (one or several, each with its own face set) |
 
 ### `Prism3D`: the source face, and a side face with a composite side
@@ -185,6 +193,12 @@ mesh in place with `Mesher.convert_to_quadratic`.
 `NotConformAllowed` is global only: `assign` refuses it on a sub-shape. It allows a
 non-conformal mesh between local algorithms that mesh their own boundary. With the
 algorithms of this catalogue, no combination is known in which it changes the mesh.
+
+### NETGEN
+
+The NETGEN algorithms mesh any face or solid freely: triangles, tetrahedra, or a
+quad-dominant surface. The sizes, the presets, the layers and the remesher are in the
+[NETGEN guide](../guides/netgen.md).
 
 ## A verified worked example: an O-grid
 
@@ -316,6 +330,8 @@ algorithm meshes it, or where nothing needs its mesh, as for the solid under a s
 
 Cancellation is different from failure: if `cancel` returns `True`, or `progress` raises,
 `compute()` raises `PysmeshCancelled` and the mesh is cleared, so nothing partial survives.
+The remesher of a shape-free mesher is the exception: a cancel leaves the input mesh, or
+the whole remesh if it came after the remesh replaced the mesh.
 
 **Progress is exact only at sub-mesh granularity.** The fraction of sub-meshes already done
 is real. Inside one running algorithm, SMESH interpolates with a tick counter, so an
@@ -323,7 +339,9 @@ algorithm that meshes the whole model in one call (`Cartesian3D`, for instance) 
 values that creep up from near zero and jump to 1.0 at the end. Only
 `QuadFromMedialAxis1D2D` reports its own true fraction. Cancellation is not preemptive
 either: only `Cartesian3D`, `Prism3D`, and the algorithm driven by `Adaptive1D` poll it
-inside their own loop; every other algorithm can be stopped only between sub-meshes.
+inside their own loop. The NETGEN algorithms pass it to netgen, which checks it between
+its steps (up to 2.2 s measured). Every other algorithm can be stopped only between
+sub-meshes.
 
 ---
 *Author: Kajetan R. Gułaj*

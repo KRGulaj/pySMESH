@@ -561,6 +561,9 @@ SMESH_Hypothesis* Mesher::build(const std::string& name, const py::dict& values)
       hyp = make_referring_hypothesis(name, p, factory, *this);
     }
     if (hyp == nullptr) {
+      hyp = make_netgen(name, p, *gen_, owned_, *this);
+    }
+    if (hyp == nullptr) {
       // A layer distribution carries a 1-D hypothesis of its own, so it is built through
       // the same factory recursively rather than through a second, parallel one. The 2-D
       // form, for RadialQuadrangle_1D2D, is the same class under its own name.

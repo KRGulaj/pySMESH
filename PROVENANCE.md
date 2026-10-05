@@ -24,6 +24,9 @@ its modules together.
 | SALOME salome_bootstrap | [SalomePlatform/salome_bootstrap](https://github.com/SalomePlatform/salome_bootstrap) | tag `V9_16_0`, `679a7b147192b3e3ac798c6dca59034edec2f78b` | `extern/salome_bootstrap/` | squashed subtree: `cdcd692c3` + merge `4b3c6a672` |
 | SALOME GEOM (`GEOMUtils` only) | [SalomePlatform/geom](https://github.com/SalomePlatform/geom) | tag `V9_16_0`, `7d0a18e1554c25bca2c2d9882e0621ea3f7f9c81` | `extern/geom/src/GEOMUtils/` | sparse copy of one directory: `06bb22494` |
 | MEFISTO (carried forward) | SALOME SMESH | tag `V9_9_0`, `4df9beadff0df879bcabb7c5472188f18cd30b42` | `extern/mefisto2/` | verbatim copy: `0825b092b` (see below) |
+| netgen (`libsrc`, `nglib`, `LICENSE`, `AUTHORS`) | [NGSolve/netgen](https://github.com/NGSolve/netgen) | tag `v6.2.2101`, `5e489319c60926daa836cecff39f0e92779032ba` | `extern/netgen/` | verbatim copy of the tag tree: `6732723fa` |
+| SALOME NETGENPlugin (`src/NETGENPlugin`, `LICENSE`) | [SalomePlatform/netgenplugin](https://github.com/SalomePlatform/netgenplugin) | tag `V9_16_0`, `553d8c3d7977acf19bf87ff8a9b2c36a0691332b` | `extern/netgenplugin/` | verbatim copy of the tag tree: `b2176930a` |
+| zlib | [zlib.net](https://zlib.net) | release 1.3.2, `zlib-1.3.2.tar.gz` (SHA-256 `bb329a0a2cd0274d05519d61c667c062e06990d72e125ee2dfa8de64f0119d16`) | `extern/zlib/` | the 48 top-level files of the archive, unmodified: `a9e977847` |
 
 Up to 4.2.2 the SALOME trees were at tag `V9_9_0`. Each subtree tree hash equals the upstream
 tree of its tag, and each copied file equals its upstream blob.
@@ -38,6 +41,18 @@ package, which SALOME moved out of GEOM into
 `geom/GEOMUtils_GEOMAlgo.patch` defines the three functions inside `GEOMUtils.cxx`, with bodies
 verbatim from `common_geometry_lib` tag `V9_16_0` (`e7b5227096fef835a448004ee06cf5938850b1c4`,
 `src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx`, LGPL-2.1).
+
+netgen and NETGENPlugin are copied, not subtrees. Each copied directory's git tree hash
+equals the tag's (netgen `libsrc` `be4cb70f`, `nglib` `d9d08d25`; NETGENPlugin
+`src/NETGENPlugin` `ed7f0d87`). netgen is at 6.2.2101 because SALOME's
+`netgen62ForSalome.patch` targets it; NETGENPlugin `V9_16_0` is the release of the other
+SALOME trees. Left out of netgen: the GUI (`ng`), Python, the tests and the CMake build;
+`cmake/Netgen/CMakeLists.txt` compiles `libsrc/{core,csg,general,geom2d,gprim,interface,
+linalg,meshing,occ,stlgeom}` and `nglib`, with `visualization/visual_dummy.cpp` for the
+viewer hooks. Left out of NETGENPlugin: `adm_local`, `bin`, `doc`, `idl`, `resources`,
+`src/GUI` and `src/NETGEN`; `cmake/NETGENPlugin/CMakeLists.txt` compiles the ten
+sources of the algorithms and hypotheses, not the `_i` (CORBA), `Remote`, `SA`, `Runner`
+and `DriverParam` files.
 
 KERNEL is needed because SMESH's data structures (`SMESHDS_Mesh`, `SMESH_ProxyMesh`) depend
 on `smIdType`, a KERNEL-defined typedef that decides whether node/element IDs are 32- or
@@ -109,7 +124,10 @@ of its `PATCH_MANIFEST`, which the index below follows.
   `smesh/SMESH_Gen_no_qt`). The other 24 fix SMESH defects. Each header states the defect, the
   root cause with the upstream lines, and what does not change.
 
-NETGEN-related patches are left out, because pySMESH does not build NETGEN.
+`patches/netgen/` (9 patches) and `patches/netgenplugin/` (10 patches), applied by
+`prepare.py` after the SMESH ones, patch the netgen and NETGENPlugin slices staged at
+`staged/src/Netgen` and `staged/src/NETGENPlugin` (looooo's layout). They are in the
+NETGEN part of the index below.
 
 `patches/occt801/` is a different kind: it patches OCCT itself, not SMESH, and
 `ci/build_occt.py` applies it, not `prepare.py`. See
@@ -171,6 +189,33 @@ MinGW/gcc-only patches are no-ops under our MSVC build.
 | `smesh/SMESH_subMesh_remove_hypothesis_state.patch` | P | new | A sub-mesh whose algorithm refused its hypotheses (`MISSING_HYP`) is checked again when a hypothesis is removed from it or from a shape above it. Upstream does nothing on those two events in that state (SMESH `bc37f0b49`), so `Hexa_3D`, which takes one `ViscousLayers`, stayed unmeshable after the second one was removed, and the compute left the solid empty with no error. Any other state, and a sub-mesh whose algorithm still refuses, are unchanged. |
 | `occt8/0003-boost-regex-str-enum.patch` | C | unchanged | Boost regex `str(ENUM)` → `str(int(ENUM))`. |
 | `occt8/0004-occt-8.0-compat.patch` | C | re-ported | The OCCT-8.0 pass (streams, `::Raise()`→`throw`, NCollection), extended to the code that is new in `V9_16_0`; the NETGEN and MeshVSLink sections, never staged, are dropped. |
+
+### NETGEN patch index
+
+Source key as above, plus **S** = SALOME (`netgenplugin` `src/NETGEN`) and **U** = netgen
+upstream (a backport). All apply at fuzz 0 in this order.
+
+| Patch | Src | What it does |
+|---|---|---|
+| `netgen/netgen62ForSalome.patch` | S | SALOME's netgen 6.2 patch, verbatim (`netgenplugin` `V9_16_0`, `src/NETGEN/netgen62ForSalome.patch`): the hooks NETGENPlugin calls. |
+| `netgen/occgenmesh_OCCT76.patch` | L | Reads `Poly_Triangulation` nodes through `Node()` and `UVNode()` (OCCT 7.6+). |
+| `netgen/Partition_Loop3d_occt781.patch` | L | The netgen section of looooo's `netgen_occt781.patch`: an include for OCCT 7.8. |
+| `netgen/0004-occt-8.0-netgen-partition.patch` | C | The netgen `Partition_*` sections of conda-forge's `0004-occt-8.0-compat.patch`. |
+| `netgen/0005-occt-8.0-netgen-occ.patch` | C | conda-forge's OCCT 8.0 pass on netgen's OCC files. |
+| `netgen/occgeom_save_without_stl.patch` | P | `OCCGeometry::Save` refuses STL output, so `_core` does not import OCCT's TKDESTL. |
+| `netgen/netgen_console_writes.patch` | P | Every direct `cout`/`cerr`/`clog` write of the compiled sources goes to netgen's own streams, which NETGENPlugin silences. |
+| `netgen/netgen_no_ngprofile.patch` | P | NGPROFILE no longer writes `netgen.prof` into the working directory. |
+| `netgen/e1d71a78_no_need_to_remove_archive_type_infos.patch` | U | Backport of netgen `e1d71a78` (v6.2.2105): a process that imported `_core` crashed at exit in about 6 of 20 runs (static destruction order of ngcore's archive register). |
+| `netgenplugin/NETGENPlugin_occt8.patch` | C | The NETGENPlugin sections of conda-forge's `0004-occt-8.0-compat.patch`, re-ported to `V9_16_0`. |
+| `netgenplugin/NETGENPlugin_local_size_by_subshape.patch` | P | A local size names a sub-shape by kind and ordinal, resolved through the mesh, not through the SALOME study (CORBA). |
+| `netgenplugin/NETGENPlugin_runtime_containment.patch` | P | No working-directory change, no file, no redirect of `std::cout`; netgen's messages, logger and debug stream silenced or kept in memory; `SALOME_NETGEN_DISABLE_MULTITHREADING` not read. |
+| `netgenplugin/NETGENPlugin_edge_local_size_ends.patch` | P | A local size on an edge holds up to its last vertex, and on an edge shorter than size / 1.5 (simple parameters gave a segment too few). |
+| `netgenplugin/NETGENPlugin_face_maxh_index.patch` | P | `SetFaceMaxH` takes the 1-based face number: a size given to a face went to the face before it. |
+| `netgenplugin/NETGENPlugin_curvature_before_read.patch` | P | The chordal error reads a face's curvature after OCCT computes it (OCCT 8's `RequireCurvature` read the cached value first): cylinder faces got no size. |
+| `netgenplugin/NETGENPlugin_debug_text_threads.patch` | P | netgen's in-memory debug stream takes one write at a time: worker threads reallocated it at once and corrupted the heap. |
+| `netgenplugin/NETGENPlugin_remesher_stl_topology.patch` | P | The remesher reads its STL topology through `STLGeometry*`: a cast to the second base read a garbage bounding box (random stack overflow). |
+| `netgenplugin/NETGENPlugin_remesher_no_parameters.patch` | P | The remesher with no parameters hypothesis no longer reads address 0 (`LoadLocalMeshSize` of a null name). |
+| `netgenplugin/NETGENPlugin_remesher_partial_result.patch` | P | A stopped or failed STL surface meshing (nglib returns NG_OK for both) is not taken for the remeshed mesh. |
 
 ### Patches that `V9_16_0` made obsolete
 
@@ -317,6 +362,20 @@ built: Draw, VTK, FreeImage, RapidJSON, FreeType, OpenGL and Tcl/Tk. A control b
 FreeType is OFF. TKService, which TKV3d and TKVCAF pull in, builds without it. FreeType
 serves only OCCT's text rendering (`Font_*`, `StdPrs_BRepFont`), and pySMESH calls none of
 it. So the wheel bundles no FreeType DLL.
+
+## How netgen is built
+
+netgen, its core library (ngcore), nglib, zlib and NETGENPlugin build inside the `_core`
+CMake project, as static libraries, from the staged trees: `cmake/Netgen/CMakeLists.txt`
+(targets `pysmesh_zlib`, `ngcore`, `netgen`, `nglib`) and
+`cmake/NETGENPlugin/CMakeLists.txt` (target `NETGENPlugin`). Every translation unit that
+includes a netgen header (netgen, the plugin, `src/bindings/mesher_netgen.cpp` and the
+probe's `tests/probe/probe_netgen.cpp`) compiles with the one define set
+`PYSMESH_NETGEN_DEFINITIONS` of `cmake/Netgen/CMakeLists.txt`. Another set would give
+`netgen::Mesh` another layout in one of them (`NO_PARALLEL_THREADS`, for example, is
+not in the set). netgen links OCCT from the same install as the rest of `_core` and
+adds no DLL to the wheel.
+`netgen_version.hpp` is generated from `cmake/Netgen/netgen_version.hpp.in`.
 
 ## Reference-only repositories
 

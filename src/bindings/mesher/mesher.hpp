@@ -161,6 +161,10 @@ class Params {
   // hypothesis (a layer distribution is a 1-D hypothesis inside a 3-D one).
   py::dict nested(const char* key);
 
+  // A list whose rows mix kinds, such as (sub-shape, size) pairs. The branch that reads it
+  // checks each value.
+  py::list list(const char* key);
+
   // Whether the caller sent `key`. Only for an option that upstream added after the
   // dataclass of its branch was written: the branch reads it when sent, so a caller that
   // does not know the option keeps the behaviour it had. done() still refuses an unread key.
@@ -465,11 +469,20 @@ class Mesher {
   // rather than failing later on a null shape.
   void ensure_shape(const char* op) const;
 
+  // Raise naming `op`: `name` cannot go on a mesher with no shape, or only on the whole
+  // mesh (works_without_shape) and not on `kind`.
+  [[noreturn]] void refuse_without_shape(const char* op, const std::string& name,
+                                         const std::string& kind) const;
+
   // Raise if a ViscousLayers (ViscousLayers2D) hypothesis reaches a SOLID (FACE) whose
   // algorithm does not build layers, or whose algorithm refuses the layer hypotheses there:
   // a second one where it reads one, or face sets that SMESH's layer check rejects. All
   // before anything is computed.
   void refuse_unread_layers() const;
+
+  // Whether a NETGEN algorithm is assigned anywhere, so that a compute must hold the
+  // process-wide NETGEN lock (mesher_netgen.cpp).
+  bool uses_netgen() const;
 
   // Raise if ViscousLayers2D reaches `face` (named `place`) while an algorithm of an
   // enclosing SOLID meshes that face itself, so that no 2-D algorithm reads the layers.
@@ -485,11 +498,21 @@ class Mesher {
   // hypotheses (HYP_CONCURRENT), and those hypotheses with where they are assigned.
   std::string describe_concurrency(const TopoDS_Shape& target, SMESH_Hypothesis* hyp) const;
 
+  // A NETGEN algorithm on `target` or below it that now reads `hyp` beside a hypothesis it
+  // cannot combine with it: the algorithm's own CheckHypothesis status (HYP_CONCURRENT or
+  // HYP_INCOMPAT_HYPS) in `status`, and a description; empty when there is none.
+  std::string netgen_conflict(const TopoDS_Shape& target, SMESH_Hypothesis* hyp,
+                              int& status) const;
+
   void clear_mesh();
 
   // The counts and the meshed sub-shapes of a successful compute, as compute() returns
   // them (mesher_core.cpp).
   py::dict success_report(const py::list& warnings) const;
+
+  // The outcome of a compute on a mesher with no shape (the NETGEN remesher): the report,
+  // or PysmeshError with the remesher's own text.
+  py::dict shape_free_outcome(bool ok) const;
 
   // One viscous-layer builder request, as the Python ViscousLayerBuilder sends it.
   struct LayerRequest {
@@ -608,6 +631,30 @@ py::dict block_parameters(const py::object& shape_obj, int solid_ordinal, int ve
 // Free functions defined in mesher_gmf.cpp.
 py::dict read_gmf(const std::string& path);
 void write_gmf(const std::string& path, const py::dict& mesh, const py::list& groups);
+
+// ---- NETGEN (mesher_netgen.cpp) ----------------------------------------------------- //
+// The NETGEN algorithms and hypotheses of NETGENPlugin, built by name like the rest of the
+// catalogue, or null for a name that is not NETGEN's. mesher_netgen.cpp is the only binding
+// file that includes netgen's headers.
+SMESH_Hypothesis* make_netgen(const std::string& name, Params& p, SMESH_Gen& gen,
+                              std::vector<std::unique_ptr<SMESH_Hypothesis>>& owned,
+                              const Mesher& m);
+
+// Whether `name` is a NETGEN algorithm: a compute that runs one holds netgen_mutex().
+bool is_netgen_algorithm(const std::string& name);
+
+// Whether `name` may be assigned on a mesher with no shape: NETGEN_Remesher_2D and its
+// NETGEN_RemesherParameters_2D, which remesh the triangles of the mesh itself.
+bool works_without_shape(const std::string& name);
+
+// Raise unless the mesh is one NETGEN_Remesher_2D can read: its faces have an area (with
+// every face degenerate netgen's STL path runs out of memory), and the fixed_edges group of
+// its parameters still exists.
+void check_remesher_input(SMESH_Mesh& mesh);
+
+// The one process-wide lock over netgen's global state (its meshing parameters, its
+// cancel flag, its streams and the plugin's local-size maps).
+std::mutex& netgen_mutex();
 
 }  // namespace mesher
 }  // namespace pysmesh

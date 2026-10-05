@@ -1,0 +1,28 @@
+pySMESH: NETGEN_Remesher_2D runs with no NETGEN_RemesherParameters_2D (NETGENPlugin
+V9_16_0; applies after NETGENPlugin_remesher_stl_topology.patch).
+
+Defect: NETGENPlugin_Remesher_2D::Compute calls
+ngMesh->LoadLocalMeshSize( ngParams.meshsize_filename ). With a parameters hypothesis the
+name is that hypothesis's mesh size file, "" by default. Without one it is the null pointer
+that the Ng_Meshing_Parameters constructor sets (nglib.cpp), and the std::string that
+Mesh::LoadLocalMeshSize takes is built from it: an access violation (0xC0000005) in every
+remesh with no parameters (pySMESH record g3/nr1_min.py, "without").
+
+Change, in NETGENPlugin_Remesher_2D.cxx only: LoadLocalMeshSize is called only for a name.
+Nothing else changes.
+
+diff --git a/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx b/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx
+--- a/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx
++++ b/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx
+@@ -723,7 +723,10 @@
+   ngMesh->SetLocalH( stlTopo->GetBoundingBox().PMin() - netgen::Vec3d(h, h, h),
+                      stlTopo->GetBoundingBox().PMax() + netgen::Vec3d(h, h, h),
+                      netgen::mparam.grading );
+-  ngMesh->LoadLocalMeshSize( ngParams.meshsize_filename );
++  // pySMESH: with no NETGEN_RemesherParameters_2D the file name is the null pointer of
++  // a default Ng_Meshing_Parameters, and a std::string made from it read address 0.
++  if ( ngParams.meshsize_filename )
++    ngMesh->LoadLocalMeshSize( ngParams.meshsize_filename );
+ 
+   netgen::OCCGeometry occgeo;
+   mesher.SetLocalSize( occgeo, *ngMesh );

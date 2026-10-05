@@ -76,6 +76,13 @@ from pysmesh import (  # noqa: E402
     Mefisto2D,
     Mesher,
     MinimumAngle,
+    Netgen1D2D,
+    Netgen1D2D3D,
+    Netgen2D,
+    Netgen3D,
+    NetgenParameters,
+    NetgenParameters2D,
+    NetgenSimpleParameters3D,
     NumberOfLayers,
     NumberOfLayers2D,
     NumberOfSegments,
@@ -971,6 +978,167 @@ def _medial_axis() -> dict[str, Value]:
         "branch_points": ma.branch_points,
         "boundary_edges": ma.boundary_edges,
     }
+
+
+# ---- NETGEN: netgen 6.2.2101 through NETGENPlugin (Phase 5) ------------------------ #
+
+# The primitives' exact volumes, for the volume error of a tetrahedral mesh of them.
+_CYLINDER_VOLUME: Final[float] = math.pi * 1.5**2 * 4.0
+_SPHERE_VOLUME: Final[float] = 4.0 / 3.0 * math.pi * 1.7**3
+_TORUS_VOLUME: Final[float] = 2.0 * math.pi**2 * 3.0 * 0.8**2
+# The six edges of a tetrahedron as corner pairs, each with the two corners off it.
+_TET_EDGES: Final[tuple[tuple[int, int, int, int], ...]] = (
+    (0, 1, 2, 3),
+    (0, 2, 1, 3),
+    (0, 3, 1, 2),
+    (1, 2, 0, 3),
+    (1, 3, 0, 2),
+    (2, 3, 0, 1),
+)
+
+
+def _primitive_shape(build: Callable[[Session], object]) -> ps.Shape:
+    """One primitive as a stateless shape."""
+    s = Session()
+    build(s)
+    return ps.load_brep(s.brep())
+
+
+def _min_dihedral_deg(md: ps.MeshData) -> float | None:
+    """The smallest dihedral angle of the linear or quadratic tetrahedra, in degrees."""
+    tets = np.isin(
+        md.element_type,
+        (int(ElementType.TETRAHEDRON), int(ElementType.QUAD_TETRAHEDRON)),
+    )
+    if not tets.any():
+        return None
+    start = md.element_offsets[:-1][tets]
+    corners = md.element_nodes[start[:, None] + np.arange(4)]
+    xyz = md.node_coords[corners]
+    smallest = math.inf
+    for i, j, k, m in _TET_EDGES:
+        edge = xyz[:, j] - xyz[:, i]
+        along = edge / np.linalg.norm(edge, axis=1)[:, None]
+        u = xyz[:, k] - xyz[:, i]
+        v = xyz[:, m] - xyz[:, i]
+        u -= np.sum(u * along, axis=1)[:, None] * along
+        v -= np.sum(v * along, axis=1)[:, None] * along
+        cosine = np.sum(u * v, axis=1) / (
+            np.linalg.norm(u, axis=1) * np.linalg.norm(v, axis=1)
+        )
+        smallest = min(
+            smallest, float(np.degrees(np.arccos(np.clip(cosine, -1, 1))).min())
+        )
+    return smallest
+
+
+def _netgen_stats(m: Mesher, cad_volume: float | None) -> dict[str, Value]:
+    """The mesh statistics, the volume error against the CAD, the smallest dihedral."""
+    out = _mesh_stats(m)
+    if cad_volume is not None:
+        meshed = out.get("cell_volume_sum")
+        assert isinstance(meshed, float)
+        out["volume_rel_error"] = abs(meshed - cad_volume) / cad_volume
+    out["min_dihedral_deg"] = _min_dihedral_deg(m.mesh())
+    return out
+
+
+def _netgen_1d2d3d(
+    build: Callable[[Session], object], size: float, volume: float
+) -> Probe:
+    """Netgen1D2D3D on one primitive at one max_size."""
+
+    def run() -> dict[str, Value]:
+        with Mesher(_primitive_shape(build)) as m:
+            m.assign(Netgen1D2D3D())
+            m.assign(NetgenParameters(max_size=size))
+            return _netgen_stats(m, volume)
+
+    return run
+
+
+for _name, _build, _size, _volume in (
+    ("box", lambda s: s.add_box(*_BOX), 2.0, float(np.prod(_BOX))),
+    ("cylinder", lambda s: s.add_cylinder(1.5, 4.0), 0.6, _CYLINDER_VOLUME),
+    ("sphere", lambda s: s.add_sphere(1.7), 0.5, _SPHERE_VOLUME),
+    ("torus", lambda s: s.add_torus(3.0, 0.8), 0.4, _TORUS_VOLUME),
+):
+    probe("netgen", f"netgen/1d2d3d_{_name}")(_netgen_1d2d3d(_build, _size, _volume))
+
+
+@probe("netgen", "netgen/1d2d_then_3d_partitioned_box")
+def _netgen_partitioned() -> dict[str, Value]:
+    s = Session()
+    s.add_box(2.0, 1.0, 1.0)
+    s.add_box(1.0, 1.0, 1.0)
+    s.fragment(list(s.entities(EntityKind.SOLID)))
+    with Mesher(ps.load_brep(s.brep())) as m:
+        m.assign(Netgen1D2D())
+        m.assign(NetgenParameters2D(max_size=0.3))
+        m.assign(Netgen3D())
+        m.assign(NetgenParameters(max_size=0.3))
+        return _netgen_stats(m, 2.0)
+
+
+@probe("netgen", "netgen/regular_2d_3d_cylinder")
+def _netgen_regular() -> dict[str, Value]:
+    with Mesher(_primitive_shape(lambda s: s.add_cylinder(1.5, 4.0))) as m:
+        m.assign(Regular1D())
+        m.assign(LocalLength(length=0.6))
+        m.assign(Netgen2D())
+        m.assign(Netgen3D())
+        return _netgen_stats(m, _CYLINDER_VOLUME)
+
+
+@probe("netgen", "netgen/quadrangle_faces_3d_box")
+def _netgen_quadrangle() -> dict[str, Value]:
+    with Mesher(_box_shape()) as m:
+        m.assign(Regular1D())
+        m.assign(NumberOfSegments(count=4))
+        m.assign(Quadrangle2D())
+        m.assign(Netgen3D())
+        return _netgen_stats(m, float(np.prod(_BOX)))
+
+
+@probe("netgen", "netgen/1d2d_sphere_surface")
+def _netgen_surface() -> dict[str, Value]:
+    with Mesher(_primitive_shape(lambda s: s.add_sphere(1.7))) as m:
+        m.assign(Netgen1D2D())
+        m.assign(NetgenParameters2D(max_size=0.4))
+        return _netgen_stats(m, None)
+
+
+@probe("netgen", "netgen/simple_3d_box")
+def _netgen_simple() -> dict[str, Value]:
+    with Mesher(_box_shape()) as m:
+        m.assign(Netgen1D2D3D())
+        m.assign(NetgenSimpleParameters3D(number_of_segments=4))
+        return _netgen_stats(m, float(np.prod(_BOX)))
+
+
+@probe("netgen", "netgen/second_order_sphere")
+def _netgen_second_order() -> dict[str, Value]:
+    with Mesher(_primitive_shape(lambda s: s.add_sphere(1.7))) as m:
+        m.assign(Netgen1D2D3D())
+        m.assign(NetgenParameters(max_size=0.6, second_order=True))
+        return _netgen_stats(m, None)
+
+
+@probe("netgen", "netgen/local_size_on_face_box")
+def _netgen_local_face() -> dict[str, Value]:
+    with Mesher(_box_shape()) as m:
+        m.assign(Netgen1D2D3D())
+        face = SubShape(SubShapeKind.FACE, 1)
+        m.assign(NetgenParameters(max_size=2.0, local_sizes=((face, 0.5),)))
+        return _netgen_stats(m, float(np.prod(_BOX)))
+
+
+@probe("netgen", "netgen/chordal_error_cylinder_surface")
+def _netgen_chordal() -> dict[str, Value]:
+    with Mesher(_primitive_shape(lambda s: s.add_cylinder(1.5, 4.0))) as m:
+        m.assign(Netgen1D2D())
+        m.assign(NetgenParameters2D(max_size=0.6, chordal_error=0.01))
+        return _netgen_stats(m, None)
 
 
 # ---- Known defects (docs/reports/defect_sweep_4.2.2.md): expected to change in Phase 4 ---- #

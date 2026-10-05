@@ -2,8 +2,9 @@
 #
 # Layout:
 #   extern/{smesh,kernel,geom,mefisto2,pthread}  pristine vendored upstream (never edited)
+#   extern/{netgen,netgenplugin,zlib}            pristine vendored upstream (never edited)
 #   prepare.py                                   stages + patches -> staged/
-#   cmake/{Kernel,Geom,SMESH}/CMakeLists.txt     per-module static-lib definitions
+#   cmake/{Kernel,Geom,SMESH,Netgen,NETGENPlugin}/CMakeLists.txt  static-lib definitions
 #   src/bindings/                                pybind11 module
 #
 # OCCT + VTK + Boost are dynamic and are all build-time only: every one of their DLLs is
@@ -149,6 +150,10 @@ endif()
 include(${CMAKE_SOURCE_DIR}/cmake/Kernel/CMakeLists.txt)
 include(${CMAKE_SOURCE_DIR}/cmake/Geom/CMakeLists.txt)
 include(${CMAKE_SOURCE_DIR}/cmake/SMESH/CMakeLists.txt)
+# netgen 6.2.2101, ngcore, nglib and zlib, static (NETGEN_STATIC_LIBS).
+include(${CMAKE_SOURCE_DIR}/cmake/Netgen/CMakeLists.txt)
+# NETGENPlugin V9_16_0, static (NETGENPLUGIN_STATIC_LIBS).
+include(${CMAKE_SOURCE_DIR}/cmake/NETGENPlugin/CMakeLists.txt)
 
 # --------------------------------------------------------------------------- #
 # Python extension module
@@ -190,8 +195,16 @@ pybind11_add_module(_core
     src/bindings/mesher_block.cpp
     src/bindings/mesher_gmf.cpp
     src/bindings/mesher_viscous.cpp
+    src/bindings/mesher_netgen.cpp
     src/bindings/mesher_bind.cpp)
 target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
+# mesher_netgen.cpp includes the NETGENPlugin headers, and through them netgen's own, so it
+# compiles with netgen's define set (cmake/Netgen/CMakeLists.txt). No other binding file
+# includes a netgen header.
+set_source_files_properties(src/bindings/mesher_netgen.cpp PROPERTIES
+    COMPILE_DEFINITIONS "${PYSMESH_NETGEN_DEFINITIONS}"
+    COMPILE_OPTIONS "${PYSMESH_NETGEN_OPTIONS}"
+    INCLUDE_DIRECTORIES "${PYSMESH_NETGEN_INCLUDE_DIRS};${NETGENPLUGIN_SRC_DIR}")
 # TKShHealing (ShapeUpgrade_UnifySameDomain), TKOffset (BRepOffsetAPI_*), and TKTopAlgo
 # (BRepClass3d_SolidClassifier) are pulled in transitively via the SMESH static libs, but the
 # bindings call them directly, so link them explicitly rather than lean on a transitive edge.
@@ -216,7 +229,8 @@ target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
 # deliberately NOT listed: OCCT 8.0 keeps BRepAlgoAPI_* in TKBO, and TKBool holds the legacy
 # TopOpeBRep engine plus BRepFill_PipeShell, which is reached only through TKOffset's facade.
 target_link_libraries(_core PRIVATE
-    ${SMESH_STATIC_LIBS} Geom Kernel
+    ${NETGENPLUGIN_STATIC_LIBS} ${SMESH_STATIC_LIBS} Geom Kernel
+    ${NETGEN_STATIC_LIBS}
     VTK::CommonCore VTK::CommonDataModel VTK::FiltersVerdict
     TKShHealing
     TKMesh
@@ -279,9 +293,8 @@ string(REGEX REPLACE "^version = \"([^\"]+)\".*" "\\1" PYSMESH_VERSION
 if(NOT PYSMESH_VERSION)
     message(FATAL_ERROR "pysmesh: pyproject.toml has no 'version = \"...\"' line")
 endif()
-if(NOT DEFINED PYSMESH_WITH_NETGEN)
-    set(PYSMESH_WITH_NETGEN "False")
-endif()
+# NETGEN (netgen 6.2.2101 and NETGENPlugin V9_16_0) is part of every build.
+set(PYSMESH_WITH_NETGEN "True")
 
 # Local-dev / in-tree layout: the pybind extension and the generated _build_info.py must
 # sit INSIDE the pysmesh package dir for the package's relative imports (`from ._core
@@ -314,10 +327,18 @@ if(PYSMESH_BUILD_V2_PROBE)
     add_executable(v2_probe
         tests/probe/probe_main.cpp
         tests/probe/probe_occt.cpp
-        tests/probe/probe_smesh.cpp)
+        tests/probe/probe_smesh.cpp
+        tests/probe/probe_netgen.cpp)
     target_include_directories(v2_probe PRIVATE ${CMAKE_SOURCE_DIR}/tests/probe)
+    # probe_netgen.cpp includes netgen and NETGENPlugin headers, so it gets netgen's own
+    # define set.
+    set_source_files_properties(tests/probe/probe_netgen.cpp PROPERTIES
+        COMPILE_DEFINITIONS "${PYSMESH_NETGEN_DEFINITIONS}"
+        COMPILE_OPTIONS "${PYSMESH_NETGEN_OPTIONS}"
+        INCLUDE_DIRECTORIES "${PYSMESH_NETGEN_INCLUDE_DIRS};${NETGENPLUGIN_SRC_DIR}")
     target_link_libraries(v2_probe PRIVATE
-        ${SMESH_STATIC_LIBS} Geom Kernel
+        ${NETGENPLUGIN_STATIC_LIBS} ${SMESH_STATIC_LIBS} Geom Kernel
+        ${NETGEN_STATIC_LIBS}
         VTK::CommonCore VTK::CommonDataModel VTK::FiltersVerdict
         TKShHealing TKMesh TKOffset TKTopAlgo TKPrim TKBO TKFillet TKFeat TKHelix
         TKDEIGES TKDESTEP TKXCAF TKVCAF TKLCAF TKCAF TKCDF TKXSBase

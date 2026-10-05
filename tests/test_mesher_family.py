@@ -71,6 +71,16 @@ from pysmesh import (
     MaxElementVolume,
     MaxLength,
     Mefisto2D,
+    Netgen1D2D,
+    Netgen1D2D3D,
+    Netgen2D,
+    Netgen3D,
+    NetgenParameters,
+    NetgenParameters2D,
+    NetgenRemesher2D,
+    NetgenRemesherParameters2D,
+    NetgenSimpleParameters2D,
+    NetgenSimpleParameters3D,
     Mesher,
     NotConformAllowed,
     NumberOfLayers,
@@ -254,6 +264,11 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
     (RadialPrism3D(), None),
     (Projection3D(), None),
     (PolyhedronPerSolid3D(), None),
+    # NETGEN algorithms
+    (Netgen1D2D(), None),
+    (Netgen2D(), None),
+    (Netgen1D2D3D(), None),
+    (Netgen3D(), None),
     # 1-D hypotheses
     (NumberOfSegments(count=4), None),
     (NumberOfSegments(count=4, distribution=Distribution.SCALE, scale_factor=3.0), None),
@@ -288,6 +303,11 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
     (NotConformAllowed(), None),
     # 2-D and 3-D hypotheses
     (MaxElementArea(max_area=4.0), None),
+    # NETGEN hypotheses
+    (NetgenParameters(max_size=2.0), None),
+    (NetgenParameters2D(max_size=2.0), None),
+    (NetgenSimpleParameters2D(number_of_segments=3), None),
+    (NetgenSimpleParameters3D(local_length=0.5, max_element_volume=0.5), None),
     (LengthFromEdges(), None),
     (MaxElementVolume(max_volume=8.0), None),
     (QuadranglePreference(), None),
@@ -381,6 +401,27 @@ def test_every_catalogue_entry_builds_and_attaches(
         assert mesher.assignments() == ((item.native_name, on),)
 
 
+# The entries that work only on a mesher with no shape: the NETGEN remesher and its
+# parameters, assigned on the whole mesh.
+_SHAPE_FREE_CATALOGUE: list[Algorithm | Hypothesis] = [
+    NetgenRemesher2D(),
+    NetgenRemesherParameters2D(max_size=0.5),
+]
+
+
+@pytest.mark.parametrize(
+    "item", _SHAPE_FREE_CATALOGUE, ids=[i.native_name for i in _SHAPE_FREE_CATALOGUE]
+)
+def test_every_shape_free_catalogue_entry_builds_and_attaches(
+    item: Algorithm | Hypothesis,
+) -> None:
+    """As above, on a mesher with no shape."""
+    with Mesher() as mesher:
+        mesher.assign(item)
+
+        assert mesher.assignments() == ((item.native_name, None),)
+
+
 def test_a_parameter_the_factory_does_not_read_is_refused() -> None:
     """The falsification for the test above: the drift check must be able to fail."""
     with Mesher(_box_shape()) as mesher:
@@ -411,7 +452,9 @@ def test_the_catalogue_covers_every_public_algorithm_and_hypothesis() -> None:
         and issubclass(getattr(mesher_module, name), (Algorithm, Hypothesis))
         and getattr(mesher_module, name) not in (Algorithm, Hypothesis)
     }
-    covered = {type(item).__name__ for item, _ in _CATALOGUE}
+    covered = {type(item).__name__ for item, _ in _CATALOGUE} | {
+        type(item).__name__ for item in _SHAPE_FREE_CATALOGUE
+    }
 
     assert exported == covered
 
