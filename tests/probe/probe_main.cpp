@@ -83,5 +83,6 @@ int main() {
   std::printf("pySMESH v2 capability probe\n");
   run_occt_probe();
   run_smesh_probe();
+  run_netgen_probe();
   return probe::summarize();
 }

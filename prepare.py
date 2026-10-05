@@ -28,7 +28,8 @@ looooo/SMESH patch series expects. Then it applies the patches and the source ed
    ``patches/smesh/SMESH_Gen_no_qt.patch``.
 3. The **conda-forge/smesh-feedstock** OCCT 8.0 layer (``patches/occt8/*.patch``).
 4. The netgen series (``patches/netgen/*.patch``): SALOME's ``netgen62ForSalome.patch``
-   verbatim, then the OCCT 8 port from looooo/SMESH and conda-forge.
+   verbatim, then the OCCT 8 port from looooo/SMESH and conda-forge, then the pySMESH
+   patches.
 5. The source edits in this file that no patch carries (see ``_apply_source_edits``).
 
 Every patch is re-ported to its tree and must apply exactly: every hunk at fuzz 0. A
@@ -135,6 +136,7 @@ PATCH_MANIFEST: Final[tuple[tuple[str, str], ...]] = (
     ("netgen/Partition_Loop3d_occt781.patch", "src/Netgen"),
     ("netgen/0004-occt-8.0-netgen-partition.patch", "."),
     ("netgen/0005-occt-8.0-netgen-occ.patch", "."),
+    ("netgen/occgeom_save_without_stl.patch", "src/Netgen"),
 )
 
 # netgen slice: the directories of extern/netgen that prepare.py copies to
