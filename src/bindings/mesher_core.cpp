@@ -965,44 +965,54 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
     }
   }
 
-  if (!ok || !failures.empty()) {
-    // A missing algorithm, or an algorithm without the hypothesis it needs, is an algorithm
-    // state of the sub-mesh, not a compute error: SMESH_Gen::Compute returns false and no
-    // sub-mesh carries an error text (report A6: "failed on 0 sub-shape(s)"). So each
-    // sub-mesh that was not computed is asked for its state. A VERTEX takes no algorithm of
-    // its own, and NO_ALGO counts only where an enclosing algorithm needs this mesh.
-    std::vector<std::pair<std::pair<std::size_t, int>, std::string>> states;
-    for (std::size_t k = 0; k < 3; ++k) {
-      for (TopExp_Explorer ex(data_->shape, kKindTypes[k]); ex.More(); ex.Next()) {
-        SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
-        if (sub == nullptr || sub->IsMeshComputed() ||
-            sub->GetAlgoState() == SMESH_subMesh::HYP_OK) {
-          continue;
-        }
-        const std::pair<const char*, int> at =
-            ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current()));
-        bool seen = false;
-        for (const auto& s : states) {
-          seen = seen || (s.first.first == k && s.first.second == at.second);
-        }
-        if (seen || at.second <= 0) {
-          continue;
-        }
-        std::string line = std::string(kKindNames[k]) + " " + std::to_string(at.second) + ": ";
-        if (sub->GetAlgoState() == SMESH_subMesh::NO_ALGO) {
-          if (!needs_own_algorithm(*mesh_, ex.Current())) {
-            continue;
-          }
-          line += "no algorithm is assigned to it (algorithm state NO_ALGO)";
-        } else {
-          const SMESH_Algo* algo = sub->GetAlgo();
-          line += std::string(algo != nullptr && algo->GetName() != nullptr ? algo->GetName()
-                                                                            : "its algorithm") +
-                  " is missing a hypothesis it needs (algorithm state MISSING_HYP)";
-        }
-        states.push_back({{k, at.second}, line});
+  // A missing algorithm, or an algorithm without the hypothesis it needs, is an algorithm
+  // state of the sub-mesh, not a compute error: no sub-mesh carries an error text (report
+  // A6: "failed on 0 sub-shape(s)"). So each sub-mesh that was not computed is asked for its
+  // state. NO_ALGO counts only after a failed compute, where an enclosing algorithm needs
+  // this mesh. A sub-mesh whose algorithm misses its hypothesis is never computed, but
+  // SMESH_Gen::Compute returns false only for a compute that failed
+  // (SMESH_Gen::sequentialComputeSubMeshes), so it returned true with that sub-shape left
+  // without a mesh (M3). So the states are asked after every compute, and MISSING_HYP fails
+  // a compute that SMESH reports as done. A VERTEX keeps its node whatever its algorithm
+  // does: only its 0-D algorithm (SegmentAroundVertex_0D) counts, when it misses its
+  // hypothesis and so does nothing.
+  const bool failed = !ok || !failures.empty();
+  std::vector<std::pair<std::pair<std::size_t, int>, std::string>> states;
+  for (std::size_t k = 0; k < 4; ++k) {
+    const bool is_vertex = kKindTypes[k] == TopAbs_VERTEX;
+    for (TopExp_Explorer ex(data_->shape, kKindTypes[k]); ex.More(); ex.Next()) {
+      SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
+      if (sub == nullptr || (sub->IsMeshComputed() && !is_vertex) ||
+          sub->GetAlgoState() == SMESH_subMesh::HYP_OK ||
+          (is_vertex && sub->GetAlgoState() != SMESH_subMesh::MISSING_HYP)) {
+        continue;
       }
+      const std::pair<const char*, int> at =
+          ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current()));
+      bool seen = false;
+      for (const auto& s : states) {
+        seen = seen || (s.first.first == k && s.first.second == at.second);
+      }
+      if (seen || at.second <= 0) {
+        continue;
+      }
+      std::string line = std::string(kKindNames[k]) + " " + std::to_string(at.second) + ": ";
+      if (sub->GetAlgoState() == SMESH_subMesh::NO_ALGO) {
+        if (!failed || !needs_own_algorithm(*mesh_, ex.Current())) {
+          continue;
+        }
+        line += "no algorithm is assigned to it (algorithm state NO_ALGO)";
+      } else {
+        const SMESH_Algo* algo = sub->GetAlgo();
+        line += std::string(algo != nullptr && algo->GetName() != nullptr ? algo->GetName()
+                                                                          : "its algorithm") +
+                " is missing a hypothesis it needs (algorithm state MISSING_HYP)";
+      }
+      states.push_back({{k, at.second}, line});
     }
+  }
+
+  if (failed || !states.empty()) {
     std::sort(states.begin(), states.end());
     for (const auto& s : states) {
       failures.push_back(s.second);

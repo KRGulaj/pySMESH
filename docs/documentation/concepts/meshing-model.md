@@ -302,6 +302,18 @@ except pysmesh.PysmeshError as exc:
     partial = mesher.mesh()  # whatever was built before the failure
 ```
 
+**A missing algorithm or hypothesis is named by its state.** A sub-shape without an
+algorithm, where an enclosing algorithm needs its mesh, holds the algorithm state
+`NO_ALGO`; an algorithm without a hypothesis it needs holds `MISSING_HYP`. Neither is a
+compute error in SMESH, so the failure names each such sub-shape with its algorithm and its
+state, for example `SOLID 1: Cartesian_3D is missing a hypothesis it needs (algorithm state
+MISSING_HYP)`. SMESH reports a compute as done when such a sub-shape is simply left
+unmeshed: `Cartesian3D` without `CartesianParameters3D` made no volume, and `Projection2D`
+without a source left its face empty. `compute()` raises for those too. A vertex keeps its
+node, but `SegmentAroundVertex0D` without `SegmentLengthAroundVertex` does nothing, so it
+is named as well. A sub-shape with no algorithm of its own is no error where an enclosing
+algorithm meshes it, or where nothing needs its mesh, as for the solid under a surface mesh.
+
 Cancellation is different from failure: if `cancel` returns `True`, or `progress` raises,
 `compute()` raises `PysmeshCancelled` and the mesh is cleared, so nothing partial survives.
 
