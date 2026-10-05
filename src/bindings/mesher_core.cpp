@@ -435,6 +435,19 @@ void Mesher::ensure_open() const {
   }
 }
 
+void Mesher::refuse_without_shape(const char* op, const std::string& name,
+                                  const std::string& kind) const {
+  if (!works_without_shape(name)) {
+    throw PysmeshError(std::string(op) + ": this mesher has no shape, so '" + name +
+                           "' has nothing to run on.",
+                       "A mesher built from arrays takes only the NETGEN remesher "
+                       "(NetgenRemesher2D with NetgenRemesherParameters2D), which meshes "
+                       "the mesh's own triangles again.");
+  }
+  throw PysmeshError(std::string(op) + ": this mesher has no shape, so '" + name +
+                     "' goes on the whole mesh (on=None), not on " + kind + ".");
+}
+
 void Mesher::ensure_shape(const char* op) const {
   if (data_ != nullptr) {
     return;
@@ -648,8 +661,23 @@ std::pair<const char*, int> Mesher::ordinal_of_shape_index(int shape_index) cons
 void Mesher::assign(const std::string& name, const py::dict& params, const std::string& kind,
                     int ordinal) {
   ensure_open();
-  ensure_shape("Mesher.assign");
-  const TopoDS_Shape& target = sub_shape(kind, ordinal);  // validates kind and ordinal
+  // A mesher with no shape takes the NETGEN remesher and its parameters, on the whole mesh:
+  // SMESH holds them on its pseudo-shape (SMESH_Mesh::PseudoShape) and computes them on the
+  // mesh alone. Everything else needs a shape.
+  if (data_ == nullptr && !(kind.empty() && works_without_shape(name))) {
+    refuse_without_shape("Mesher.assign", name, kind);
+  }
+  // The remesher and its parameters only work on a mesh alone: on a shape, NETGEN_Remesher_2D
+  // computes nothing and returns false (NETGENPlugin_Remesher_2D.cxx).
+  if (data_ != nullptr && works_without_shape(name)) {
+    throw PysmeshError("Mesher.assign: '" + name + "' remeshes a mesher with no shape; this "
+                       "one has a shape.",
+                       "Build the mesher with shape=None (or Mesher.from_arrays) from the "
+                       "triangles to remesh. On a shape, mesh the faces with Netgen1D2D or "
+                       "Netgen2D.");
+  }
+  const TopoDS_Shape& target =
+      data_ == nullptr ? mesh_->GetShapeToMesh() : sub_shape(kind, ordinal);  // validates
 
   SMESH_Hypothesis* hyp = build(name, params);  // ownership taken inside build()
   const int hyp_id = hyp->GetID();
@@ -747,8 +775,11 @@ std::string Mesher::netgen_conflict(const TopoDS_Shape& target, SMESH_Hypothesis
 
 void Mesher::unassign(const std::string& name, const std::string& kind, int ordinal) {
   ensure_open();
-  ensure_shape("Mesher.unassign");
-  const TopoDS_Shape& target = sub_shape(kind, ordinal);
+  if (data_ == nullptr && !(kind.empty() && works_without_shape(name))) {
+    refuse_without_shape("Mesher.unassign", name, kind);
+  }
+  const TopoDS_Shape& target =
+      data_ == nullptr ? mesh_->GetShapeToMesh() : sub_shape(kind, ordinal);
   for (auto it = assigned_.begin(); it != assigned_.end(); ++it) {
     if (it->name != name || it->kind != kind || it->ordinal != ordinal) {
       continue;
@@ -777,13 +808,31 @@ py::list Mesher::assignments() const {
 
 py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
   ensure_open();
-  ensure_shape("Mesher.compute");
+  // With no shape only the NETGEN remesher computes: on the mesh's own triangles, on the
+  // pseudo-shape that holds it (Mesher::assign).
+  const bool shape_free = data_ == nullptr;
+  if (shape_free) {
+    bool remesher = false;
+    for (const Assignment& a : assigned_) {
+      remesher = remesher || a.name == "NETGEN_Remesher_2D";
+    }
+    if (!remesher) {
+      ensure_shape("Mesher.compute");
+    }
+    if (meshDS_->NbFaces() == 0) {
+      throw PysmeshError("Mesher.compute: the NETGEN remesher has nothing to remesh: this "
+                         "mesher holds no face.");
+    }
+    check_remesher_input(*mesh_);
+  }
   if (assigned_.empty()) {
     throw PysmeshError("Mesher.compute: nothing is assigned. Assign at least an algorithm "
                        "before computing.");
   }
 
-  refuse_unread_layers();
+  if (!shape_free) {
+    refuse_unread_layers();
+  }
 
   ProgressHooks hooks;
   if (!progress.is_none()) {
@@ -813,12 +862,23 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
   // (SMESH_Gen_i::Compute); without it, one cancel made every later compute of this mesher
   // fail with no error text. Called before the driver starts, so it never clears a cancel
   // of this run.
-  gen_->PrepareCompute(*mesh_, data_->shape);
-  ComputeDriver driver(*mesh_, *gen_, data_->shape, hooks);
+  const TopoDS_Shape& target = shape_free ? mesh_->GetShapeToMesh() : data_->shape;
+  // The remesher marks the pseudo-shape always computed once it has replaced the mesh
+  // (NETGENPlugin_Remesher_2D.cxx); a set mark before the run means SMESH runs nothing.
+  SMESH_subMesh* const pseudo = shape_free ? mesh_->GetSubMesh(target) : nullptr;
+  const bool remeshed_before = pseudo != nullptr && pseudo->IsAlwaysComputed();
+  // A failed or cancelled remesh leaves the pseudo-shape FAILED_TO_COMPUTE, and SMESH
+  // computes nothing there until its algorithm state changes. The mesh is the input either
+  // way, so the state is reset and the remesher runs on it again.
+  if (shape_free && !remeshed_before) {
+    pseudo->ComputeStateEngine(SMESH_subMesh::MODIF_ALGO_STATE);
+  }
+  gen_->PrepareCompute(*mesh_, target);
+  ComputeDriver driver(*mesh_, *gen_, target, hooks);
   bool ok = false;
   if (!driver.cancelled()) {
     py::gil_scoped_release release;
-    ok = gen_->Compute(*mesh_, data_->shape);
+    ok = gen_->Compute(*mesh_, target);
   }
   // finish() re-raises an exception a hook threw, with its own type. A raising hook is a
   // cancel, so the mesh is cleared first: a cancel leaves no partial mesh, and before this
@@ -834,12 +894,26 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
   // landing late gives a complete mesh and the same `false`, and an ordinary failure gives
   // `false` with no cancel at all. Checked before the failure path so a cancelled run is not
   // reported as an impossible assignment.
+  if (driver.cancelled() && shape_free) {
+    // The remesher replaces the mesh only after netgen finished, and binds nothing to a
+    // sub-shape, so there is nothing to clear: the mesh is the input or the whole result.
+    const bool replaced = !remeshed_before && pseudo->IsAlwaysComputed();
+    throw CancelledError("Mesher.compute: cancelled by the caller.",
+                         replaced ? "The cancel came after the NETGEN remesher replaced the "
+                                    "mesh: the mesh is the remeshed one."
+                                  : "The NETGEN remesher did not replace the mesh: the mesh "
+                                    "is as it was before this compute.");
+  }
   if (driver.cancelled()) {
     clear_mesh();
     throw CancelledError("Mesher.compute: cancelled by the caller.",
                          "The mesh was cleared: nothing partial is returned. Cancellation is "
                          "not preemptive — only a few algorithms poll it inside their own "
                          "loop, so a long single algorithm runs to its end before stopping.");
+  }
+
+  if (shape_free) {
+    return shape_free_outcome(ok);
   }
 
   // SMESH_ComputeError is attached to the sub-mesh that actually failed, not to the
@@ -981,6 +1055,30 @@ py::dict Mesher::success_report(const py::list& warnings) const {
   }
   out["meshed"] = meshed;
   out["warnings"] = warnings;
+  return out;
+}
+
+py::dict Mesher::shape_free_outcome(bool ok) const {
+  // The remesher reports on the pseudo-shape's sub-mesh. Its only warning ("No faces in
+  // input mesh") cannot arise, since compute() refuses a mesh with no face first, so any
+  // error text there is a failure.
+  SMESH_subMesh* sub = mesh_->GetSubMesh(mesh_->GetShapeToMesh());
+  const SMESH_ComputeErrorPtr err = sub != nullptr ? sub->GetComputeError() : nullptr;
+  if (!ok || (err && !err->IsOK())) {
+    std::string details =
+        err && !err->myComment.empty() ? err->myComment : std::string("no message");
+    if (err && err->myAlgo != nullptr && err->myAlgo->GetName() != nullptr) {
+      details += std::string(" (algorithm ") + err->myAlgo->GetName() + ")";
+    }
+    throw PysmeshError("Mesher.compute: remeshing failed.", details);
+  }
+  py::dict out;
+  out["nodes"] = static_cast<std::int64_t>(meshDS_->NbNodes());
+  out["edges"] = static_cast<std::int64_t>(meshDS_->NbEdges());
+  out["faces"] = static_cast<std::int64_t>(meshDS_->NbFaces());
+  out["volumes"] = static_cast<std::int64_t>(meshDS_->NbVolumes());
+  out["meshed"] = py::list();
+  out["warnings"] = py::list();
   return out;
 }
 

@@ -344,6 +344,20 @@ class Netgen2D(Algorithm):
     native_name: ClassVar[str] = "NETGEN_2D_ONLY"
 
 
+@dataclass(frozen=True)
+class NetgenRemesher2D(Algorithm):
+    """Mesh the triangles of a mesher with no shape again, with NETGEN.
+
+    It is the one algorithm a mesher built with ``shape=None`` takes, assigned on the
+    whole mesh (``on=None``). NETGEN reads the triangles (a quadrangle as two) as an STL
+    surface, splits it into charts at its feature edges, and meshes each chart anew. The
+    result replaces the mesh, bound to no sub-shape. It reads
+    :class:`NetgenRemesherParameters2D`.
+    """
+
+    native_name: ClassVar[str] = "NETGEN_Remesher_2D"
+
+
 # ---- 3-D algorithms -------------------------------------------------------------------- #
 
 
@@ -1216,6 +1230,95 @@ class NetgenSimpleParameters3D(NetgenSimpleParameters2D):
         _check_positive(
             type(self).__name__, "max_element_volume", self.max_element_volume
         )
+
+
+@dataclass(frozen=True)
+class NetgenRemesherParameters2D(_OptionalFields):
+    """The parameters of :class:`NetgenRemesher2D`.
+
+    The remesher meshes the triangles as an STL surface. Feature edges cut it into
+    charts, and each chart is meshed as one surface. Each ``*_factor`` field turns
+    on one way of limiting the element size, with that factor; None turns it off.
+    The defaults are the plugin's (``NETGENPlugin_RemesherHypothesis_2D``).
+
+    Attributes:
+        max_size: The largest element edge.
+        min_size: The smallest element size NETGEN refines to; 0 for no limit.
+        quad_allowed: Make a quad-dominant mesh.
+        ridge_angle: The angle in degrees between the normals of two adjacent triangles
+            above which their shared edge is a feature edge. Feature edges bound the
+            charts, and the new mesh keeps them as edges.
+        edge_corner_angle: The angle in degrees between two adjacent chart boundary
+            edges above which their shared point ends a boundary curve.
+        chart_angle: The angle in degrees between the normals of adjacent triangles
+            under which an edge that is not a feature edge does not bound a chart.
+        outer_chart_angle: The angle in degrees for the overlapping parts of a chart.
+        chart_distance_factor: Limit the size by the distance to the next chart.
+        line_length_factor: Limit the size near the ends of a chart boundary curve by
+            the length of that curve.
+        surface_curvature_factor: Limit the size by the curvature of the surface.
+        edge_angle_factor: Limit the size by the curvature of the chart boundary curves.
+        surface_mesh_curvature_factor: Elements per radius of curvature of the input
+            triangles.
+        keep_existing_edges: Keep the segments of the input mesh as chart boundaries.
+        make_groups_of_surfaces: Put the new faces of each chart into a FACE group named
+            ``Surface_<n>``.
+        fixed_edges: The name of a group of EDGE elements of the same mesher. Each node
+            of these edges that lies on a feature edge stays a node of the new mesh:
+            a feature line ends there. A node elsewhere is not kept. None for no
+            group. The remesh removes the old edges, so the group is empty after.
+    """
+
+    native_name: ClassVar[str] = "NETGEN_RemesherParameters_2D"
+
+    max_size: float = 1000.0
+    min_size: float = 0.0
+    quad_allowed: bool = False
+    ridge_angle: float = 30.0
+    edge_corner_angle: float = 60.0
+    chart_angle: float = 15.0
+    outer_chart_angle: float = 70.0
+    chart_distance_factor: float | None = 1.2
+    line_length_factor: float | None = 0.5
+    surface_curvature_factor: float | None = None
+    edge_angle_factor: float | None = None
+    surface_mesh_curvature_factor: float | None = None
+    keep_existing_edges: bool = False
+    make_groups_of_surfaces: bool = False
+    fixed_edges: str | None = None
+
+    def __post_init__(self) -> None:
+        """Refuse a size, an angle or a factor the plugin would misread."""
+        owner = type(self).__name__
+        _check_positive(owner, "max_size", self.max_size)
+        if not 0.0 <= self.min_size <= self.max_size:
+            raise PysmeshError(
+                f"{owner}: min_size must lie in [0, max_size] "
+                f"(got {self.min_size}, max_size {self.max_size})."
+            )
+        for name in (
+            "ridge_angle",
+            "edge_corner_angle",
+            "chart_angle",
+            "outer_chart_angle",
+        ):
+            value = getattr(self, name)
+            if not 0.0 < value <= 180.0:
+                raise PysmeshError(
+                    f"{owner}: {name} must lie in (0, 180] degrees (got {value})."
+                )
+        for name in (
+            "chart_distance_factor",
+            "line_length_factor",
+            "surface_curvature_factor",
+            "edge_angle_factor",
+            "surface_mesh_curvature_factor",
+        ):
+            _check_positive(owner, name, getattr(self, name))
+        if self.fixed_edges is not None and not self.fixed_edges:
+            raise PysmeshError(
+                f"{owner}: fixed_edges names a group; it cannot be empty."
+            )
 
 
 # ---- Hypotheses that name another part of the model ------------------------------------ #

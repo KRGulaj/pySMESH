@@ -1,0 +1,35 @@
+pySMESH: NETGEN_Remesher_2D reads its STL topology at the right address (NETGENPlugin
+V9_16_0; applies after NETGENPlugin_debug_text_threads.patch).
+
+Defect: NETGENPlugin_Remesher_2D::Compute writes
+netgen::STLTopology* stlTopo = (netgen::STLTopology*) ngStlGeo;
+ngStlGeo is the Ng_STL_Geometry* that Ng_STL_NewGeometry() returns, the address of a
+netgen::STLGeometry. In netgen 6 that class is
+class STLGeometry : public NetgenGeometry, public STLTopology (libsrc/stlgeom/stlgeom.hpp),
+so its STLTopology part does not start at that address, and the C-style cast does not
+adjust it. stlTopo->GetBoundingBox() then reads other bytes of the object. The remesher
+builds netgen's local size tree from that box (ngMesh->SetLocalH), sizes a remesh with no
+parameters from its diagonal, and prints stlTopo->GetStatusText() on a failure. Measured
+(pySMESH record g3): about 1 process in 3 that remeshes an icosphere three times ended in a
+stack overflow, an endless netgen::LocalH::SetH recursion on a NaN size; AddressSanitizer
+with the heap filled with 0xFF bytes made it certain, and showed the local size tree built
+from the box (pmin x and y NaN).
+
+Change, in NETGENPlugin_Remesher_2D.cxx only: stlTopo is converted through STLGeometry*, so
+the compiler adjusts the address to the STLTopology base. Nothing else changes.
+
+diff --git a/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx b/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx
+--- a/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx
++++ b/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx
+@@ -589,7 +589,10 @@
+   NETGENPlugin_NetgenLibWrapper ngLib;
+   netgen::Mesh *        ngMesh = (netgen::Mesh*) ngLib._ngMesh;
+   Ng_STL_Geometry *   ngStlGeo = Ng_STL_NewGeometry();
+-  netgen::STLTopology* stlTopo = (netgen::STLTopology*) ngStlGeo;
++  // pySMESH: ngStlGeo points to a netgen::STLGeometry, whose STLTopology base comes
++  // second (class STLGeometry : public NetgenGeometry, public STLTopology), so a
++  // straight cast to STLTopology read the bounding box from another member's bytes.
++  netgen::STLTopology* stlTopo = (netgen::STLGeometry*) ngStlGeo;
+   netgen::multithread.terminate = 0;
+ 
+   const NETGENPlugin_RemesherHypothesis_2D* hyp =

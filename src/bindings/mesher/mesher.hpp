@@ -465,6 +465,11 @@ class Mesher {
   // rather than failing later on a null shape.
   void ensure_shape(const char* op) const;
 
+  // Raise naming `op`: `name` cannot go on a mesher with no shape, or only on the whole
+  // mesh (works_without_shape) and not on `kind`.
+  [[noreturn]] void refuse_without_shape(const char* op, const std::string& name,
+                                         const std::string& kind) const;
+
   // Raise if a ViscousLayers (ViscousLayers2D) hypothesis reaches a SOLID (FACE) whose
   // algorithm does not list it among the hypotheses it reads, before anything is computed.
   void refuse_unread_layers() const;
@@ -488,6 +493,10 @@ class Mesher {
   // The counts and the meshed sub-shapes of a successful compute, as compute() returns
   // them (mesher_core.cpp).
   py::dict success_report(const py::list& warnings) const;
+
+  // The outcome of a compute on a mesher with no shape (the NETGEN remesher): the report,
+  // or PysmeshError with the remesher's own text.
+  py::dict shape_free_outcome(bool ok) const;
 
   // One viscous-layer builder request, as the Python ViscousLayerBuilder sends it.
   struct LayerRequest {
@@ -616,6 +625,15 @@ SMESH_Hypothesis* make_netgen(const std::string& name, Params& p, SMESH_Gen& gen
 
 // Whether `name` is a NETGEN algorithm: a compute that runs one holds netgen_mutex().
 bool is_netgen_algorithm(const std::string& name);
+
+// Whether `name` may be assigned on a mesher with no shape: NETGEN_Remesher_2D and its
+// NETGEN_RemesherParameters_2D, which remesh the triangles of the mesh itself.
+bool works_without_shape(const std::string& name);
+
+// Raise unless the mesh is one NETGEN_Remesher_2D can read: its faces have an area (with
+// every face degenerate netgen's STL path runs out of memory), and the fixed_edges group of
+// its parameters still exists.
+void check_remesher_input(SMESH_Mesh& mesh);
 
 // The one process-wide lock over netgen's global state (its meshing parameters, its
 // cancel flag, its streams and the plugin's local-size maps).
