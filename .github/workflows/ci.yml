@@ -153,7 +153,9 @@ jobs:
       - name: Build wheel
         env:
           PYSMESH_DEV_ASSERTS: "ON" # extra input validation in CI only
-        # CMakeLists.txt takes OCCT only from PYSMESH_OCCT_ROOT, and only at 8.0.1.
+        # CMakeLists.txt takes OCCT only from PYSMESH_OCCT_ROOT, and only at 8.0.1. netgen,
+        # ngcore, nglib, zlib and NETGENPlugin build here too, as static parts of _core
+        # (cmake/Netgen, cmake/NETGENPlugin), from the trees prepare.py staged.
         run: |
           pip wheel . --no-build-isolation --no-deps -w dist \
             -C cmake.define.PYSMESH_OCCT_ROOT="$OCCT_ROOT/install"
@@ -176,7 +178,7 @@ jobs:
               -w dist/repaired "$whl"
           done
 
-      - name: Assert the repaired wheel is self-contained (OCCT + Boost + VTK, honest ABI tag)
+      - name: Assert the repaired wheel is self-contained (OCCT + Boost + VTK, no netgen DLL, honest ABI tag)
         run: python ci/check_wheel.py dist/repaired/*.whl
 
       - name: Validate PyPI metadata and README rendering

@@ -9,6 +9,11 @@ a failure, because VTK was resolved from the host environment. It is now a requi
 wheel without it would fall back to whatever VTK the host happens to expose, which is the
 silent-ABI hazard the private copy exists to remove.
 
+netgen is the opposite case. netgen, its core library ngcore, nglib and the zlib they
+use are static libraries inside ``_core.pyd`` (``cmake/Netgen/CMakeLists.txt``), so a
+DLL of any of them in the bundle is a failure: it means the build linked a shared copy,
+which adds a DLL and can bring a second netgen into the host's process.
+
 It also checks the wheel's ABI tag. ``_core`` is a pybind11 module, and pybind11 does not
 support ``Py_LIMITED_API``, so the built extension is version-locked
 (``_core.cp313-win_amd64.pyd``). An ``abi3`` tag on such a wheel is a false promise: pip
@@ -54,6 +59,12 @@ _V2_MODELLING_TOOLKITS = (
     "tkexpress",  # ExprIntrp, reached by the mesher's expression-based 1-D distributions
     "tkdeiges",  # IGESControl_{Reader,Writer}, called by read_iges / write_iges
 )
+
+
+# Libraries built static into _core.pyd. delvewheel mangles a bundled DLL to
+# ``<stem>-<hash>.dll``, so match on the stem as a prefix. VTK's own ``vtkzlib`` starts
+# with ``vtk`` and does not match.
+_STATIC_IN_CORE = ("netgen", "ngcore", "nglib", "zlib")
 
 
 def _check_abi_tag(wheel: str) -> list[str]:
@@ -111,6 +122,7 @@ def _check(wheel: str) -> None:
     missing_modelling = [
         tk for tk in _V2_MODELLING_TOOLKITS if not any(n.startswith(tk) for n in dll_names)
     ]
+    shared_static = [n for n in dll_names if n.startswith(_STATIC_IN_CORE)]
 
     problems: list[str] = list(tag_problems)
     if not has_occt:
@@ -136,12 +148,18 @@ def _check(wheel: str) -> None:
         problems.append(
             "v2 modelling toolkits missing from the bundle: " + ", ".join(missing_modelling)
         )
+    if shared_static:
+        problems.append(
+            "netgen, ngcore, nglib and zlib are static in _core.pyd, but the bundle "
+            "carries a DLL of them: " + ", ".join(shared_static)
+        )
 
     if problems:
         raise SystemExit(f"{wheel}: " + "; ".join(problems))
     print(
         f"OK {wheel}: honest ABI tag, self-contained "
-        f"(OCCT + Boost + {len(vtk_bundled)} VTK DLLs, {len(dll_names)} total)"
+        f"(OCCT + Boost + {len(vtk_bundled)} VTK DLLs, {len(dll_names)} total, "
+        "no netgen DLL)"
     )
 
 
