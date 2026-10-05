@@ -227,7 +227,12 @@ class Mefisto2D(Algorithm):
 
 @dataclass(frozen=True)
 class PolygonPerFace2D(Algorithm):
-    """One polygonal element per face, using the edge discretisation as its boundary."""
+    """One polygonal element per face, using the edge discretisation as its boundary.
+
+    With :class:`ViscousLayers2D` it grows the quadrangle layers on the chosen edges
+    first, and the polygon fills the rest of the face, its sides the inner sides of the
+    layer cells.
+    """
 
     native_name: ClassVar[str] = "PolygonPerFace_2D"
 
@@ -307,7 +312,10 @@ class Cartesian3D(Algorithm):
     layer nodes divide it at the closed-form fractions of the stack. The shrunk mesh
     keeps every cut cell that has volume, whatever ``size_threshold`` says, so the
     layers have no gap. A stack too thick for the shape, where one shrunk surface meets
-    another, fails the compute on the SOLID and leaves no cell.
+    or crosses another, fails the compute on the SOLID and leaves no cell; the error
+    names the largest total thickness for which the shrink works, found by bisection.
+    Keep a margin below it: where shrunk surfaces come closer together than the grid
+    spacing can follow, the layer cells fold over, and the compute fails there too.
 
     Sized by :class:`CartesianParameters3D`.
     """
@@ -332,10 +340,14 @@ class CompositeHexa3D(Algorithm):
     The counterpart of :class:`Hexa3D` for a block an import has cut into more than six
     faces.
 
-    It builds no viscous layers. With :class:`ViscousLayers` on its solid,
-    :meth:`~pysmesh.Mesher.compute` raises before it meshes anything; SMESH's own
-    compute crashed there, because the layer cells on the side faces break its block
-    grid. Use :class:`Hexa3D` for a block with layers.
+    With :class:`ViscousLayers` on its solid it builds the layers, one hypothesis per
+    solid, as :class:`Hexa3D` does; :class:`Hexa3D` hands a block of more than six faces
+    to it. Where the split of a side does not meet the layers, the mesh is the one
+    :class:`Hexa3D` makes on the same block with six faces. Where it does, it differs
+    there: a vertex of the split keeps its node when the layers shrink a side face (on a
+    2 x 1 x 1 block of two fused cubes, up to 0.1 away from the six-face mesh), and with
+    layers on the faces around a split wall SMESH's smoothing thins that wall's stack
+    near the split by about 1 %.
     """
 
     native_name: ClassVar[str] = "CompositeHexa_3D"
@@ -358,11 +370,22 @@ class Prism3D(Algorithm):
     global 2-D algorithm only, a face that is not a quadrangle marks the source. If
     every face reads as a quadrangle, Prism3D tries the faces in turn.
 
-    A side face whose bottom or top side has more than one edge cannot be swept
-    through, for example where a cap edge is split under a whole one: Prism3D projects
-    onto the first edge of a side only. It then tries another face as the source. If
-    none fits, the compute fails and names, for each face, why it is not the source.
-    Split the opposite cap edge too, so that the side face becomes two quadrangles.
+    A side face whose bottom or top side has more than one edge has a composite side,
+    for example where a cap edge is split under a whole one. Prism3D projects the
+    opposite side onto it as a whole. It sweeps through that face only if the edges of
+    the composite side join smoothly, as the parts of a split edge do, each split point
+    gets a node, and each edge of the composite side gets the number of segments that
+    its own 1-D hypothesis gives. Inside an edge, the projection places the nodes, as on
+    every edge of the target cap. Otherwise Prism3D tries another face as the source. If
+    none fits, the compute fails and names, for each face, why it is not the source. The
+    way out: split the opposite cap edge at the same points, or give the split edges the
+    segments that the opposite side puts on them. A quadratic mesh is refused on a
+    composite side.
+
+    It builds no viscous layers of its own, but it sweeps the 2-D layers of its source
+    face: put :class:`ViscousLayers2D` on that face, beside a 2-D algorithm assigned on
+    that face alone. :meth:`~pysmesh.Mesher.compute` refuses 2-D layers on any other
+    face of the solid.
     """
 
     native_name: ClassVar[str] = "Prism_3D"
@@ -958,9 +981,19 @@ class ProjectionSource3D(Hypothesis):
 class ViscousLayers(Hypothesis):
     """Prism layers grown inward from named faces of a solid.
 
-    :class:`Hexa3D`, :class:`PolyhedronPerSolid3D` and :class:`Cartesian3D` build
-    them. On a solid that another algorithm meshes, :meth:`~pysmesh.Mesher.compute`
-    raises before it meshes anything.
+    :class:`Hexa3D`, :class:`CompositeHexa3D`, :class:`PolyhedronPerSolid3D` and
+    :class:`Cartesian3D` build them. On a solid that another algorithm meshes,
+    :meth:`~pysmesh.Mesher.compute` raises before it meshes anything.
+
+    Several hypotheses can reach one solid, each with its own face set and stack (a
+    thickness per face set). :class:`PolyhedronPerSolid3D` grows each stack on its own
+    faces. :class:`Hexa3D`, :class:`CompositeHexa3D` and :class:`Cartesian3D` read one
+    hypothesis per solid, so
+    :meth:`~pysmesh.Mesher.compute` refuses a second one there. SMESH also refuses two
+    face sets that share a face, and two that hold faces sharing an edge with a
+    different ``layer_count``; :meth:`~pysmesh.Mesher.compute` raises with SMESH's
+    reason before it meshes anything. To detach one of several, pass
+    :meth:`~pysmesh.Mesher.unassign` an instance equal to it.
 
     Attributes:
         total_thickness: Total height of the layer stack.
@@ -997,9 +1030,14 @@ class ViscousLayers2D(Hypothesis):
     """Quadrangle layers grown inward from named edges of a face.
 
     The 2-D counterpart of :class:`ViscousLayers`, and the only 2-D form in the stack.
-    :class:`Quadrangle2D`, :class:`QuadFromMedialAxis1D2D` and :class:`Mefisto2D`
-    build them. On a face that another algorithm meshes,
-    :meth:`~pysmesh.Mesher.compute` raises before it meshes anything.
+    :class:`Quadrangle2D`, :class:`QuadFromMedialAxis1D2D`, :class:`Mefisto2D` and
+    :class:`PolygonPerFace2D` build them. On a face that another algorithm meshes,
+    :meth:`~pysmesh.Mesher.compute` raises before it meshes anything. That includes a
+    face of a solid that :class:`Cartesian3D` or :class:`PolyhedronPerSolid3D` meshes
+    (they mesh every dimension themselves), and a face of a :class:`Prism3D` solid
+    without a 2-D algorithm assigned on that face alone. With :class:`Prism3D`, assign
+    the 2-D algorithm on the face the sweep starts from, with the layers there: the
+    sweep carries them through every level.
 
     Attributes:
         total_thickness: Total height of the layer stack.

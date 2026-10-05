@@ -76,6 +76,7 @@
 class SMDS_Mesh;
 class SMESHDS_GroupBase;
 class SMESHDS_Mesh;
+class SMESH_Algo;
 class SMESH_Gen;
 class SMESH_Hypothesis;
 class SMESH_Mesh;
@@ -280,8 +281,11 @@ class Mesher {
   void assign(const std::string& name, const py::dict& params, const std::string& kind,
               int ordinal);
 
-  // Detach a previously assigned algorithm or hypothesis from the same sub-shape.
-  void unassign(const std::string& name, const std::string& kind, int ordinal);
+  // Detach a previously assigned algorithm or hypothesis from the same sub-shape. Where
+  // several of that name are attached there (an auxiliary hypothesis such as ViscousLayers),
+  // the one assigned with parameters equal to `params` is detached.
+  void unassign(const std::string& name, const py::dict& params, const std::string& kind,
+                int ordinal);
 
   // Names of everything assigned, in assignment order, as (name, kind, ordinal) triples.
   py::list assignments() const;
@@ -462,8 +466,20 @@ class Mesher {
   void ensure_shape(const char* op) const;
 
   // Raise if a ViscousLayers (ViscousLayers2D) hypothesis reaches a SOLID (FACE) whose
-  // algorithm does not list it among the hypotheses it reads, before anything is computed.
+  // algorithm does not build layers, or whose algorithm refuses the layer hypotheses there:
+  // a second one where it reads one, or face sets that SMESH's layer check rejects. All
+  // before anything is computed.
   void refuse_unread_layers() const;
+
+  // Raise if ViscousLayers2D reaches `face` (named `place`) while an algorithm of an
+  // enclosing SOLID meshes that face itself, so that no 2-D algorithm reads the layers.
+  // `own` is the face's own 2-D algorithm, or null.
+  void refuse_face_layers_meshed_from_above(const TopoDS_Shape& face, const std::string& place,
+                                            const SMESH_Algo* own) const;
+
+  // `text` with the caller's (kind, ordinal) after each SMESHDS shape index "#N" in it, so
+  // that an upstream message names the sub-shape the way the caller does.
+  std::string with_ordinals(const std::string& text) const;
 
   // The sub-shape where `hyp`, just assigned on `target`, met two different similar
   // hypotheses (HYP_CONCURRENT), and those hypotheses with where they are assigned.
@@ -493,6 +509,7 @@ class Mesher {
     std::string kind;
     int ordinal;
     int hyp_id;
+    py::dict params;  // as given to assign; tells apart several of one name on one shape
   };
 
   std::shared_ptr<ShapeData> data_;

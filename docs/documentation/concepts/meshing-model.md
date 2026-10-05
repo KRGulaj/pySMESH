@@ -73,12 +73,12 @@ native `StdMeshers` source or from a test that computes a real mesh with it.
 
 | Algorithm | What it does | Needs beneath | Hypotheses it reads |
 |---|---|---|---|
-| `Quadrangle2D` | Mapped quadrangle meshing of a face bounded by four logical sides. Refuses a face it cannot read as four sides. | A 1-D algorithm and hypothesis on its edges | `QuadrangleParams` (base vertex, corner vertices, how to resolve mismatched sides), `QuadranglePreference` |
-| `Mefisto2D` | Free triangle meshing of a face. | A 1-D algorithm and hypothesis on its edges | `MaxElementArea` (a bound, not a target: it refines the face below the boundary segments where it asks for that, and never coarsens it past the longest one; where the boundary segments are too long for the bound, the compute reports a `ComputeWarning` naming the largest triangle area), `LengthFromEdges` (the mean boundary segment as the target edge length; the default when no 2-D hypothesis applies) |
-| `PolygonPerFace2D` | One polygonal element per face, using the edge discretisation directly as its boundary. | A 1-D algorithm and hypothesis on its edges | None |
+| `Quadrangle2D` | Mapped quadrangle meshing of a face bounded by four logical sides. Refuses a face it cannot read as four sides. | A 1-D algorithm and hypothesis on its edges | `QuadrangleParams` (base vertex, corner vertices, how to resolve mismatched sides), `QuadranglePreference`, `ViscousLayers2D` |
+| `Mefisto2D` | Free triangle meshing of a face. | A 1-D algorithm and hypothesis on its edges | `MaxElementArea` (a bound, not a target: it refines the face below the boundary segments where it asks for that, and never coarsens it past the longest one; where the boundary segments are too long for the bound, the compute reports a `ComputeWarning` naming the largest triangle area), `LengthFromEdges` (the mean boundary segment as the target edge length; the default when no 2-D hypothesis applies), `ViscousLayers2D` |
+| `PolygonPerFace2D` | One polygonal element per face, using the edge discretisation directly as its boundary. With `ViscousLayers2D`, layer quadrangles on the chosen edges and one polygon for the rest. | A 1-D algorithm and hypothesis on its edges | `ViscousLayers2D` |
 | `Projection2D` | Copies a face's mesh from another face. This is how a periodic pair is made to match node for node. | A 1-D algorithm and hypothesis on its own edges, matching the source face's edge counts | `ProjectionSource2D` (required) |
 | `Projection1D2D` | Projects a face's mesh **and** its boundary discretisation from another face. | Nothing: it supplies its own 1-D layer from the source | `ProjectionSource2D` (required) |
-| `QuadFromMedialAxis1D2D` | Quad-dominant meshing of a thin face, built on its medial axis. The only algorithm in the catalogue that reports true progress. | A 1-D algorithm and hypothesis on its edges | None beyond the 1-D layer |
+| `QuadFromMedialAxis1D2D` | Quad-dominant meshing of a thin face, built on its medial axis. The only algorithm in the catalogue that reports true progress. | A 1-D algorithm and hypothesis on its edges | `ViscousLayers2D` |
 | `UseExisting2D` | Takes the faces a script made on the face, bound to it by `on`, as the face's mesh. Creates nothing itself. | Nodes and faces made by a script | None |
 | `RadialQuadrangle1D2D` | Radial quadrangle meshing of a disk or an annulus. | A 1-D algorithm and hypothesis on the boundary edge | `NumberOfLayers2D`, `LayerDistribution2D` (a 1-D hypothesis laid along the radius from the curve inward), or a 1-D hypothesis applied to the radial direction |
 
@@ -114,15 +114,15 @@ triangle stays below 5 degrees. After 3 passes the smallest angle is 21.35 degre
 | Algorithm | What it does | Needs beneath | Hypotheses it reads |
 |---|---|---|---|
 | `Cartesian3D` | Body-fitted Cartesian volume meshing: a regular grid, cut against the geometry at the boundary. Hexahedra inside, polyhedra at every cut cell. Meshes every dimension itself; hides any lower-dimension algorithm. Its polyhedra cannot be written to Inria `.mesh`. With `ViscousLayers` it grows prism layers on the chosen faces: it meshes the shape shrunk by the layer thickness and fills the gap with layer cells (see the viscous layer section of the mesh editing guide). | Nothing | `CartesianParameters3D`, `ViscousLayers` |
-| `Hexa3D` | Structured hexahedral meshing of a block: a solid bounded by six logical faces. Consumes the 2-D mesh below it. | A conforming quadrangle mesh on its six logical faces | `BlockRenumber` (hexahedra and nodes in i, j, k order; axes global by default, or set per block by two vertices) |
-| `CompositeHexa3D` | Structured hexahedral meshing of a solid whose six logical sides are each split into more faces. The counterpart of `Hexa3D` for such an import. | The same conforming quadrangle mesh `Hexa3D` needs, split across more faces | None |
+| `Hexa3D` | Structured hexahedral meshing of a block: a solid bounded by six logical faces. Consumes the 2-D mesh below it. | A conforming quadrangle mesh on its six logical faces | `BlockRenumber` (hexahedra and nodes in i, j, k order; axes global by default, or set per block by two vertices), `ViscousLayers` (one per solid) |
+| `CompositeHexa3D` | Structured hexahedral meshing of a solid whose six logical sides are each split into more faces. The counterpart of `Hexa3D` for such an import. | The same conforming quadrangle mesh `Hexa3D` needs, split across more faces | `ViscousLayers` (one per solid) |
 | `HexaFromSkin3D` | Fills a solid with hexahedra derived from an existing all-quadrangle surface mesh. | An existing all-quadrangle mesh on the solid's skin | None |
-| `Prism3D` | Extrudes a source face's mesh through a prismatic solid. Meshes the lateral faces and edges itself. | A 1-D and 2-D algorithm on the source face only | None of its own |
+| `Prism3D` | Extrudes a source face's mesh through a prismatic solid. Meshes the lateral faces and edges itself. | A 1-D and 2-D algorithm on the source face only | None of its own; it sweeps the `ViscousLayers2D` of its source face |
 | `RadialPrism3D` | An O-grid between an inner and an outer shell: a pipe wall, an annulus. Needs the two shells' meshes to already match, typically via `Projection2D`. | Matching 2-D meshes on the inner and outer shell | `NumberOfLayers` or `LayerDistribution` |
 | `Projection3D` | Copies a solid's mesh from another solid. | Nothing beyond the source solid's own mesh | `ProjectionSource3D` (required) |
-| `PolyhedronPerSolid3D` | One polyhedral element per solid, from the face mesh bounding it. Meshes every dimension itself; hides a lower-dimension algorithm beside it. Unlike `Cartesian3D`, it does consume an existing boundary mesh where one is present. | Nothing required; uses a boundary mesh if present | None |
+| `PolyhedronPerSolid3D` | One polyhedral element per solid, from the face mesh bounding it. Meshes every dimension itself; hides a lower-dimension algorithm beside it. Unlike `Cartesian3D`, it does consume an existing boundary mesh where one is present. | Nothing required; uses a boundary mesh if present | `ViscousLayers` (one or several, each with its own face set) |
 
-### `Prism3D`: the source face, and a side face it cannot sweep through
+### `Prism3D`: the source face, and a side face with a composite side
 
 `Prism3D` sweeps from a face that is already meshed. Assign the 2-D algorithm on one face
 alone, with a `SubShape`, and that face is meshed first and becomes the source. On two unit
@@ -135,12 +135,38 @@ source. If every face reads as a quadrangle, `Prism3D` tries the faces in turn. 
 it then reported the error of a face it had rejected, even when a later face worked: the
 stacked boxes failed with "Wrong source face".
 
-A side face whose bottom or top side has more than one edge cannot be swept through. This
+A side face whose bottom or top side has more than one edge has a composite side. This
 happens where a cap edge is split under a whole one: the side face between them has 5
-edges. `Prism3D` projects onto the first edge of a side only. If another face fits as the
-source, it sweeps from that face; otherwise the compute fails and names, for each face, why
-it is not the source. To sweep between the caps, split the opposite cap edge too, so that
-the side face becomes two quadrangles.
+edges. `Prism3D` projects the opposite side onto the composite side as a whole, each node
+at its share of the side's length. It sweeps through that face only if:
+
+- the edges of the composite side join smoothly, as the parts of a split edge do;
+- each split point gets a node, within the vertex tolerance;
+- each edge of the composite side gets the number of segments that its own 1-D hypothesis
+  gives, so that no hypothesis is dropped. Inside an edge the projection places the nodes,
+  as on every edge of the target cap;
+- the mesh is linear.
+
+On a regular n-gon prism (circumradius 1, height 1) with one bottom edge split at its
+midpoint, 4 segments on every edge and 2 on each half-edge, `Prism3D` sweeps between the
+caps for every n from 4 to 8: each top node lies 1 above a bottom node, the cells are the
+cap faces times 4, and the cell volumes sum to the prism volume within 1.6e-14 relative.
+Up to 5.0.0 it projected onto the first edge of a side only, and refused n = 4, 6 and 8.
+
+If the conditions fail, `Prism3D` tries another face as the source. With 4 segments on each
+half-edge under 4 on the whole edge, n = 5 sweeps from a side face, as in 5.0.0; n = 6 and
+8 have no face left, and the compute fails and names, for each face, why it is not the
+source. So does a box with one bottom edge split and 4 segments on every edge: the
+message names the two half-edges, their 8 segments and the 4 below. The way out: split
+the opposite cap edge at the same points, so that the side face becomes two
+quadrangles, or give the split edges the segments that the opposite side puts on them.
+
+`Prism3D` builds no viscous layers itself, but it sweeps the 2-D layers of its source face.
+Assign the 2-D algorithm and `ViscousLayers2D` on the source face alone: at every level of
+the sweep the layer lines sit at the closed-form depths, and the levels follow the 1-D
+hypothesis of the side edges. On a 2 x 1 x 1.875 block with `Geometric1D(0.125, 2)` on the
+side edges, the levels are 0.125, 0.375, 0.875 and 1.875. `ViscousLayers2D` on any other
+face of the solid is refused, because `Prism3D` meshes that face itself.
 
 ### Hypotheses that name another part of the model
 
@@ -275,6 +301,18 @@ except pysmesh.PysmeshError as exc:
     print(exc.face_ids)    # which faces failed
     partial = mesher.mesh()  # whatever was built before the failure
 ```
+
+**A missing algorithm or hypothesis is named by its state.** A sub-shape without an
+algorithm, where an enclosing algorithm needs its mesh, holds the algorithm state
+`NO_ALGO`; an algorithm without a hypothesis it needs holds `MISSING_HYP`. Neither is a
+compute error in SMESH, so the failure names each such sub-shape with its algorithm and its
+state, for example `SOLID 1: Cartesian_3D is missing a hypothesis it needs (algorithm state
+MISSING_HYP)`. SMESH reports a compute as done when such a sub-shape is simply left
+unmeshed: `Cartesian3D` without `CartesianParameters3D` made no volume, and `Projection2D`
+without a source left its face empty. `compute()` raises for those too. A vertex keeps its
+node, but `SegmentAroundVertex0D` without `SegmentLengthAroundVertex` does nothing, so it
+is named as well. A sub-shape with no algorithm of its own is no error where an enclosing
+algorithm meshes it, or where nothing needs its mesh, as for the solid under a surface mesh.
 
 Cancellation is different from failure: if `cancel` returns `True`, or `progress` raises,
 `compute()` raises `PysmeshCancelled` and the mesh is cleared, so nothing partial survives.

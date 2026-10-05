@@ -2,12 +2,13 @@
 # Copyright (C) 2026 Kajetan R. Gulaj
 # Created: 2026-10-04
 
-"""Gates for Prism3D: a side face over a split edge (B1), and the source face (S4).
+"""Gates for Prism3D: a side face over a split edge (B1, PR1), and the source face (S4).
 
 Report ``defect_sweep_4.2.2.md`` §3 B1: a straight prism on a regular n-gon
 (circumradius 1, height 1), one bottom edge split at its midpoint, the top edge above it
-whole, so the side face between them has 5 edges. Regular1D with 4 segments, 2 on each
-half-edge, so that every face can be structured.
+whole, so the side face between them has 5 edges, and one of its sides is 2 edges
+(a composite horizontal side). Regular1D with 4 segments, 2 on each half-edge, so that
+every face can be structured.
 
 * **n = 5 meshes as a prism.** Prism3D tried that 5-edge face as the bottom, rejected
   it, then meshed the solid from another face, and still reported the rejected face's
@@ -16,12 +17,24 @@ half-edge, so that every face can be structured.
   fills it exactly, so the cell volumes sum to the n-gon area times the height; every
   cell has a positive volume; the solid is a straight prism, so every node of the top
   cap has a node of the bottom cap 1 below it.
-* **n = 6 is refused, naming the real cause.** Prism3D finds no face it can sweep from.
-  With the top cap as the bottom, the 5-edge face has 1 edge on its bottom side and 2 on
-  its top side, and Prism3D projects only onto the first edge of a top side
-  (``StdMeshers_Prism_3D.cxx`` computeWalls), so it cannot mesh that face. The message
-  must say so for that face, and name the way out, not report the error of a rejected
-  candidate.
+* **n = 4, 6 and 8 mesh as a prism with vertical node columns (PR1).** Prism3D projected
+  only the first edge of a side onto the first edge of the opposite side
+  (``StdMeshers_Prism_3D.cxx`` computeWalls), so it refused them. It now projects
+  the whole side onto the composite side if each split point takes a node and each
+  half-edge gets the segments of its own hypothesis. Oracle as for n = 5, and each cap
+  has the same nodes, and the cells are the cap faces times the layers.
+* **A tapered prism fills its volume (PR1).** The split on a square base under a top 0.6
+  wide (repro ``r3d.py``): the cells, with bilinear faces, fill the frustum volume
+  h (A1 + A2 + sqrt(A1 A2)) / 3, and every boundary node lies on its face.
+* **The projection drops no hypothesis (PR1).** With 4 segments on each half-edge
+  under 4 on the whole edge, the projection would give each half-edge 2. Prism3D does
+  not sweep from that cap: n = 5 sweeps from a side face with the cells and nodes of
+  5.0.0; n = 8 and the r3d prism (4 segments on every edge) have no other face, and the
+  message names the half-edges, the two segment counts and the way out.
+* **A split point without a node is refused (PR1).** With 3 segments on the whole edge,
+  the nodes nearest the split point lie 1/6 of the edge away from it. The message gives
+  that distance and the way out. A quadratic mesh on a composite side is refused too:
+  the projection makes linear segments.
 * **The way out meshes.** With the top edge split too, at the same point, the side face
   is two quadrangles: the prism fills its volume, the caps are 1 apart node for node,
   and the cells are the bottom faces times the layers.
@@ -45,6 +58,7 @@ the volume 2.
 from __future__ import annotations
 
 import math
+import re
 
 import numpy as np
 import pytest
@@ -61,6 +75,7 @@ from pysmesh import (
     Prism3D,
     PysmeshError,
     Quadrangle2D,
+    QuadraticMesh,
     Regular1D,
     Session,
     SubShape,
@@ -108,6 +123,11 @@ def _split_edge_prism(n: int, split_top: bool = False) -> ps.Shape:
     for i in range(1, n):
         j = (i + 1) % n
         loops.append(np.array([bottom[i], bottom[j], top[j], top[i]]))
+    return _solid_from_loops(loops)
+
+
+def _solid_from_loops(loops: list[NDArray[np.float64]]) -> ps.Shape:
+    """The solid bounded by one planar face per closed polyline."""
     s = Session()
     for loop in loops:
         before = set(s.entities(EntityKind.EDGE).tolist())
@@ -179,25 +199,34 @@ def test_a_split_edge_pentagon_prism_fills_its_volume_with_lifted_caps(
     assert _unlifted_top_nodes(xyz) == 0
 
 
+def _cap_node_counts(xyz: NDArray[np.float64]) -> tuple[int, int]:
+    """How many nodes lie on the bottom cap, z = 0, and on the top cap, z = HEIGHT."""
+    bottom = int(np.count_nonzero(np.abs(xyz[:, 2]) < NODE_TOL))
+    top = int(np.count_nonzero(np.abs(xyz[:, 2] - HEIGHT) < NODE_TOL))
+    return bottom, top
+
+
 @pytest.mark.parametrize("base", BASES)
-def test_a_split_edge_hexagon_prism_is_refused_naming_the_composite_side(
-    base: str,
+@pytest.mark.parametrize("n", [4, 6, 8])
+def test_a_split_edge_prism_meshes_with_vertical_node_columns(
+    n: int, base: str
 ) -> None:
-    """n = 6: refused for the 5-edge face's composite top side, no stale error (B1)."""
-    shape = _split_edge_prism(6)
+    """n = 4, 6, 8: exact volume, positive cells, caps 1 apart, cap faces x 4 (PR1)."""
+    shape = _split_edge_prism(n)
+    area = 0.5 * n * math.sin(2.0 * math.pi / n)
 
     with Mesher(shape) as m:
-        _assign(m, shape, 6, base)
-        with pytest.raises(PysmeshError) as caught:
-            m.compute()
+        _assign(m, shape, n, base)
+        m.compute()
+        volumes = m.quality(ps.Volume()).values
+        mesh = m.mesh()
 
-    details = caught.value.details
-    assert "No FACE can be the bottom of the prism." in details
-    assert (
-        "has 1 EDGE(s) on its bottom side and 2 on its top side; "
-        "a composite horizontal side is not supported. Split the EDGE opposite the "
-        "composite side at the same points"
-    ) in details
+    bottom_nodes, top_nodes = _cap_node_counts(mesh.node_coords)
+    assert float(volumes.sum()) == pytest.approx(area * HEIGHT, rel=VOLUME_RTOL)
+    assert float(volumes.min()) > 0.0
+    assert _unlifted_top_nodes(mesh.node_coords) == 0
+    assert bottom_nodes == top_nodes
+    assert len(volumes) == _bottom_face_count(mesh) * LAYERS
 
 
 # Segments on every edge of the stacked boxes.
@@ -379,3 +408,244 @@ def test_a_split_edge_prism_with_unmatched_segments_fills_its_volume_exactly(
     assert _exact_volume(mesh) == pytest.approx(area * HEIGHT, rel=VOLUME_RTOL)
     assert float(volumes.min()) > 0.0
     assert _off_surface_nodes(mesh, 5) == 0
+
+
+# The mesh of 5.0.0 for 4 segments per half-edge (repro r3h.py, n = 5): cells and nodes
+# of the sweep from a side face, which PR1 keeps (brief amendment 3).
+LATERAL_SWEEP_5_0_0: dict[str, tuple[int, int]] = {
+    "quadrangle": (192, 325),
+    "mefisto": (1080, 702),
+}
+
+
+@pytest.mark.parametrize("base", BASES)
+def test_unmatched_half_edges_keep_the_sweep_of_5_0_0(base: str) -> None:
+    """r3h n = 5, 4 per half-edge: the cap is not the source; the side sweep stays."""
+    shape = _split_edge_prism(5)
+
+    with Mesher(shape) as m:
+        _assign(m, shape, 5, base, half_segments=LAYERS)
+        m.compute()
+        mesh = m.mesh()
+
+    volumes = int(np.count_nonzero(np.isin(mesh.element_type, list(CELL_FACES))))
+    assert (volumes, len(mesh.node_coords)) == LATERAL_SWEEP_5_0_0[base]
+
+
+# The tapered prism of repro r3d.py: a unit square base, its edge y = 0 split at
+# x = 0.5, under a top TAPER wide, centred.
+TAPER: float = 0.6
+# Each half of the split base edge; no other edge has this length.
+TAPER_HALF_EDGE: float = 0.5
+# The frustum volume, h (A1 + A2 + sqrt(A1 A2)) / 3 with A1 = 1 and A2 = TAPER**2.
+TAPER_VOLUME: float = HEIGHT * (1.0 + TAPER * TAPER + TAPER) / 3.0
+
+
+def _tapered_split_edge_prism(
+    taper: float = TAPER,
+) -> tuple[ps.Shape, list[tuple[NDArray[np.float64], NDArray[np.float64]]]]:
+    """The r3d solid, and the plane (a point, the unit normal) of each face."""
+    c = 0.5 * (1.0 - taper)
+    b = np.array(
+        [(0, 0, 0), (0.5, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0)], dtype=np.float64
+    )
+    t = np.array(
+        [
+            (c, c, HEIGHT),
+            (1 - c, c, HEIGHT),
+            (1 - c, 1 - c, HEIGHT),
+            (c, 1 - c, HEIGHT),
+        ],
+        dtype=np.float64,
+    )
+    loops = [
+        b,
+        t[::-1],
+        np.array([b[0], b[1], b[2], t[1], t[0]]),
+        np.array([b[2], b[3], t[2], t[1]]),
+        np.array([b[3], b[4], t[3], t[2]]),
+        np.array([b[4], b[0], t[0], t[3]]),
+    ]
+    planes = []
+    for loop in loops:
+        normal = np.cross(loop, np.roll(loop, -1, axis=0)).sum(axis=0)  # Newell
+        planes.append((loop[0], normal / np.linalg.norm(normal)))
+    return _solid_from_loops(loops), planes
+
+
+def _off_plane_nodes(
+    mesh: ps.MeshData, planes: list[tuple[NDArray[np.float64], NDArray[np.float64]]]
+) -> int:
+    """How many nodes on a face, edge or vertex lie on none of the face planes."""
+    bound = np.isin(
+        mesh.node_kind,
+        [int(SubShapeKind.FACE), int(SubShapeKind.EDGE), int(SubShapeKind.VERTEX)],
+    )
+    xyz = mesh.node_coords[bound]
+    gap = np.stack([np.abs((xyz - p) @ n) for p, n in planes]).min(axis=0)
+    return int(np.count_nonzero(gap > NODE_TOL))
+
+
+def _assign_tapered(
+    m: Mesher, halves: list[int], base: str, half_segments: int | None
+) -> None:
+    """Regular1D, 4 segments, ``half_segments`` per half-edge if given, base, Prism3D.
+
+    Without ``half_segments`` the half-edges take the 4 segments of every edge, as in
+    repro r3d.py.
+    """
+    m.assign(Regular1D())
+    m.assign(NumberOfSegments(count=LAYERS))
+    if half_segments is not None:
+        for e in halves:
+            m.assign(
+                NumberOfSegments(count=half_segments), on=SubShape(SubShapeKind.EDGE, e)
+            )
+    if base == "quadrangle":
+        m.assign(Quadrangle2D())
+    else:
+        m.assign(Mefisto2D())
+        m.assign(MaxElementArea(max_area=MEFISTO_MAX_AREA))
+    m.assign(Prism3D())
+
+
+@pytest.mark.parametrize("base", BASES)
+def test_a_tapered_split_edge_prism_fills_the_frustum_exactly(base: str) -> None:
+    """r3d, top 0.6 wide: exact frustum volume, on-face nodes, cap faces x 4 (PR1)."""
+    shape, planes = _tapered_split_edge_prism()
+    halves = [e.id for e in shape.edges() if abs(e.length - TAPER_HALF_EDGE) < NODE_TOL]
+
+    with Mesher(shape) as m:
+        _assign_tapered(m, halves, base, HALF_SEGMENTS)
+        m.compute()
+        volumes = m.quality(ps.Volume()).values
+        mesh = m.mesh()
+
+    assert len(halves) == 2
+    assert _exact_volume(mesh) == pytest.approx(TAPER_VOLUME, rel=VOLUME_RTOL)
+    assert float(volumes.min()) > 0.0
+    assert _off_plane_nodes(mesh, planes) == 0
+    assert len(volumes) == _bottom_face_count(mesh) * LAYERS
+
+
+# The way out that every composite-side refusal names.
+WAY_OUT: str = (
+    "Split the EDGE opposite the composite side at the same points, so that both "
+    "sides have the same number of EDGEs, or give each EDGE of the composite side the "
+    "segments that the other side projects onto it"
+)
+# The octagon prism: no side face can be the bottom either, so the cap is the last word.
+REFUSED_N: int = 8
+# The reason of a refused cap whose half-edges take more segments than the edge above.
+# It names the half-edges by their SMESH shape index, as the other Prism3D reasons name
+# faces ("Side face #N").
+COUNT_REASON: re.Pattern[str] = re.compile(
+    r"its bottom side has (\d+) segments, while the hypotheses of the EDGEs of its top "
+    r"side \(#(\d+), #(\d+)\) give (\d+)\. (.*?) \(algorithm"
+)
+
+
+def _count_refusal(details: str) -> tuple[int, int, int, str]:
+    """Segments below, distinct edges named, segments on the composite side, way out."""
+    found = COUNT_REASON.search(details)
+    assert found is not None, details
+    edges = {int(found.group(2)), int(found.group(3))}
+    return int(found.group(1)), len(edges), int(found.group(4)), found.group(5)
+
+
+@pytest.mark.parametrize("base", BASES)
+def test_half_edges_with_more_segments_are_refused_naming_the_counts(base: str) -> None:
+    """4 per half-edge under 4: the 8 segments are not dropped, the cap is refused."""
+    shape = _split_edge_prism(REFUSED_N)
+
+    with Mesher(shape) as m:
+        _assign(m, shape, REFUSED_N, base, half_segments=LAYERS)
+        with pytest.raises(PysmeshError) as caught:
+            m.compute()
+
+    below, edges, composite, way_out = _count_refusal(caught.value.details)
+    assert "No FACE can be the bottom of the prism." in caught.value.details
+    assert (below, edges, composite) == (LAYERS, 2, 2 * LAYERS)
+    assert way_out.startswith(WAY_OUT)
+
+
+@pytest.mark.parametrize("base", BASES)
+@pytest.mark.parametrize("taper", [1.0, TAPER])
+def test_the_r3d_prism_with_4_segments_per_half_edge_is_refused_naming_them(
+    taper: float, base: str
+) -> None:
+    """r3d as in Phase 4: 8 segments on the split side over 4; no face drops them."""
+    shape, _ = _tapered_split_edge_prism(taper)
+
+    with Mesher(shape) as m:
+        _assign_tapered(m, [], base, None)
+        with pytest.raises(PysmeshError) as caught:
+            m.compute()
+
+    below, edges, composite, way_out = _count_refusal(caught.value.details)
+    assert "No FACE can be the bottom of the prism." in caught.value.details
+    assert (below, edges, composite) == (LAYERS, 2, 2 * LAYERS)
+    assert way_out.startswith(WAY_OUT)
+
+
+def _top_edge_above_split(shape: ps.Shape, n: int) -> int:
+    """The id of the whole top edge above the split bottom edge."""
+    t = 2.0 * math.pi / n
+    middle = np.array([0.5 * (1.0 + math.cos(t)), 0.5 * math.sin(t), HEIGHT])
+    found = [
+        e.id
+        for e in shape.edges()
+        if np.linalg.norm(0.5 * (e.bbox[:3] + e.bbox[3:]) - middle) < NODE_TOL
+    ]
+    assert len(found) == 1
+    return found[0]
+
+
+def test_a_split_point_without_a_node_is_refused_naming_its_distance() -> None:
+    """3 segments above, 1 and 2 below: the split lies 1/6 edge off a node (PR1)."""
+    n = REFUSED_N
+    shape = _split_edge_prism(n)
+    half = math.sin(math.pi / n)
+    halves = [e.id for e in shape.edges() if abs(e.length - half) < NODE_TOL]
+    # The nodes of the whole edge sit at 0, 1/3, 2/3 and 1 of it, the split at 1/2.
+    distance = 2.0 * half / 6.0
+
+    with Mesher(shape) as m:
+        m.assign(Regular1D())
+        m.assign(NumberOfSegments(count=LAYERS))
+        top = SubShape(SubShapeKind.EDGE, _top_edge_above_split(shape, n))
+        m.assign(NumberOfSegments(count=3), on=top)
+        m.assign(NumberOfSegments(count=1), on=SubShape(SubShapeKind.EDGE, halves[0]))
+        m.assign(NumberOfSegments(count=2), on=SubShape(SubShapeKind.EDGE, halves[1]))
+        m.assign(Mefisto2D())
+        m.assign(MaxElementArea(max_area=MEFISTO_MAX_AREA))
+        m.assign(Prism3D())
+        with pytest.raises(PysmeshError) as caught:
+            m.compute()
+
+    details = caught.value.details
+    found = re.search(
+        r"the VERTEX that splits its top side lies ([0-9.e+-]+) from the nearest node "
+        r"of its bottom side\. (.*?) \(algorithm",
+        details,
+    )
+    assert found is not None
+    assert float(found.group(1)) == pytest.approx(distance, rel=1e-5)
+    assert found.group(2).startswith(WAY_OUT)
+
+
+@pytest.mark.parametrize("base", BASES)
+def test_a_quadratic_mesh_on_a_composite_side_is_refused(base: str) -> None:
+    """QuadraticMesh: the projection makes linear segments; refused (PR1)."""
+    shape = _split_edge_prism(REFUSED_N)
+
+    with Mesher(shape) as m:
+        _assign(m, shape, REFUSED_N, base)
+        m.assign(QuadraticMesh())
+        with pytest.raises(PysmeshError) as caught:
+            m.compute()
+
+    assert (
+        "its mesh is quadratic, which a composite horizontal side does not support. "
+        f"{WAY_OUT}"
+    ) in caught.value.details

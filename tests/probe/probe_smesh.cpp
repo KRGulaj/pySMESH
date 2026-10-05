@@ -57,7 +57,9 @@
 #include <SMESHDS_Group.hxx>
 #include <SMESHDS_SubMesh.hxx>
 #include <SMESHDS_Mesh.hxx>
+#include <SMESH_Comment.hxx>
 #include <SMESH_ComputeError.hxx>
+#include <Utils_SALOME_Exception.hxx>
 #include <SMESH_ControlsDef.hxx>
 #include <BRepMesh_DataStructureOfDelaun.hxx>
 #include <BRepMesh_Triangle.hxx>
@@ -88,6 +90,7 @@
 #include <StdMeshers_MaxElementVolume.hxx>
 #include <StdMeshers_NumberOfSegments.hxx>
 #include <StdMeshers_ViscousLayerBuilder.hxx>
+#include <StdMeshers_PolygonPerFace_2D.hxx>
 #include <StdMeshers_PolyhedronPerSolid_3D.hxx>
 #include <StdMeshers_Prism_3D.hxx>
 #include <StdMeshers_Projection_2D.hxx>
@@ -117,7 +120,13 @@
 #include <StdMeshers_SegmentLengthAroundVertex.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepLib.hxx>
 #include <BRep_Tool.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <TopoDS_Shell.hxx>
+#include <TopoDS_Solid.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Vertex.hxx>
 
@@ -2624,7 +2633,7 @@ void probe_p4_layer_builder_lifecycle() {
 
 // Cartesian_3D at the given spacing with ViscousLayers (0.2 thick, 3 layers, factor 1.2) on
 // every face of the session's shape.
-void cartesian_layers(Session& s, const char* spacing) {
+void cartesian_layers(Session& s, const char* spacing, double thickness = 0.2) {
   StdMeshers_Cartesian_3D* a3 = s.make<StdMeshers_Cartesian_3D>();
   StdMeshers_CartesianParameters3D* grid = s.make<StdMeshers_CartesianParameters3D>();
   for (int axis = 0; axis < 3; ++axis) {
@@ -2633,7 +2642,7 @@ void cartesian_layers(Session& s, const char* spacing) {
     grid->SetGridSpacing(step, internal, axis);
   }
   StdMeshers_ViscousLayers* layers = s.make<StdMeshers_ViscousLayers>();
-  layers->SetTotalThickness(0.2);
+  layers->SetTotalThickness(thickness);
   layers->SetNumberLayers(3);
   layers->SetStretchFactor(1.2);
   layers->SetBndShapes(std::vector<int>(), /*toIgnore=*/true);
@@ -2765,11 +2774,12 @@ void probe_p4_mefisto_max_element_area() {
 // ------------------------------------------------------------------------------ P4L6 ----- //
 
 // StdMeshers_CompositeHexa_3D_viscous_layers.patch: CompositeHexa_3D with ViscousLayers used
-// to read a null proxy mesh and crash; it now fails the compute with an error that says so.
+// to read a null proxy mesh and crash (up to 4.2.2), then refused them (5.0.0). It now loads
+// the side grids before the layers are built and builds them: on the unit box with 4
+// segments and 3 layers on one face, 4 x 4 x 4 inner hexahedra and 4 x 4 x 3 layer ones.
 void probe_p4_composite_hexa_layers() {
-  section("P4L6", "CompositeHexa_3D refuses viscous layers instead of crashing");
-  // Under a compound root, as load_brep gives a shape: on a bare SOLID, SMESH refuses the
-  // hypothesis at assignment (HYP_INCOMPATIBLE), and Compute never sees it.
+  section("P4L6", "CompositeHexa_3D builds viscous layers");
+  // Under a compound root, as load_brep gives a shape.
   BRep_Builder builder;
   TopoDS_Compound box;
   builder.MakeCompound(box);
@@ -2792,14 +2802,354 @@ void probe_p4_composite_hexa_layers() {
   const bool computed = s.compute();
   TopExp_Explorer solid(box, TopAbs_SOLID);
   const SMESH_ComputeErrorPtr err = s.mesh().GetSubMesh(solid.Current())->GetComputeError();
-  const bool named = err && err->myComment.find("does not build viscous layers") !=
-                                std::string::npos;
+  const bool clean = !err || err->IsOK();
+  const smIdType volumes = s.meshDS()->NbVolumes();
   char msg[300];
   std::snprintf(msg, sizeof(msg),
-                "P4L6 CompositeHexa_3D + ViscousLayers: the compute fails on the SOLID, naming "
-                "the reason (it crashed before); assigned %d computed %d error '%s'",
-                int(assigned), int(computed), err ? err->myComment.c_str() : "(none)");
-  check(assigned && !computed && named, msg);
+                "P4L6 CompositeHexa_3D + ViscousLayers builds 64 + 48 hexahedra with no error; "
+                "assigned %d computed %d volumes %lld error '%s'",
+                int(assigned), int(computed), static_cast<long long>(volumes),
+                clean ? "(none)" : err->myComment.c_str());
+  check(assigned && computed && clean && volumes == 4 * 4 * 4 + 4 * 4 * 3, msg);
+}
+
+// ------------------------------------------------------------------------------ P5EXC ---- //
+
+// SMESH_subMesh_salome_exception_text.patch: a SALOME_Exception thrown by an algorithm's
+// Compute lost the first 7 characters of its text, for the "Salome " of a "Salome Exception"
+// prefix that only the const char* constructor adds (Utils_SALOME_Exception.cxx, makeText).
+// No public input reaches such a throw site in this build, so a stub 3-D algorithm throws
+// each kind: a std::string, an SMESH_Comment, a text shorter than 7 characters, and a
+// const char* text, which carries the prefix.
+class ThrowingAlgo3D : public SMESH_3D_Algo {
+ public:
+  enum class Kind { kString, kComment, kShort, kPrefixed };
+
+  ThrowingAlgo3D(int hypId, SMESH_Gen* gen, Kind kind) : SMESH_3D_Algo(hypId, gen), kind_(kind) {
+    _name = "ProbeThrowing_3D";
+  }
+
+  bool CheckHypothesis(SMESH_Mesh&, const TopoDS_Shape&,
+                       SMESH_Hypothesis::Hypothesis_Status& status) override {
+    status = SMESH_Hypothesis::HYP_OK;
+    return true;
+  }
+
+  bool Compute(SMESH_Mesh&, const TopoDS_Shape&) override {
+    switch (kind_) {
+      case Kind::kString:
+        throw SALOME_Exception(std::string("ViscousBuilder2D: a text from a std::string"));
+      case Kind::kComment:
+        throw SALOME_Exception(SMESH_Comment("ViscousBuilder2D: not SMDS_TOP_EDGE node "
+                                             "position: ") << 0 << " of node " << 12);
+      case Kind::kShort:
+        throw SALOME_Exception(std::string("abc"));
+      case Kind::kPrefixed:
+        throw SALOME_Exception("a text from a const char*");
+    }
+    return false;
+  }
+
+  bool Evaluate(SMESH_Mesh&, const TopoDS_Shape&, MapShapeNbElems&) override { return false; }
+
+ private:
+  Kind kind_;
+};
+
+// The compute error text the SOLID gets when the stub throws `kind` on the unit box.
+std::string thrown_text(ThrowingAlgo3D::Kind kind) {
+  BRep_Builder builder;
+  TopoDS_Compound box;
+  builder.MakeCompound(box);
+  builder.Add(box, BRepPrimAPI_MakeBox(1.0, 1.0, 1.0).Shape());
+  Session s(box);
+  StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+  StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+  n->SetNumberOfSegments(2);
+  StdMeshers_Quadrangle_2D* a2 = s.make<StdMeshers_Quadrangle_2D>();
+  ThrowingAlgo3D* a3 = s.make<ThrowingAlgo3D>(kind);
+  const bool assigned =
+      s.assign(box, a1) && s.assign(box, n) && s.assign(box, a2) && s.assign(box, a3);
+  if (!assigned || s.compute()) {
+    return "(the stub was not assigned, or the compute succeeded)";
+  }
+  TopExp_Explorer solid(box, TopAbs_SOLID);
+  const SMESH_ComputeErrorPtr err = s.mesh().GetSubMesh(solid.Current())->GetComputeError();
+  return err ? err->myComment : std::string("(no compute error)");
+}
+
+void probe_p5_salome_exception_text() {
+  section("P5EXC", "a SALOME_Exception from a compute keeps its full text");
+  const struct {
+    ThrowingAlgo3D::Kind kind;
+    const char* want;
+    const char* what;
+  } cases[] = {
+      {ThrowingAlgo3D::Kind::kString, "ViscousBuilder2D: a text from a std::string",
+       "a std::string text reaches the compute error whole"},
+      {ThrowingAlgo3D::Kind::kComment,
+       "ViscousBuilder2D: not SMDS_TOP_EDGE node position: 0 of node 12",
+       "an SMESH_Comment text reaches the compute error whole"},
+      {ThrowingAlgo3D::Kind::kShort, "abc",
+       "a text shorter than 7 characters is kept, not read past its end"},
+      {ThrowingAlgo3D::Kind::kPrefixed, "Exception : a text from a const char*",
+       "a text with the \"Salome Exception\" prefix keeps exactly its former text"},
+  };
+  for (const auto& c : cases) {
+    const std::string got = thrown_text(c.kind);
+    check(got == c.want, std::string("P5EXC ") + c.what + ": got '" + got + "', want '" +
+                             c.want + "'");
+  }
+}
+
+// ------------------------------------------------------------------------------ P5HYP ---- //
+
+// SMESH_subMesh_remove_hypothesis_state.patch: Hexa_3D takes one ViscousLayers; a second one
+// on the compound root leaves the SOLID MISSING_HYP. Removing it checks the algorithm again,
+// so the SOLID is HYP_OK and meshes; upstream it stayed MISSING_HYP and meshed nothing.
+void probe_p5_remove_hypothesis_state() {
+  section("P5HYP", "removing a hypothesis checks a MISSING_HYP sub-mesh again");
+  BRep_Builder builder;
+  TopoDS_Compound box;
+  builder.MakeCompound(box);
+  builder.Add(box, BRepPrimAPI_MakeBox(1.0, 1.0, 1.0).Shape());
+  Session s(box);
+  StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+  StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+  n->SetNumberOfSegments(4);
+  StdMeshers_Quadrangle_2D* a2 = s.make<StdMeshers_Quadrangle_2D>();
+  StdMeshers_Hexa_3D* a3 = s.make<StdMeshers_Hexa_3D>();
+  TopExp_Explorer face(box, TopAbs_FACE);
+  const int first = s.meshDS()->ShapeToIndex(face.Current());
+  face.Next();
+  const int second = s.meshDS()->ShapeToIndex(face.Current());
+  StdMeshers_ViscousLayers* la = s.make<StdMeshers_ViscousLayers>();
+  StdMeshers_ViscousLayers* lb = s.make<StdMeshers_ViscousLayers>();
+  for (auto [layers, wall] : {std::pair{la, first}, std::pair{lb, second}}) {
+    layers->SetTotalThickness(0.2);
+    layers->SetNumberLayers(2);
+    layers->SetStretchFactor(1.0);
+    layers->SetBndShapes(std::vector<int>(1, wall), /*toIgnore=*/false);
+  }
+  const bool assigned = s.assign(box, a1) && s.assign(box, n) && s.assign(box, a2) &&
+                        s.assign(box, a3) && s.assign(box, la) && s.assign(box, lb);
+  TopExp_Explorer solid(box, TopAbs_SOLID);
+  SMESH_subMesh* sm = s.mesh().GetSubMesh(solid.Current());
+  const bool missing = sm->GetAlgoState() == SMESH_subMesh::MISSING_HYP;
+  s.mesh().RemoveHypothesis(box, lb->GetID());
+  const bool ok_again = sm->GetAlgoState() == SMESH_subMesh::HYP_OK;
+  const bool computed = s.compute();
+  const smIdType volumes = s.meshDS()->NbVolumes();
+  char msg[300];
+  std::snprintf(msg, sizeof(msg),
+                "P5HYP Hexa_3D with two ViscousLayers is MISSING_HYP, and HYP_OK once one is "
+                "removed; then it meshes 4x4x4 + 4x4x2 hexahedra: assigned %d missing %d "
+                "ok_again %d computed %d volumes %lld",
+                int(assigned), int(missing), int(ok_again), int(computed),
+                static_cast<long long>(volumes));
+  check(assigned && missing && ok_again && computed && volumes == 4 * 4 * 4 + 4 * 4 * 2,
+        msg);
+}
+
+// ------------------------------------------------------------------------------ P5CVL ---- //
+
+// StdMeshers_Cartesian_VL_offset_error.patch and StdMeshers_Cartesian_VL_inverted_layers.patch
+// on a 2 x 2 x 2 block with a bore of radius 0.4 on its axis, under a compound root as
+// pySMESH loads a shape, spacing 0.25: the offset surfaces meet at a total thickness of 0.3.
+// The SOLID's compute error at `thickness`, or "(computed)" when it has none and volumes
+// were made. SMESH_Gen::Compute can return true with the SOLID failed, so the error decides.
+std::string bored_block_layers(double thickness) {
+  const TopoDS_Shape bored =
+      BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(2.0, 2.0, 2.0).Shape(),
+                      BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(1.0, 1.0, 0.0), gp_Dir(0, 0, 1)),
+                                               0.4, 2.0)
+                          .Shape())
+          .Shape();
+  BRep_Builder builder;
+  TopoDS_Compound root;
+  builder.MakeCompound(root);
+  for (TopExp_Explorer ex(bored, TopAbs_SOLID); ex.More(); ex.Next()) {
+    builder.Add(root, ex.Current());
+  }
+  Session s(root);
+  cartesian_layers(s, "0.25", thickness);
+  s.compute();
+  TopExp_Explorer solid(root, TopAbs_SOLID);
+  const SMESH_ComputeErrorPtr err = s.mesh().GetSubMesh(solid.Current())->GetComputeError();
+  if (err && !err->IsOK()) {
+    return err->myComment;
+  }
+  return s.meshDS()->NbVolumes() > 0 ? "(computed)" : "(no error and no volume)";
+}
+
+void probe_p5_cartesian_too_thick() {
+  section("P5CVL", "Cartesian_3D layers too thick: the reason and the largest workable thickness");
+  const struct {
+    double thickness;
+    const char* want;
+    const char* what;
+  } cases[] = {
+      {0.285, "(computed)", "0.285 meshes"},
+      {0.3, "The largest total thickness for which the offset works is about 0.299927",
+       "0.3 (empty offset) names the largest workable thickness, 0.299927"},
+      {0.7, "is not a valid solid (BRepCheck_Analyzer)",
+       "0.7 (invalid offset, partly outside the block) is refused by name"},
+      {0.2999, "layer cells are inverted", "0.2999 (layer cells fold over) is refused by name"},
+  };
+  for (const auto& c : cases) {
+    const std::string got = bored_block_layers(c.thickness);
+    check(got.find(c.want) != std::string::npos,
+          std::string("P5CVL ") + c.what + ": got '" + got.substr(0, 200) + "'");
+  }
+}
+
+// ------------------------------------------------------------------------------ P5PPF ---- //
+
+// StdMeshers_PolygonPerFace_2D_viscous_layers.patch: PolygonPerFace_2D with ViscousLayers2D
+// on one edge of the unit square (4 segments per edge, 3 layers): it failed with "Less that
+// 3 nodes on the wire" after building the layers. Now 4 x 3 layer quadrangles and one
+// polygon cover the square.
+void probe_p5_polygon_per_face_layers() {
+  section("P5PPF", "PolygonPerFace_2D builds ViscousLayers2D");
+  const TopoDS_Face face =
+      BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 0, 1, 0, 1).Face();
+  Session s(face);
+  StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+  StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+  n->SetNumberOfSegments(4);
+  StdMeshers_PolygonPerFace_2D* a2 = s.make<StdMeshers_PolygonPerFace_2D>();
+  StdMeshers_ViscousLayers2D* layers = s.make<StdMeshers_ViscousLayers2D>();
+  layers->SetTotalThickness(0.3);
+  layers->SetNumberLayers(3);
+  layers->SetStretchFactor(1.2);
+  layers->SetBndShapes(std::vector<int>(1, s.meshDS()->ShapeToIndex(
+                           TopExp_Explorer(face, TopAbs_EDGE).Current())),
+                       /*toIgnore=*/false);
+  const bool assigned = s.assign(face, a1) && s.assign(face, n) && s.assign(face, a2) &&
+                        s.assign(face, layers);
+  const bool computed = s.compute();
+  int quadrangles = 0;
+  int polygons = 0;
+  double area = 0.0;
+  for (SMDS_FaceIteratorPtr it = s.meshDS()->facesIterator(); it->more();) {
+    const SMDS_MeshElement* f = it->next();
+    quadrangles += f->GetEntityType() == SMDSEntity_Quadrangle ? 1 : 0;
+    polygons += f->GetEntityType() == SMDSEntity_Polygon ? 1 : 0;
+    gp_XYZ twice(0, 0, 0);
+    for (int i = 0; i < f->NbNodes(); ++i) {
+      const SMDS_MeshNode* a = f->GetNode(i);
+      const SMDS_MeshNode* b = f->GetNode((i + 1) % f->NbNodes());
+      twice += gp_XYZ(a->X(), a->Y(), a->Z()) ^ gp_XYZ(b->X(), b->Y(), b->Z());
+    }
+    area += 0.5 * twice.Z();
+  }
+  char msg[220];
+  std::snprintf(msg, sizeof(msg),
+                "P5PPF unit square, layers on one edge: 12 layer quadrangles and 1 polygon of "
+                "total area 1; assigned %d computed %d quadrangles %d polygons %d area %.15g",
+                int(assigned), int(computed), quadrangles, polygons, area);
+  check(assigned && computed && quadrangles == 12 && polygons == 1 &&
+            std::abs(std::abs(area) - 1.0) < 1e-12,
+        msg);
+}
+
+// StdMeshers_Prism_3D_composite_side.patch: a unit box whose bottom EDGE y = 0 is split at
+// x = 0.5 and whose top EDGE above it is whole, so one side FACE has a composite
+// horizontal side (report §3 B1). Regular_1D with 4 segments, 2 on each half-EDGE,
+// Quadrangle_2D and Prism_3D: it failed with "Non-quadrilateral faces are not opposite".
+// Now 4 x 4 x 4 hexahedra fill the box, each half-EDGE keeps its 2 segments, and every top
+// node lies 1 above a bottom node.
+void probe_p5_prism_composite_side() {
+  section("P5PR1", "Prism_3D on a side FACE with a composite horizontal side");
+  const gp_Pnt b[5] = {gp_Pnt(0, 0, 0), gp_Pnt(0.5, 0, 0), gp_Pnt(1, 0, 0), gp_Pnt(1, 1, 0),
+                       gp_Pnt(0, 1, 0)};
+  const gp_Pnt t[4] = {gp_Pnt(0, 0, 1), gp_Pnt(1, 0, 1), gp_Pnt(1, 1, 1), gp_Pnt(0, 1, 1)};
+  const std::vector<std::vector<gp_Pnt>> loops = {
+      {b[0], b[1], b[2], b[3], b[4]}, {t[3], t[2], t[1], t[0]}, {b[0], b[1], b[2], t[1], t[0]},
+      {b[2], b[3], t[2], t[1]},       {b[3], b[4], t[3], t[2]}, {b[4], b[0], t[0], t[3]}};
+  BRepBuilderAPI_Sewing sewing(1e-6);
+  for (const std::vector<gp_Pnt>& loop : loops) {
+    BRepBuilderAPI_MakePolygon polygon;
+    for (const gp_Pnt& p : loop) {
+      polygon.Add(p);
+    }
+    polygon.Close();
+    sewing.Add(BRepBuilderAPI_MakeFace(polygon.Wire(), /*OnlyPlane=*/true).Face());
+  }
+  sewing.Perform();
+  TopoDS_Solid box = BRepBuilderAPI_MakeSolid(
+                         TopoDS::Shell(TopExp_Explorer(sewing.SewedShape(), TopAbs_SHELL).Current()))
+                         .Solid();
+  BRepLib::OrientClosedSolid(box);
+  Session s(box);
+
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(box, TopAbs_EDGE, edges);
+  std::vector<TopoDS_Shape> halves;
+  for (int i = 1; i <= edges.Extent(); ++i) {
+    TopoDS_Vertex v0, v1;
+    TopExp::Vertices(TopoDS::Edge(edges(i)), v0, v1);
+    if (std::abs(BRep_Tool::Pnt(v0).Distance(BRep_Tool::Pnt(v1)) - 0.5) < 1e-9) {
+      halves.push_back(edges(i));
+    }
+  }
+  StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+  StdMeshers_NumberOfSegments* four = s.make<StdMeshers_NumberOfSegments>();
+  four->SetNumberOfSegments(4);
+  StdMeshers_NumberOfSegments* two = s.make<StdMeshers_NumberOfSegments>();
+  two->SetNumberOfSegments(2);
+  StdMeshers_Quadrangle_2D* a2 = s.make<StdMeshers_Quadrangle_2D>();
+  StdMeshers_Prism_3D* a3 = s.make<StdMeshers_Prism_3D>();
+  bool assigned = halves.size() == 2 && s.assign(box, a1) && s.assign(box, four) &&
+                  s.assign(box, a2) && s.assign(box, a3);
+  for (const TopoDS_Shape& half : halves) {
+    assigned = s.assign(half, two) && assigned;
+  }
+  const bool computed = s.compute();
+
+  SMESH::Controls::Volume volume_ctl;
+  volume_ctl.SetMesh(s.meshDS());
+  double volume = 0.0;
+  int nonpositive = 0;
+  for (SMDS_ElemIteratorPtr it = s.meshDS()->elementsIterator(SMDSAbs_Volume); it->more();) {
+    const double v = numeric(volume_ctl, it->next()->GetID());
+    volume += v;
+    nonpositive += v <= 0.0 ? 1 : 0;
+  }
+  int half_segments = 0;
+  for (const TopoDS_Shape& half : halves) {
+    const SMESHDS_SubMesh* sm = s.meshDS()->MeshElements(half);
+    half_segments += sm ? int(sm->NbElements()) : 0;
+  }
+  std::vector<gp_Pnt> bottom, top;
+  for (SMDS_NodeIteratorPtr it = s.meshDS()->nodesIterator(); it->more();) {
+    const SMDS_MeshNode* n = it->next();
+    if (std::abs(n->Z()) < 1e-9) {
+      bottom.push_back(gp_Pnt(n->X(), n->Y(), 0));
+    } else if (std::abs(n->Z() - 1.0) < 1e-9) {
+      top.push_back(gp_Pnt(n->X(), n->Y(), 0));
+    }
+  }
+  int unlifted = 0;
+  for (const gp_Pnt& p : top) {
+    bool below = false;
+    for (const gp_Pnt& q : bottom) {
+      below = below || p.Distance(q) < 1e-9;
+    }
+    unlifted += below ? 0 : 1;
+  }
+  char msg[300];
+  std::snprintf(msg, sizeof(msg),
+                "P5PR1 box with a split bottom EDGE: 64 hexahedra of total volume 1, 2 + 2 "
+                "segments on the half-EDGEs, 25 top nodes each above a bottom node; assigned %d "
+                "computed %d volumes %d nonpositive %d volume %.15g half segments %d top %d "
+                "bottom %d unlifted %d",
+                int(assigned), int(computed), int(s.meshDS()->NbVolumes()), nonpositive, volume,
+                half_segments, int(top.size()), int(bottom.size()), unlifted);
+  check(assigned && computed && s.meshDS()->NbVolumes() == 64 && nonpositive == 0 &&
+            std::abs(volume - 1.0) < 1e-12 && half_segments == 4 && top.size() == 25 &&
+            bottom.size() == 25 && unlifted == 0,
+        msg);
 }
 
 }  // namespace
@@ -2825,4 +3175,9 @@ void run_smesh_probe() {
   probe_p4_cartesian_layers();
   probe_p4_mefisto_max_element_area();
   probe_p4_composite_hexa_layers();
+  probe_p5_salome_exception_text();
+  probe_p5_remove_hypothesis_state();
+  probe_p5_cartesian_too_thick();
+  probe_p5_polygon_per_face_layers();
+  probe_p5_prism_composite_side();
 }

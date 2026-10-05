@@ -10,7 +10,9 @@
 #include "mesher/mesher.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <list>
 #include <map>
 #include <set>
 #include <utility>
@@ -25,6 +27,8 @@
 #include <SMESH_Hypothesis.hxx>
 #include <SMESH_Mesh.hxx>
 #include <SMESH_subMesh.hxx>
+#include <StdMeshers_ViscousLayers.hxx>
+#include <StdMeshers_ViscousLayers2D.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 
@@ -574,55 +578,191 @@ std::string Mesher::describe_concurrency(const TopoDS_Shape& target,
 }
 
 void Mesher::refuse_unread_layers() const {
-  // Only some algorithms build layers in their Compute: Hexa_3D, PolyhedronPerSolid_3D and
-  // Cartesian_3D read ViscousLayers; Quadrangle_2D, QuadFromMedialAxis_1D2D and MEFISTO_2D
-  // read ViscousLayers2D. The compatible lists do not tell: RadialQuadrangle_1D2D inherits
+  // Only some algorithms build layers in their Compute: Hexa_3D, CompositeHexa_3D
+  // (StdMeshers_CompositeHexa_3D_viscous_layers.patch), PolyhedronPerSolid_3D and
+  // Cartesian_3D read ViscousLayers; Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D and
+  // PolygonPerFace_2D (StdMeshers_PolygonPerFace_2D_viscous_layers.patch) read
+  // ViscousLayers2D. The compatible lists do not tell: RadialQuadrangle_1D2D inherits
   // ViscousLayers2D from Quadrangle_2D and builds no layer. Any other algorithm meshes the
-  // sub-shape with no layer and no word (Prism_3D, RadialQuadrangle_1D2D), fails after
-  // building half of them (PolygonPerFace_2D), or crashed (CompositeHexa_3D).
+  // sub-shape with no layer and no word (Prism_3D, RadialQuadrangle_1D2D).
+  //
+  // A building algorithm can still refuse the layer hypotheses that reach it: Hexa_3D
+  // (StdMeshers_Hexa_3D.cxx:136-147) and CompositeHexa_3D take one ViscousLayers per solid,
+  // Cartesian_3D keeps the last one it lists (StdMeshers_Cartesian_3D.cxx:114-125), and the
+  // layer check of StdMeshers_ViscousLayers::CheckHypothesis refuses face sets that do not
+  // fit together.
+  // SMESH then leaves the sub-mesh MISSING_HYP, or drops the other hypotheses, and its
+  // Compute returns true with no element there (SMESH_Gen.cxx:249-253). So the layer check
+  // runs here first, with SMESH's reason; the algorithm runs it again in its own check
+  // before its Compute (SMESH_subMesh.cxx, COMPUTE), so this call changes no result.
   struct LayerKind {
     TopAbs_ShapeEnum type;
     const char* kind_name;
     const char* hypothesis;
     std::set<std::string> builders;
     const char* listed;
+    std::set<std::string> read_one;  // builders that read one hypothesis per sub-shape
   };
   const LayerKind kinds[] = {
       {TopAbs_SOLID, "SOLID", "ViscousLayers",
-       {"Hexa_3D", "PolyhedronPerSolid_3D", "Cartesian_3D"},
-       "Hexa_3D, PolyhedronPerSolid_3D and Cartesian_3D"},
+       {"Hexa_3D", "CompositeHexa_3D", "PolyhedronPerSolid_3D", "Cartesian_3D"},
+       "Hexa_3D, CompositeHexa_3D, PolyhedronPerSolid_3D and Cartesian_3D",
+       {"Hexa_3D", "CompositeHexa_3D", "Cartesian_3D"}},
       {TopAbs_FACE, "FACE", "ViscousLayers2D",
-       {"Quadrangle_2D", "QuadFromMedialAxis_1D2D", "MEFISTO_2D"},
-       "Quadrangle_2D, QuadFromMedialAxis_1D2D and MEFISTO_2D"},
+       {"Quadrangle_2D", "QuadFromMedialAxis_1D2D", "MEFISTO_2D", "PolygonPerFace_2D"},
+       "Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D and PolygonPerFace_2D",
+       {}},
   };
   for (const LayerKind& kind : kinds) {
     SMESH_HypoFilter filter(SMESH_HypoFilter::HasName(kind.hypothesis));
     for (TopExp_Explorer ex(data_->shape, kind.type); ex.More(); ex.Next()) {
-      if (mesh_->GetHypothesis(ex.Current(), filter, /*andAncestors=*/true) == nullptr) {
+      std::list<const SMESHDS_Hypothesis*> found;
+      const int count = mesh_->GetHypotheses(ex.Current(), filter, found,
+                                             /*andAncestors=*/true);
+      if (count == 0) {
         continue;
       }
       SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
       SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
-      if (algo == nullptr || algo->GetName() == nullptr) {
-        continue;  // no algorithm of its own: the compute reports what is missing
-      }
-      const std::string name = algo->GetName();
-      if (kind.builders.count(name) != 0) {
-        continue;
-      }
       const std::pair<const char*, int> at =
           ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current()));
-      throw PysmeshError(
-          std::string("Mesher.compute: ") + kind.hypothesis + " reaches " +
-              (at.first[0] != 0 ? at.first : kind.kind_name) + " " +
-              std::to_string(at.second) + ", whose algorithm " + name +
-              " does not build viscous layers.",
-          std::string("Only ") + kind.listed + " build " + kind.hypothesis +
-              "; with " + name + " the layers would be missing, or the compute would fail "
-              "after building some. Assign one of those algorithms there, or assign the "
-              "layers only to the sub-shapes such an algorithm meshes.");
+      const std::string place =
+          std::string(at.first[0] != 0 ? at.first : kind.kind_name) + " " +
+          std::to_string(at.second);
+      if (kind.type == TopAbs_FACE) {
+        refuse_face_layers_meshed_from_above(ex.Current(), place, algo);
+      }
+      if (algo == nullptr || algo->GetName() == nullptr) {
+        continue;  // no algorithm at all: the compute reports what is missing
+      }
+      const std::string name = algo->GetName();
+      if (kind.builders.count(name) == 0) {
+        throw PysmeshError(
+            std::string("Mesher.compute: ") + kind.hypothesis + " reaches " + place +
+                ", whose algorithm " + name + " does not build viscous layers.",
+            std::string("Only ") + kind.listed + " build " + kind.hypothesis +
+                "; with " + name + " the layers would be missing, or the compute would "
+                "fail after building some. Assign one of those algorithms there, or assign "
+                "the layers only to the sub-shapes such an algorithm meshes.");
+      }
+      if (count > 1 && kind.read_one.count(name) != 0) {
+        throw PysmeshError(
+            "Mesher.compute: " + std::to_string(count) + " " + kind.hypothesis +
+                " hypotheses reach " + place + ", but its algorithm " + name +
+                " reads one " + kind.hypothesis + " per " + kind.kind_name + ".",
+            "With several, " + name + " would mesh nothing there, or build one stack and "
+            "drop the others. Assign one hypothesis per " + std::string(kind.kind_name) +
+            ", or use PolyhedronPerSolid_3D, which grows each hypothesis's stack on its "
+            "own faces.");
+      }
+      SMESH_Hypothesis::Hypothesis_Status status = SMESH_Hypothesis::HYP_OK;
+      const SMESH_ComputeErrorPtr why =
+          kind.type == TopAbs_SOLID
+              ? StdMeshers_ViscousLayers::CheckHypothesis(*mesh_, ex.Current(), status)
+              : StdMeshers_ViscousLayers2D::CheckHypothesis(*mesh_, ex.Current(), status);
+      if (why && !why->IsOK()) {
+        const std::string reason =
+            why->myComment.empty() ? std::string(status_text(status))
+                                   : with_ordinals(why->myComment);
+        throw PysmeshError(
+            "Mesher.compute: the " + std::string(kind.hypothesis) + " hypotheses on " +
+                place + " do not fit together: " + reason + " (algorithm " + name + ").",
+            "SMESH checks them before it meshes " + place + ": a face set may share no "
+            "face with another one, and faces that share an edge need the same number of "
+            "layers. Change the face sets so that they meet these rules.");
+      }
     }
   }
+}
+
+void Mesher::refuse_face_layers_meshed_from_above(const TopoDS_Shape& face,
+                                                  const std::string& place,
+                                                  const SMESH_Algo* own) const {
+  // ViscousLayers2D is read by the FACE's own 2-D algorithm. An algorithm of an enclosing
+  // SOLID that meshes faces itself (NeedDiscreteBoundary() false) leaves that 2-D algorithm
+  // out: Cartesian_3D and PolyhedronPerSolid_3D mesh every face of their solid, and
+  // Prism_3D every face but the source of its sweep, which carries a 2-D algorithm. Their
+  // layers were dropped with no word, or the compute failed after meshing ("Less that 3
+  // nodes on the wire", "no message").
+  for (const TopoDS_Shape& above : mesh_->GetAncestors(face)) {
+    if (above.ShapeType() != TopAbs_SOLID) {
+      continue;
+    }
+    SMESH_subMesh* solid_sub = mesh_->GetSubMeshContaining(above);
+    const SMESH_Algo* outer = solid_sub != nullptr ? solid_sub->GetAlgo() : nullptr;
+    if (outer == nullptr || outer->GetName() == nullptr || outer->NeedDiscreteBoundary()) {
+      continue;
+    }
+    const std::string name = outer->GetName();
+    const std::pair<const char*, int> at =
+        ordinal_of_shape_index(meshDS_->ShapeToIndex(above));
+    const std::string solid = std::string(at.first[0] != 0 ? at.first : "SOLID") + " " +
+                              std::to_string(at.second);
+    if (name == "Cartesian_3D" || name == "PolyhedronPerSolid_3D") {
+      throw PysmeshError(
+          "Mesher.compute: ViscousLayers2D reaches " + place + ", a face of " + solid +
+              ", whose algorithm " + name +
+              " meshes every dimension itself and builds no 2-D layers.",
+          name + " meshes the faces of " + solid + " without their 2-D algorithms, so "
+          "no ViscousLayers2D is read there: the layers would be missing, or the compute "
+          "would fail after building some. Grow the layers with ViscousLayers on " + solid +
+          " instead; " + name + " builds them.");
+    }
+    if (own == nullptr) {
+      throw PysmeshError(
+          "Mesher.compute: ViscousLayers2D reaches " + place +
+              ", which has no 2-D algorithm of its own: " + name + " of " + solid +
+              " meshes it and builds no 2-D layers.",
+          "Only Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D and PolygonPerFace_2D "
+          "build ViscousLayers2D. With " + name + ", assign one of them on that face alone, "
+          "with the layers there: the sweep starts from it and carries its layers "
+          "through the solid.");
+    }
+    // A 2-D algorithm inherited from the shape above leaves the choice of the face the
+    // sweep starts from to Prism_3D's own search, which may take another face: then the
+    // layers stayed on this face, and the cells of the sweep did not fit it (76 cells on a
+    // block of 4 x 4 x 4 with 12 layer quadrangles, no error). Only a 2-D algorithm on the
+    // face itself makes it the start of the sweep, before the search runs.
+    TopoDS_Shape assigned_to;
+    gen_->GetAlgo(mesh_->GetSubMesh(face), &assigned_to);
+    if (!assigned_to.IsSame(face)) {
+      throw PysmeshError(
+          "Mesher.compute: ViscousLayers2D reaches " + place + ", whose 2-D algorithm " +
+              std::string(own->GetName() != nullptr ? own->GetName() : "") +
+              " is assigned to a shape around it: " + name + " of " + solid +
+              " chooses the face its sweep starts from, may mesh " + place +
+              " itself, and then builds no 2-D layers there.",
+          "Assign the 2-D algorithm on that face alone, beside the layers: the sweep then "
+          "starts from it and carries its layers through the solid.");
+    }
+  }
+}
+
+std::string Mesher::with_ordinals(const std::string& text) const {
+  std::string out;
+  std::size_t i = 0;
+  while (i < text.size()) {
+    out += text[i];
+    if (text[i] != '#' || i + 1 >= text.size() || !std::isdigit(static_cast<unsigned char>(
+                                                       text[i + 1]))) {
+      ++i;
+      continue;
+    }
+    std::size_t end = i + 1;
+    while (end < text.size() && std::isdigit(static_cast<unsigned char>(text[end]))) {
+      ++end;
+    }
+    const std::string digits = text.substr(i + 1, end - i - 1);
+    out += digits;
+    const std::pair<const char*, int> at =
+        digits.size() > 9 ? std::pair<const char*, int>{"", 0}
+                          : ordinal_of_shape_index(std::stoi(digits));
+    if (at.first[0] != 0) {
+      out += std::string(" (") + at.first + " " + std::to_string(at.second) + ")";
+    }
+    i = end;
+  }
+  return out;
 }
 
 std::pair<const char*, int> Mesher::ordinal_of_shape_index(int shape_index) const {
@@ -663,28 +803,53 @@ void Mesher::assign(const std::string& name, const py::dict& params, const std::
                            "was not assigned.",
                        why);
   }
-  assigned_.push_back({name, kind, ordinal, hyp_id});
+  assigned_.push_back({name, kind, ordinal, hyp_id, params});
 }
 
-void Mesher::unassign(const std::string& name, const std::string& kind, int ordinal) {
+void Mesher::unassign(const std::string& name, const py::dict& params, const std::string& kind,
+                      int ordinal) {
   ensure_open();
   ensure_shape("Mesher.unassign");
   const TopoDS_Shape& target = sub_shape(kind, ordinal);
+  std::vector<std::vector<Assignment>::iterator> named;
   for (auto it = assigned_.begin(); it != assigned_.end(); ++it) {
-    if (it->name != name || it->kind != kind || it->ordinal != ordinal) {
-      continue;
+    if (it->name == name && it->kind == kind && it->ordinal == ordinal) {
+      named.push_back(it);
     }
-    const SMESH_Hypothesis::Hypothesis_Status status =
-        mesh_->RemoveHypothesis(target, it->hyp_id);
-    if (SMESH_Hypothesis::IsStatusFatal(status)) {
-      throw PysmeshError("Mesher.unassign: SMESH refused to detach '" + name + "' from " +
-                         where(kind, ordinal) + " — " + status_text(status) + ".");
-    }
-    assigned_.erase(it);
-    return;
   }
-  throw PysmeshError("Mesher.unassign: '" + name + "' is not assigned to " +
-                     where(kind, ordinal) + ".");
+  if (named.empty()) {
+    throw PysmeshError("Mesher.unassign: '" + name + "' is not assigned to " +
+                       where(kind, ordinal) + ".");
+  }
+  // SMESH attaches several auxiliary hypotheses of one type to one sub-shape (several
+  // ViscousLayers, each with its own face set). The name alone then does not say which one
+  // the caller means, so the parameters decide.
+  auto chosen = named.front();
+  if (named.size() > 1) {
+    chosen = assigned_.end();
+    for (const auto& it : named) {
+      if (it->params.equal(params)) {
+        chosen = it;
+        break;
+      }
+    }
+    if (chosen == assigned_.end()) {
+      throw PysmeshError(
+          "Mesher.unassign: " + std::to_string(named.size()) + " '" + name +
+              "' hypotheses are assigned to " + where(kind, ordinal) +
+              ", and none has the parameters given; nothing was detached.",
+          "With several of one name on one sub-shape, unassign detaches the one equal to "
+          "the instance it is given, field for field. Pass an instance equal to the one "
+          "to detach.");
+    }
+  }
+  const SMESH_Hypothesis::Hypothesis_Status status =
+      mesh_->RemoveHypothesis(target, chosen->hyp_id);
+  if (SMESH_Hypothesis::IsStatusFatal(status)) {
+    throw PysmeshError("Mesher.unassign: SMESH refused to detach '" + name + "' from " +
+                       where(kind, ordinal) + " — " + status_text(status) + ".");
+  }
+  assigned_.erase(chosen);
 }
 
 py::list Mesher::assignments() const {
@@ -800,44 +965,54 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
     }
   }
 
-  if (!ok || !failures.empty()) {
-    // A missing algorithm, or an algorithm without the hypothesis it needs, is an algorithm
-    // state of the sub-mesh, not a compute error: SMESH_Gen::Compute returns false and no
-    // sub-mesh carries an error text (report A6: "failed on 0 sub-shape(s)"). So each
-    // sub-mesh that was not computed is asked for its state. A VERTEX takes no algorithm of
-    // its own, and NO_ALGO counts only where an enclosing algorithm needs this mesh.
-    std::vector<std::pair<std::pair<std::size_t, int>, std::string>> states;
-    for (std::size_t k = 0; k < 3; ++k) {
-      for (TopExp_Explorer ex(data_->shape, kKindTypes[k]); ex.More(); ex.Next()) {
-        SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
-        if (sub == nullptr || sub->IsMeshComputed() ||
-            sub->GetAlgoState() == SMESH_subMesh::HYP_OK) {
-          continue;
-        }
-        const std::pair<const char*, int> at =
-            ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current()));
-        bool seen = false;
-        for (const auto& s : states) {
-          seen = seen || (s.first.first == k && s.first.second == at.second);
-        }
-        if (seen || at.second <= 0) {
-          continue;
-        }
-        std::string line = std::string(kKindNames[k]) + " " + std::to_string(at.second) + ": ";
-        if (sub->GetAlgoState() == SMESH_subMesh::NO_ALGO) {
-          if (!needs_own_algorithm(*mesh_, ex.Current())) {
-            continue;
-          }
-          line += "no algorithm is assigned to it (algorithm state NO_ALGO)";
-        } else {
-          const SMESH_Algo* algo = sub->GetAlgo();
-          line += std::string(algo != nullptr && algo->GetName() != nullptr ? algo->GetName()
-                                                                            : "its algorithm") +
-                  " is missing a hypothesis it needs (algorithm state MISSING_HYP)";
-        }
-        states.push_back({{k, at.second}, line});
+  // A missing algorithm, or an algorithm without the hypothesis it needs, is an algorithm
+  // state of the sub-mesh, not a compute error: no sub-mesh carries an error text (report
+  // A6: "failed on 0 sub-shape(s)"). So each sub-mesh that was not computed is asked for its
+  // state. NO_ALGO counts only after a failed compute, where an enclosing algorithm needs
+  // this mesh. A sub-mesh whose algorithm misses its hypothesis is never computed, but
+  // SMESH_Gen::Compute returns false only for a compute that failed
+  // (SMESH_Gen::sequentialComputeSubMeshes), so it returned true with that sub-shape left
+  // without a mesh (M3). So the states are asked after every compute, and MISSING_HYP fails
+  // a compute that SMESH reports as done. A VERTEX keeps its node whatever its algorithm
+  // does: only its 0-D algorithm (SegmentAroundVertex_0D) counts, when it misses its
+  // hypothesis and so does nothing.
+  const bool failed = !ok || !failures.empty();
+  std::vector<std::pair<std::pair<std::size_t, int>, std::string>> states;
+  for (std::size_t k = 0; k < 4; ++k) {
+    const bool is_vertex = kKindTypes[k] == TopAbs_VERTEX;
+    for (TopExp_Explorer ex(data_->shape, kKindTypes[k]); ex.More(); ex.Next()) {
+      SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
+      if (sub == nullptr || (sub->IsMeshComputed() && !is_vertex) ||
+          sub->GetAlgoState() == SMESH_subMesh::HYP_OK ||
+          (is_vertex && sub->GetAlgoState() != SMESH_subMesh::MISSING_HYP)) {
+        continue;
       }
+      const std::pair<const char*, int> at =
+          ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current()));
+      bool seen = false;
+      for (const auto& s : states) {
+        seen = seen || (s.first.first == k && s.first.second == at.second);
+      }
+      if (seen || at.second <= 0) {
+        continue;
+      }
+      std::string line = std::string(kKindNames[k]) + " " + std::to_string(at.second) + ": ";
+      if (sub->GetAlgoState() == SMESH_subMesh::NO_ALGO) {
+        if (!failed || !needs_own_algorithm(*mesh_, ex.Current())) {
+          continue;
+        }
+        line += "no algorithm is assigned to it (algorithm state NO_ALGO)";
+      } else {
+        const SMESH_Algo* algo = sub->GetAlgo();
+        line += std::string(algo != nullptr && algo->GetName() != nullptr ? algo->GetName()
+                                                                          : "its algorithm") +
+                " is missing a hypothesis it needs (algorithm state MISSING_HYP)";
+      }
+      states.push_back({{k, at.second}, line});
     }
+  }
+
+  if (failed || !states.empty()) {
     std::sort(states.begin(), states.end());
     for (const auto& s : states) {
       failures.push_back(s.second);

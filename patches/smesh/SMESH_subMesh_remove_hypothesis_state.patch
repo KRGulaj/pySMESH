@@ -1,0 +1,56 @@
+pySMESH: SMESH_subMesh checks the algorithm again when a hypothesis is removed from a sub-mesh
+that misses one (SMESH V9_16_0).
+
+Defect: a sub-mesh whose algorithm refused its hypotheses stays unmeshable after the hypothesis
+that made it refuse is removed. The compute then leaves it empty and reports no error.
+
+Symptom: the unit box with Regular_1D (4 segments), Quadrangle_2D, Hexa_3D and two
+ViscousLayers hypotheses on the compound root, one on the face x = 0 and one on x = 1. Hexa_3D
+takes one ViscousLayers (StdMeshers_Hexa_3D.cxx:136-147), so the SOLID's sub-mesh becomes
+MISSING_HYP. With either hypothesis removed, Hexa_3D accepts the one left, but the SOLID stays
+MISSING_HYP and SMESH_Gen::Compute meshes no volume there and returns true.
+
+Root cause: SMESH_subMesh::AlgoStateEngine, state MISSING_HYP, does nothing on REMOVE_HYP
+(SMESH_subMesh.cxx:818-819) and on REMOVE_FATHER_HYP (":856-857, nothing to do"); it assumes
+that removing a hypothesis cannot make the algorithm's check pass. The HYP_OK state checks again
+on REMOVE_HYP (:929-936), and MISSING_HYP checks again on MODIF_HYP and ADD_FATHER_HYP
+(:835-844). The removal branches are from SMESH bc37f0b49 (2004-06-18, "DCQ : Merge with
+Ecole_Ete_a6"); upstream master at 83f8bf482 (2026-09-14) has the same code.
+
+Change, in SMESH_subMesh.cxx only: in the MISSING_HYP state, REMOVE_HYP and REMOVE_FATHER_HYP
+call the algorithm's CheckHypothesis, and the sub-mesh becomes HYP_OK if it passes, as on
+ADD_FATHER_HYP.
+
+Not changed: a sub-mesh in any other state; a MISSING_HYP sub-mesh whose algorithm still
+refuses its hypotheses after the removal; the status that the removal returns.
+
+diff --git a/src/SMESH/SMESH_subMesh.cxx b/src/SMESH/SMESH_subMesh.cxx
+--- a/src/SMESH/SMESH_subMesh.cxx
++++ b/src/SMESH/SMESH_subMesh.cxx
+@@ -816,7 +816,16 @@
+       break;
+     }
+     case REMOVE_HYP:
+-      break;
++    case REMOVE_FATHER_HYP: {
++      // pySMESH: a removed hypothesis can be what made the algorithm refuse the others
++      // (Hexa_3D takes one ViscousLayers, and a second one makes it HYP_INCOMPATIBLE), so
++      // check again, as MODIF_HYP and ADD_FATHER_HYP do. The sub-mesh stayed MISSING_HYP.
++      algo = GetAlgo();
++      ASSERT(algo);
++      if ( algo->CheckHypothesis((*_father),_subShape, aux_ret ))
++        setAlgoState(HYP_OK);
++      break;
++    }
+     case REMOVE_ALGO: {        // perhaps a father algo applies ?
+       algo = GetAlgo();
+       if (algo == NULL)  // no more algo applying on sub-shape...
+@@ -853,8 +862,6 @@
+       }
+       break;
+     }
+-    case REMOVE_FATHER_HYP:    // nothing to do
+-      break;
+     case REMOVE_FATHER_ALGO: {
+       algo = GetAlgo();
+       if (algo == NULL)  // no more applying algo on father

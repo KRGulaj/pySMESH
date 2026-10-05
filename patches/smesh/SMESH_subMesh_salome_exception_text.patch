@@ -1,0 +1,49 @@
+pySMESH: SMESH_subMesh keeps the whole text of a SALOME_Exception that a Compute throws
+(SMESH V9_16_0).
+
+Defect: when an algorithm's Compute throws a SALOME_Exception built from a std::string or an
+SMESH_Comment, the compute error of the sub-mesh loses the first 7 characters of the text.
+A text shorter than 7 characters is read past its end.
+
+Symptom: a 3-D algorithm that throws SALOME_Exception( SMESH_Comment( "ViscousBuilder2D: not
+SMDS_TOP_EDGE node position: " ) << 0 << " of node " << 12 ) gives the SOLID the compute
+error "Builder2D: not SMDS_TOP_EDGE node position: 0 of node 12"; a std::string "abc" gives an
+empty or garbage text (v2_probe, section P5EXC). Throw sites of this kind in the compiled
+algorithms: StdMeshers_ViscousLayers2D.cxx:2005, the CartesianParameters3D checks (:125-160)
+called again from ComputeCoordinates (:305), and, before StdMeshers_Cartesian_VL_offset_error.patch,
+StdMeshers_Cartesian_3D.cxx:154.
+
+Root cause: ComputeStateEngine skips 7 characters of every SALOME_Exception text, for the
+"Salome " of the "Salome Exception" prefix (SMESH_subMesh.cxx:1614-1621). Only the const char*
+constructor adds that prefix (Utils_SALOME_Exception.cxx, makeText); the std::string
+constructor stores the text as given (Utils_SALOME_Exception.hxx), and an SMESH_Comment is a
+std::string. The skip is from SMESH 9a54694a0 (2013-02-12, "Merge from V6_main 11/02/2013");
+the std::string constructor came later, with KERNEL b741d902 (2021-02-18, "Kernel evolution
+for salome gui without neither NS nor other servers"). Upstream SMESH master at 83f8bf482
+(2026-09-14) has the same code.
+
+Change, in SMESH_subMesh.cxx only: the 7 characters are skipped only when the text starts with
+"Salome Exception". Every other text is kept whole.
+
+Not changed: a text with the prefix keeps exactly its former text ("Exception : <text>"); the
+other catch clauses; the error name COMPERR_SLM_EXCEPTION.
+
+diff --git a/src/SMESH/SMESH_subMesh.cxx b/src/SMESH/SMESH_subMesh.cxx
+--- a/src/SMESH/SMESH_subMesh.cxx
++++ b/src/SMESH/SMESH_subMesh.cxx
+@@ -1615,9 +1615,14 @@
+           const int skipSalomeShift = 7; /* to skip "Salome " of
+                                             "Salome Exception" prefix returned
+                                             by SALOME_Exception::what() */
++          // pySMESH: only the const char* constructor adds that prefix; a text built from a
++          // std::string or an SMESH_Comment has none, so skip it only where it is there.
++          const std::string text   = S_ex.what();
++          const std::string prefix = "Salome Exception";
+           if ( !_computeError ) _computeError = SMESH_ComputeError::New();
+           _computeError->myName    = COMPERR_SLM_EXCEPTION;
+-          _computeError->myComment = S_ex.what() + skipSalomeShift;
++          _computeError->myComment = text.compare( 0, prefix.size(), prefix ) == 0
++                                   ? text.substr( skipSalomeShift ) : text;
+         }
+         catch ( std::exception& exc ) {
+           if ( !_computeError ) _computeError = SMESH_ComputeError::New();

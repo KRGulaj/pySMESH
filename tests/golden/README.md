@@ -298,3 +298,26 @@ concurrent assignment.
   goes from 2.147 to 2.153, both within 3, and the cells are better shaped.
 - `export_handoff_after_common` refuses as before (`not a bijection`). Amendment 8 replaced
   `Handoff.aliases` with per-ordinal id lists, and the details name them.
+
+## Explained differences since the Prism_3D composite side group (Phase 5, group 4)
+
+Phase 5 groups 1 to 3 change no probe. Group 4 (PR1) changes one `defect` probe. The
+`geometry` and `mesh` groups are equal to the reference bit for bit (`--rtol 0 --atol 0`).
+
+| Probe | Before | Now | Issue |
+|---|---|---|---|
+| `B1/prism_unequal_edge_counts` | swept from a side face: 225 nodes, 128 hexahedra, 160 quadrangles, 68 edges | swept from the pentagon cap: 145 nodes, 64 hexahedra and 16 pentahedra, 112 quadrangles and 8 triangles, 60 edges; cell volumes sum to 2.377641290737884, as before | PR1 |
+
+The probe is the n = 5 prism of report §3 B1, with 2 segments on each half-edge. Up to
+5.0.0, Prism_3D refused the pentagon cap as the source, because the 5-edge side face has a
+composite horizontal side, and swept from a side face. That sweep gave 8 segments to two
+edges whose hypothesis gives 4. PR1 projects the whole side onto the composite side. The
+hypotheses of the two half-edges give the 2 segments that the projection puts on each, so
+Prism_3D now sweeps between the caps. The oracle is the structure of a straight prism:
+
+- the pentagon cap has 29 nodes, and 5 levels give 145 nodes;
+- its 16 quadrangles and 4 triangles give 64 hexahedra and 16 pentahedra over 4 layers;
+- the walls take 20 segments x 4 layers = 80 quadrangles, and the two caps 32 more;
+- the cap boundaries take 2 x 20 segments, and the 5 vertical edges 4 each: 60 edges;
+- the cell volumes sum to the prism volume 5/2 sin(72 degrees) = 2.3776412907378837
+  (1.9e-16 relative), and every cell has a positive volume.
