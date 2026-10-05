@@ -31,7 +31,8 @@ looooo/SMESH patch series expects. Then it applies the patches and the source ed
 3. The **conda-forge/smesh-feedstock** OCCT 8.0 layer (``patches/occt8/*.patch``).
 4. The netgen series (``patches/netgen/*.patch``): SALOME's ``netgen62ForSalome.patch``
    verbatim, then the OCCT 8 port from looooo/SMESH and conda-forge, then the pySMESH
-   patches.
+   patches and the fixes backported from later netgen releases (each named after its
+   upstream commit).
 5. The NETGENPlugin series (``patches/netgenplugin/*.patch``): the OCCT 8 port from
    conda-forge, then the pySMESH patches that remove CORBA and SALOMEDS and keep the
    plugin inside the host process's contract.
@@ -142,6 +143,7 @@ PATCH_MANIFEST: Final[tuple[tuple[str, str], ...]] = (
     ("netgen/0004-occt-8.0-netgen-partition.patch", "."),
     ("netgen/0005-occt-8.0-netgen-occ.patch", "."),
     ("netgen/occgeom_save_without_stl.patch", "src/Netgen"),
+    ("netgen/e1d71a78_no_need_to_remove_archive_type_infos.patch", "src/Netgen"),
     # --- NETGENPlugin V9_16_0 : root staged/src/NETGENPlugin (looooo's layout) ---
     ("netgenplugin/NETGENPlugin_occt8.patch", "src/NETGENPlugin"),
     ("netgenplugin/NETGENPlugin_local_size_by_subshape.patch", "src/NETGENPlugin"),

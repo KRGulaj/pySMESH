@@ -1,0 +1,64 @@
+netgen upstream e1d71a78ab1d71d185268a9779520eb04d9be509, "no need to remove archive type
+infos" (mhochsteger, 2021-09-13; first in v6.2.2105), backported to netgen 6.2.2101.
+
+Defect in 2101: ngcore keeps the archive class register in a namespace-scope
+std::unique_ptr in core/archive.cpp (type_register), and every RegisterClassForArchive
+object took its class out of that register in its destructor. netgen's own build makes
+ngcore a separate DLL, loaded before netgen's libraries and unloaded after them. pySMESH
+links ngcore and netgen statically into _core.pyd, where netgen's registering objects
+(regob in csg/brick.cpp, and others) are built before archive.cpp registers the
+destructor of type_register. At process exit type_register is destroyed first, and the
+later ~RegisterClassForArchive reads the freed map in Archive::IsRegistered: an access
+violation during DLL_PROCESS_DETACH whenever the freed memory has been reused. Measured
+before this patch: 6 of 20 processes that only imported pySMESH ended with 0xC0000005
+(tests/test_mesher_netgen_process.py), stack ~RegisterClassForArchive ->
+Archive::RemoveArchiveRegister -> Archive::IsRegistered -> std::map::find, from
+dllmain_crt_process_detach.
+
+Change, verbatim from upstream: RegisterClassForArchive has no destructor, and
+Archive::RemoveArchiveRegister is gone (its only caller was that destructor). The register
+lives until the process ends. The hunks apply at fuzz 0 with an offset of -66 lines. No
+mesh changes: the register is read only by netgen's archive (serialisation) code, which
+pySMESH does not call.
+
+diff --git a/libsrc/core/archive.cpp b/libsrc/core/archive.cpp
+index 448b8f47..7937e64d 100644
+--- a/libsrc/core/archive.cpp
++++ b/libsrc/core/archive.cpp
+@@ -22,11 +22,6 @@ namespace ngcore
+                                    std::make_unique<std::map<std::string, detail::ClassArchiveInfo>>();
+     (*type_register)[classname] = info;
+   }
+-  void Archive :: RemoveArchiveRegister(const std::string& classname)
+-  {
+-    if(IsRegistered(classname))
+-        type_register->erase(classname);
+-  }
+   bool Archive :: IsRegistered(const std::string& classname)
+   {
+     if(type_register == nullptr) type_register =
+diff --git a/libsrc/core/archive.hpp b/libsrc/core/archive.hpp
+index bddd2533..cbe17e27 100644
+--- a/libsrc/core/archive.hpp
++++ b/libsrc/core/archive.hpp
+@@ -646,7 +646,6 @@ namespace ngcore
+     // Set ClassArchiveInfo for Demangled typeid, this is done by creating an instance of
+     // RegisterClassForArchive<type, bases...>
+     static void SetArchiveRegister(const std::string& classname, const detail::ClassArchiveInfo& info);
+-    static void RemoveArchiveRegister(const std::string& classname);
+     static bool IsRegistered(const std::string& classname);
+ 
+     // Helper class for up-/downcasting
+@@ -713,12 +712,6 @@ namespace ngcore
+                         { return typeid(T) == ti ? p : Archive::Caster<T, Bases...>::tryDowncast(ti, p); };
+       Archive::SetArchiveRegister(std::string(Demangle(typeid(T).name())),info);
+     }
+-    ~RegisterClassForArchive()
+-    {
+-      Archive::RemoveArchiveRegister(std::string(Demangle(typeid(T).name())));
+-    }
+-
+-
+   };
+ 
+   // BinaryOutArchive ======================================================================
