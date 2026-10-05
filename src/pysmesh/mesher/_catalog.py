@@ -369,8 +369,8 @@ class Prism3D(Algorithm):
 
     It builds no viscous layers of its own, but it sweeps the 2-D layers of its source
     face: put :class:`ViscousLayers2D` on that face, beside a 2-D algorithm assigned on
-    that face alone. :meth:`~pysmesh.Mesher.compute` refuses 2-D layers on any other face
-    of the solid.
+    that face alone. :meth:`~pysmesh.Mesher.compute` refuses 2-D layers on any other
+    face of the solid.
     """
 
     native_name: ClassVar[str] = "Prism_3D"
@@ -974,9 +974,9 @@ class ViscousLayers(Hypothesis):
     thickness per face set). :class:`PolyhedronPerSolid3D` grows each stack on its own
     faces. :class:`Hexa3D` and :class:`Cartesian3D` read one hypothesis per solid, so
     :meth:`~pysmesh.Mesher.compute` refuses a second one there. SMESH also refuses two
-    face sets that share a face, and two that hold faces sharing an edge with a different
-    ``layer_count``; :meth:`~pysmesh.Mesher.compute` raises with SMESH's reason before it
-    meshes anything. To detach one of several, pass
+    face sets that share a face, and two that hold faces sharing an edge with a
+    different ``layer_count``; :meth:`~pysmesh.Mesher.compute` raises with SMESH's
+    reason before it meshes anything. To detach one of several, pass
     :meth:`~pysmesh.Mesher.unassign` an instance equal to it.
 
     Attributes:
@@ -1020,8 +1020,8 @@ class ViscousLayers2D(Hypothesis):
     face of a solid that :class:`Cartesian3D` or :class:`PolyhedronPerSolid3D` meshes
     (they mesh every dimension themselves), and a face of a :class:`Prism3D` solid
     without a 2-D algorithm assigned on that face alone. With :class:`Prism3D`, assign
-    the 2-D algorithm on the face the sweep starts from, with the layers there: the sweep
-    carries them through every level.
+    the 2-D algorithm on the face the sweep starts from, with the layers there: the
+    sweep carries them through every level.
 
     Attributes:
         total_thickness: Total height of the layer stack.

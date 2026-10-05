@@ -1140,7 +1140,7 @@ def test_composite_hexa_3d_refuses_layers_instead_of_crashing() -> None:
     assert "CompositeHexa_3D does not build viscous layers" in line
 
 
-# ---- VL6 several ViscousLayers hypotheses on one solid ------------------------------ #
+# ---- VL6 several ViscousLayers hypotheses on one solid ----------------------------- #
 
 
 def _at_x1(items: list[object]) -> int:
@@ -1171,9 +1171,9 @@ def test_two_face_sets_on_one_solid_each_grow_their_own_closed_form_stack(
 ) -> None:
     """PolyhedronPerSolid3D with one hypothesis on x = 0 and another on x = 1.
 
-    The faces x = 0 and x = 1 share no edge, so the layer counts may differ. Each wall gets
-    the planes of its own stack; the layer cells of each go into its own group (4 x 4
-    quadrangles per wall); the cells fill the unit box exactly.
+    The faces x = 0 and x = 1 share no edge, so the layer counts may differ. Each wall
+    gets the planes of its own stack; the layer cells of each go into its own group (4 x
+    4 quadrangles per wall); the cells fill the unit box exactly.
     """
     box = _unit_box()
     wall_a, wall_b = _at_x0(box.faces()), _at_x1(box.faces())
@@ -1209,9 +1209,10 @@ def test_layer_face_sets_that_do_not_fit_together_raise_smesh_reason(
     set_b: str, count_b: int, reason: str
 ) -> None:
     """Two face sets that SMESH refuses: they share the face y = 0, or they are on the
-    adjacent faces x = 0 and y = 0 with 3 and 2 layers (``StdMeshers_ViscousLayers.cxx``,
-    ``findFacesWithLayers``). The reference meshed no volume and said nothing. Now the
-    compute raises with SMESH's reason, naming the face by its ordinal, and meshes nothing.
+    adjacent faces x = 0 and y = 0 with 3 and 2 layers
+    (``StdMeshers_ViscousLayers.cxx``, ``findFacesWithLayers``). The reference meshed no
+    volume and said nothing. Now the compute raises with SMESH's reason, naming the face
+    by its ordinal, and meshes nothing.
     """
     box = _unit_box()
     x0, y0 = _at_x0(box.faces()), _at_y0(box.faces())
@@ -1236,9 +1237,10 @@ def test_a_second_layer_hypothesis_on_an_algorithm_that_reads_one_is_refused(
     algorithm: str,
 ) -> None:
     """Hexa_3D takes one ViscousLayers per solid (``StdMeshers_Hexa_3D.cxx:136-147``):
-    with two, the reference meshed no volume and said nothing. Cartesian_3D keeps the last
-    one it lists (``StdMeshers_Cartesian_3D.cxx:114-125``): the reference built only one
-    stack. Now the compute refuses, names the solid and the algorithm, and meshes nothing.
+    with two, the reference meshed no volume and said nothing. Cartesian_3D keeps the
+    last one it lists (``StdMeshers_Cartesian_3D.cxx:114-125``): the reference built
+    only one stack. Now the compute refuses, names the solid and the algorithm, and
+    meshes nothing.
     """
     box = _unit_box()
     wall_a, wall_b = _at_x0(box.faces()), _at_x1(box.faces())
@@ -1279,9 +1281,9 @@ def test_unassign_removes_exactly_the_layer_hypothesis_it_is_given() -> None:
     assert groups == {"bl_a": 16 * 3}
 
 
-def test_a_solid_meshes_again_once_the_second_hexa_layer_hypothesis_is_detached() -> None:
-    """Hexa3D with two ViscousLayers, then the second one detached: the solid meshes with
-    the first one's stack. On the reference the solid stayed unmeshed: removing a
+def test_a_hexa_solid_meshes_once_its_second_layer_hypothesis_is_detached() -> None:
+    """Hexa3D with two ViscousLayers, then the second one detached: the solid meshes
+    with the first one's stack. On the reference the solid stayed unmeshed: removing a
     hypothesis never checked the algorithm again (``SMESH_subMesh.cxx``, state
     ``MISSING_HYP``), so the compute succeeded with no volume.
     """
@@ -1323,7 +1325,7 @@ def test_unassign_refuses_a_layer_hypothesis_equal_to_none_of_several() -> None:
         assert mesher.assignments() == before
 
 
-# ---- VL7 the extrusion methods on the catalogue path -------------------------------- #
+# ---- VL7 the extrusion methods on the catalogue path ------------------------------- #
 
 
 def _method_stack(
@@ -1352,7 +1354,9 @@ def _method_stack(
         mesh = mesher.mesh()
         layer_ids = {int(i) for g in mesher.groups() for i in g.element_ids}
         groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
-    rows = [r for r in range(mesh.element_count) if int(mesh.element_id[r]) in layer_ids]
+    rows = [
+        r for r in range(mesh.element_count) if int(mesh.element_id[r]) in layer_ids
+    ]
     layer_nodes = np.unique(np.concatenate([mesh.nodes_of(r) for r in rows]))
     return mesh.node_coords, mesh.node_coords[layer_nodes], groups, report
 
@@ -1362,8 +1366,8 @@ def _method_stack(
 def test_each_extrusion_method_grows_the_closed_form_stack_on_a_flat_wall(
     method: ExtrusionMethod, algorithm: str
 ) -> None:
-    """ViscousLayers on the wall x = 0 of the unit box, by each extrusion method, through
-    Mesher. On a flat wall each method moves a node along the wall normal by the
+    """ViscousLayers on the wall x = 0 of the unit box, by each extrusion method,
+    through Mesher. On a flat wall each method moves a node along the wall normal by the
     closed-form depth (SMESH ``additional_hypo.rst``, "Viscous Layers"), so the stack
     nodes lie on the planes x = d_k, and the wall gets 4 x 4 x N layer cells.
     """
@@ -1383,7 +1387,8 @@ def test_smoothed_layers_on_two_adjacent_walls_keep_the_closed_form_on_each(
     algorithm: str,
 ) -> None:
     """SURF_OFFSET_SMOOTH on the walls x = 0 and y = 0: the stacks meet along the edge
-    between them, and away from it (y > T) the x = 0 stack lies on the closed-form planes.
+    between them, and away from it (y > T) the x = 0 stack lies on the closed-form
+    planes.
     """
     total, count = STACK
 
@@ -1406,12 +1411,12 @@ def test_smoothed_layers_on_two_adjacent_walls_keep_the_closed_form_on_each(
 def test_unsmoothed_layers_on_two_adjacent_walls_stop_short_with_a_warning(
     method: ExtrusionMethod, algorithm: str
 ) -> None:
-    """FACE_OFFSET and NODE_OFFSET do not smooth the layers (``StdMeshers_ViscousLayers.cxx``
-    ``AverageHyp::ToSmooth``), so on the walls x = 0 and y = 0 the two stacks collide along
-    the edge between them and SMESH stops the inflation short of T. That is upstream's
-    local limiting (``:5005-5015``): the compute succeeds with a warning on the solid that
-    states the average thickness it reached, below T, and no layer node lies deeper than T
-    from the nearer wall.
+    """FACE_OFFSET and NODE_OFFSET do not smooth the layers
+    (``StdMeshers_ViscousLayers.cxx`` ``AverageHyp::ToSmooth``), so on the walls x = 0
+    and y = 0 the two stacks collide along the edge between them and SMESH stops the
+    inflation short of T. That is upstream's local limiting (``:5005-5015``): the
+    compute succeeds with a warning on the solid that states the average thickness it
+    reached, below T, and no layer node lies deeper than T from the nearer wall.
     """
     total, count = STACK
 
@@ -1428,7 +1433,7 @@ def test_unsmoothed_layers_on_two_adjacent_walls_stop_short_with_a_warning(
     assert groups == {"bl": 2 * 4 * 4 * count}
 
 
-# ---- VL8 the "thickness not reached" warning ---------------------------------------- #
+# ---- VL8 the "thickness not reached" warning --------------------------------------- #
 
 
 def _slab(gap: float) -> ps.Shape:
@@ -1446,10 +1451,10 @@ def test_layers_in_a_narrow_gap_stop_at_half_of_it_with_a_warning(
     """Layers of T on both walls of a slab 0.2 thick, T above half of it.
 
     SMESH limits the stacks locally so that they do not collide
-    (``StdMeshers_ViscousLayers.cxx:5005-5015``), and states it as a warning on the solid,
-    with the average thickness reached. The warning reaches ``ComputeReport.warnings``;
-    the thickness it states, and the depth of every layer node from its wall, are at most
-    half the gap; the cells fill the slab exactly.
+    (``StdMeshers_ViscousLayers.cxx:5005-5015``), and states it as a warning on the
+    solid, with the average thickness reached. The warning reaches
+    ``ComputeReport.warnings``; the thickness it states, and the depth of every layer
+    node from its wall, are at most half the gap; the cells fill the slab exactly.
     """
     gap = 0.2
     shape = _slab(gap)
@@ -1469,7 +1474,9 @@ def test_layers_in_a_narrow_gap_stop_at_half_of_it_with_a_warning(
     head = f"Thickness {total:g} of viscous layers not reached, "
     assert warning.text.startswith(head + "average reached thickness is ")
     assert 0.0 < float(warning.text.rsplit(" ", 1)[1]) <= gap / 2
-    rows = [r for r in range(mesh.element_count) if int(mesh.element_id[r]) in layer_ids]
+    rows = [
+        r for r in range(mesh.element_count) if int(mesh.element_id[r]) in layer_ids
+    ]
     z = mesh.node_coords[np.unique(np.concatenate([mesh.nodes_of(r) for r in rows])), 2]
     assert len(rows) == 2 * 4 * 4 * 3
     assert float(np.minimum(z, gap - z).max()) <= gap / 2 + TOL
@@ -1477,7 +1484,7 @@ def test_layers_in_a_narrow_gap_stop_at_half_of_it_with_a_warning(
     assert inverted == 0
 
 
-# ---- VL9 ViscousLayers2D on a face that an all-dimension algorithm meshes ------------ #
+# ---- VL9 ViscousLayers2D on a face that an all-dimension algorithm meshes ---------- #
 
 
 def _face_at(shape: ps.Shape, axis: int, value: float) -> ps.SubShape:
@@ -1507,9 +1514,9 @@ def test_layers_2d_on_a_face_an_all_dimension_algorithm_meshes_are_refused(
     makes: PolyhedronPerSolid_3D and Cartesian_3D mesh every dimension themselves, and
     Prism_3D projects the face z = 0 from the source z = 1. None of them builds 2-D
     layers. The reference dropped the layers with no word, or failed after meshing
-    ("Less that 3 nodes on the wire", or "no message"). Now the compute refuses before it
-    meshes anything, and names the face and the algorithm (on the whole shape, the first
-    face the layers reach).
+    ("Less that 3 nodes on the wire", or "no message"). Now the compute refuses before
+    it meshes anything, and names the face and the algorithm (on the whole shape, the
+    first face the layers reach).
     """
     box = _unit_box()
     bottom = _face_at(box, 2, 0.0)
@@ -1557,10 +1564,11 @@ def test_layers_2d_on_a_face_an_all_dimension_algorithm_meshes_are_refused(
     assert f"reaches FACE {named}," in str(raised.value)
 
 
-# ---- VLc layers on sweeps ------------------------------------------------------------ #
+# ---- VLc layers on sweeps ---------------------------------------------------------- #
 
-# Geometric1D(0.125, 2) fills an edge of 0.125 (2^4 - 1) = 1.875 with 4 segments exactly,
-# so no length is compensated (StdMeshers_Regular_1D.cxx, GEOMETRIC_1D, compensateError).
+# Geometric1D(0.125, 2) fills an edge of 0.125 (2^4 - 1) = 1.875 with 4 segments
+# exactly, so no length is compensated (StdMeshers_Regular_1D.cxx, GEOMETRIC_1D,
+# compensateError).
 SWEEP_HEIGHT: float = 1.875
 
 
@@ -1613,9 +1621,9 @@ def test_a_sweep_carries_the_source_face_layers_through_every_graded_level(
 ) -> None:
     """Prism3D from the bottom face, which grows ViscousLayers2D on its edge y = 0.
 
-    The sweep levels are the Geometric1D closed form z_k = 0.125 (2^k - 1); at every level
-    the layer lines lie at y = d_k; the cells (28 per level: 4 x 4 inner quadrangles and
-    4 x 3 layer ones) fill the block exactly, and none is inverted.
+    The sweep levels are the Geometric1D closed form z_k = 0.125 (2^k - 1); at every
+    level the layer lines lie at y = d_k; the cells (28 per level: 4 x 4 inner
+    quadrangles and 4 x 3 layer ones) fill the block exactly, and none is inverted.
     """
     mesher, _ = _swept_block(factor, source_alone=True)
     with mesher:
@@ -1641,10 +1649,11 @@ def test_a_sweep_carries_the_source_face_layers_through_every_graded_level(
 
 
 def test_layers_2d_on_a_prism_face_with_an_inherited_2d_algorithm_are_refused() -> None:
-    """Quadrangle2D on the whole shape, ViscousLayers2D on the bottom face: Prism3D picks
-    the face it sweeps from itself, and swept from the top. The reference gave the bottom
-    face its layers and the volume cells none (76 cells that do not fit that face), with no
-    word. Now the compute refuses before it meshes anything, and names the way out.
+    """Quadrangle2D on the whole shape, ViscousLayers2D on the bottom face: Prism3D
+    picks the face it sweeps from itself, and swept from the top. The reference gave the
+    bottom face its layers and the volume cells none (76 cells that do not fit that
+    face), with no word. Now the compute refuses before it meshes anything, and names
+    the way out.
     """
     mesher, block = _swept_block(1.2, source_alone=False)
     with mesher:
@@ -1657,12 +1666,12 @@ def test_layers_2d_on_a_prism_face_with_an_inherited_2d_algorithm_are_refused() 
     assert "on that face alone" in raised.value.details
 
 
-# ---- VLd the largest workable thickness of Cartesian layers -------------------------- #
+# ---- VLd the largest workable thickness of Cartesian layers ------------------------ #
 
 # The child meshes the bored block (2 x 2 x 2, a bore of radius 0.4 on its axis) with
-# Cartesian3D at grid spacing 0.25 and layers of T = argv[2] on every face, and prints one
-# JSON line: the error details, or the cell count and the inverted cells. A child, because
-# the reference crashed once on a run of these inputs.
+# Cartesian3D at grid spacing 0.25 and layers of T = argv[2] on every face, and prints
+# one JSON line: the error details, or the cell count and the inverted cells. A child,
+# because the reference crashed once on a run of these inputs.
 _BORED_CHILD: str = """
 import json, os, sys
 occt = os.environ.get("PYSMESH_OCCT_BIN")
@@ -1682,22 +1691,28 @@ everything = s.entities(ps.EntityKind.SOLID).tolist()
 s.cut(block, [i for i in everything if i not in block])
 with ps.Mesher(ps.load_brep(s.brep())) as m:
     m.assign(ps.Cartesian3D())
-    m.assign(ps.CartesianParameters3D(spacing_x="0.25", spacing_y="0.25", spacing_z="0.25"))
+    m.assign(ps.CartesianParameters3D(spacing_x="0.25", spacing_y="0.25",
+                                      spacing_z="0.25"))
     m.assign(ps.ViscousLayers(total_thickness=float(sys.argv[2]), layer_count=3,
-                              stretch_factor=1.2, boundary=(), ignore=True, group_name="bl"))
+                              stretch_factor=1.2, boundary=(), ignore=True,
+                              group_name="bl"))
     try:
         report = m.compute()
-        out = {"volumes": report.volumes, "inverted": m.select(ps.BadOrientedVolume()).count,
+        out = {"volumes": report.volumes,
+               "inverted": m.select(ps.BadOrientedVolume()).count,
                "bare": m.select(ps.BareBorderVolume()).count}
     except ps.PysmeshError as e:
         out = {"error": e.details, "left": m.mesh().element_count}
 print("BORED-RESULT " + json.dumps(out))
 """
-_WORKABLE: str = r"The largest total thickness for which the offset works is about ([0-9.eE+-]+)"
+_WORKABLE: str = (
+    r"The largest total thickness for which the offset works is about ([0-9.eE+-]+)"
+)
 
 
 def _bored_with_layers(total: float) -> dict[str, object]:
-    """Run the bored-block child at total thickness ``total``; return its JSON result."""
+    """Run the bored-block child at total thickness ``total``; return its JSON
+    result."""
     package_root = str(Path(ps.__file__).resolve().parent.parent)
     proc = subprocess.run(
         [sys.executable, "-c", _BORED_CHILD, package_root, repr(total)],
@@ -1712,14 +1727,14 @@ def _bored_with_layers(total: float) -> dict[str, object]:
     return json.loads(line.split(" ", 1)[1])  # type: ignore[no-any-return]
 
 
-def test_layers_too_thick_name_a_thickness_that_meshes_and_one_just_above_that_fails() -> None:
-    """Layers of 0.3 in the bored block: the offset surfaces meet at 0.3 exactly (the bore,
-    radius 0.4 + T, reaches the walls, 1 - T from its axis).
+def test_layers_too_thick_name_the_largest_thickness_that_meshes() -> None:
+    """Layers of 0.3 in the bored block: the offset surfaces meet at 0.3 exactly (the
+    bore, radius 0.4 + T, reaches the walls, 1 - T from its axis).
 
     The error names T*, the largest thickness for which the offset works, found by
-    bisection; T* is below 0.3 and within 0.3 / 2^12 of it. At 0.95 T* the compute meshes,
-    with no inverted cell and every boundary facet covered; at 1.05 T* it fails with the
-    same kind of message, naming T* again.
+    bisection; T* is below 0.3 and within 0.3 / 2^12 of it. At 0.95 T* the compute
+    meshes, with no inverted cell and every boundary facet covered; at 1.05 T* it fails
+    with the same kind of message, naming T* again.
     """
     import re
 
@@ -1743,10 +1758,11 @@ def test_layers_too_thick_name_a_thickness_that_meshes_and_one_just_above_that_f
 
 @pytest.mark.parametrize("total", [0.5, 0.7])
 def test_layers_whose_offset_is_not_a_valid_solid_are_refused(total: float) -> None:
-    """Thicker still, the offset surfaces cross, and BRepOffset_MakeOffset reports success
-    with a solid that is not valid, partly outside the block. The reference failed with
-    "SOLID 1: no message" (0.5), or meshed 13 cells, 4 of them inverted, with nodes outside
-    the block (0.7). Now the compute fails with the reason and names T*, and leaves no cell.
+    """Thicker still, the offset surfaces cross, and BRepOffset_MakeOffset reports
+    success with a solid that is not valid, partly outside the block. The reference
+    failed with "SOLID 1: no message" (0.5), or meshed 13 cells, 4 of them inverted,
+    with nodes outside the block (0.7). Now the compute fails with the reason and names
+    T*, and leaves no cell.
     """
     import re
 
@@ -1762,10 +1778,11 @@ def test_layers_whose_offset_is_not_a_valid_solid_are_refused(total: float) -> N
 
 
 def test_layer_cells_that_fold_over_are_refused() -> None:
-    """Layers of 0.2999 in the bored block: the offset is a valid solid, but its bore comes
-    within 0.0002 of its walls, closer than the grid can follow, and 57 layer hexahedra
-    fold over. The reference returned them as a success. Now the compute fails, says why,
-    and leaves no cell; at 0.2995 (a gap of 0.001) it meshes with no inverted cell.
+    """Layers of 0.2999 in the bored block: the offset is a valid solid, but its bore
+    comes within 0.0002 of its walls, closer than the grid can follow, and 57 layer
+    hexahedra fold over. The reference returned them as a success. Now the compute
+    fails, says why, and leaves no cell; at 0.2995 (a gap of 0.001) it meshes with no
+    inverted cell.
     """
     folded = _bored_with_layers(0.2999)
     near = _bored_with_layers(0.2995)
