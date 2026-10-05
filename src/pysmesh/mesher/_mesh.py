@@ -65,17 +65,20 @@ class _MeshOps(_MesherBase):
         """Detach an algorithm or a hypothesis previously attached to a sub-shape.
 
         Args:
-            item: The algorithm or hypothesis to detach. Only its name is used, so an
-                equivalent instance works.
+            item: The algorithm or hypothesis to detach. Where one of its name is
+                attached there, only the name is used, so any instance of the class
+                works. Where several are attached (an auxiliary hypothesis such as
+                :class:`ViscousLayers`, one per face set), the one equal to ``item``,
+                field for field, is detached.
             on: The sub-shape it was attached to.
 
         Raises:
-            PysmeshError: If nothing of that name is attached there, or SMESH refuses to
-                detach it.
+            PysmeshError: If nothing of that name is attached there, if several are and
+                none equals ``item``, or if SMESH refuses to detach it.
         """
         kind = "" if on is None else on.kind.name
         ordinal = 0 if on is None else on.ordinal
-        self._m.unassign(item.native_name, kind, ordinal)
+        self._m.unassign(item.native_name, item.params(), kind, ordinal)
 
     def assignments(self) -> tuple[tuple[str, SubShape | None], ...]:
         """Everything attached, in the order it was attached.
@@ -139,9 +142,21 @@ class _MeshOps(_MesherBase):
                 with SMESH's own reason and the algorithm that reported it, and ``.face_ids``
                 carries the ordinals of the failed faces. The partial mesh is **kept** here
                 rather than cleared, because how far the assignment got is the diagnostic.
+                Also if an algorithm misses a hypothesis it needs (algorithm state
+                ``MISSING_HYP``), even where SMESH reports the compute as done: the
+                sub-shape is left without a mesh, or, for a vertex, its 0-D algorithm
+                does nothing. The message names the sub-shape and the algorithm. A
+                sub-shape with no algorithm of its own is no error where an enclosing
+                algorithm meshes it, or where nothing needs its mesh (a solid under a
+                surface mesh).
                 Also before anything is meshed, if a :class:`ViscousLayers` or
                 :class:`ViscousLayers2D` reaches a solid or a face whose algorithm does
-                not build layers; the message names the sub-shape and the algorithm.
+                not build layers; the message names the sub-shape and the algorithm. A
+                face that an algorithm of its solid meshes itself counts as such a face.
+                The same holds if two :class:`ViscousLayers` reach a solid whose
+                algorithm reads one, or if the layer hypotheses there do not fit
+                together (two face sets share a face, or faces that share an edge have a
+                different layer count); the message gives SMESH's reason.
         """
         return _report(self._m.compute(progress, cancel))
 

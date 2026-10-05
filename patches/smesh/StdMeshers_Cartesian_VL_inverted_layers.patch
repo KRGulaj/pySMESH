@@ -1,0 +1,80 @@
+pySMESH: Cartesian_3D with viscous layers refuses layer cells that fold over (SMESH V9_16_0;
+applies after StdMeshers_Cartesian_VL_offset_error.patch).
+
+Defect: where the solid offset by the layer thickness has surfaces closer together than the
+grid spacing, the layer cells there are inverted, and the compute succeeds with them.
+
+Symptom: a 2 x 2 x 2 block with a bore of radius 0.4 on its axis, layers on every face (3
+layers, factor 1.2), grid spacing 0.25. At a total thickness of 0.2999 the offset bore comes
+within 0.0002 of the offset walls. The compute succeeds: 57 of the 912 layer hexahedra are
+inverted (BadOrientedVolume), the smallest cell volume is -7.8e-3, and the cells sum to 6.20
+for a solid of 6.99. At 0.2995 (a gap of 0.001) and below, no cell is inverted.
+
+Root cause: ViscousBuilder::MakeViscousLayers (StdMeshers_Cartesian_VL.cxx) joins each node of
+the offset mesh boundary to its nearest point on the wall and divides that segment into the
+layers, with no check of the cells it makes. Where the offset surfaces almost meet, the cut
+cells of the offset mesh between them are degenerate, and the segments of the two sides cross,
+so the layer cells fold over. The offset step itself succeeds (a valid solid), so
+StdMeshers_Cartesian_VL_offset_error.patch does not see it. The layer builder is from SMESH
+c9294ee68 (2022-06-17, "bos #17015 [CEA 17008] Body fitting with Viscous Layers for CFD
+meshing"); upstream master at 83f8bf482 (2026-09-14) has the same code.
+
+Change, in StdMeshers_Cartesian_VL.cxx only: after the layer cells of a solid are built and the
+coincident nodes merged, MakeViscousLayers counts the layer volumes that SMDS_VolumeTool finds
+not forward (as the BadOrientedVolume control does). If there are any, it clears the mesh, puts
+"Viscous layers: N layer cells are inverted: the solid offset inward by the total thickness T
+has surfaces closer together than the grid can follow, so the layers there fold over. Use a
+smaller total thickness." on the shape and on every SOLID, and returns false.
+
+Not changed: every mesh with no inverted layer cell, bit for bit; the layers in a face (the
+two-step builder's 2-D path), which this check skips.
+
+diff --git a/src/StdMeshers/StdMeshers_Cartesian_VL.cxx b/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
+--- a/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
++++ b/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
+@@ -27,6 +27,7 @@
+ #include "StdMeshers_ViscousLayers.hxx"
+ 
+ #include <SMDS_MeshGroup.hxx>
++#include <SMDS_VolumeTool.hxx>
+ #include <SMESHDS_Mesh.hxx>
+ #include <SMESHDS_SubMesh.hxx>
+ #include <SMESH_Algo.hxx>
+@@ -1476,6 +1477,37 @@
+   editor.MergeNodes( nodesToMerge );
+   if ( isCanceled() ) return false; // pySMESH: canceled
+ 
++  // pySMESH: where the offset surfaces are closer together than the grid can follow, the
++  // layer cells there fold over, and the compute succeeded with them. Refuse the layers,
++  // leave no cell behind, and put the error on every SOLID, as for a bad offset mesh.
++  if ( !isMainShape2D )
++  {
++    int nbInverted = 0;
++    SMDS_VolumeTool volTool;
++    for ( SMDS_ElemIteratorPtr it = initMDS->elementsIterator( SMDSAbs_Volume ); it->more(); )
++    {
++      const SMDS_MeshElement* el = it->next();
++      if ( el->isMarked() && volTool.Set( el ) && !volTool.IsForward() )
++        ++nbInverted;
++    }
++    if ( nbInverted > 0 )
++    {
++      initMDS->ClearMesh();
++      const std::string text = SMESH_Comment( "Viscous layers: " ) << nbInverted
++        << " layer cells are inverted: the solid offset inward by the total thickness "
++        << _hyp->GetTotalThickness() << " has surfaces closer together than the grid "
++        "can follow, so the layers there fold over. Use a smaller total thickness.";
++      std::vector< TopoDS_Shape > failed( 1, theShape );
++      for ( TopExp_Explorer soExp( theShape, TopAbs_SOLID ); soExp.More(); soExp.Next() )
++        if ( !soExp.Current().IsSame( theShape ))
++          failed.push_back( soExp.Current() );
++      for ( const TopoDS_Shape& s : failed )
++        if ( SMESH_subMesh * sm = theMesh.GetSubMesh( s ))
++          sm->GetComputeError() = SMESH_ComputeError::New( COMPERR_ALGO_FAILED, text );
++      return false;
++    }
++  }
++
+   // create a group
+   if ( !_hyp->GetGroupName().empty() )
+   {

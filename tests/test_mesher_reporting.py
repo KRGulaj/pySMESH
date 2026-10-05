@@ -15,6 +15,17 @@ Each claim is asserted against an oracle the report itself does not produce (rep
   algorithm that lacks its hypothesis, holds an algorithm state, not a compute error
   (``SMESH_subMesh::GetAlgoState``). The failure must name each such sub-shape with its
   state. The oracle is the assignment the test made.
+* **M3, an algorithm without its hypothesis fails the compute.** A sub-mesh whose
+  algorithm misses its hypothesis is never computed, and ``SMESH_Gen::Compute`` returns
+  false only for a compute that failed (``sequentialComputeSubMeshes``). So Cartesian3D,
+  Projection3D or RadialPrism3D alone gave a success with no volume, and Projection2D
+  on one face a success with that face empty. The compute must fail and name the
+  sub-shape, its algorithm and its state. A VERTEX keeps its node, but
+  SegmentAroundVertex0D without its length does nothing, so it is named too. A sub-shape
+  with no algorithm of its own, meshed by an enclosing algorithm, and a solid with no
+  3-D algorithm under a surface
+  mesh, are no error. The oracle is the assignment the test made, and the closed-form
+  element counts of the meshes that must stay.
 * **M1, a raising hook leaves no partial mesh.** The hook's exception must reach the
   caller with its own type, and the mesh must be empty afterwards, as for a cancel.
 * **N1, a refused value is a PysmeshError.** An upstream setter refuses a bad value with
@@ -35,6 +46,7 @@ from pysmesh import (
     Adaptive1D,
     Arithmetic1D,
     AutomaticLength,
+    Cartesian3D,
     CartesianParameters3D,
     Deflection1D,
     Distribution,
@@ -50,10 +62,14 @@ from pysmesh import (
     NumberOfLayers,
     NumberOfLayers2D,
     NumberOfSegments,
+    Projection2D,
+    Projection3D,
     Quadrangle2D,
     QuadrangleParams,
     QuadType,
+    RadialPrism3D,
     Regular1D,
+    SegmentAroundVertex0D,
     SegmentLengthAroundVertex,
     Session,
     StartEndLength,
@@ -202,6 +218,123 @@ def test_the_degenerate_pole_edges_of_a_sphere_are_named_missing_a_hypothesis() 
     named = [line.split(":")[0] for line in _missing_lines(info.value)]
     assert poles == [1, 3]
     assert named == ["EDGE 1", "EDGE 3"]
+
+
+# ---- M3: an algorithm without its hypothesis fails the compute --------------------- #
+
+# Segments on every edge of the box in the M3 cases: 6 faces x 4 x 4 quadrangles, 4**3
+# hexahedra.
+M3_SEGMENTS: int = 4
+
+
+def _hollow_box() -> ps.Shape:
+    """A 3 x 3 x 3 box less the unit box at its centre: one solid between two shells."""
+    s = Session()
+    s.add_box(3.0, 3.0, 3.0)
+    outer = s.entities(ps.EntityKind.SOLID).tolist()
+    s.add_box(1.0, 1.0, 1.0, origin=(1.0, 1.0, 1.0))
+    inner = [i for i in s.entities(ps.EntityKind.SOLID).tolist() if i not in outer]
+    s.cut(outer, inner)
+    return ps.load_brep(s.brep())
+
+
+def _surface_algorithms(m: Mesher) -> None:
+    """Regular1D with 4 segments and Quadrangle2D on the whole shape."""
+    m.assign(Regular1D())
+    m.assign(NumberOfSegments(count=M3_SEGMENTS))
+    m.assign(Quadrangle2D())
+
+
+@pytest.mark.parametrize(
+    ("algorithm", "native", "surface", "hollow"),
+    [
+        (Cartesian3D(), "Cartesian_3D", False, False),
+        (Projection3D(), "Projection_3D", True, False),
+        (RadialPrism3D(), "RadialPrism_3D", True, True),
+    ],
+    ids=["Cartesian3D", "Projection3D", "RadialPrism3D"],
+)
+def test_a_solid_whose_algorithm_misses_its_hypothesis_is_named(
+    algorithm: ps.Algorithm, native: str, surface: bool, hollow: bool
+) -> None:
+    """The 3-D algorithm without its hypothesis: SOLID 1 named, not 0 volumes (M3)."""
+    with Mesher(_hollow_box() if hollow else _box()) as m:
+        if surface:
+            _surface_algorithms(m)
+        m.assign(algorithm)
+
+        with pytest.raises(ps.PysmeshError) as info:
+            m.compute()
+
+    assert _missing_lines(info.value) == [
+        (
+            f"SOLID 1: {native} is missing a hypothesis it needs "
+            "(algorithm state MISSING_HYP)"
+        )
+    ]
+
+
+def test_a_face_whose_projection_has_no_source_is_named() -> None:
+    """Projection2D on the bottom face without ProjectionSource2D: that face (M3)."""
+    box = _box()
+    bottom = min(box.faces(), key=lambda f: float(f.bbox[5])).id
+    with Mesher(box) as m:
+        _surface_algorithms(m)
+        m.assign(Projection2D(), on=SubShape(SubShapeKind.FACE, bottom))
+
+        with pytest.raises(ps.PysmeshError) as info:
+            m.compute()
+
+    assert _missing_lines(info.value) == [
+        (
+            f"FACE {bottom}: Projection_2D is missing a hypothesis it needs "
+            "(algorithm state MISSING_HYP)"
+        )
+    ]
+    assert list(info.value.face_ids) == [bottom]
+
+
+def test_a_vertex_algorithm_without_its_length_is_named() -> None:
+    """SegmentAroundVertex0D without SegmentLengthAroundVertex does nothing (M3)."""
+    with Mesher(_box()) as m:
+        _surface_algorithms(m)
+        m.assign(SegmentAroundVertex0D(), on=SubShape(SubShapeKind.VERTEX, 1))
+
+        with pytest.raises(ps.PysmeshError) as info:
+            m.compute()
+
+    assert _missing_lines(info.value) == [
+        (
+            "VERTEX 1: SegmentAroundVertex_0D is missing a hypothesis it needs "
+            "(algorithm state MISSING_HYP)"
+        )
+    ]
+
+
+def test_a_surface_mesh_without_a_3d_algorithm_is_no_error() -> None:
+    """No 3-D algorithm: 6 x 4 x 4 quadrangles, no volume, and no error (M3)."""
+    with Mesher(_box()) as m:
+        _surface_algorithms(m)
+
+        report = m.compute()
+
+    assert (report.faces, report.volumes) == (6 * M3_SEGMENTS**2, 0)
+
+
+def test_sub_shapes_meshed_by_an_all_dimensional_algorithm_are_no_error() -> None:
+    """Cartesian3D meshes the faces and edges, which have no algorithm: 4**3 cells."""
+    spacing = str(1.0 / M3_SEGMENTS)
+    with Mesher(_box()) as m:
+        m.assign(Cartesian3D())
+        m.assign(
+            CartesianParameters3D(
+                spacing_x=spacing, spacing_y=spacing, spacing_z=spacing
+            )
+        )
+
+        report = m.compute()
+
+    assert report.volumes == M3_SEGMENTS**3
 
 
 # ---- M1: a hook that raises leaves no mesh ----------------------------------------- #

@@ -1,17 +1,18 @@
-pySMESH: make StdMeshers_Prism_3D name the real reason it cannot mesh a prism whose side face
-has a composite horizontal side, and forget the errors of the bottom candidates it rejected
-(SMESH V9_16_0).
+pySMESH: make StdMeshers_Prism_3D mesh a prism whose side face has a composite horizontal
+side, when the projection of the other side fits it; else name the reason and the way out;
+and forget the errors of the bottom candidates it rejected (SMESH V9_16_0).
 
-Defect: Prism_3D reports a solid as failed with the error of a FACE that it tried as the prism
-bottom and rejected, and on a side face with a composite horizontal side it builds a mesh that
-does not follow the EDGEs, which the stale error then hides.
+Defect: Prism_3D cannot mesh a prism with a side face whose bottom or top side has several
+EDGEs (a composite horizontal side). It builds a mesh that does not follow those EDGEs, or it
+fails, and it reports the error of a FACE that it tried as the prism bottom and rejected.
 
 Symptom: a straight prism on a regular n-gon, one bottom EDGE split at its midpoint, the top
 EDGE above it whole, so the wall between them is one 5-EDGE FACE (report §3 B1). With
 Regular_1D + NumberOfSegments(4), 2 on each half-EDGE, and Quadrangle_2D or MEFISTO_2D:
 n = 5 fails with "Composite 'horizontal' edges are not supported", n = 6 with "Side face #27
 has a composite top edge" (#27 is the top cap, not a side face), both "(algorithm Prism_3D)".
-Prism_3D::Compute returns true for both.
+Prism_3D::Compute returns true for both. n = 4 (a box) fails with "Non-quadrilateral faces are
+not opposite".
 
 Root cause, in StdMeshers_Prism_3D.cxx:
 * initPrism() finds no FACE that must be the bottom: removeQuasiQuads() accepts the caps and
@@ -28,20 +29,60 @@ Root cause, in StdMeshers_Prism_3D.cxx:
   side[QUAD_BOTTOM_SIDE].grid->Edge(0) onto side[QUAD_TOP_SIDE].grid->Edge(0) only
   (:1925-1975): the first half-EDGE gets the 4 segments of the whole bottom EDGE, the second
   keeps its own 2. The caps then have 5 and 6 EDGEs, project2dMesh() cannot pair them, and
-  projectBottomToTop() places the top nodes by the block approach (bottomToTopTrsf is always
-  identity, GetLayersTransformation() being commented out). Measured with the stale error
-  cleared: mesh volume off the prism volume by 1.7e-5 (n = 5, Quadrangle_2D) to 1.3e-3
-  (n = 5, MEFISTO_2D) relative, 29 top cap nodes against 31 bottom ones, no vertical node
-  column. A composite bottom side, which getWallFaces() accepts when all its EDGEs are on the
-  bottom FACE, becomes a composite top side when initPrism() turns the prism upside down.
+  projectBottomToTop() places the top nodes by the block approach (:2569-2592), because
+  bottomToTopTrsf is always identity (GetLayersTransformation() is commented out, :1342-1345).
+  Measured with the stale error cleared: mesh volume off the prism volume by 1.7e-5 (n = 5,
+  Quadrangle_2D) to 1.3e-3 (n = 5, MEFISTO_2D) relative, 29 top cap nodes against 31 bottom
+  ones, no vertical node column. A composite bottom side, which getWallFaces() accepts when
+  all its EDGEs are on the bottom FACE (:1155-1163), becomes a composite top side when
+  initPrism() turns the prism upside down (:3821-3825).
+* On a box (n = 4) the bottom and the 5-EDGE wall are the only FACEs without 4 EDGEs and
+  share the split EDGE. initPrism() takes them as the bottom and the top, because
+  removeQuasiQuads() runs only for more than 2 such FACEs (:3673), and the check that they are
+  opposite fails (:3803-3818).
 * The search is from SMESH 9a54694a0 (2013-02-12, "Merge from V6_main 11/02/2013"); upstream
   master at 83f8bf482 has the same code.
 
 Change, in StdMeshers_Prism_3D.cxx only:
-* getWallFaces(), first row of walls: a wall FACE that is not meshed yet and has more than one
-  EDGE on its bottom or top side is refused, "Side face #N has B EDGE(s) on its bottom side and
-  T on its top side; a composite horizontal side is not supported. Split the EDGE opposite the
-  composite side at the same points, so that both sides have the same number of EDGEs".
+* computeWalls(), a wall that is not meshed yet and has more than one EDGE on its bottom or
+  top side: projectCompositeSide() projects the whole bottom side onto the whole top side, as
+  computeWalls() projects a composite vertical side (:1827-1895): each node keeps its share
+  of the length of the side, counted from the left side of the wall (normalized parameter,
+  StdMeshers_FaceSide::Value3d() and Parameter()). A node that falls on a VERTEX splitting the
+  top side within the VERTEX tolerance is that VERTEX's node. Each segment is set on the EDGE
+  that holds its middle. A top side meshed already is kept if its number of segments is that
+  of the bottom side. Walls with single EDGEs are meshed as before.
+* getWallFaces(), first row of walls, at the point of the former refusal: a wall FACE that is
+  not meshed yet and has a composite horizontal side is checked by compositeSideMismatch().
+  A pre-pass over the bottom EDGEs tells whether initPrism() will turn the prism upside down
+  (more bottom EDGEs than walls), so that the check takes the side that computeWalls() will
+  project from. The mesh must be linear (a quadratic one is refused: the projection makes
+  linear segments). The EDGEs of a composite side must join smoothly (SMESH_Algo::
+  IsContinuous()), as the parts of a split EDGE do: at a corner, as where a polygon cap is a
+  wall of a sweep across the solid, the caps differ in shape, and the sweep projected the
+  vertical sides onto each other without their hypotheses (a regular hexagon prism with 4
+  segments on each half of its split EDGE got 6 and 12 segments on EDGEs of 4).
+  If the target side has several EDGEs, the projection must put a node on
+  each VERTEX that splits it, and on each target EDGE the number of segments that the hypotheses
+  of that EDGE give (SMESH_Algo::Evaluate(), which meshes nothing), so that no hypothesis is
+  dropped. A single target EDGE takes the projection, as before. The source EDGEs are meshed
+  to find their nodes, unless the total numbers of segments already differ. If the check
+  fails, the FACE is not the bottom: "Side face #N has B EDGE(s) on its bottom side and T on
+  its top side, and <reason>. Split the EDGE opposite the composite side at the same points,
+  so that both sides have the same number of EDGEs, or give each EDGE of the composite side
+  the segments that the other side projects onto it", and the search for the bottom goes on
+  from the same point as before. projectCompositeSide() runs the same check again for every
+  wall, and fails the compute with the reason.
+* compute(): if a wall has a composite horizontal side and the prism is a translation (both
+  caps planar, one row of walls, every vertical EDGE straight and the same vector),
+  bottomToTopTrsf is that translation, so projectBottomToTop() places each top node above its
+  bottom node. Before, the block approach placed them up to 1.5e-4 away.
+* initPrism(): if exactly 2 FACEs have not 4 EDGEs and they share an EDGE, removeQuasiQuads()
+  runs as for more than 2 such FACEs, and the search for the bottom skips a FACE that touches
+  a shared EDGE ("FACE #N: not tried, it touches an EDGE that the 2 FACEs without 4 EDGEs
+  share."). As the bottom, such a FACE makes the shared EDGEs vertical, and computeWalls()
+  projects the vertical sides of a wall onto each other without their own hypotheses: on the
+  box of r3d with 4 segments on every EDGE, three EDGEs got 8.
 * initPrism(), search for a bottom: the reason of each FACE that is not the bottom is kept,
   "FACE #N: <its error>." or "FACE #N: not tried, it has E EDGEs and the solid F FACEs.". If a
   bottom is found, the stored error is cleared with error( COMPERR_OK ) (not
@@ -50,36 +91,528 @@ Change, in StdMeshers_Prism_3D.cxx only:
   its text was empty.
 
 Not changed: the order of the candidates and the "2 + nbEdges" filter; a wall whose FACE is
-already meshed; computeWalls() and the projections. A solid with no composite horizontal side
-on an unmeshed wall meshes as before, bit for bit, unless a rejected candidate's error used to
-fail it.
+already meshed; the projection of single EDGEs, which also ignores the hypotheses of a top
+EDGE; the cap projection of a prism that is not a translation. A solid with no composite
+horizontal side meshes as before, bit for bit, unless a rejected candidate's error used to fail
+it, or exactly 2 FACEs without 4 EDGEs that share an EDGE used to fail it.
 
 diff --git a/src/StdMeshers/StdMeshers_Prism_3D.cxx b/src/StdMeshers/StdMeshers_Prism_3D.cxx
 --- a/src/StdMeshers/StdMeshers_Prism_3D.cxx
 +++ b/src/StdMeshers/StdMeshers_Prism_3D.cxx
-@@ -1160,6 +1160,21 @@
+@@ -1102,6 +1102,384 @@
+ }
+ 
+ //================================================================================
++// pySMESH: a wall FACE whose bottom or top side has several EDGEs (a composite horizontal
++// side). computeWalls() meshes the top side of a wall that is not meshed yet by projecting
++// its bottom side onto it. For single EDGEs it projects EDGE onto EDGE. For a composite side
++// these functions project the whole bottom side onto the whole top side, as computeWalls()
++// projects a composite vertical side: a node keeps its share of the length of its side,
++// counted from the left side of the wall.
++//================================================================================
++
++namespace
++{
++  //================================================================================
++  /*!
++   * \brief Return the number of segments of an EDGE: those of its mesh, else those that
++   *        its 1D algorithm would make with its hypotheses (SMESH_Algo::Evaluate(), which
++   *        meshes nothing), or -1 if no algorithm can tell. Set isQuadratic if the
++   *        segments are quadratic.
++   */
++  //================================================================================
++
++  smIdType nbSegments( SMESH_Mesh& mesh, const TopoDS_Edge& edge, bool& isQuadratic )
++  {
++    SMESH_subMesh* sm = mesh.GetSubMesh( edge );
++    if ( sm->IsMeshComputed() )
++    {
++      SMDS_ElemIteratorPtr segments = sm->GetSubMeshDS()->GetElements();
++      if ( segments->more() && segments->next()->IsQuadratic() )
++        isQuadratic = true;
++      return sm->GetSubMeshDS()->NbElements();
++    }
++    SMESH_Algo* algo = sm->GetAlgo();
++    SMESH_Hypothesis::Hypothesis_Status status;
++    if ( !algo || !algo->CheckHypothesis( mesh, edge, status ))
++      return -1;
++    MapShapeNbElems nbElems;
++    if ( !algo->Evaluate( mesh, edge, nbElems ) || !nbElems.count( sm ))
++      return -1;
++    const std::vector< smIdType >& nb = nbElems[ sm ];
++    if ( nb.size() <= SMDSEntity_Quad_Edge )
++      return -1;
++    if ( nb[ SMDSEntity_Quad_Edge ] > 0 )
++      isQuadratic = true;
++    return nb[ SMDSEntity_Edge ] + nb[ SMDSEntity_Quad_Edge ];
++  }
++
++  //================================================================================
++  /*!
++   * \brief Mesh the EDGEs of a side that are not meshed yet. Return why one cannot be
++   *        meshed, or an empty text.
++   */
++  //================================================================================
++
++  std::string meshSideEdges( SMESH_Mesh&                   mesh,
++                             const StdMeshers_FaceSidePtr& side,
++                             const char*                   sideName )
++  {
++    for ( int i = 0; i < side->NbEdges(); ++i )
++    {
++      SMESH_subMesh* sm = mesh.GetSubMesh( side->Edge( i ));
++      if ( !sm->IsMeshComputed() )
++      {
++        sm->ComputeSubMeshStateEngine( SMESH_subMesh::COMPUTE ); // nodes on VERTEXes
++        sm->ComputeStateEngine( SMESH_subMesh::COMPUTE );        // segments on the EDGE
++      }
++      if ( !sm->IsMeshComputed() )
++        return SMESH_Comment( "EDGE #" ) << sm->GetId() << " of its " << sideName
++          << " side cannot be meshed";
++    }
++    return std::string();
++  }
++
++  //================================================================================
++  /*!
++   * \brief Return the nodes of the meshed source side of a wall, and where each falls on
++   *        the target side, as a normalized parameter of the target side. The source side
++   *        is the bottom one, or the top one if fromTop.
++   */
++  //================================================================================
++
++  bool sourceNodesOnTarget( const FaceQuadStruct&                quad,
++                            const bool                           fromTop,
++                            std::vector< const SMDS_MeshNode* >& nodes,
++                            std::vector< double >&               tgtParams )
++  {
++    StdMeshers_FaceSidePtr src = quad.side[ fromTop ? QUAD_TOP_SIDE : QUAD_BOTTOM_SIDE ].grid;
++    StdMeshers_FaceSidePtr tgt = quad.side[ fromTop ? QUAD_BOTTOM_SIDE : QUAD_TOP_SIDE ].grid;
++    StdMeshers_FaceSidePtr lft = quad.side[ QUAD_LEFT_SIDE ].grid;
++    src->NbPoints( /*update=*/true );
++    const UVPtStructVec& points = src->GetUVPtStruct();
++    if ( points.size() < 2 )
++      return false;
++    const bool srcFromLeft = ( src->FirstVertex().IsSame( lft->FirstVertex() ) ||
++                               src->FirstVertex().IsSame( lft->LastVertex() ));
++    const bool tgtFromLeft = ( tgt->FirstVertex().IsSame( lft->FirstVertex() ) ||
++                               tgt->FirstVertex().IsSame( lft->LastVertex() ));
++    nodes.clear();
++    tgtParams.clear();
++    for ( size_t i = 0; i < points.size(); ++i )
++    {
++      const double fromLeft = srcFromLeft ? points[ i ].normParam : 1. - points[ i ].normParam;
++      nodes.push_back( points[ i ].node );
++      tgtParams.push_back( tgtFromLeft ? fromLeft : 1. - fromLeft );
++    }
++    return true;
++  }
++
++  //================================================================================
++  /*!
++   * \brief Return the index of the EDGE of the top side that ends at the VERTEX lying at a
++   *        normalized parameter of the top side, within the VERTEX tolerance, or -1
++   */
++  //================================================================================
++
++  int splitVertexAt( const StdMeshers_FaceSidePtr& top, const double param )
++  {
++    for ( int iE = 0; iE + 1 < top->NbEdges(); ++iE )
++      if ( Abs( param - top->LastParameter( iE )) * top->Length() <=
++           BRep_Tool::Tolerance( top->LastVertex( iE )))
++        return iE;
++    return -1;
++  }
++
++  //================================================================================
++  /*!
++   * \brief Return why the source side of a wall with a composite horizontal side cannot be
++   *        projected onto its target side, or an empty text if it can. The source side is
++   *        the bottom one, or the top one if fromTop. The mesh must be linear, and the EDGEs
++   *        of a composite side must join smoothly, as the parts of a split EDGE. If the target
++   *        side has several EDGEs, the projection must put a node on each VERTEX that splits
++   *        it, and on each target EDGE the number of segments that the hypotheses of that
++   *        EDGE give, so that no hypothesis is dropped. The source EDGEs are meshed if they
++   *        are not yet, unless the numbers of segments already differ.
++   */
++  //================================================================================
++
++  std::string compositeSideMismatch( SMESH_Mesh&           mesh,
++                                     const FaceQuadStruct& quad,
++                                     const bool            fromTop )
++  {
++    StdMeshers_FaceSidePtr src = quad.side[ fromTop ? QUAD_TOP_SIDE : QUAD_BOTTOM_SIDE ].grid;
++    StdMeshers_FaceSidePtr tgt = quad.side[ fromTop ? QUAD_BOTTOM_SIDE : QUAD_TOP_SIDE ].grid;
++    const char*        srcName = fromTop ? "top" : "bottom";
++    const char*        tgtName = fromTop ? "bottom" : "top";
++
++    // the numbers of segments, before anything is meshed
++    std::vector< smIdType > nbTgtEdgeSeg( tgt->NbEdges() );
++    smIdType nbSrcSeg = 0, nbTgtSeg = 0;
++    bool     isKnown  = true, isQuadratic = false;
++    for ( int i = 0; i < src->NbEdges(); ++i )
++    {
++      const smIdType nb = nbSegments( mesh, src->Edge( i ), isQuadratic );
++      isKnown   = isKnown && nb >= 0;
++      nbSrcSeg += nb;
++    }
++    for ( int i = 0; i < tgt->NbEdges(); ++i )
++    {
++      nbTgtEdgeSeg[ i ] = nbSegments( mesh, tgt->Edge( i ), isQuadratic );
++      isKnown   = isKnown && nbTgtEdgeSeg[ i ] >= 0;
++      nbTgtSeg += nbTgtEdgeSeg[ i ];
++    }
++    if ( isQuadratic )
++      return "its mesh is quadratic, which a composite horizontal side does not support";
++
++    // the EDGEs of a composite side must join smoothly, as the parts of a split EDGE do: at
++    // a corner the two caps differ in shape, and the solid is no prism between them
++    const StdMeshers_FaceSidePtr sides[2] = { src, tgt };
++    const char*                  names[2] = { srcName, tgtName };
++    for ( int iS = 0; iS < 2; ++iS )
++      for ( int i = 0; i + 1 < sides[ iS ]->NbEdges(); ++i )
++        if ( !SMESH_Algo::IsContinuous( sides[ iS ]->Edge( i ), sides[ iS ]->Edge( i + 1 )))
++          return SMESH_Comment( "its " ) << names[ iS ] << " side has a corner between EDGEs #"
++            << mesh.GetMeshDS()->ShapeToIndex( sides[ iS ]->Edge( i )) << " and #"
++            << mesh.GetMeshDS()->ShapeToIndex( sides[ iS ]->Edge( i + 1 ))
++            << ", so it is not a split EDGE";
++    if ( tgt->NbEdges() < 2 )
++      return std::string(); // a single target EDGE takes the projection, as in computeWalls()
++    if ( isKnown && nbSrcSeg != nbTgtSeg )
++    {
++      SMESH_Comment edgeIDs;
++      for ( int i = 0; i < tgt->NbEdges(); ++i )
++        edgeIDs << ( i ? ", #" : "#" ) << mesh.GetMeshDS()->ShapeToIndex( tgt->Edge( i ));
++      return SMESH_Comment( "its " ) << srcName << " side has " << nbSrcSeg
++        << " segments, while the hypotheses of the EDGEs of its " << tgtName << " side ("
++        << edgeIDs << ") give " << nbTgtSeg;
++    }
++
++    const std::string notMeshed = meshSideEdges( mesh, src, srcName );
++    if ( !notMeshed.empty() )
++      return notMeshed;
++    std::vector< const SMDS_MeshNode* > nodes;
++    std::vector< double >               params;
++    if ( !sourceNodesOnTarget( quad, fromTop, nodes, params ))
++      return SMESH_Comment( "its " ) << srcName << " side has no node";
++
++    // a node on each VERTEX that splits the target side
++    for ( int iE = 0; iE + 1 < tgt->NbEdges(); ++iE )
++    {
++      const double split = tgt->LastParameter( iE );
++      double gap = 1.;
++      for ( size_t i = 0; i < params.size(); ++i )
++        gap = Min( gap, Abs( params[ i ] - split ));
++      if ( gap * tgt->Length() > BRep_Tool::Tolerance( tgt->LastVertex( iE )))
++        return SMESH_Comment( "the VERTEX that splits its " ) << tgtName << " side lies "
++          << gap * tgt->Length() << " from the nearest node of its " << srcName << " side";
++    }
++
++    // the segments of its hypotheses on each target EDGE
++    std::vector< double > sorted( params );
++    std::sort( sorted.begin(), sorted.end() );
++    std::vector< smIdType > nbProjected( tgt->NbEdges(), 0 );
++    for ( size_t i = 1; i < sorted.size(); ++i )
++      ++nbProjected[ tgt->EdgeIndex( 0.5 * ( sorted[ i - 1 ] + sorted[ i ] ))];
++    for ( int i = 0; i < tgt->NbEdges(); ++i )
++      if ( nbTgtEdgeSeg[ i ] >= 0 && nbTgtEdgeSeg[ i ] != nbProjected[ i ] )
++        return SMESH_Comment( "the hypotheses of EDGE #" )
++          << mesh.GetMeshDS()->ShapeToIndex( tgt->Edge( i )) << " of its " << tgtName
++          << " side give " << nbTgtEdgeSeg[ i ] << " segments, while the projection of its "
++          << srcName << " side puts " << nbProjected[ i ] << " on it";
++    return std::string();
++  }
++
++  //================================================================================
++  /*!
++   * \brief Mesh the top side of a wall with a composite horizontal side by projecting its
++   *        bottom side onto it as a whole. Return why it cannot, or an empty text.
++   */
++  //================================================================================
++
++  std::string projectCompositeSide( SMESH_Mesh& mesh, const FaceQuadStruct& quad )
++  {
++    SMESHDS_Mesh*        meshDS = mesh.GetMeshDS();
++    StdMeshers_FaceSidePtr  bot = quad.side[ QUAD_BOTTOM_SIDE ].grid;
++    StdMeshers_FaceSidePtr  top = quad.side[ QUAD_TOP_SIDE    ].grid;
++
++    // getWallFaces() checked the walls of a bottom candidate; check every wall again, here
++    std::string why = compositeSideMismatch( mesh, quad, /*fromTop=*/false );
++    if ( why.empty() )
++      why = meshSideEdges( mesh, bot, "bottom" );
++    if ( !why.empty() )
++      return why;
++    smIdType nbBotSegments = 0;
++    for ( int i = 0; i < bot->NbEdges(); ++i )
++      nbBotSegments += mesh.GetSubMesh( bot->Edge( i ))->GetSubMeshDS()->NbElements();
++
++    int      nbTopMeshed   = 0;
++    smIdType nbTopSegments = 0;
++    for ( int i = 0; i < top->NbEdges(); ++i )
++    {
++      SMESH_subMesh* sm = mesh.GetSubMesh( top->Edge( i ));
++      sm->ComputeStateEngine( SMESH_subMesh::CHECK_COMPUTE_STATE );
++      if ( sm->IsMeshComputed() )
++      {
++        ++nbTopMeshed;
++        nbTopSegments += sm->GetSubMeshDS()->NbElements();
++      }
++    }
++    if ( nbTopMeshed == top->NbEdges() )
++    {
++      if ( nbTopSegments == nbBotSegments )
++        return std::string();
++      return SMESH_Comment( "its top side is meshed already, with " ) << nbTopSegments
++        << " segments for " << nbBotSegments << " on its bottom side";
++    }
++    if ( nbTopMeshed > 0 )
++      return "its top side is meshed already in part";
++
++    std::vector< const SMDS_MeshNode* > botNodes;
++    std::vector< double >               params;
++    if ( !sourceNodesOnTarget( quad, /*fromTop=*/false, botNodes, params ))
++      return "its bottom side has no node";
++
++    // nodes on the top VERTEXes
++    for ( int i = 0; i <= top->NbEdges(); ++i )
++    {
++      const TopoDS_Vertex v = ( i < top->NbEdges() ) ? top->FirstVertex( i ) : top->LastVertex();
++      mesh.GetSubMesh( v )->ComputeStateEngine( SMESH_subMesh::COMPUTE );
++      if ( !SMESH_Algo::VertexNode( v, meshDS ))
++        return SMESH_Comment( "VERTEX #" ) << meshDS->ShapeToIndex( v ) << " of its top side has no node";
++    }
++
++    // the projected nodes, in the order of the top side
++    std::vector< double > topParams( params );
++    std::sort( topParams.begin(), topParams.end() );
++    std::vector< const SMDS_MeshNode* > topNodes( topParams.size() );
++    topNodes.front()  = SMESH_Algo::VertexNode( top->FirstVertex(), meshDS );
++    topNodes.back()   = SMESH_Algo::VertexNode( top->LastVertex(),  meshDS );
++    topParams.front() = 0.;
++    topParams.back()  = 1.;
++    for ( size_t k = 1; k + 1 < topParams.size(); ++k )
++    {
++      const double u = topParams[ k ];
++      const int iSplit = splitVertexAt( top, u );
++      if ( iSplit >= 0 )
++      {
++        topNodes[ k ] = SMESH_Algo::VertexNode( top->LastVertex( iSplit ), meshDS );
++        continue;
++      }
++      TopoDS_Edge  edge;
++      const double t = top->Parameter( u, edge );
++      const gp_Pnt p = top->Value3d( u );
++      SMDS_MeshNode* node = meshDS->AddNode( p.X(), p.Y(), p.Z() );
++      meshDS->SetNodeOnEdge( node, edge, t );
++      topNodes[ k ] = node;
++    }
++    for ( size_t k = 1; k < topNodes.size(); ++k )
++    {
++      const int iE = top->EdgeIndex( 0.5 * ( topParams[ k - 1 ] + topParams[ k ] ));
++      SMDS_MeshEdge* segment = meshDS->AddEdge( topNodes[ k - 1 ], topNodes[ k ] );
++      meshDS->SetMeshElementOnShape( segment, top->Edge( iE ));
++    }
++    for ( int i = 0; i < top->NbEdges(); ++i )
++      mesh.GetSubMesh( top->Edge( i ))->ComputeStateEngine( SMESH_subMesh::CHECK_COMPUTE_STATE );
++    return std::string();
++  }
++
++  //================================================================================
++  /*!
++   * \brief Return true if a wall of the prism has a composite horizontal side
++   */
++  //================================================================================
++
++  bool hasCompositeHorizontalSide( const Prism_3D::TPrismTopo& prism )
++  {
++    for ( size_t iW = 0; iW < prism.myWallQuads.size(); ++iW )
++    {
++      Prism_3D::TQuadList::const_iterator quad = prism.myWallQuads[ iW ].begin();
++      for ( ; quad != prism.myWallQuads[ iW ].end(); ++quad )
++        if ( (*quad)->side[ QUAD_BOTTOM_SIDE ].grid->NbEdges() > 1 ||
++             (*quad)->side[ QUAD_TOP_SIDE    ].grid->NbEdges() > 1 )
++          return true;
++    }
++    return false;
++  }
++
++  //================================================================================
++  /*!
++   * \brief Set the translation that carries the bottom FACE onto the top one, if the
++   *        prism is a translation: both FACEs planar, one row of walls, and every
++   *        vertical EDGE a straight segment of one and the same vector
++   */
++  //================================================================================
++
++  bool prismTranslation( const Prism_3D::TPrismTopo& prism,
++                         SMESH_MesherHelper&         helper,
++                         gp_Trsf&                    trsf )
++  {
++    if ( !GeomLib_IsPlanarSurface( BRep_Tool::Surface( prism.myBottom )).IsPlanar() ||
++         !GeomLib_IsPlanarSurface( BRep_Tool::Surface( prism.myTop    )).IsPlanar() )
++      return false;
++    gp_Vec vec;
++    bool   isFirst = true;
++    for ( size_t iW = 0; iW < prism.myWallQuads.size(); ++iW )
++    {
++      if ( prism.myWallQuads[ iW ].size() != 1 )
++        return false;
++      StdMeshers_FaceSidePtr side = prism.myWallQuads[ iW ].front()->side[ QUAD_LEFT_SIDE ].grid;
++      for ( int iE = 0; iE < side->NbEdges(); ++iE )
++        if ( !SMESH_Algo::IsStraight( side->Edge( iE )))
++          return false;
++      TopoDS_Vertex v0 = side->FirstVertex(), v1 = side->LastVertex();
++      if ( !helper.IsSubShape( v0, prism.myBottom ))
++        std::swap( v0, v1 );
++      if ( !helper.IsSubShape( v0, prism.myBottom ) || !helper.IsSubShape( v1, prism.myTop ))
++        return false;
++      const gp_Vec v( BRep_Tool::Pnt( v0 ), BRep_Tool::Pnt( v1 ));
++      if ( !isFirst &&
++           ( v - vec ).Magnitude() > BRep_Tool::Tolerance( v0 ) + BRep_Tool::Tolerance( v1 ))
++        return false;
++      vec     = v;
++      isFirst = false;
++    }
++    if ( isFirst )
++      return false;
++    trsf.SetTranslation( vec );
++    return true;
++  }
++} // namespace
++
++//================================================================================
+ /*!
+  * \brief Find wall faces by bottom edges
+  */
+@@ -1120,6 +1498,30 @@
+   TopTools_IndexedDataMapOfShapeListOfShape edgeToFaces;
+   TopExp::MapShapesAndAncestors( thePrism.myShape3D,
+                                  TopAbs_EDGE, TopAbs_FACE, edgeToFaces );
++
++  // pySMESH: initPrism() turns the prism upside down if the bottom has more EDGEs than walls,
++  // that is if a wall has a composite bottom side; computeWalls() then projects the top side
++  // of each wall onto its bottom side. Find it out before the walls are checked below.
++  bool isUpsideDown = false;
++  {
++    TopTools_MapOfShape walls;
++    int nbWallEdges = 0;
++    list< TopoDS_Edge >::const_iterator e = thePrism.myBottomEdges.begin();
++    for ( ; e != thePrism.myBottomEdges.end(); ++e )
++    {
++      if ( SMESH_Algo::isDegenerated( *e ))
++        continue;
++      TopTools_ListIteratorOfListOfShape f( edgeToFaces.FindFromKey( *e ));
++      for ( ; f.More(); f.Next() )
++        if ( !thePrism.myBottom.IsSame( f.Value() ))
++        {
++          ++nbWallEdges;
++          walls.Add( f.Value() );
++          break;
++        }
++    }
++    isUpsideDown = ( nbWallEdges > walls.Extent() );
++  }
+ 
+   // ------------------------------
+   // Get the 1st row of wall FACEs
+@@ -1160,6 +1562,26 @@
              for ( int iE = 0; iE < botSide->NbEdges(); ++iE )
                if ( !myHelper->IsSubShape( botSide->Edge(iE), thePrism.myBottom ))
                  return toSM( error(TCom("Composite 'horizontal' edges are not supported")));
 +          }
-+          // computeWalls() meshes the top side of a wall that is not meshed yet by projecting
-+          // the first EDGE of its bottom side onto the first EDGE of its top side only, so a
-+          // composite horizontal side gets a mesh that does not follow its EDGEs.
++          // pySMESH: computeWalls() meshes the top side of a wall that is not meshed yet by
++          // projecting its bottom side onto it, as a whole for a composite horizontal side
++          // (projectCompositeSide()). If that projection does not fit this wall, this FACE
++          // is not the bottom, and the search for the bottom goes on.
 +          if ( !mesh->GetSubMesh( face )->IsMeshComputed() )
 +          {
 +            const int nbBotE = quadList.back()->side[ QUAD_BOTTOM_SIDE ].grid->NbEdges();
 +            const int nbTopE = quadList.back()->side[ QUAD_TOP_SIDE    ].grid->NbEdges();
-+            if ( nbBotE > 1 || nbTopE > 1 )
++            const std::string why =
++              ( nbBotE > 1 || nbTopE > 1 ) ?
++              compositeSideMismatch( *mesh, *quadList.back(), isUpsideDown ) : std::string();
++            if ( !why.empty() )
 +              return toSM( error( COMPERR_BAD_SHAPE, TCom("Side face #") << shapeID( face )
 +                                  << " has " << nbBotE << " EDGE(s) on its bottom side and "
-+                                  << nbTopE << " on its top side; a composite horizontal side"
-+                                  << " is not supported. Split the EDGE opposite the composite"
-+                                  << " side at the same points, so that both sides have the"
-+                                  << " same number of EDGEs" ));
++                                  << nbTopE << " on its top side, and " << why
++                                  << ". Split the EDGE opposite the composite side at the same"
++                                  << " points, so that both sides have the same number of"
++                                  << " EDGEs, or give each EDGE of the composite side the"
++                                  << " segments that the other side projects onto it" ));
            }
            if ( faceMap.Add( face ))
            {
-@@ -3741,6 +3756,7 @@
+@@ -1343,6 +1765,13 @@
+   //   trsf.clear();
+   // else if ( !trsf.empty() )
+   //   bottomToTopTrsf = trsf.back();
++
++  // pySMESH: with a composite horizontal side the caps differ in topology, project2dMesh()
++  // cannot pair them, and the block approach placed the top nodes up to 1.5e-4 away from
++  // the node above their bottom node. If the prism is a translation, place them by it.
++  // Other prisms keep the identity, as before.
++  if ( hasCompositeHorizontalSide( thePrism ))
++    prismTranslation( thePrism, *myHelper, bottomToTopTrsf );
+ 
+   // To compute coordinates of a node inside a block using "block approach",
+   // it is necessary to know
+@@ -1922,6 +2351,19 @@
+       SMESH_subMesh*      fSM = mesh->GetSubMesh( face );
+       if ( ! fSM->IsMeshComputed() )
+       {
++        // pySMESH: a composite horizontal side is projected as a whole
++        const bool isCompositeSide = ( (*quad)->side[ QUAD_BOTTOM_SIDE ].grid->NbEdges() > 1 ||
++                                       (*quad)->side[ QUAD_TOP_SIDE    ].grid->NbEdges() > 1 );
++        if ( isCompositeSide )
++        {
++          const std::string why = projectCompositeSide( *mesh, **quad );
++          if ( !why.empty() )
++            return toSM( error( COMPERR_BAD_INPUT_MESH, TCom("Side face #") << shapeID( face )
++                                << ": its top side cannot be a projection of its bottom side,"
++                                << " because " << why ));
++        }
++        else // pySMESH: single EDGEs, as before
++        {
+         // Top EDGEs must be projections from the bottom ones
+         // to compute structured quad mesh on wall FACEs
+         // ---------------------------------------------------
+@@ -1982,6 +2424,7 @@
+           }
+         }
+         tgtSM->ComputeStateEngine( SMESH_subMesh::CHECK_COMPUTE_STATE );
++        } // pySMESH: single EDGEs
+ 
+ 
+         // Compute quad mesh on wall FACEs
+@@ -3670,7 +4113,26 @@
+                        TCom("More than 2 faces with not quadrangle elements: ")
+                        <<nbNotQuadMeshed));
+   }
+-  if ( nbNotQuad > 2 || !thePrism.myBottom.IsNull() )
++  // pySMESH: two not quadrilateral FACEs that share an EDGE cannot be the bottom and the
++  // top, and Compute() failed with "Non-quadrilateral faces are not opposite". A wall
++  // over a split cap EDGE is one: on a box with one bottom EDGE split, the bottom and that
++  // wall are the only FACEs without 4 EDGEs. Remove the quasi-quadrilateral ones, as for
++  // more than 2 such FACEs, so that the search below can take the other cap. The search
++  // skips a FACE that touches a shared EDGE: as the bottom, it makes those EDGEs vertical,
++  // and computeWalls() projects the vertical sides onto each other without their own
++  // hypotheses.
++  TopTools_IndexedMapOfShape sharedEdgeVertices;
++  if ( nbNotQuad == 2 && thePrism.myBottom.IsNull() )
++  {
++    TopTools_IndexedMapOfShape edgesOfFirst;
++    TopExp::MapShapes( notQuadGeomSubMesh.front()->GetSubShape(), TopAbs_EDGE, edgesOfFirst );
++    for ( TopExp_Explorer e( notQuadGeomSubMesh.back()->GetSubShape(), TopAbs_EDGE );
++          e.More(); e.Next() )
++      if ( edgesOfFirst.Contains( e.Current() ))
++        TopExp::MapShapes( e.Current(), TopAbs_VERTEX, sharedEdgeVertices );
++  }
++  const bool notQuadShareEdge = !sharedEdgeVertices.IsEmpty();
++  if ( nbNotQuad > 2 || !thePrism.myBottom.IsNull() || notQuadShareEdge )
+   {
+     // Issue 0020843 - one of side FACEs is quasi-quadrilateral (not 4 EDGEs).
+     // Remove from notQuadGeomSubMesh faces meshed with regular grid
+@@ -3741,6 +4203,7 @@
    {
      bool savedSetErrorToSM = mySetErrorToSM;
      mySetErrorToSM = false; // ignore errors in initPrism()
@@ -87,7 +620,7 @@ diff --git a/src/StdMeshers/StdMeshers_Prism_3D.cxx b/src/StdMeshers/StdMeshers_
  
      // search among meshed FACEs
      list< SMESH_subMesh* >::iterator sm = meshedSubMesh.begin();
-@@ -3750,21 +3766,40 @@
+@@ -3750,21 +4213,49 @@
        botSM             = *sm;
        thePrism.myBottom = TopoDS::Face( botSM->GetSubShape() );
        if ( !initPrism( thePrism, theShape3D, /*selectBottom=*/false ))
@@ -106,6 +639,15 @@ diff --git a/src/StdMeshers/StdMeshers_Prism_3D.cxx b/src/StdMeshers/StdMeshers_
 +      {
 +        reasons << " FACE #" << shapeID( f.Current() ) << ": not tried, it has "
 +                << minNbFaces - 2 << " EDGEs and the solid " << nbFaces << " FACEs.";
++        continue;
++      }
++      bool touchesSharedEdge = false; // pySMESH: see notQuadShareEdge above
++      for ( TopExp_Explorer v( f.Current(), TopAbs_VERTEX ); v.More(); v.Next() )
++        touchesSharedEdge = touchesSharedEdge || sharedEdgeVertices.Contains( v.Current() );
++      if ( touchesSharedEdge )
++      {
++        reasons << " FACE #" << shapeID( f.Current() ) << ": not tried, it touches an EDGE"
++                << " that the 2 FACEs without 4 EDGEs share.";
 +        continue;
 +      }
        thePrism.Clear();

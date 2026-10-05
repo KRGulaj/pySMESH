@@ -1025,23 +1025,16 @@ def _disk() -> ps.Shape:
     return ps.load_brep(session.brep())
 
 
-@pytest.mark.parametrize(
-    "algorithm", ["Prism3D", "PolygonPerFace2D", "RadialQuadrangle1D2D"]
-)
+@pytest.mark.parametrize("algorithm", ["Prism3D", "RadialQuadrangle1D2D"])
 def test_an_algorithm_that_builds_no_layers_refuses_them_before_computing(
     algorithm: str,
 ) -> None:
     """The layers were dropped with no word (Prism3D, RadialQuadrangle1D2D: no group, no
-    layer planes), or PolygonPerFace2D built them and then failed ("Less that 3 nodes on
-    the wire") with the layer cells left in the mesh. Now the compute refuses, names the
-    algorithm, and meshes nothing.
+    layer planes). Now the compute refuses, names the algorithm, and meshes nothing.
+    PolygonPerFace2D left this list when it began to build the layers (VLb).
     """
     total, count = STACK
-    shape = {
-        "Prism3D": _unit_box,
-        "PolygonPerFace2D": _unit_square,
-        "RadialQuadrangle1D2D": _disk,
-    }[algorithm]()
+    shape = {"Prism3D": _unit_box, "RadialQuadrangle1D2D": _disk}[algorithm]()
     with Mesher(shape) as mesher:
         if algorithm == "Prism3D":
             _assign_3d(mesher, algorithm)
@@ -1055,11 +1048,7 @@ def test_an_algorithm_that_builds_no_layers_refuses_them_before_computing(
         else:
             mesher.assign(Regular1D())
             mesher.assign(NumberOfSegments(count=8))
-            mesher.assign(
-                PolygonPerFace2D()
-                if algorithm == "PolygonPerFace2D"
-                else RadialQuadrangle1D2D()
-            )
+            mesher.assign(RadialQuadrangle1D2D())
             layers = ViscousLayers2D(
                 total_thickness=total,
                 layer_count=count,
@@ -1075,17 +1064,15 @@ def test_an_algorithm_that_builds_no_layers_refuses_them_before_computing(
             mesher.compute()
 
         assert mesher.mesh().element_count == 0
-    native = {
-        "Prism3D": "Prism_3D",
-        "PolygonPerFace2D": "PolygonPerFace_2D",
-        "RadialQuadrangle1D2D": "RadialQuadrangle_1D2D",
-    }[algorithm]
+    native = {"Prism3D": "Prism_3D", "RadialQuadrangle1D2D": "RadialQuadrangle_1D2D"}[
+        algorithm
+    ]
     assert native in str(raised.value)
 
 
-# The child assigns ViscousLayers with CompositeHexa3D on the unit box and computes. On
-# the reference the process died with an access violation: the layers fail there, and
-# CompositeHexa_3D then read a null proxy mesh.
+# The child assigns ViscousLayers with CompositeHexa3D on the unit box and computes. Up
+# to 4.2.2 the process died with an access violation: the layers failed there, and
+# CompositeHexa_3D then read a null proxy mesh; 5.0.0 refused the layers.
 _COMPOSITE_CHILD: str = """
 import os, sys
 occt = os.environ.get("PYSMESH_OCCT_BIN")
@@ -1108,18 +1095,20 @@ with ps.Mesher(ps.load_brep(s.brep())) as m:
                               boundary=(1,), group_name="bl"))
     try:
         m.compute()
-        print("COMPOSITE-RESULT computed")
+        groups = {g.name: int(g.element_ids.size) for g in m.groups()}
+        bad = m.select(ps.BadOrientedVolume()).count
+        print("COMPOSITE-RESULT computed", groups["bl"], bad)
     except ps.PysmeshError as e:
         print("COMPOSITE-RESULT refused " + str(e))
 """
 
 
-def test_composite_hexa_3d_refuses_layers_instead_of_crashing() -> None:
-    """In a child process: CompositeHexa3D with ViscousLayers raises, it does not crash.
-
-    Made to read the hypothesis, CompositeHexa_3D still cannot use the layers: the layer
-    quadrangles give the side faces more rows than the opposite faces, and its box grid
-    gets null nodes (StdMeshers_CompositeHexa_3D_viscous_layers.patch).
+def test_composite_hexa_3d_builds_layers_on_the_unit_box_in_a_child_process() -> None:
+    """In a child process: CompositeHexa3D with ViscousLayers on one face of the unit
+    box (4 segments, 3 layers) builds 4 x 4 x 3 layer cells, none inverted. It crashed
+    up to 4.2.2 and was refused in 5.0.0;
+    StdMeshers_CompositeHexa_3D_viscous_layers.patch now loads the side grids before the
+    layers are built.
     """
     package_root = str(Path(ps.__file__).resolve().parent.parent)
 
@@ -1136,5 +1125,948 @@ def test_composite_hexa_3d_refuses_layers_instead_of_crashing() -> None:
     line = next(
         ln for ln in proc.stdout.splitlines() if ln.startswith("COMPOSITE-RESULT ")
     )
-    assert line.startswith("COMPOSITE-RESULT refused ")
-    assert "CompositeHexa_3D does not build viscous layers" in line
+    assert line.split()[1:] == ["computed", str(4 * 4 * 3), "0"], line
+
+
+# ---- VL6 several ViscousLayers hypotheses on one solid ----------------------------- #
+
+
+def _at_x1(items: list[object]) -> int:
+    """The ordinal of the face that lies in the plane x = 1."""
+    for item in items:
+        box = item.bbox  # type: ignore[attr-defined]
+        if abs(box[0] - 1.0) < TOL and abs(box[3] - 1.0) < TOL:
+            return int(item.id)  # type: ignore[attr-defined]
+    raise AssertionError("nothing in the plane x = 1")
+
+
+def _layer_set(
+    total: float, count: int, factor: float, walls: tuple[int, ...], group: str
+) -> ViscousLayers:
+    """A ViscousLayers hypothesis on ``walls``, its cells in ``group``."""
+    return ViscousLayers(
+        total_thickness=total,
+        layer_count=count,
+        stretch_factor=factor,
+        boundary=walls,
+        group_name=group,
+    )
+
+
+@pytest.mark.parametrize("count_b", [2, 3])
+def test_two_face_sets_on_one_solid_each_grow_their_own_closed_form_stack(
+    count_b: int,
+) -> None:
+    """PolyhedronPerSolid3D with one hypothesis on x = 0 and another on x = 1.
+
+    The faces x = 0 and x = 1 share no edge, so the layer counts may differ. Each wall
+    gets the planes of its own stack; the layer cells of each go into its own group (4 x
+    4 quadrangles per wall); the cells fill the unit box exactly.
+    """
+    box = _unit_box()
+    wall_a, wall_b = _at_x0(box.faces()), _at_x1(box.faces())
+
+    with Mesher(box) as mesher:
+        _assign_3d(mesher, "PolyhedronPerSolid3D")
+        mesher.assign(_layer_set(0.3, 3, 1.2, (wall_a,), "bl_a"))
+        mesher.assign(_layer_set(0.2, count_b, 1.0, (wall_b,), "bl_b"))
+        report = mesher.compute()
+        x = np.unique(np.round(mesher.mesh().node_coords[:, 0], 12))
+        groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
+        volume = float(mesher.quality(Volume()).values.sum())
+        inverted = mesher.select(BadOrientedVolume()).count
+
+    np.testing.assert_allclose(
+        x[(x > TOL) & (x <= 0.3 + TOL)], _layer_ends(0.3, 1.2, 3), atol=TOL
+    )
+    near_b = np.sort(1.0 - x[(x >= 0.8 - TOL) & (x < 1.0 - TOL)])
+    np.testing.assert_allclose(near_b, _layer_ends(0.2, 1.0, count_b), atol=TOL)
+    assert groups == {"bl_a": 16 * 3, "bl_b": 16 * count_b}
+    assert volume == pytest.approx(1.0, rel=1e-12)
+    assert (inverted, report.warnings) == (0, ())
+
+
+@pytest.mark.parametrize(
+    ("set_b", "count_b", "reason"),
+    [
+        ("y0", 3, "Several hypotheses define Viscous Layers on the face"),
+        ("y0_only_n2", 2, "different number of viscous layers on adjacent faces"),
+    ],
+)
+def test_layer_face_sets_that_do_not_fit_together_raise_smesh_reason(
+    set_b: str, count_b: int, reason: str
+) -> None:
+    """Two face sets that SMESH refuses: they share the face y = 0, or they are on the
+    adjacent faces x = 0 and y = 0 with 3 and 2 layers
+    (``StdMeshers_ViscousLayers.cxx``, ``findFacesWithLayers``). The reference meshed no
+    volume and said nothing. Now the compute raises with SMESH's reason, naming the face
+    by its ordinal, and meshes nothing.
+    """
+    box = _unit_box()
+    x0, y0 = _at_x0(box.faces()), _at_y0(box.faces())
+    walls_a = (x0, y0) if set_b == "y0" else (x0,)
+
+    with Mesher(box) as mesher:
+        _assign_3d(mesher, "PolyhedronPerSolid3D")
+        mesher.assign(_layer_set(0.3, 3, 1.2, walls_a, "bl_a"))
+        mesher.assign(_layer_set(0.2, count_b, 1.0, (y0,), "bl_b"))
+
+        with pytest.raises(PysmeshError, match=reason) as raised:
+            mesher.compute()
+
+        assert mesher.mesh().element_count == 0
+    assert "SOLID 1" in str(raised.value)
+    if set_b == "y0":
+        assert f"FACE {y0}" in str(raised.value)
+
+
+@pytest.mark.parametrize("algorithm", ["Hexa3D", "CompositeHexa3D", "Cartesian3D"])
+def test_a_second_layer_hypothesis_on_an_algorithm_that_reads_one_is_refused(
+    algorithm: str,
+) -> None:
+    """Hexa_3D takes one ViscousLayers per solid (``StdMeshers_Hexa_3D.cxx:136-147``):
+    with two, the reference meshed no volume and said nothing. CompositeHexa_3D takes
+    one as Hexa_3D does (VLa); the reference refused it as a non-builder. Cartesian_3D
+    keeps the last one it lists (``StdMeshers_Cartesian_3D.cxx:114-125``): the reference
+    built only one stack. Now the compute refuses, names the solid and the algorithm,
+    and meshes nothing.
+    """
+    box = _unit_box()
+    wall_a, wall_b = _at_x0(box.faces()), _at_x1(box.faces())
+
+    with Mesher(box) as mesher:
+        _assign_3d(mesher, algorithm)
+        mesher.assign(_layer_set(0.3, 3, 1.2, (wall_a,), "bl_a"))
+        mesher.assign(_layer_set(0.2, 3, 1.0, (wall_b,), "bl_b"))
+
+        with pytest.raises(PysmeshError, match="reads one ViscousLayers") as raised:
+            mesher.compute()
+
+        assert mesher.mesh().element_count == 0
+    native = {
+        "Hexa3D": "Hexa_3D",
+        "CompositeHexa3D": "CompositeHexa_3D",
+        "Cartesian3D": "Cartesian_3D",
+    }[algorithm]
+    assert native in str(raised.value)
+    assert "SOLID 1" in str(raised.value)
+
+
+def test_unassign_removes_exactly_the_layer_hypothesis_it_is_given() -> None:
+    """Two ViscousLayers on one solid, the second one detached: the first one's stack is
+    built, and only its group exists. The reference detached the first one by name.
+    """
+    box = _unit_box()
+    second = _layer_set(0.2, 2, 1.0, (_at_x1(box.faces()),), "bl_b")
+
+    with Mesher(box) as mesher:
+        _assign_3d(mesher, "PolyhedronPerSolid3D")
+        mesher.assign(_layer_set(0.3, 3, 1.2, (_at_x0(box.faces()),), "bl_a"))
+        mesher.assign(second)
+        mesher.unassign(second)
+        mesher.compute()
+        x = np.unique(np.round(mesher.mesh().node_coords[:, 0], 12))
+        groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
+
+    np.testing.assert_allclose(
+        x[(x > TOL) & (x <= 0.3 + TOL)], _layer_ends(0.3, 1.2, 3), atol=TOL
+    )
+    assert groups == {"bl_a": 16 * 3}
+
+
+def test_a_hexa_solid_meshes_once_its_second_layer_hypothesis_is_detached() -> None:
+    """Hexa3D with two ViscousLayers, then the second one detached: the solid meshes
+    with the first one's stack. On the reference the solid stayed unmeshed: removing a
+    hypothesis never checked the algorithm again (``SMESH_subMesh.cxx``, state
+    ``MISSING_HYP``), so the compute succeeded with no volume.
+    """
+    total, count = STACK
+    box = _unit_box()
+    second = _layer_set(0.2, 3, 1.0, (_at_x1(box.faces()),), "bl_b")
+
+    with Mesher(box) as mesher:
+        _assign_3d(mesher, "Hexa3D")
+        mesher.assign(_layer_set(total, count, 1.2, (_at_x0(box.faces()),), "bl_a"))
+        mesher.assign(second)
+        mesher.unassign(second)
+        report = mesher.compute()
+        xyz = mesher.mesh().node_coords
+        groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
+
+    np.testing.assert_allclose(
+        _planes(xyz, total), _layer_ends(total, 1.2, count), atol=TOL
+    )
+    assert groups == {"bl_a": 4 * 4 * count}
+    assert report.volumes == 4 * 4 * 4 + 4 * 4 * count
+
+
+def test_unassign_refuses_a_layer_hypothesis_equal_to_none_of_several() -> None:
+    """Two ViscousLayers on one solid, and a third, different one given to unassign: it
+    raises, names the sub-shape, and detaches nothing. The reference detached the first.
+    """
+    box = _unit_box()
+
+    with Mesher(box) as mesher:
+        _assign_3d(mesher, "PolyhedronPerSolid3D")
+        mesher.assign(_layer_set(0.3, 3, 1.2, (_at_x0(box.faces()),), "bl_a"))
+        mesher.assign(_layer_set(0.2, 2, 1.0, (_at_x1(box.faces()),), "bl_b"))
+        before = mesher.assignments()
+
+        with pytest.raises(PysmeshError, match="2 'ViscousLayers'"):
+            mesher.unassign(_layer_set(0.25, 2, 1.0, (1,), "bl_c"))
+
+        assert mesher.assignments() == before
+
+
+# ---- VL7 the extrusion methods on the catalogue path ------------------------------- #
+
+
+def _method_stack(
+    algorithm: str, method: ExtrusionMethod, two_walls: bool
+) -> tuple[NDArray[np.float64], NDArray[np.float64], dict[str, int], ps.ComputeReport]:
+    """The unit box with the stack on x = 0 (and y = 0) by ``method``: every node, the
+    nodes of the layer cells, the group sizes, the report."""
+    total, count = STACK
+    box = _unit_box()
+    walls = (_at_x0(box.faces()),)
+    if two_walls:
+        walls += (_at_y0(box.faces()),)
+    with Mesher(box) as mesher:
+        _assign_3d(mesher, algorithm)
+        mesher.assign(
+            ViscousLayers(
+                total_thickness=total,
+                layer_count=count,
+                stretch_factor=1.2,
+                boundary=walls,
+                group_name="bl",
+                method=method,
+            )
+        )
+        report = mesher.compute()
+        mesh = mesher.mesh()
+        layer_ids = {int(i) for g in mesher.groups() for i in g.element_ids}
+        groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
+    rows = [
+        r for r in range(mesh.element_count) if int(mesh.element_id[r]) in layer_ids
+    ]
+    layer_nodes = np.unique(np.concatenate([mesh.nodes_of(r) for r in rows]))
+    return mesh.node_coords, mesh.node_coords[layer_nodes], groups, report
+
+
+@pytest.mark.parametrize("algorithm", ["Hexa3D", "PolyhedronPerSolid3D"])
+@pytest.mark.parametrize("method", list(ExtrusionMethod))
+def test_each_extrusion_method_grows_the_closed_form_stack_on_a_flat_wall(
+    method: ExtrusionMethod, algorithm: str
+) -> None:
+    """ViscousLayers on the wall x = 0 of the unit box, by each extrusion method,
+    through Mesher. On a flat wall each method moves a node along the wall normal by the
+    closed-form depth (SMESH ``additional_hypo.rst``, "Viscous Layers"), so the stack
+    nodes lie on the planes x = d_k, and the wall gets 4 x 4 x N layer cells.
+    """
+    total, count = STACK
+
+    xyz, _, groups, report = _method_stack(algorithm, method, two_walls=False)
+
+    np.testing.assert_allclose(
+        _planes(xyz, total), _layer_ends(total, 1.2, count), atol=TOL
+    )
+    assert groups == {"bl": 4 * 4 * count}
+    assert report.warnings == ()
+
+
+@pytest.mark.parametrize("algorithm", ["Hexa3D", "PolyhedronPerSolid3D"])
+def test_smoothed_layers_on_two_adjacent_walls_keep_the_closed_form_on_each(
+    algorithm: str,
+) -> None:
+    """SURF_OFFSET_SMOOTH on the walls x = 0 and y = 0: the stacks meet along the edge
+    between them, and away from it (y > T) the x = 0 stack lies on the closed-form
+    planes.
+    """
+    total, count = STACK
+
+    xyz, _, groups, report = _method_stack(
+        algorithm, ExtrusionMethod.SURF_OFFSET_SMOOTH, two_walls=True
+    )
+
+    away = xyz[xyz[:, 1] > total + TOL]
+    np.testing.assert_allclose(
+        _planes(away, total), _layer_ends(total, 1.2, count), atol=TOL
+    )
+    assert groups == {"bl": 2 * 4 * 4 * count}
+    assert report.warnings == ()
+
+
+@pytest.mark.parametrize("algorithm", ["Hexa3D", "PolyhedronPerSolid3D"])
+@pytest.mark.parametrize(
+    "method", [ExtrusionMethod.FACE_OFFSET, ExtrusionMethod.NODE_OFFSET]
+)
+def test_unsmoothed_layers_on_two_adjacent_walls_stop_short_with_a_warning(
+    method: ExtrusionMethod, algorithm: str
+) -> None:
+    """FACE_OFFSET and NODE_OFFSET do not smooth the layers
+    (``StdMeshers_ViscousLayers.cxx`` ``AverageHyp::ToSmooth``), so on the walls x = 0
+    and y = 0 the two stacks collide along the edge between them and SMESH stops the
+    inflation short of T. That is upstream's local limiting (``:5005-5015``): the
+    compute succeeds with a warning on the solid that states the average thickness it
+    reached, below T, and no layer node lies deeper than T from the nearer wall.
+    """
+    total, count = STACK
+
+    _, layer_xyz, groups, report = _method_stack(algorithm, method, two_walls=True)
+
+    (warning,) = report.warnings
+    assert (warning.kind, warning.ordinal) == (ps.SubShapeKind.SOLID, 1)
+    head = f"Thickness {total:g} of viscous layers not reached, "
+    assert warning.text.startswith(head + "average reached thickness is ")
+    reached = float(warning.text.rsplit(" ", 1)[1])
+    assert 0.0 < reached < total
+    depth = np.minimum(layer_xyz[:, 0], layer_xyz[:, 1])
+    assert float(depth.max()) <= total + TOL
+    assert groups == {"bl": 2 * 4 * 4 * count}
+
+
+# ---- VL8 the "thickness not reached" warning --------------------------------------- #
+
+
+def _slab(gap: float) -> ps.Shape:
+    """A 1 x 1 x ``gap`` box at the origin: two walls ``gap`` apart."""
+    session = Session()
+    session.add_box(1.0, 1.0, gap)
+    return ps.load_brep(session.brep())
+
+
+@pytest.mark.parametrize("total", [0.12, 0.3])
+@pytest.mark.parametrize("algorithm", ["Hexa3D", "PolyhedronPerSolid3D"])
+def test_layers_in_a_narrow_gap_stop_at_half_of_it_with_a_warning(
+    algorithm: str, total: float
+) -> None:
+    """Layers of T on both walls of a slab 0.2 thick, T above half of it.
+
+    SMESH limits the stacks locally so that they do not collide
+    (``StdMeshers_ViscousLayers.cxx:5005-5015``), and states it as a warning on the
+    solid, with the average thickness reached. The warning reaches
+    ``ComputeReport.warnings``; the thickness it states, and the depth of every layer
+    node from its wall, are at most half the gap; the cells fill the slab exactly.
+    """
+    gap = 0.2
+    shape = _slab(gap)
+    walls = tuple(int(f.id) for f in shape.faces() if abs(f.bbox[2] - f.bbox[5]) < TOL)
+
+    with Mesher(shape) as mesher:
+        _assign_3d(mesher, algorithm)
+        mesher.assign(_layer_set(total, 3, 1.2, walls, "bl"))
+        report = mesher.compute()
+        mesh = mesher.mesh()
+        layer_ids = {int(i) for g in mesher.groups() for i in g.element_ids}
+        volume = float(mesher.quality(Volume()).values.sum())
+        inverted = mesher.select(BadOrientedVolume()).count
+
+    (warning,) = report.warnings
+    assert (warning.kind, warning.ordinal) == (ps.SubShapeKind.SOLID, 1)
+    head = f"Thickness {total:g} of viscous layers not reached, "
+    assert warning.text.startswith(head + "average reached thickness is ")
+    assert 0.0 < float(warning.text.rsplit(" ", 1)[1]) <= gap / 2
+    rows = [
+        r for r in range(mesh.element_count) if int(mesh.element_id[r]) in layer_ids
+    ]
+    z = mesh.node_coords[np.unique(np.concatenate([mesh.nodes_of(r) for r in rows])), 2]
+    assert len(rows) == 2 * 4 * 4 * 3
+    assert float(np.minimum(z, gap - z).max()) <= gap / 2 + TOL
+    assert volume == pytest.approx(gap, rel=1e-12)
+    assert inverted == 0
+
+
+# ---- VL9 ViscousLayers2D on a face that an all-dimension algorithm meshes ---------- #
+
+
+def _face_at(shape: ps.Shape, axis: int, value: float) -> ps.SubShape:
+    """The face of ``shape`` that lies in the plane ``coordinate[axis] = value``."""
+    for face in shape.faces():
+        box = face.bbox
+        if abs(box[axis] - value) < TOL and abs(box[axis + 3] - value) < TOL:
+            return ps.SubShape(ps.SubShapeKind.FACE, int(face.id))
+    raise AssertionError(f"no face in the plane {'xyz'[axis]} = {value}")
+
+
+@pytest.mark.parametrize(
+    ("setup", "native"),
+    [
+        ("polyhedron_on_face", "PolyhedronPerSolid_3D"),
+        ("polyhedron_on_shape", "PolyhedronPerSolid_3D"),
+        ("polyhedron_quadrangle", "PolyhedronPerSolid_3D"),
+        ("cartesian_on_face", "Cartesian_3D"),
+        ("cartesian_quadrangle", "Cartesian_3D"),
+        ("prism_projected_face", "Prism_3D"),
+    ],
+)
+def test_layers_2d_on_a_face_an_all_dimension_algorithm_meshes_are_refused(
+    setup: str, native: str
+) -> None:
+    """ViscousLayers2D on the face z = 0 of the unit box, whose mesh another algorithm
+    makes: PolyhedronPerSolid_3D and Cartesian_3D mesh every dimension themselves, and
+    Prism_3D projects the face z = 0 from the source z = 1. None of them builds 2-D
+    layers. The reference dropped the layers with no word, or failed after meshing
+    ("Less that 3 nodes on the wire", or "no message"). Now the compute refuses before
+    it meshes anything, and names the face and the algorithm (on the whole shape, the
+    first face the layers reach).
+    """
+    box = _unit_box()
+    bottom = _face_at(box, 2, 0.0)
+    walls = tuple(
+        int(e.id)
+        for e in box.edges()
+        if abs(e.bbox[2]) < TOL and abs(e.bbox[5]) < TOL and abs(e.bbox[3]) < TOL
+    )
+
+    with Mesher(box) as mesher:
+        if setup.startswith("cartesian"):
+            mesher.assign(Cartesian3D())
+            mesher.assign(
+                CartesianParameters3D(
+                    spacing_x="0.25", spacing_y="0.25", spacing_z="0.25"
+                )
+            )
+        else:
+            mesher.assign(Regular1D())
+            mesher.assign(NumberOfSegments(count=4))
+        if setup.endswith("quadrangle"):
+            mesher.assign(Quadrangle2D())
+        if setup.startswith("polyhedron"):
+            mesher.assign(PolyhedronPerSolid3D())
+        if setup == "prism_projected_face":
+            mesher.assign(Quadrangle2D(), on=_face_at(box, 2, 1.0))
+            mesher.assign(Prism3D())
+        mesher.assign(
+            ViscousLayers2D(
+                total_thickness=0.3,
+                layer_count=3,
+                stretch_factor=1.2,
+                boundary=walls,
+                group_name="bl",
+            ),
+            on=None if setup == "polyhedron_on_shape" else bottom,
+        )
+
+        with pytest.raises(PysmeshError, match="builds no 2-D layers") as raised:
+            mesher.compute()
+
+        assert mesher.mesh().element_count == 0
+    named = 1 if setup == "polyhedron_on_shape" else bottom.ordinal
+    assert native in str(raised.value)
+    assert f"reaches FACE {named}," in str(raised.value)
+
+
+# ---- VLc layers on sweeps ---------------------------------------------------------- #
+
+# Geometric1D(0.125, 2) fills an edge of 0.125 (2^4 - 1) = 1.875 with 4 segments
+# exactly, so no length is compensated (StdMeshers_Regular_1D.cxx, GEOMETRIC_1D,
+# compensateError).
+SWEEP_HEIGHT: float = 1.875
+
+
+def _sweep_levels() -> NDArray[np.float64]:
+    """The node levels of Geometric1D(a1 = 0.125, q = 2): a1 (q^k - 1) / (q - 1)."""
+    k = np.arange(0, 5, dtype=np.float64)
+    return 0.125 * (2.0**k - 1.0)
+
+
+def _swept_block(factor: float, source_alone: bool) -> tuple[Mesher, ps.Shape]:
+    """A 2 x 1 x 1.875 block for Prism3D: 4 segments on the caps, Geometric1D(0.125, 2)
+    on the 4 vertical edges, ViscousLayers2D (0.3, 3, ``factor``) on the bottom face's
+    edge y = 0. Quadrangle2D on the bottom face alone, or on the whole shape."""
+    session = Session()
+    session.add_box(2.0, 1.0, SWEEP_HEIGHT)
+    block = ps.load_brep(session.brep())
+    bottom = _face_at(block, 2, 0.0)
+    wall = next(
+        int(e.id)
+        for e in block.edges()
+        if abs(e.bbox[1]) < TOL and abs(e.bbox[4]) < TOL and abs(e.bbox[5]) < TOL
+    )
+    mesher = Mesher(block)
+    mesher.assign(Regular1D())
+    mesher.assign(NumberOfSegments(count=4))
+    for edge in block.edges():
+        if edge.bbox[5] - edge.bbox[2] > 1.0:
+            mesher.assign(
+                ps.Geometric1D(start_length=0.125, common_ratio=2.0),
+                on=ps.SubShape(ps.SubShapeKind.EDGE, int(edge.id)),
+            )
+    mesher.assign(Quadrangle2D(), on=bottom if source_alone else None)
+    mesher.assign(Prism3D())
+    mesher.assign(
+        ViscousLayers2D(
+            total_thickness=0.3,
+            layer_count=3,
+            stretch_factor=factor,
+            boundary=(wall,),
+            group_name="bl",
+        ),
+        on=bottom,
+    )
+    return mesher, block
+
+
+@pytest.mark.parametrize("factor", [1.0, 1.2])
+def test_a_sweep_carries_the_source_face_layers_through_every_graded_level(
+    factor: float,
+) -> None:
+    """Prism3D from the bottom face, which grows ViscousLayers2D on its edge y = 0.
+
+    The sweep levels are the Geometric1D closed form z_k = 0.125 (2^k - 1); at every
+    level the layer lines lie at y = d_k; the cells (28 per level: 4 x 4 inner
+    quadrangles and 4 x 3 layer ones) fill the block exactly, and none is inverted.
+    """
+    mesher, _ = _swept_block(factor, source_alone=True)
+    with mesher:
+        report = mesher.compute()
+        xyz = mesher.mesh().node_coords
+        groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
+        volume = float(mesher.quality(Volume()).values.sum())
+        inverted = mesher.select(BadOrientedVolume()).count
+
+    levels = np.unique(np.round(xyz[:, 2], 12))
+    np.testing.assert_allclose(levels, _sweep_levels(), atol=TOL)
+    inside = (xyz[:, 0] > TOL) & (xyz[:, 0] < 2.0 - TOL)
+    for level in levels:
+        at = xyz[inside & (np.abs(xyz[:, 2] - level) < TOL)]
+        y = np.unique(np.round(at[:, 1], 12))
+        np.testing.assert_allclose(
+            y[(y > TOL) & (y <= 0.3 + TOL)], _layer_ends(0.3, factor, 3), atol=TOL
+        )
+    assert report.volumes == 4 * (4 * 4 + 4 * 3)
+    assert groups == {"bl": 4 * 3}
+    assert volume == pytest.approx(2.0 * 1.0 * SWEEP_HEIGHT, rel=1e-12)
+    assert (inverted, report.warnings) == (0, ())
+
+
+def test_layers_2d_on_a_prism_face_with_an_inherited_2d_algorithm_are_refused() -> None:
+    """Quadrangle2D on the whole shape, ViscousLayers2D on the bottom face: Prism3D
+    picks the face it sweeps from itself, and swept from the top. The reference gave the
+    bottom face its layers and the volume cells none (76 cells that do not fit that
+    face), with no word. Now the compute refuses before it meshes anything, and names
+    the way out.
+    """
+    mesher, block = _swept_block(1.2, source_alone=False)
+    with mesher:
+        with pytest.raises(PysmeshError, match="builds no 2-D layers") as raised:
+            mesher.compute()
+
+        assert mesher.mesh().element_count == 0
+    bottom = _face_at(block, 2, 0.0)
+    assert f"reaches FACE {bottom.ordinal}," in str(raised.value)
+    assert "on that face alone" in raised.value.details
+
+
+# ---- VLd the largest workable thickness of Cartesian layers ------------------------ #
+
+# The child meshes the bored block (2 x 2 x 2, a bore of radius 0.4 on its axis) with
+# Cartesian3D at grid spacing 0.25 and layers of T = argv[2] on every face, and prints
+# one JSON line: the error details, or the cell count and the inverted cells. A child,
+# because the reference crashed once on a run of these inputs.
+_BORED_CHILD: str = """
+import json, os, sys
+occt = os.environ.get("PYSMESH_OCCT_BIN")
+if occt:
+    os.add_dll_directory(occt)
+lib = os.path.join(sys.prefix, "Library", "bin")
+if os.path.isdir(lib):
+    os.add_dll_directory(lib)
+sys.path.insert(0, sys.argv[1])
+import pysmesh as ps
+
+s = ps.Session()
+s.add_box(2.0, 2.0, 2.0)
+block = s.entities(ps.EntityKind.SOLID).tolist()
+s.add_cylinder(0.4, 2.0, origin=(1.0, 1.0, 0.0))
+everything = s.entities(ps.EntityKind.SOLID).tolist()
+s.cut(block, [i for i in everything if i not in block])
+with ps.Mesher(ps.load_brep(s.brep())) as m:
+    m.assign(ps.Cartesian3D())
+    m.assign(ps.CartesianParameters3D(spacing_x="0.25", spacing_y="0.25",
+                                      spacing_z="0.25"))
+    m.assign(ps.ViscousLayers(total_thickness=float(sys.argv[2]), layer_count=3,
+                              stretch_factor=1.2, boundary=(), ignore=True,
+                              group_name="bl"))
+    try:
+        report = m.compute()
+        out = {"volumes": report.volumes,
+               "inverted": m.select(ps.BadOrientedVolume()).count,
+               "bare": m.select(ps.BareBorderVolume()).count}
+    except ps.PysmeshError as e:
+        out = {"error": e.details, "left": m.mesh().element_count}
+print("BORED-RESULT " + json.dumps(out))
+"""
+_WORKABLE: str = (
+    r"The largest total thickness for which the offset works is about ([0-9.eE+-]+)"
+)
+
+
+def _bored_with_layers(total: float) -> dict[str, object]:
+    """Run the bored-block child at total thickness ``total``; return its JSON
+    result."""
+    package_root = str(Path(ps.__file__).resolve().parent.parent)
+    proc = subprocess.run(
+        [sys.executable, "-c", _BORED_CHILD, package_root, repr(total)],
+        capture_output=True,
+        text=True,
+        timeout=300.0,
+        env=dict(os.environ),
+        check=False,
+    )
+    assert proc.returncode == 0, (proc.returncode, proc.stderr[-2000:])
+    line = next(ln for ln in proc.stdout.splitlines() if ln.startswith("BORED-RESULT "))
+    return json.loads(line.split(" ", 1)[1])  # type: ignore[no-any-return]
+
+
+def test_layers_too_thick_name_the_largest_thickness_that_meshes() -> None:
+    """Layers of 0.3 in the bored block: the offset surfaces meet at 0.3 exactly (the
+    bore, radius 0.4 + T, reaches the walls, 1 - T from its axis).
+
+    The error names T*, the largest thickness for which the offset works, found by
+    bisection; T* is below 0.3 and within 0.3 / 2^12 of it. At 0.95 T* the compute
+    meshes, with no inverted cell and every boundary facet covered; at 1.05 T* it fails
+    with the same kind of message, naming T* again.
+    """
+    import re
+
+    refused = _bored_with_layers(0.3)
+
+    assert "error" in refused, refused
+    assert "too thick for the shape" in str(refused["error"])
+    found = re.search(_WORKABLE, str(refused["error"]))
+    assert found is not None, refused
+    limit = float(found.group(1))
+    assert 0.3 - 0.3 / 2**12 - 1e-6 <= limit < 0.3
+    below = _bored_with_layers(0.95 * limit)
+    assert below.get("error") is None, below
+    assert (below["inverted"], below["bare"]) == (0, 0)
+    above = _bored_with_layers(1.05 * limit)
+    assert "error" in above, above
+    assert "too thick for the shape" in str(above["error"])
+    assert re.search(_WORKABLE, str(above["error"])) is not None
+    assert above["left"] == 0
+
+
+@pytest.mark.parametrize("total", [0.5, 0.7])
+def test_layers_whose_offset_is_not_a_valid_solid_are_refused(total: float) -> None:
+    """Thicker still, the offset surfaces cross, and BRepOffset_MakeOffset reports
+    success with a solid that is not valid, partly outside the block. The reference
+    failed with "SOLID 1: no message" (0.5), or meshed 13 cells, 4 of them inverted,
+    with nodes outside the block (0.7). Now the compute fails with the reason and names
+    T*, and leaves no cell.
+    """
+    import re
+
+    refused = _bored_with_layers(total)
+
+    assert "error" in refused, refused
+    assert "is not a valid solid" in str(refused["error"])
+    assert "too thick for the shape" in str(refused["error"])
+    found = re.search(_WORKABLE, str(refused["error"]))
+    assert found is not None
+    assert 0.29 < float(found.group(1)) < 0.3
+    assert refused["left"] == 0
+
+
+def test_layer_cells_that_fold_over_are_refused() -> None:
+    """Layers of 0.2999 in the bored block: the offset is a valid solid, but its bore
+    comes within 0.0002 of its walls, closer than the grid can follow, and 57 layer
+    hexahedra fold over. The reference returned them as a success. Now the compute
+    fails, says why, and leaves no cell; at 0.2995 (a gap of 0.001) it meshes with no
+    inverted cell.
+    """
+    folded = _bored_with_layers(0.2999)
+    near = _bored_with_layers(0.2995)
+
+    assert "error" in folded, folded
+    assert "layer cells are inverted" in str(folded["error"])
+    assert folded["left"] == 0
+    assert near.get("error") is None, near
+    assert (near["inverted"], near["bare"]) == (0, 0)
+
+
+# ---- VLb PolygonPerFace2D with ViscousLayers2D ------------------------------------- #
+
+
+def _hexagon_face() -> ps.Shape:
+    """A regular hexagon face, circumradius 1, in z = 0, a corner on the x axis."""
+    corners = np.array(
+        [[math.cos(k * math.pi / 3), math.sin(k * math.pi / 3), 0.0] for k in range(6)],
+        dtype=np.float64,
+    )
+    session = Session()
+    session.add_polyline(corners, closed=True)
+    session.make_face(list(session.entities(ps.EntityKind.EDGE)))
+    return ps.load_brep(session.brep())
+
+
+def _loose_edges(mesh: ps.MeshData, on_boundary: NDArray[np.bool_]) -> tuple[int, int]:
+    """Edges used by one face that are not on the boundary, and edges used by more than
+    two faces: both 0 on a conforming face mesh."""
+    count: dict[tuple[int, int], int] = {}
+    for row in range(mesh.element_count):
+        if int(mesh.element_type[row]) not in _SURFACE:
+            continue
+        ring = mesh.nodes_of(row)
+        for a, b in zip(ring, np.roll(ring, -1), strict=True):
+            key = (int(min(a, b)), int(max(a, b)))
+            count[key] = count.get(key, 0) + 1
+    loose = sum(
+        1
+        for (a, b), n in count.items()
+        if n == 1 and not (on_boundary[a] and on_boundary[b])
+    )
+    return loose, sum(1 for n in count.values() if n > 2)
+
+
+@pytest.mark.parametrize("factor", [1.0, 1.2])
+@pytest.mark.parametrize("walls", ["y0", "y0_and_x0"])
+def test_polygon_per_face_grows_layers_on_a_square(walls: str, factor: float) -> None:
+    """PolygonPerFace2D with ViscousLayers2D on the unit square, 4 segments per edge.
+
+    The layers on y = 0 lie on the lines y = d_k, away from the wall x = 0; with x = 0
+    too, the layers on x = 0 lie on x = d_k, away from y = 0. One cell per segment per
+    layer, and one polygon inside, whose sides are the inner sides of the layer cells:
+    the mesh conforms (every edge used by one face is on the square's boundary). The
+    cells cover the square exactly, and none is inverted.
+    """
+    total, count = STACK
+    square = _unit_square()
+    chosen = [_at_y0(square.edges())]
+    if walls == "y0_and_x0":
+        chosen.append(_at_x0(square.edges()))
+
+    with Mesher(square) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=4))
+        mesher.assign(PolygonPerFace2D())
+        mesher.assign(
+            ViscousLayers2D(
+                total_thickness=total,
+                layer_count=count,
+                stretch_factor=factor,
+                boundary=tuple(chosen),
+                group_name="bl",
+            )
+        )
+        report = mesher.compute()
+        mesh = mesher.mesh()
+        areas = mesher.quality(Area()).values
+        groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
+
+    xyz = mesh.node_coords
+    ends = _layer_ends(total, factor, count)
+    away = xyz[xyz[:, 0] > total + TOL] if len(chosen) == 2 else xyz
+    y = np.unique(np.round(away[:, 1], 12))
+    np.testing.assert_allclose(y[(y > TOL) & (y <= total + TOL)], ends, atol=TOL)
+    if len(chosen) == 2:
+        x = np.unique(np.round(xyz[xyz[:, 1] > total + TOL, 0], 12))
+        np.testing.assert_allclose(x[(x > TOL) & (x <= total + TOL)], ends, atol=TOL)
+    boundary = (np.abs(xyz[:, 0]) < TOL) | (np.abs(xyz[:, 0] - 1.0) < TOL)
+    boundary |= (np.abs(xyz[:, 1]) < TOL) | (np.abs(xyz[:, 1] - 1.0) < TOL)
+    polygons = int(np.sum(mesh.element_type == int(ElementType.POLYGON)))
+    assert groups == {"bl": len(chosen) * 4 * count}
+    assert polygons == 1
+    assert _loose_edges(mesh, boundary) == (0, 0)
+    assert float(areas.sum()) == pytest.approx(1.0, rel=1e-12)
+    assert float(areas.min()) > 0.0
+    assert report.warnings == ()
+
+
+def test_polygon_per_face_grows_layers_on_an_inclined_hexagon_edge() -> None:
+    """PolygonPerFace2D with ViscousLayers2D (0.2, 3, 1.2) on one edge of a regular
+    hexagon (circumradius 1, 4 segments per edge): the edge between the corners at 0 and
+    60 deg, on the line at the apothem cos(30 deg) from the centre, normal 30 deg. The
+    layer nodes near the middle of the wall lie at the depths d_k; the cells cover the
+    hexagon, area 3 sqrt(3) / 2, exactly; none is inverted; the mesh conforms.
+    """
+    hexagon = _hexagon_face()
+    normal = np.array([math.cos(math.pi / 6), math.sin(math.pi / 6), 0.0])
+    apothem = math.cos(math.pi / 6)
+    wall = next(
+        int(e.id)
+        for e in hexagon.edges()
+        if abs(e.bbox[0] - 0.5) < 1e-6 and abs(e.bbox[3] - 1.0) < 1e-6
+    )
+
+    with Mesher(hexagon) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=4))
+        mesher.assign(PolygonPerFace2D())
+        mesher.assign(
+            ViscousLayers2D(
+                total_thickness=0.2,
+                layer_count=3,
+                stretch_factor=1.2,
+                boundary=(wall,),
+                group_name="bl",
+            )
+        )
+        mesher.compute()
+        mesh = mesher.mesh()
+        areas = mesher.quality(Area()).values
+
+    xyz = mesh.node_coords
+    depth = apothem - xyz @ normal
+    along = xyz @ np.array([-normal[1], normal[0], 0.0])
+    near = (np.abs(along) < 0.2) & (depth > TOL) & (depth <= 0.2 + TOL)
+    np.testing.assert_allclose(
+        np.unique(np.round(depth[near], 9)), _layer_ends(0.2, 1.2, 3), atol=1e-9
+    )
+    radius = np.hypot(xyz[:, 0], xyz[:, 1])
+    angle = np.mod(np.arctan2(xyz[:, 1], xyz[:, 0]), math.pi / 3) - math.pi / 6
+    on_rim = np.abs(radius * np.cos(angle) - apothem) < 1e-9
+    assert _loose_edges(mesh, on_rim) == (0, 0)
+    assert float(areas.sum()) == pytest.approx(1.5 * math.sqrt(3.0), rel=1e-12)
+    assert float(areas.min()) > 0.0
+
+
+# ---- VLa CompositeHexa3D with ViscousLayers ---------------------------------------- #
+
+
+def _block(split: bool) -> ps.Shape:
+    """A 2 x 1 x 1 block: two unit cubes fused (10 faces), or one box (6 faces)."""
+    session = Session()
+    if split:
+        session.add_box(1.0, 1.0, 1.0)
+        first = session.entities(ps.EntityKind.SOLID).tolist()
+        session.add_box(1.0, 1.0, 1.0, origin=(1.0, 0.0, 0.0))
+        every = session.entities(ps.EntityKind.SOLID).tolist()
+        session.fuse(first, [i for i in every if i not in first])
+    else:
+        session.add_box(2.0, 1.0, 1.0)
+    return ps.load_brep(session.brep())
+
+
+def _block_layers(
+    algorithm: str, split: bool, walls: str
+) -> tuple[ps.MeshData, ps.ComputeReport, dict[str, int], int, int]:
+    """The block meshed at LocalLength 0.25 with the stack (0.3, 3, 1.2) on the faces in
+    the plane x = 0 or y = 0, or on every face: the mesh, the report, the group sizes,
+    and the inverted and bare-border cell counts."""
+    block = _block(split)
+    axis = {"x0": 0, "y0": 1}.get(walls)
+    chosen = tuple(
+        int(f.id)
+        for f in block.faces()
+        if axis is not None and abs(f.bbox[axis]) < TOL and abs(f.bbox[axis + 3]) < TOL
+    )
+    with Mesher(block) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(ps.LocalLength(length=0.25))
+        mesher.assign(Quadrangle2D())
+        mesher.assign(CompositeHexa3D() if algorithm == "CompositeHexa3D" else Hexa3D())
+        mesher.assign(
+            ViscousLayers(
+                total_thickness=0.3,
+                layer_count=3,
+                stretch_factor=1.2,
+                boundary=chosen,
+                ignore=walls == "all",
+                group_name="bl",
+            )
+        )
+        report = mesher.compute()
+        groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
+        inverted = mesher.select(BadOrientedVolume()).count
+        bare = mesher.select(BareBorderVolume()).count
+        mesh = mesher.mesh()
+    return mesh, report, groups, inverted, bare
+
+
+def _nearest(a: NDArray[np.float64], b: NDArray[np.float64]) -> NDArray[np.float64]:
+    """For each point of ``a``, the distance to the nearest point of ``b``."""
+    return np.linalg.norm(a[:, None, :] - b[None, :, :], axis=2).min(axis=1)
+
+
+@pytest.mark.parametrize("algorithm", ["CompositeHexa3D", "Hexa3D"])
+def test_composite_hexa_layers_on_a_split_wall_equal_hexa_on_the_plain_block(
+    algorithm: str,
+) -> None:
+    """The stack on the wall y = 0, which the split block has as two faces.
+
+    CompositeHexa3D on the split block, and Hexa3D, which hands the 10-face block to
+    CompositeHexa3D, give the mesh that Hexa3D gives on the plain 2 x 1 x 1 box: the
+    same nodes, the same cells and the same layer group. The layer nodes lie on the
+    planes y = d_k; the cells fill the block, of volume 2, with no gap and none
+    inverted. The reference refused, or crashed, with layers on CompositeHexa3D.
+    """
+    total, count = STACK
+
+    mesh, report, groups, inverted, bare = _block_layers(algorithm, True, "y0")
+    plain, plain_report, plain_groups, _, _ = _block_layers("Hexa3D", False, "y0")
+
+    xyz = mesh.node_coords
+    assert len(xyz) == len(plain.node_coords)
+    assert float(_nearest(xyz, plain.node_coords).max()) < TOL
+    assert (report.volumes, groups) == (plain_report.volumes, plain_groups)
+    y = np.unique(np.round(xyz[:, 1], 12))
+    np.testing.assert_allclose(
+        y[(y > TOL) & (y <= total + TOL)], _layer_ends(total, 1.2, count), atol=TOL
+    )
+    assert groups == {"bl": 8 * 4 * count}
+    assert _shared_split_volume(mesh) == pytest.approx(2.0, rel=1e-12)
+    assert (inverted, bare) == (0, 0)
+
+
+def test_composite_hexa_layers_on_an_end_wall_equal_hexa_in_the_layer_zone() -> None:
+    """The stack on the end wall x = 0 of the split block, by CompositeHexa3D.
+
+    In the layer zone x <= T the nodes are those of Hexa3D on the plain box, on the
+    planes x = d_k. Beyond it the layers shrink the side faces: the plain box shrinks
+    each long side edge as one, the split block only the edges of the half next to the
+    wall, and the vertices of the split at x = 1 keep their nodes there. The cell counts
+    are equal; the cells fill the block exactly, none inverted.
+    """
+    total, count = STACK
+
+    mesh, report, groups, inverted, bare = _block_layers("CompositeHexa3D", True, "x0")
+    plain, plain_report, _, _, _ = _block_layers("Hexa3D", False, "x0")
+
+    xyz = mesh.node_coords
+    zone = xyz[xyz[:, 0] <= total + TOL]
+    plain_zone = plain.node_coords[plain.node_coords[:, 0] <= total + TOL]
+    assert len(zone) == len(plain_zone)
+    assert float(_nearest(zone, plain_zone).max()) < TOL
+    x = np.unique(np.round(xyz[:, 0], 12))
+    np.testing.assert_allclose(
+        x[(x > TOL) & (x <= total + TOL)], _layer_ends(total, 1.2, count), atol=TOL
+    )
+    seam = np.array(
+        [[1.0, y, z] for y in (0.0, 1.0) for z in (0.0, 1.0)], dtype=np.float64
+    )
+    assert float(_nearest(seam, xyz).max()) < TOL
+    assert report.volumes == plain_report.volumes
+    assert groups == {"bl": 4 * 4 * count}
+    assert _shared_split_volume(mesh) == pytest.approx(2.0, rel=1e-12)
+    assert (inverted, bare) == (0, 0)
+
+
+def test_composite_hexa_layers_on_every_face_sit_at_the_closed_form() -> None:
+    """The stack on every face of the split block, by CompositeHexa3D.
+
+    The layer nodes that grow from the middle node of the whole wall x = 0, (0, 0.5,
+    0.5), lie on the planes x = d_k, as on the plain box with Hexa3D; the smoothing of
+    SURF_OFFSET_SMOOTH moves them sideways by less than 1e-3 there, so the column is
+    read within 0.01 of its line. Each of the 10 faces gets one layer cell per
+    quadrangle per layer (8 x 4 x 4 x 2 + 4 x 4 x 2 = 160 quadrangles); the cell count
+    is that of Hexa3D on the plain box; the cells fill the block exactly, none inverted.
+    On the split walls the layer builder thins the stack near the seam x = 1 (SMESH's
+    smoothing at the seam vertices, not CompositeHexa3D), so no plane is read there.
+    """
+    total, count = STACK
+    ends = _layer_ends(total, 1.2, count)
+
+    mesh, report, groups, inverted, bare = _block_layers("CompositeHexa3D", True, "all")
+    _, plain_report, _, _, _ = _block_layers("Hexa3D", False, "all")
+
+    xyz = mesh.node_coords
+    column = (np.abs(xyz[:, 1] - 0.5) < 0.01) & (np.abs(xyz[:, 2] - 0.5) < 0.01)
+    x = np.unique(np.round(xyz[column, 0], 12))
+    np.testing.assert_allclose(x[(x > TOL) & (x <= total + TOL)], ends, atol=TOL)
+    assert groups == {"bl": 160 * count}
+    assert report.volumes == plain_report.volumes
+    assert _shared_split_volume(mesh) == pytest.approx(2.0, rel=1e-9)
+    assert (inverted, bare) == (0, 0)

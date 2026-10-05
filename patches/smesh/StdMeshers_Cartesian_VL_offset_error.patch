@@ -1,36 +1,172 @@
-pySMESH: Cartesian_3D with viscous layers says why it cannot offset the shape (SMESH V9_16_0;
-applies after StdMeshers_Cartesian_VL_offset_makers_leak.patch and
-StdMeshers_Cartesian_3D_offset_small_cells.patch).
+pySMESH: Cartesian_3D with viscous layers says why it cannot offset the shape, and names the
+largest total thickness for which the offset works (SMESH V9_16_0; applies after
+StdMeshers_Cartesian_VL_offset_makers_leak.patch and StdMeshers_Cartesian_3D_offset_small_cells.patch).
 
 Defect: when the shape cannot be offset by the layer thickness, the compute fails with
-"SOLID 1: no message", or with its message cut short.
+"SOLID 1: no message", or with its message cut short, or it succeeds with cells outside the
+shape; and the user cannot tell what thickness works.
 
-Symptom: a 2 x 2 x 2 block with a bore of radius 0.4 on its axis, layers 0.3 thick on every
-face (3 layers, factor 1.2), grid spacing 0.25: "SOLID 1: no message". At 0.29 it meshes.
+Symptom: a 2 x 2 x 2 block with a bore of radius 0.4 on its axis, layers on every face (3
+layers, factor 1.2), grid spacing 0.25. At 0.29 it meshes. At 0.3 to 0.35: "SOLID 1: no
+message". At 0.5, 0.6, 0.65, 0.75, 0.8 and 0.99: "SOLID 1: no message". At 0.7 the compute
+either fails with "bad mesh on offset geometry" or succeeds with 13 cells of total volume
+0.006, 4 of them inverted, with nodes at x = 2.1, outside the block.
 
 Root cause, measured with an instrumented build: offset by 0.3, the bore reaches radius 0.7
 and the walls come to 0.7 from its axis, so the offset surfaces touch. BRepOffset_MakeOffset
 then reports IsDone with BRepOffset_NoError and a null shape (at 0.29: a valid solid of
-volume 0.739). ViscousBuilder::MakeOffsetSolid (StdMeshers_Cartesian_VL.cxx:913-957) checks
-only IsDone and hands the null shape on with no error text; its glue of several offset
+volume 0.739). Thicker, at 0.5 to 0.99, it reports IsDone with a solid that
+BRepCheck_Analyzer finds invalid, with 9 faces instead of 7, reaching outside the block
+(bounding box -0.1 to 2.1 at 0.7). ViscousBuilder::MakeOffsetSolid (StdMeshers_Cartesian_VL.cxx:913-957)
+checks only IsDone and hands either shape on with no error text; its glue of several offset
 solids (:963-969) is not checked either. Compute then throws SALOME_Exception with that text
-(StdMeshers_Cartesian_3D.cxx:154). SMESH_subMesh cuts 7 characters off the text of a
-SALOME_Exception, for the "Salome " of a prefix (SMESH_subMesh.cxx:1615-1620), but the
-std::string constructor of SALOME_Exception adds no prefix, so even a set message lost its
-first word.
+(StdMeshers_Cartesian_3D.cxx:154), or meshes the invalid solid. SMESH_subMesh cuts 7
+characters off the text of a SALOME_Exception, for the "Salome " of a prefix
+(SMESH_subMesh.cxx:1615-1620), but the std::string constructor of SALOME_Exception adds no
+prefix, so even a set message lost its first word.
 
 Change:
 * StdMeshers_Cartesian_VL.cxx: MakeOffsetSolid sets an error for an empty offset result
-  ("... the layers are too thick for the shape, so that offset surfaces meet ...") and for a
-  failed glue, and frees the maker it made.
+  ("... the layers are too thick for the shape, so that offset surfaces meet ..."), for an
+  offset solid that BRepCheck_Analyzer finds invalid ("... so that offset surfaces cross
+  ..."), and for a failed glue, and frees the maker it made. Each of these errors ends with
+  the largest total thickness for which the offset step works: bisection between 0 and the
+  thickness asked for, at most 12 offset steps, each the same offset as MakeOffsetSolid with
+  throwaway builders, a step working when every offset solid is non-empty and valid and the
+  solids glue together. On the bored block the error names 0.299927 (to 7.3e-05); at 0.285
+  the compute meshes, at 0.315 it fails with the same error. SMESH computes a failing SOLID
+  twice in one compute; the last bisection is kept (with its shape, thickness and faces with
+  layers, under a mutex), so the second call makes no offset step: 12 per compute.
 * StdMeshers_Cartesian_3D.cxx: Compute reports the offset error with SMESH_Algo::error
   instead of throwing it.
 
-Not changed: every shape that can be offset, and the mesh of every case that meshes.
+Not changed: the offset of every shape that can be offset into a valid solid, and the mesh of
+every case that meshes; a successful compute makes no extra offset (the bisection runs on the
+failure path only); a BRepOffset_MakeOffset that is not done keeps its own error text.
+
 diff --git a/src/StdMeshers/StdMeshers_Cartesian_VL.cxx b/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
 --- a/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
 +++ b/src/StdMeshers/StdMeshers_Cartesian_VL.cxx
-@@ -931,6 +931,17 @@
+@@ -38,6 +38,7 @@
+ #include <SMESH_subMesh.hxx>
+ 
+ #include <BRepAdaptor_Curve.hxx>
++#include <BRepCheck_Analyzer.hxx>
+ #include <BRep_Builder.hxx>
+ #include <BRepBuilderAPI_MakeFace.hxx>
+ #include <BRepGProp.hxx>
+@@ -49,6 +50,8 @@
+ #include <TopExp.hxx>
+ #include <TopExp_Explorer.hxx>
+ #include <TopoDS.hxx>
++
++#include <mutex>
+ 
+ using namespace StdMeshers_Cartesian_VL;
+ 
+@@ -806,6 +809,101 @@
+     }
+     return;
+   }
++
++  //================================================================================
++  /*!
++   * \brief pySMESH: whether the offset step works at a total thickness: every SOLID of
++   *        theShape, offset inward by it as MakeOffsetSolid does, is a non-empty solid that
++   *        BRepCheck_Analyzer finds valid, and the offset solids glue together. Throwaway
++   *        builders: the ViscousBuilder keeps nothing of it.
++   */
++  //================================================================================
++
++  bool offsetWorks( const TopoDS_Shape&    theShape,
++                    SMESHDS_Mesh*          theMeshDS,
++                    const std::set< int >& theShapesWVL,
++                    const double           theThickness )
++  {
++    TopTools_IndexedMapOfShape solids;
++    TopExp::MapShapes( theShape, TopAbs_SOLID, solids );
++    BOPAlgo_Builder glue;
++    glue.SetGlue( BOPAlgo_GlueFull );
++    for ( int i = 1; i <= solids.Size(); ++i )
++    {
++      BRepOffset_MakeOffset makeOffset;
++      makeOffset.Initialize( solids( i ), -theThickness, Precision::Confusion(),
++                             BRepOffset_Skin, /*Intersection=*/false, /*selfInter=*/false,
++                             GeomAbs_Intersection );
++      for ( TopExp_Explorer fEx( theShape, TopAbs_FACE ); fEx.More(); fEx.Next() )
++        if ( !theShapesWVL.count( theMeshDS->ShapeToIndex( fEx.Current() )))
++          makeOffset.SetOffsetOnFace( TopoDS::Face( fEx.Current() ), 0 );
++      makeOffset.MakeOffsetShape();
++      if ( !makeOffset.IsDone() || makeOffset.Shape().IsNull() ||
++           !BRepCheck_Analyzer( makeOffset.Shape() ).IsValid() )
++        return false;
++      glue.AddArgument( makeOffset.Shape() );
++    }
++    const TopAbs_ShapeEnum type = theShape.ShapeType();
++    if ( type == TopAbs_COMPOUND || type == TopAbs_COMPSOLID )
++    {
++      glue.Perform();
++      if ( glue.HasErrors() || glue.Shape().IsNull() )
++        return false;
++    }
++    return true;
++  }
++
++  //================================================================================
++  /*!
++   * \brief pySMESH: the sentence that names the largest total thickness for which the
++   *        offset step works, below theFailed: bisection with at most 12 offset steps.
++   *        Called on the failure path only. SMESH computes a failing SOLID twice in one
++   *        compute, so the last result is kept, holding the shape (so that no other shape
++   *        can take its place), and the second call makes no offset step.
++   */
++  //================================================================================
++
++  std::string workableThickness( const TopoDS_Shape&    theShape,
++                                 SMESHDS_Mesh*          theMeshDS,
++                                 const std::set< int >& theShapesWVL,
++                                 const double           theFailed )
++  {
++    struct LastBisection
++    {
++      TopoDS_Shape    shape;
++      double          thickness = 0.;
++      std::set< int > shapesWVL;
++      std::string     text;
++    };
++    static std::mutex    lastMutex;
++    static LastBisection last;
++    const std::lock_guard< std::mutex > lock( lastMutex );
++    if ( last.shape.IsSame( theShape ) && last.thickness == theFailed &&
++         last.shapesWVL == theShapesWVL )
++      return last.text;
++
++    const int maxOffsetSteps = 12;
++    double works = 0., fails = theFailed;
++    for ( int i = 0; i < maxOffsetSteps; ++i )
++    {
++      const double middle = 0.5 * ( works + fails );
++      if ( offsetWorks( theShape, theMeshDS, theShapesWVL, middle ))
++        works = middle;
++      else
++        fails = middle;
++    }
++    std::string text;
++    if ( works == 0. )
++      text = SMESH_Comment( " No total thickness above " ) << fails << " can be offset.";
++    else
++      text = SMESH_Comment( " The largest total thickness for which the offset works is about " )
++        << works << " (bisection of the offset step, to " << fails - works
++        << "): use a smaller one, with a margin, because near it the offset surfaces almost"
++        " meet.";
++    last = LastBisection{ theShape, theFailed, theShapesWVL, text };
++    return text;
++  }
++
+ } // namespace
+ 
+ 
+@@ -931,6 +1029,31 @@
      }
  
      makeOffset->MakeOffsetShape();
@@ -41,14 +177,28 @@ diff --git a/src/StdMeshers/StdMeshers_Cartesian_VL.cxx b/src/StdMeshers/StdMesh
 +      theError = SMESH_Comment( "Viscous layers: the solid offset inward by the total "
 +                                "thickness " ) << -offset << " is empty (BRepOffset_MakeOffset "
 +        "reports success with no shape): the layers are too thick for the shape, so that "
-+        "offset surfaces meet. Use a smaller total thickness.";
++        "offset surfaces meet. Use a smaller total thickness."
++        << workableThickness( theShape, theMesh.GetMeshDS(), _shapesWVL, -offset );
++      delete makeOffset;
++      return TopoDS_Shape();
++    }
++    if ( makeOffset->IsDone() && !BRepCheck_Analyzer( makeOffset->Shape() ).IsValid() )
++    {
++      // pySMESH: thicker still, the offset surfaces cross, and BRepOffset_MakeOffset reports
++      // success with a solid that is not valid, partly outside the input solid. The compute
++      // then failed with no message, or built cells outside the shape.
++      theError = SMESH_Comment( "Viscous layers: the solid offset inward by the total "
++                                "thickness " ) << -offset << " is not a valid solid "
++        "(BRepCheck_Analyzer): the layers are too thick for the shape, so that offset "
++        "surfaces cross. Use a smaller total thickness."
++        << workableThickness( theShape, theMesh.GetMeshDS(), _shapesWVL, -offset );
 +      delete makeOffset;
 +      return TopoDS_Shape();
 +    }
      if ( makeOffset->IsDone() )
      {
        shrinkBodies.push_back( makeOffset->Shape() );
-@@ -974,6 +985,15 @@
+@@ -974,6 +1097,16 @@
        _solidCompound.AddArgument( solid );
  
      _solidCompound.Perform();
@@ -58,7 +208,8 @@ diff --git a/src/StdMeshers/StdMeshers_Cartesian_VL.cxx b/src/StdMeshers/StdMesh
 +      theError = SMESH_Comment( "Viscous layers: the solids offset inward by the total "
 +                                "thickness " ) << -offset << " could not be glued together "
 +        "(BOPAlgo_Builder failed): the layers are too thick for the shape, or the offset "
-+        "solids meet. Use a smaller total thickness.";
++        "solids meet. Use a smaller total thickness."
++        << workableThickness( theShape, theMesh.GetMeshDS(), _shapesWVL, -offset );
 +      return TopoDS_Shape();
 +    }
      return _solidCompound.Shape();

@@ -21,7 +21,8 @@ void bind_mesher(py::module_& m) {
       .def(py::init<const py::object&>(), py::arg("shape"))
       .def("assign", &Mesher::assign, py::arg("name"), py::arg("params"), py::arg("kind"),
            py::arg("ordinal"))
-      .def("unassign", &Mesher::unassign, py::arg("name"), py::arg("kind"), py::arg("ordinal"))
+      .def("unassign", &Mesher::unassign, py::arg("name"), py::arg("params"), py::arg("kind"),
+           py::arg("ordinal"))
       .def("has_shape", &Mesher::has_shape)
       .def("add_nodes", &Mesher::add_nodes, py::arg("coords"), py::arg("kind") = "",
            py::arg("ordinal") = 0, py::arg("parameters") = py::none())

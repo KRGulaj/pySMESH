@@ -336,15 +336,41 @@ Only some algorithms build the layers in their compute:
 
 | Hypothesis | Algorithms that build it |
 |---|---|
-| `ViscousLayers` | `Hexa3D`, `PolyhedronPerSolid3D`, `Cartesian3D` |
-| `ViscousLayers2D` | `Quadrangle2D`, `QuadFromMedialAxis1D2D`, `Mefisto2D` |
+| `ViscousLayers` | `Hexa3D`, `CompositeHexa3D`, `PolyhedronPerSolid3D`, `Cartesian3D` |
+| `ViscousLayers2D` | `Quadrangle2D`, `QuadFromMedialAxis1D2D`, `Mefisto2D`, `PolygonPerFace2D` |
 
 If a layer hypothesis reaches a solid (a face) that another algorithm meshes, `compute()`
 raises before it meshes anything, and names the sub-shape and the algorithm. Without that
-check the layers were dropped with no word (`Prism3D`, `RadialQuadrangle1D2D`), or the compute
-failed after building some of them (`PolygonPerFace2D`), or the process crashed
-(`CompositeHexa3D`). Assign the layers only to the sub-shapes that a building algorithm
-meshes.
+check the layers were dropped with no word (`Prism3D`, `RadialQuadrangle1D2D`). Assign the
+layers only to the sub-shapes that a building algorithm meshes.
+
+`PolygonPerFace2D` grows the layer quadrangles first, and then fills the rest of the face
+with one polygon whose sides are the inner sides of the layer cells. Up to 5.0.0 it was
+refused: after the layer step it read the face wire wrong and failed with "Less that 3
+nodes on the wire".
+
+A face counts as meshed by another algorithm when an algorithm of its solid meshes it
+itself. `Cartesian3D` and `PolyhedronPerSolid3D` mesh every face of their solid, whatever 2-D
+algorithm sits on the face, so `ViscousLayers2D` on such a face is refused: use
+`ViscousLayers` on the solid. `Prism3D` meshes every face but the one its sweep starts from.
+Assign the 2-D algorithm on that face alone, with `ViscousLayers2D` there, and the sweep
+carries the layers through every level of the solid, graded as the 1-D hypothesis on the
+side edges says. A 2-D algorithm assigned to the whole shape lets `Prism3D` choose where the
+sweep starts, so `ViscousLayers2D` on a face of a `Prism3D` solid is refused unless the face
+has its own 2-D algorithm.
+
+Several `ViscousLayers` can reach one solid, each with its own face set, to give each face set
+its own thickness:
+
+| Algorithm | Several `ViscousLayers` on one solid |
+|---|---|
+| `PolyhedronPerSolid3D` | Each hypothesis grows its own stack on its own faces. |
+| `Hexa3D`, `CompositeHexa3D`, `Cartesian3D` | Not read: each reads one hypothesis per solid. `compute()` refuses a second one. |
+
+SMESH refuses two face sets that share a face, and two face sets with a different
+`layer_count` on faces that share an edge. `compute()` raises with SMESH's reason before it
+meshes anything, and names the face by its ordinal. To detach one of several hypotheses, give
+`Mesher.unassign` an instance equal to it, field for field.
 
 `Cartesian3D` grows its layers another way. It shrinks the shape by `T`, lays its grid in
 the shrunk shape, and fills the gap with layer cells. For that inner mesh it keeps every cut
@@ -411,16 +437,33 @@ mesh.release()
 
 ### Limits that remain
 
-- `CompositeHexa3D` builds no layers. With the hypothesis made readable, the layer cells on
-  its side faces give their grids more rows than the opposite faces have, and its block grid
-  breaks. Use `Hexa3D` for a block with layers.
-- `PolygonPerFace2D` builds no layers: after the layer step it finds too few nodes on the
-  face wire.
+- `CompositeHexa3D` (and `Hexa3D` on a block of more than six faces, which it hands
+  over): where the split of a side does not meet the layers, the mesh is the one `Hexa3D`
+  makes on the same block with six faces. Where it does, it differs there. A vertex of the
+  split keeps its node when the layers shrink a side face: on a 2 x 1 x 1 block of two fused
+  unit cubes with layers on an end wall, nodes beyond the layers are up to 0.1 away from the
+  six-face mesh. With layers on the faces around a split wall, SMESH's smoothing thins that
+  wall's stack near the split by about 1 % (0.2965 for 0.3), with no warning.
 - `ViscousLayers2D` takes no extrusion method; only the 3-D hypothesis has one.
+- Between two walls with layers that are closer than `2 T`, SMESH stops each stack before
+  the stacks meet, at half the gap or less. The compute succeeds with a warning on the solid
+  in `ComputeReport.warnings`: "Thickness T of viscous layers not reached, average reached
+  thickness is ...". The closed form then holds only where the stack reached `T`.
+- `ExtrusionMethod.FACE_OFFSET` and `NODE_OFFSET` do not smooth the layers. Where two walls
+  with layers meet at an edge, the two stacks collide there, and SMESH stops the inflation
+  short of `T`. The compute succeeds with a warning in `ComputeReport.warnings` that states
+  the average thickness reached. On a single flat wall all three methods give the closed form.
 - `Cartesian3D` with layers: a stack too thick for the shape, so that one shrunk surface
-  meets another, is not supported. The compute fails on the solid with the reason ("the
-  solid offset inward by the total thickness ... is empty ... the layers are too thick for
-  the shape"), and leaves no cell. At an edge between two walls with layers, the corner cells have warped faces where
+  meets or crosses another, is not supported. The compute fails on the solid with the
+  reason ("the solid offset inward by the total thickness ... is empty", or "... is not a
+  valid solid", then "the layers are too thick for the shape"), and leaves no cell. The
+  error ends with the largest total thickness for which the shrink works, found by
+  bisection in at most 12 shrinks: on a 2 x 2 x 2 block with a bore of radius 0.4, where
+  the shrunk surfaces meet at 0.3, it names 0.299927. Keep a margin below that value. Where
+  the shrunk surfaces come closer together than the grid spacing can follow (0.0002 apart
+  at 0.2999, with a grid of 0.25), the layer cells fold over, and the compute fails with
+  "layer cells are inverted".
+- `Cartesian3D` with layers: at an edge between two walls with layers, the corner cells have warped faces where
   the grid lines on a wall cross that edge at an angle other than 90 degrees (the caps of a
   hexagonal prism). The mesh there is conforming, but the `Volume` control
   splits each warped cell on its own, so its sum can differ from the shape's volume by about
