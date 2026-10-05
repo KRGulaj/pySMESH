@@ -2626,7 +2626,7 @@ void probe_p4_layer_builder_lifecycle() {
 
 // Cartesian_3D at the given spacing with ViscousLayers (0.2 thick, 3 layers, factor 1.2) on
 // every face of the session's shape.
-void cartesian_layers(Session& s, const char* spacing) {
+void cartesian_layers(Session& s, const char* spacing, double thickness = 0.2) {
   StdMeshers_Cartesian_3D* a3 = s.make<StdMeshers_Cartesian_3D>();
   StdMeshers_CartesianParameters3D* grid = s.make<StdMeshers_CartesianParameters3D>();
   for (int axis = 0; axis < 3; ++axis) {
@@ -2635,7 +2635,7 @@ void cartesian_layers(Session& s, const char* spacing) {
     grid->SetGridSpacing(step, internal, axis);
   }
   StdMeshers_ViscousLayers* layers = s.make<StdMeshers_ViscousLayers>();
-  layers->SetTotalThickness(0.2);
+  layers->SetTotalThickness(thickness);
   layers->SetNumberLayers(3);
   layers->SetStretchFactor(1.2);
   layers->SetBndShapes(std::vector<int>(), /*toIgnore=*/true);
@@ -2942,6 +2942,58 @@ void probe_p5_remove_hypothesis_state() {
         msg);
 }
 
+// ------------------------------------------------------------------------------ P5CVL ---- //
+
+// StdMeshers_Cartesian_VL_offset_error.patch and StdMeshers_Cartesian_VL_inverted_layers.patch
+// on a 2 x 2 x 2 block with a bore of radius 0.4 on its axis, under a compound root as
+// pySMESH loads a shape, spacing 0.25: the offset surfaces meet at a total thickness of 0.3.
+// The SOLID's compute error at `thickness`, or "(computed)" when it has none and volumes
+// were made. SMESH_Gen::Compute can return true with the SOLID failed, so the error decides.
+std::string bored_block_layers(double thickness) {
+  const TopoDS_Shape bored =
+      BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(2.0, 2.0, 2.0).Shape(),
+                      BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(1.0, 1.0, 0.0), gp_Dir(0, 0, 1)),
+                                               0.4, 2.0)
+                          .Shape())
+          .Shape();
+  BRep_Builder builder;
+  TopoDS_Compound root;
+  builder.MakeCompound(root);
+  for (TopExp_Explorer ex(bored, TopAbs_SOLID); ex.More(); ex.Next()) {
+    builder.Add(root, ex.Current());
+  }
+  Session s(root);
+  cartesian_layers(s, "0.25", thickness);
+  s.compute();
+  TopExp_Explorer solid(root, TopAbs_SOLID);
+  const SMESH_ComputeErrorPtr err = s.mesh().GetSubMesh(solid.Current())->GetComputeError();
+  if (err && !err->IsOK()) {
+    return err->myComment;
+  }
+  return s.meshDS()->NbVolumes() > 0 ? "(computed)" : "(no error and no volume)";
+}
+
+void probe_p5_cartesian_too_thick() {
+  section("P5CVL", "Cartesian_3D layers too thick: the reason and the largest workable thickness");
+  const struct {
+    double thickness;
+    const char* want;
+    const char* what;
+  } cases[] = {
+      {0.285, "(computed)", "0.285 meshes"},
+      {0.3, "The largest total thickness for which the offset works is about 0.299927",
+       "0.3 (empty offset) names the largest workable thickness, 0.299927"},
+      {0.7, "is not a valid solid (BRepCheck_Analyzer)",
+       "0.7 (invalid offset, partly outside the block) is refused by name"},
+      {0.2999, "layer cells are inverted", "0.2999 (layer cells fold over) is refused by name"},
+  };
+  for (const auto& c : cases) {
+    const std::string got = bored_block_layers(c.thickness);
+    check(got.find(c.want) != std::string::npos,
+          std::string("P5CVL ") + c.what + ": got '" + got.substr(0, 200) + "'");
+  }
+}
+
 }  // namespace
 
 void run_smesh_probe() {
@@ -2967,4 +3019,5 @@ void run_smesh_probe() {
   probe_p4_composite_hexa_layers();
   probe_p5_salome_exception_text();
   probe_p5_remove_hypothesis_state();
+  probe_p5_cartesian_too_thick();
 }
