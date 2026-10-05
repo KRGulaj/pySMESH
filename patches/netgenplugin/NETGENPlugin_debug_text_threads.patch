@@ -1,0 +1,144 @@
+pySMESH: netgen's in-memory debug stream takes one write at a time (NETGENPlugin V9_16_0;
+applies after NETGENPlugin_curvature_before_read.patch).
+
+Defect, in pySMESH's own NETGENPlugin_runtime_containment.patch: the wrapper pointed
+netgen::testout at a std::ostringstream member for ReadErrors. netgen writes that stream
+from its worker threads too, for example BFGS (libsrc/linalg/bfgs.cpp:398, "fail, f = ...")
+inside the ParallelFor of the volume smoothing (libsrc/meshing/smoothing3.cpp:1578). Two
+threads then reallocated the std::stringbuf at once. AddressSanitizer: "attempting
+double-free" in std::basic_stringbuf::overflow, from netgen::BFGS in two TaskManager
+threads. Measured: a torus (R 3, r 1) meshed by NETGEN_2D3D at max_size 0.12 ended with
+0xC0000374 (heap corruption) or 0xC0000409 in 5 of 6 processes
+(tests/test_mesher_netgen_threads.py). netgen's own default testout and SALOME's never had
+a buffer (std::ostream(nullptr)), so the race did not show there.
+
+Change, in NETGENPlugin_Mesher.hxx and NETGENPlugin_Mesher.cxx only: a streambuf,
+NETGENPlugin_DebugText, with no put area, so every write reaches overflow() or xsputn(), and
+both append under one mutex. The wrapper's _testout is a std::ostream over it, and
+TestOutput() reads it. Threads can interleave their text; memory stays intact. ReadErrors
+parses lines that netgen writes from one thread. No mesh changes.
+
+diff --git a/src/NETGENPlugin/NETGENPlugin_Mesher.hxx b/src/NETGENPlugin/NETGENPlugin_Mesher.hxx
+--- a/src/NETGENPlugin/NETGENPlugin_Mesher.hxx
++++ b/src/NETGENPlugin/NETGENPlugin_Mesher.hxx
+@@ -52,8 +52,11 @@
+ 
+ #include <map>
+ #include <vector>
++#include <mutex>
+ #include <set>
+ #include <sstream>
++#include <streambuf>
++#include <string>
+ 
+ class NETGENPlugin_Hypothesis;
+ class NETGENPlugin_Internals;
+@@ -94,6 +97,32 @@
+  */
+ //================================================================================
+ 
++//================================================================================
++/*!
++ * \brief pySMESH: netgen's debug stream (netgen::testout), kept in memory
++ *
++ * netgen writes to it from its worker threads too: BFGS reports a failed line search
++ * from the parallel volume smoothing (bfgs.cpp, smoothing3.cpp). This buffer has no put
++ * area, so every write reaches overflow() or xsputn(), and both take one mutex: threads
++ * can interleave their text, never corrupt memory. A std::stringbuf here reallocated its
++ * buffer in two threads at once, and the process ended with heap corruption.
++ */
++//================================================================================
++
++class NETGENPlugin_DebugText : public std::streambuf
++{
++ public:
++  std::string Text() const;
++
++ protected:
++  int_type        overflow( int_type c ) override;
++  std::streamsize xsputn( const char* s, std::streamsize n ) override;
++
++ private:
++  mutable std::mutex _mutex;
++  std::string        _text;
++};
++
+ struct NETGENPLUGIN_EXPORT NETGENPlugin_NetgenLibWrapper
+ {
+   bool           _isComputeOk;
+@@ -124,8 +153,9 @@
+  private:
+   // pySMESH: netgen's debug stream for the life of this wrapper, kept in memory, and the
+   // stream it replaced.
+-  std::ostringstream _testout;
+-  std::ostream*      _savedTestout;
++  NETGENPlugin_DebugText _testoutText;
++  std::ostream           _testout;
++  std::ostream*          _savedTestout;
+ };
+ 
+ //=============================================================================
+diff --git a/src/NETGENPlugin/NETGENPlugin_Mesher.cxx b/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
+--- a/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
++++ b/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
+@@ -4788,7 +4788,7 @@
+ //================================================================================
+ 
+ NETGENPlugin_NetgenLibWrapper::NETGENPlugin_NetgenLibWrapper():
+-  _ngMesh(0)
++  _ngMesh(0), _testout( &_testoutText )
+ {
+   if ( instanceCounter() == 0 )
+   {
+@@ -4840,8 +4840,49 @@
+ 
+ std::string NETGENPlugin_NetgenLibWrapper::TestOutput()
+ {
+-  const std::ostringstream* text = dynamic_cast<const std::ostringstream*>( netgen::testout );
+-  return text ? text->str() : std::string();
++  const NETGENPlugin_DebugText* text = netgen::testout ?
++    dynamic_cast<const NETGENPlugin_DebugText*>( netgen::testout->rdbuf() ) : 0;
++  return text ? text->Text() : std::string();
++}
++
++//================================================================================
++/*!
++ * \brief pySMESH: the debug text written so far
++ */
++//================================================================================
++
++std::string NETGENPlugin_DebugText::Text() const
++{
++  std::lock_guard<std::mutex> lock( _mutex );
++  return _text;
++}
++
++//================================================================================
++/*!
++ * \brief pySMESH: append one character, under the mutex
++ */
++//================================================================================
++
++NETGENPlugin_DebugText::int_type NETGENPlugin_DebugText::overflow( int_type c )
++{
++  if ( traits_type::eq_int_type( c, traits_type::eof() ))
++    return traits_type::not_eof( c );
++  std::lock_guard<std::mutex> lock( _mutex );
++  _text.push_back( traits_type::to_char_type( c ));
++  return c;
++}
++
++//================================================================================
++/*!
++ * \brief pySMESH: append a run of characters, under the mutex
++ */
++//================================================================================
++
++std::streamsize NETGENPlugin_DebugText::xsputn( const char* s, std::streamsize n )
++{
++  std::lock_guard<std::mutex> lock( _mutex );
++  _text.append( s, static_cast<size_t>( n ));
++  return n;
+ }
+ 
+ //================================================================================

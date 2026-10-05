@@ -103,6 +103,59 @@ def test_two_threads_mesh_with_netgen_at_once_and_match_the_sequential_meshes(
     assert rounds == [True] * 20
 
 
+_CHILD_FINE_TORUS: str = """
+import json, os, sys
+occt = os.environ.get("PYSMESH_OCCT_BIN")
+if occt:
+    os.add_dll_directory(occt)
+lib = os.path.join(sys.prefix, "Library", "bin")
+if os.path.isdir(lib):
+    os.add_dll_directory(lib)
+sys.path.insert(0, sys.argv[1])
+import pysmesh as ps
+
+s = ps.Session()
+s.add_torus(3.0, 1.0)
+torus = ps.load_brep(s.brep())
+volumes = []
+for _ in range(2):
+    with ps.Mesher(torus) as m:
+        m.assign(ps.Netgen1D2D3D())
+        m.assign(ps.NetgenParameters(max_size=0.12))
+        volumes.append(m.compute().volumes)
+with open(sys.argv[2], "w", encoding="utf-8") as out:
+    json.dump({"volumes": volumes}, out)
+"""
+
+
+def test_netgen_worker_threads_write_netgen_debug_text_without_corrupting_memory(
+    tmp_path: Path,
+) -> None:
+    """A torus meshed twice at 0.12 (about 207 000 tetrahedra), in a child process.
+
+    netgen's parallel volume smoothing writes to its debug stream from its worker
+    threads (``BFGS``, ``bfgs.cpp:398``, "fail, f = ..."). The plugin keeps that
+    stream in memory for ``ReadErrors``. A plain string buffer there is reallocated
+    by two threads at once: the process ended with heap corruption (0xC0000374) or a
+    fail-fast (0xC0000409) in 5 of 6 runs. Both computes must complete, with one count.
+    """
+    package_root = str(Path(ps.__file__).resolve().parent.parent)
+    result_file = tmp_path / "volumes.json"
+
+    proc = subprocess.run(
+        [sys.executable, "-c", _CHILD_FINE_TORUS, package_root, str(result_file)],
+        capture_output=True,
+        text=True,
+        timeout=600.0,
+        env=dict(os.environ),
+        check=False,
+    )
+
+    assert proc.returncode == 0, f"exit {proc.returncode:#x}: {proc.stderr[-2000:]}"
+    volumes = json.loads(result_file.read_text(encoding="utf-8"))["volumes"]
+    assert len(volumes) == 2 and volumes[0] == volumes[1] > 0
+
+
 def _shape(kind: str) -> tuple[ps.Shape, float]:
     """A unit sphere, a torus or a partitioned box, and the max_size to mesh it with."""
     s = Session()
