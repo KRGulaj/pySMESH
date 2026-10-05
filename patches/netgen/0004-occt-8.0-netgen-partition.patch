@@ -1,0 +1,142 @@
+conda-forge/smesh-feedstock recipe/patches/0004-occt-8.0-compat.patch, the netgen part: the
+OCCT 8.0 pass on the netgen Partition_* files (netgen 6.2.2101).
+
+Source: conda-forge/smesh-feedstock, `recipe/patches/0004-occt-8.0-compat.patch`, commit
+c54d26ae6 ("Fix build against OCCT 8.0.0", 2026-06-23). The conda patch covers SMESH, GEOM,
+NETGENPlugin and netgen together; pySMESH carries its SMESH and GEOM sections, re-ported, in
+`patches/occt8/0004-occt-8.0-compat.patch`, and its NETGENPlugin sections in
+`patches/netgenplugin/`. This file is its seven `src/Netgen/libsrc/occ/Partition_*`
+sections, verbatim, so the paths keep the `src/Netgen` prefix of the conda layout and
+`prepare.py` applies the patch at the staged top. OCCT 8.0 removed the global Handle_<Class>
+typedefs and the TopTools_ListIteratorOfListOfShape.hxx and TopTools_MapIteratorOfMapOfShape
+.hxx instantiation headers; the hunks use Handle() and the collection headers instead.
+
+diff --git a/src/Netgen/libsrc/occ/Partition_Inter2d.cxx b/src/Netgen/libsrc/occ/Partition_Inter2d.cxx
+--- a/src/Netgen/libsrc/occ/Partition_Inter2d.cxx
++++ b/src/Netgen/libsrc/occ/Partition_Inter2d.cxx
+@@ -46,10 +46,9 @@
+ #include <TopOpeBRepDS_Transition.hxx>
+ #include <TopOpeBRep_EdgesIntersector.hxx>
+ #include <TopOpeBRep_Point2d.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+-#include <TopTools_MapIteratorOfMapOfShape.hxx>
+ #include <TopTools_MapOfShape.hxx>
++#include <TopTools_IndexedMapOfShape.hxx>
+ #include <TopoDS.hxx>
+ #include <TopoDS_Edge.hxx>
+ #include <TopoDS_Vertex.hxx>
+diff --git a/src/Netgen/libsrc/occ/Partition_Inter2d.hxx b/src/Netgen/libsrc/occ/Partition_Inter2d.hxx
+--- a/src/Netgen/libsrc/occ/Partition_Inter2d.hxx
++++ b/src/Netgen/libsrc/occ/Partition_Inter2d.hxx
+@@ -38,6 +38,7 @@
+ #else
+    #include <BRepAlgo_AsDes.hxx>
+    #include <TopTools_MapOfShape.hxx>
++   #include <TopTools_ListOfShape.hxx>
+ #endif
+ 
+ #ifndef _Standard_Real_HeaderFile
+diff --git a/src/Netgen/libsrc/occ/Partition_Inter3d.cxx b/src/Netgen/libsrc/occ/Partition_Inter3d.cxx
+--- a/src/Netgen/libsrc/occ/Partition_Inter3d.cxx
++++ b/src/Netgen/libsrc/occ/Partition_Inter3d.cxx
+@@ -46,9 +46,10 @@
+ #include <TopExp_Explorer.hxx>
+ 
+ #include <TopOpeBRepTool_BoxSort.hxx>
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeListOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_DataMapOfShapeListOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
++#include <TopTools_IndexedMapOfShape.hxx>
++#include <TColStd_ListOfInteger.hxx>
+ #include <TopoDS.hxx>
+ #include <TopoDS_Compound.hxx>
+ #include <TopoDS_Edge.hxx>
+@@ -85,7 +86,7 @@
+ #include <TopOpeBRepTool_GeomTool.hxx>
+ #include <TopOpeBRepTool_OutCurveType.hxx>
+ #include <TopOpeBRep_DSFiller.hxx>
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeShape.hxx>
++#include <TopTools_DataMapOfShapeShape.hxx>
+ #include <stdio.h>
+ 
+ //=======================================================================
+diff --git a/src/Netgen/libsrc/occ/Partition_Loop.cxx b/src/Netgen/libsrc/occ/Partition_Loop.cxx
+--- a/src/Netgen/libsrc/occ/Partition_Loop.cxx
++++ b/src/Netgen/libsrc/occ/Partition_Loop.cxx
+@@ -44,12 +44,12 @@
+ #include <Geom_Surface.hxx>
+ 
+ #include <TopTools_SequenceOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <TopTools_MapOfShape.hxx>
+-#include <TopTools_MapIteratorOfMapOfShape.hxx>
++#include <TopTools_MapOfShape.hxx>
+ #include <TopTools_MapOfOrientedShape.hxx>
+ #include <TopTools_DataMapOfShapeShape.hxx>
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeListOfShape.hxx>
++#include <TopTools_DataMapOfShapeListOfShape.hxx>
+ 
+ #include <gp_Pnt.hxx>
+ #include <gp_Pnt2d.hxx>
+diff --git a/src/Netgen/libsrc/occ/Partition_Loop2d.cxx b/src/Netgen/libsrc/occ/Partition_Loop2d.cxx
+--- a/src/Netgen/libsrc/occ/Partition_Loop2d.cxx
++++ b/src/Netgen/libsrc/occ/Partition_Loop2d.cxx
+@@ -34,14 +34,14 @@
+ #include <TColStd_SequenceOfReal.hxx>
+ #include <TopExp.hxx>
+ #include <TopExp_Explorer.hxx>
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeListOfShape.hxx>
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeShape.hxx>
++#include <TopTools_DataMapOfShapeListOfShape.hxx>
++#include <TopTools_DataMapOfShapeShape.hxx>
+ #include <TopTools_DataMapOfShapeInteger.hxx>
+ #include <TopTools_DataMapOfShapeReal.hxx>    // V6.5
+ #include <TopTools_DataMapOfShapeShape.hxx>
+ #include <TopTools_IndexedMapOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
+-#include <TopTools_MapIteratorOfMapOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
++#include <TopTools_MapOfShape.hxx>
+ #include <TopTools_MapOfOrientedShape.hxx>
+ #include <TopTools_MapOfShape.hxx>
+ #include <TopTools_SequenceOfShape.hxx>
+diff --git a/src/Netgen/libsrc/occ/Partition_Loop3d.cxx b/src/Netgen/libsrc/occ/Partition_Loop3d.cxx
+--- a/src/Netgen/libsrc/occ/Partition_Loop3d.cxx
++++ b/src/Netgen/libsrc/occ/Partition_Loop3d.cxx
+@@ -17,11 +17,11 @@
+ #include <TopExp.hxx>
+ #include <BRep_Builder.hxx>
+ #include <TopTools_MapOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <TopoDS_Shell.hxx>
+ #include <TopoDS_Iterator.hxx>
+ #include <TopoDS.hxx>
+-#include <TopTools_MapIteratorOfMapOfShape.hxx>
++#include <TopTools_MapOfShape.hxx>
+ #include <gp_Vec.hxx>
+ #include <gp_Pnt.hxx>
+ #include <Geom2d_Curve.hxx>
+diff --git a/src/Netgen/libsrc/occ/Partition_Spliter.cxx b/src/Netgen/libsrc/occ/Partition_Spliter.cxx
+--- a/src/Netgen/libsrc/occ/Partition_Spliter.cxx
++++ b/src/Netgen/libsrc/occ/Partition_Spliter.cxx
+@@ -43,13 +43,13 @@
+ #include <TopExp.hxx>
+ #include <TopExp_Explorer.hxx>
+ 
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeListOfShape.hxx>
+ #include <TopTools_DataMapOfShapeListOfShape.hxx>
++#include <TopTools_DataMapOfShapeListOfShape.hxx>
+ #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+ #include <TopTools_IndexedMapOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+-#include <TopTools_MapIteratorOfMapOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
++#include <TopTools_MapOfShape.hxx>
+ #include <TopTools_SequenceOfShape.hxx>
+ 
+ #include <Geom2d_Curve.hxx>

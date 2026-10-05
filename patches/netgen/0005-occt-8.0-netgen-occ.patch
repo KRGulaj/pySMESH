@@ -1,0 +1,219 @@
+conda-forge/smesh-feedstock recipe/patches/0005-occt-8.0-netgen-occ.patch: the OCCT 8.0 pass
+on the netgen OCC geometry files (netgen 6.2.2101, after netgen62ForSalome.patch and
+occgenmesh_OCCT76.patch).
+
+Source: conda-forge/smesh-feedstock, `recipe/patches/0005-occt-8.0-netgen-occ.patch`, commit
+c54d26ae6 ("Fix build against OCCT 8.0.0", 2026-06-23), verbatim from its "Subject:" line on.
+Its paths keep the `src/Netgen` prefix of the conda layout, so `prepare.py` applies the patch
+at the staged top. Its hunks of occgeom.hpp, occgeom.cpp, occpkg.cpp and occgenmesh.cpp
+apply at fuzz 0 on the SALOME-patched 6.2.2101 tree. occpkg.cpp holds the Tcl/Tk GUI
+package of netgen and is not compiled; its hunk is kept so that the patch stays verbatim.
+
+Subject: [PATCH] OCCT 8.0.0 compatibility for bundled Netgen occ geometry
+
+Equivalent of the upstream Netgen_occt800.patch hunks for the bundled
+src/Netgen/libsrc/occ files, applied against this release's (unpatched)
+Netgen sources: the global Handle_<Class> typedefs were removed in OCCT
+8.0.0 (use the Handle() macro), the TopTools_ListIteratorOfListOfShape.hxx
+instantiation header was removed (use the collection header), and OCCT
+8.0.0 trimmed transitive includes (add the now-required TopTools_*
+collection headers).
+diff --git a/src/Netgen/libsrc/occ/occgeom.hpp b/src/Netgen/libsrc/occ/occgeom.hpp
+index a491952..02dbe70 100644
+--- a/src/Netgen/libsrc/occ/occgeom.hpp
++++ b/src/Netgen/libsrc/occ/occgeom.hpp
+@@ -37,7 +37,7 @@
+ #include "TopoDS.hxx"
+ #include "TopoDS_Solid.hxx"
+ #include "TopExp_Explorer.hxx"
+-#include "TopTools_ListIteratorOfListOfShape.hxx"
++#include <TopTools_ListOfShape.hxx>
+ #include "BRep_Tool.hxx"
+ #include "Geom_Curve.hxx"
+ #include "Geom2d_Curve.hxx"
+@@ -221,7 +221,7 @@ namespace netgen
+     // OpenCascade XDE Support
+     // XCAF Handle to make the face colours available to the rest of
+     // the system
+-    Handle_XCAFDoc_ColorTool face_colours;
++    Handle(XCAFDoc_ColorTool) face_colours;
+      
+     mutable int changed;
+     mutable NgArray<int> facemeshstatus;
+diff --git a/src/Netgen/libsrc/occ/occgeom.cpp b/src/Netgen/libsrc/occ/occgeom.cpp
+index a3e8ddd..73d2943 100644
+--- a/src/Netgen/libsrc/occ/occgeom.cpp
++++ b/src/Netgen/libsrc/occ/occgeom.cpp
+@@ -2,6 +2,8 @@
+ #ifdef OCCGEOMETRY
+ 
+ #include <mystdlib.h>
++#include <TopTools_ListOfShape.hxx>
++#include <TopTools_DataMapOfShapeListOfShape.hxx>
+ #include <occgeom.hpp>
+ #include <cstdio>
+ #include "ShapeAnalysis_ShapeTolerance.hxx"
+@@ -282,7 +284,7 @@ namespace netgen
+       double surfacecont = 0;
+       
+       {
+-         Handle_ShapeBuild_ReShape rebuild = new ShapeBuild_ReShape;
++         Handle(ShapeBuild_ReShape) rebuild = new ShapeBuild_ReShape;
+          rebuild->Apply(shape);
+          for (exp1.Init (shape, TopAbs_EDGE); exp1.More(); exp1.Next())
+          {
+@@ -313,7 +315,7 @@ namespace netgen
+          cout << endl << "- repairing faces" << endl;
+ 
+          Handle(ShapeFix_Face) sff;
+-         Handle_ShapeBuild_ReShape rebuild = new ShapeBuild_ReShape;
++         Handle(ShapeBuild_ReShape) rebuild = new ShapeBuild_ReShape;
+          rebuild->Apply(shape);
+ 
+ 
+@@ -370,7 +372,7 @@ namespace netgen
+ 
+ 
+       {
+-         Handle_ShapeBuild_ReShape rebuild = new ShapeBuild_ReShape;
++         Handle(ShapeBuild_ReShape) rebuild = new ShapeBuild_ReShape;
+          rebuild->Apply(shape);
+          for (exp1.Init (shape, TopAbs_EDGE); exp1.More(); exp1.Next())
+          {
+@@ -387,7 +389,7 @@ namespace netgen
+          cout << endl << "- fixing small edges" << endl;
+ 
+          Handle(ShapeFix_Wire) sfw;
+-         Handle_ShapeBuild_ReShape rebuild = new ShapeBuild_ReShape;
++         Handle(ShapeBuild_ReShape) rebuild = new ShapeBuild_ReShape;
+          rebuild->Apply(shape);
+ 
+ 
+@@ -454,7 +456,7 @@ namespace netgen
+ 
+          {
+             BuildFMap();
+-            Handle_ShapeBuild_ReShape rebuild = new ShapeBuild_ReShape;
++            Handle(ShapeBuild_ReShape) rebuild = new ShapeBuild_ReShape;
+             rebuild->Apply(shape);
+ 
+             for (exp1.Init (shape, TopAbs_EDGE); exp1.More(); exp1.Next())
+@@ -482,7 +484,7 @@ namespace netgen
+ 
+ 
+          {
+-            Handle_ShapeBuild_ReShape rebuild = new ShapeBuild_ReShape;
++            Handle(ShapeBuild_ReShape) rebuild = new ShapeBuild_ReShape;
+             rebuild->Apply(shape);
+             for (exp1.Init (shape, TopAbs_EDGE); exp1.More(); exp1.Next())
+             {
+@@ -608,7 +610,7 @@ namespace netgen
+ 
+ 
+       {
+-         Handle_ShapeBuild_ReShape rebuild = new ShapeBuild_ReShape;
++         Handle(ShapeBuild_ReShape) rebuild = new ShapeBuild_ReShape;
+          rebuild->Apply(shape);
+          for (exp1.Init (shape, TopAbs_EDGE); exp1.More(); exp1.Next())
+          {
+@@ -653,7 +655,7 @@ namespace netgen
+                   TopoDS_Solid solid = TopoDS::Solid(exp0.Current());
+                   TopoDS_Solid newsolid = solid;
+                   BRepLib::OrientClosedSolid (newsolid);
+-                  Handle_ShapeBuild_ReShape rebuild = new ShapeBuild_ReShape;
++                  Handle(ShapeBuild_ReShape) rebuild = new ShapeBuild_ReShape;
+                   //		  rebuild->Apply(shape);
+                   rebuild->Replace(solid, newsolid);
+                   TopoDS_Shape newshape = rebuild->Apply(shape, TopAbs_COMPSOLID);//, 1);
+@@ -1076,7 +1078,7 @@ namespace netgen
+             TopoDS_Solid solid = TopoDS::Solid(exp0.Current());
+             TopoDS_Solid newsolid = solid;
+             BRepLib::OrientClosedSolid (newsolid);
+-            Handle_ShapeBuild_ReShape rebuild = new ShapeBuild_ReShape;
++            Handle(ShapeBuild_ReShape) rebuild = new ShapeBuild_ReShape;
+             rebuild->Replace(solid, newsolid);
+ 
+             TopoDS_Shape newshape = rebuild->Apply(shape, TopAbs_SHAPE, 1);
+@@ -1408,10 +1410,10 @@ namespace netgen
+       static Timer timer_getnames("LoadOCC-get names");
+ 
+       // Initiate a dummy XCAF Application to handle the STEP XCAF Document
+-      static Handle_XCAFApp_Application dummy_app = XCAFApp_Application::GetApplication();
++      static Handle(XCAFApp_Application) dummy_app = XCAFApp_Application::GetApplication();
+ 
+       // Create an XCAF Document to contain the STEP file itself
+-      Handle_TDocStd_Document step_doc;
++      Handle(TDocStd_Document) step_doc;
+ 
+       // Check if a STEP File is already open under this handle, if so, close it to prevent
+       // Segmentation Faults when trying to create a new document
+@@ -1441,8 +1443,8 @@ namespace netgen
+       timer_transfer.Stop();
+ 
+       // Read in the shape(s) and the colours present in the STEP File
+-      Handle_XCAFDoc_ShapeTool step_shape_contents = XCAFDoc_DocumentTool::ShapeTool(step_doc->Main());
+-      Handle_XCAFDoc_ColorTool step_colour_contents = XCAFDoc_DocumentTool::ColorTool(step_doc->Main());
++      Handle(XCAFDoc_ShapeTool) step_shape_contents = XCAFDoc_DocumentTool::ShapeTool(step_doc->Main());
++      Handle(XCAFDoc_ColorTool) step_colour_contents = XCAFDoc_DocumentTool::ColorTool(step_doc->Main());
+ 
+       TDF_LabelSequence step_shapes;
+       step_shape_contents->GetShapes(step_shapes);
+@@ -1567,10 +1569,10 @@ namespace netgen
+       OCCGeometry *occgeo;
+       occgeo = new OCCGeometry;
+       // Initiate a dummy XCAF Application to handle the IGES XCAF Document
+-      static Handle_XCAFApp_Application dummy_app = XCAFApp_Application::GetApplication();
++      static Handle(XCAFApp_Application) dummy_app = XCAFApp_Application::GetApplication();
+ 
+       // Create an XCAF Document to contain the IGES file itself
+-      Handle_TDocStd_Document iges_doc;
++      Handle(TDocStd_Document) iges_doc;
+ 
+       // Check if a IGES File is already open under this handle, if so, close it to prevent
+       // Segmentation Faults when trying to create a new document
+@@ -1596,8 +1598,8 @@ namespace netgen
+       reader.Transfer(iges_doc);
+ 
+       // Read in the shape(s) and the colours present in the IGES File
+-      Handle_XCAFDoc_ShapeTool iges_shape_contents = XCAFDoc_DocumentTool::ShapeTool(iges_doc->Main());
+-      Handle_XCAFDoc_ColorTool iges_colour_contents = XCAFDoc_DocumentTool::ColorTool(iges_doc->Main());
++      Handle(XCAFDoc_ShapeTool) iges_shape_contents = XCAFDoc_DocumentTool::ShapeTool(iges_doc->Main());
++      Handle(XCAFDoc_ColorTool) iges_colour_contents = XCAFDoc_DocumentTool::ColorTool(iges_doc->Main());
+ 
+       TDF_LabelSequence iges_shapes;
+       iges_shape_contents->GetShapes(iges_shapes);
+@@ -1667,7 +1669,7 @@ namespace netgen
+       // Fixed a bug in the OpenCascade XDE Colour handling when 
+       // opening BREP Files, since BREP Files have no colour data.
+       // Hence, the face_colours Handle needs to be created as a NULL handle.
+-      occgeo->face_colours = Handle_XCAFDoc_ColorTool();
++      occgeo->face_colours = Handle(XCAFDoc_ColorTool)();
+       occgeo->face_colours.Nullify();
+       occgeo->changed = 1;
+       occgeo->BuildFMap();
+diff --git a/src/Netgen/libsrc/occ/occpkg.cpp b/src/Netgen/libsrc/occ/occpkg.cpp
+index 62d0fe0..9916d67 100644
+--- a/src/Netgen/libsrc/occ/occpkg.cpp
++++ b/src/Netgen/libsrc/occ/occpkg.cpp
+@@ -477,7 +477,7 @@ namespace netgen
+ 
+ 		  //	      const_cast<TopoDS_Shape&> (occgeometry->fmap(nr)).Reverse();
+ 
+-		  Handle_ShapeBuild_ReShape rebuild = new ShapeBuild_ReShape;
++		  Handle(ShapeBuild_ReShape) rebuild = new ShapeBuild_ReShape;
+ 		  rebuild->Apply(occgeometry->shape);
+ 
+ 		  TopoDS_Shape sh;
+diff --git a/src/Netgen/libsrc/occ/occgenmesh.cpp b/src/Netgen/libsrc/occ/occgenmesh.cpp
+index 6313a1c..01a3a9a 100644
+--- a/src/Netgen/libsrc/occ/occgenmesh.cpp
++++ b/src/Netgen/libsrc/occ/occgenmesh.cpp
+@@ -1,6 +1,8 @@
+ #ifdef OCCGEOMETRY
+ 
+ #include <mystdlib.h>
++#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <occgeom.hpp>
+ #include <meshing.hpp>
+ 

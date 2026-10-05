@@ -1,0 +1,22 @@
+looooo/SMESH patch/occgenmesh_OCCT76.patch: read the Poly_Triangulation nodes through
+Node() and UVNode() (netgen 6.2.2101, after netgen62ForSalome.patch).
+
+Source: looooo/SMESH, `patch/occgenmesh_OCCT76.patch`, commit 479b7ad70 ("add patch for
+netgen", 2024-07-14), verbatim. OCCT 7.6 removed the Nodes() and UVNodes() arrays of
+Poly_Triangulation; OCCGeometry's surface-triangulation walk in occgenmesh.cpp still read
+them. Applies at fuzz 0 with an offset of -94 lines.
+
+diff --git a/libsrc/occ/occgenmesh.cpp b/libsrc/occ/occgenmesh.cpp
+--- a/libsrc/occ/occgenmesh.cpp
++++ b/libsrc/occ/occgenmesh.cpp
+@@ -1258,8 +1258,8 @@ namespace netgen
+                 for (int k = 1; k <=3; k++)
+                   {
+                     int n = triangulation->Triangles()(j)(k);
+-                    p[k-1] = triangulation->Nodes()(n).Transformed(loc);
+-                    par[k-1] = triangulation->UVNodes()(n);
++                    p[k-1] = triangulation->Node(n).Transformed(loc);
++                    par[k-1] = triangulation->UVNode(n);
+                   }
+ 
+                 //double maxside = 0;

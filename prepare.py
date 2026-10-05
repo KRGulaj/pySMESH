@@ -12,6 +12,11 @@ modified. Every SALOME tree is at tag ``V9_16_0``:
 * ``extern/geom/src/GEOMUtils``: one directory of SALOME GEOM, a sparse copy.
 * ``extern/mefisto2``: the MEFISTO 2-D triangulator, carried forward verbatim from SMESH
   ``V9_9_0`` (SALOME removed it in 2022), and looooo's f2c translation ``trte.c``.
+* ``extern/netgen``: netgen at tag ``v6.2.2101``, a sparse copy of ``libsrc/``,
+  ``nglib/`` and the licence.
+
+``extern/zlib`` (zlib 1.3.2, the top-level files of the release) is compiled where it is
+and is not staged: no patch touches it.
 
 ``prepare.py`` copies the pieces we compile into ``staged/``, in the layout that the
 looooo/SMESH patch series expects. Then it applies the patches and the source edits:
@@ -22,13 +27,12 @@ looooo/SMESH patch series expects. Then it applies the patches and the source ed
    ``patches/geom/GEOMUtils_GEOMAlgo.patch`` and
    ``patches/smesh/SMESH_Gen_no_qt.patch``.
 3. The **conda-forge/smesh-feedstock** OCCT 8.0 layer (``patches/occt8/*.patch``).
-4. The source edits in this file that no patch carries (see ``_apply_source_edits``).
+4. The netgen series (``patches/netgen/*.patch``): SALOME's ``netgen62ForSalome.patch``
+   verbatim, then the OCCT 8 port from looooo/SMESH and conda-forge.
+5. The source edits in this file that no patch carries (see ``_apply_source_edits``).
 
-Every patch is re-ported to ``V9_16_0`` and must apply exactly: every hunk at fuzz 0. A
+Every patch is re-ported to its tree and must apply exactly: every hunk at fuzz 0. A
 hunk that fails, is already applied, or targets a file that is not staged stops the run.
-
-NETGEN is disabled, so NETGEN/NETGENPlugin sources and their patches are not staged
-(see docs/reports/B0.md and PROVENANCE.md).
 
 Idempotent: re-running is a no-op once ``staged/.prepared`` exists unless ``--force`` is
 given. ``staged/`` is git-ignored.
@@ -125,7 +129,18 @@ PATCH_MANIFEST: Final[tuple[tuple[str, str], ...]] = (
     # --- OCCT 8.0 layer (conda) : root staged/ ---
     ("occt8/0003-boost-regex-str-enum.patch", "."),
     ("occt8/0004-occt-8.0-compat.patch", "."),
+    # --- netgen 6.2.2101 : root staged/src/Netgen, or staged/ for the conda layout ---
+    ("netgen/netgen62ForSalome.patch", "src/Netgen"),
+    ("netgen/occgenmesh_OCCT76.patch", "src/Netgen"),
+    ("netgen/Partition_Loop3d_occt781.patch", "src/Netgen"),
+    ("netgen/0004-occt-8.0-netgen-partition.patch", "."),
+    ("netgen/0005-occt-8.0-netgen-occ.patch", "."),
 )
+
+# netgen slice: the directories of extern/netgen that prepare.py copies to
+# staged/src/Netgen. That is the layout of looooo/SMESH and conda-forge, whose netgen
+# patches name their files under src/Netgen.
+NETGEN_SLICE: Final[tuple[str, ...]] = ("libsrc", "nglib")
 
 
 def _copytree(src: Path, dst: Path) -> None:
@@ -137,7 +152,7 @@ def _copytree(src: Path, dst: Path) -> None:
 
 
 def _stage_sources() -> None:
-    """Copy the compiled slices from extern/ into staged/src/{Kernel,Geom,SMESH}/src."""
+    """Copy the compiled slices from extern/ into staged/src/{Kernel,Geom,SMESH,Netgen}."""
     logger.info("staging KERNEL slice (salome_bootstrap + kernel)")
     for src_rel, dst_rel in KERNEL_SLICE:
         _copytree(EXTERN / src_rel, STAGED / "src/Kernel/src" / dst_rel)
@@ -156,6 +171,10 @@ def _stage_sources() -> None:
         dst = STAGED / "src/SMESH/src" / dst_dir / name
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dst)
+
+    logger.info("staging netgen slice (extern/netgen)")
+    for name in NETGEN_SLICE:
+        _copytree(EXTERN / "netgen" / name, STAGED / "src/Netgen" / name)
 
 
 def _apply(patch_rel: str, root_rel: str) -> None:

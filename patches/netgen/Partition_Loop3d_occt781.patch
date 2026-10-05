@@ -1,0 +1,30 @@
+looooo/SMESH patch/netgen_occt781.patch, the netgen part: include
+TopTools_MapOfOrientedShape.hxx only (netgen 6.2.2101).
+
+Source: looooo/SMESH, `patch/netgen_occt781.patch`, commit 479b7ad70 ("add patch for
+netgen", 2024-07-14). The looooo patch has two sections; this is its
+`libsrc/occ/Partition_Loop3d.hxx` section, verbatim. The other section changes the toolkit
+list of looooo's own CMake file for netgen, which pySMESH does not use (pySMESH builds netgen
+with cmake/Netgen/CMakeLists.txt). OCCT 7.8 removed TopTools_OrientedShapeMapHasher.hxx,
+and TopTools_ShapeMapHasher.hxx is no longer needed by this header.
+
+diff --git a/libsrc/occ/Partition_Loop3d.hxx b/libsrc/occ/Partition_Loop3d.hxx
+index e171669..aea8734 100644
+--- a/libsrc/occ/Partition_Loop3d.hxx
++++ b/libsrc/occ/Partition_Loop3d.hxx
+@@ -26,12 +26,9 @@
+ #include <Standard_Version.hxx>
+ #endif
+ 
+-#if OCC_VERSION_HEX < 0x070000
+-#else
+-   #include <TopTools_ShapeMapHasher.hxx>
+-   #include <TopTools_OrientedShapeMapHasher.hxx>
+-   #include <TopTools_MapOfOrientedShape.hxx>
+-#endif
++
++#include <TopTools_MapOfOrientedShape.hxx>
++
+ 
+ class TopoDS_Shape;
+ 
