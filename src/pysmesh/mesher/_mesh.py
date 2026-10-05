@@ -105,8 +105,10 @@ class _MeshOps(_MesherBase):
 
         * **A cancel is not preemptive.** Three algorithms poll it inside their own loop —
           :class:`Cartesian3D`, :class:`Prism3D` and the one driven by :class:`Adaptive1D` —
-          and every other one can be stopped only between sub-meshes. So the latency is
-          bounded by the longest single algorithm run, not by any poll interval.
+          and the NETGEN algorithms pass it to netgen, which checks it between its steps
+          (up to 2.2 s measured, early in volume meshing). Every other algorithm can be
+          stopped only between sub-meshes. So the latency is bounded by the longest single
+          algorithm step, not by any poll interval.
         * **Progress is exact only at sub-mesh granularity.** The fraction of the sub-meshes
           already done is real. Within one running algorithm SMESH interpolates with a tick
           counter that advances once per enquiry, so the value there tracks the enquiry, not

@@ -9,15 +9,22 @@ tolerance (``--rtol``, default 1e-9) with an absolute floor (``--atol``, default
 round-off that a dependency upgrade may legitimately move is separated from a real change.
 A probe that gained or lost an ``error`` is always a difference.
 
-The report is grouped. ``geometry`` and ``mesh`` differences are regressions to explain.
-``defect`` differences are the known defects of ``docs/reports/defect_sweep_4.2.2.md``, which
-Phase 4 is meant to change; they are listed apart so an intended fix is not mistaken for
-drift, and so an *unintended* change to a defect is still seen.
+The report is grouped. ``geometry``, ``mesh`` and ``netgen`` differences are
+regressions to explain. ``defect`` differences are the known defects of
+``docs/reports/defect_sweep_4.2.2.md``, which Phase 4 is meant to change; they are
+listed apart so an intended fix is not mistaken for drift, and so an *unintended* change
+to a defect is still seen. Every group in either file is printed, also one this script
+does not name.
+
+A probe that the baseline lacks is printed with its values but does not block: it has
+no baseline value to differ from. A key added to an existing probe, and a removed probe
+or key, still block.
 
 Usage:
     python tests/golden/compare.py <baseline.json> <candidate.json> [--rtol R] [--atol A]
 
-Exits 0 when nothing outside the ``defect`` group differs, 1 otherwise.
+Exits 0 when nothing outside the ``defect`` group differs, apart from added probes; 1
+otherwise.
 """
 
 from __future__ import annotations
@@ -27,6 +34,10 @@ import json
 import math
 import sys
 from pathlib import Path
+from typing import Final
+
+# The marker of a probe that the baseline lacks, in a difference line.
+_ADDED: Final[str] = ": probe ADDED "
 
 
 def _differs(a: object, b: object, rtol: float, atol: float) -> bool:
@@ -57,7 +68,7 @@ def compare(
             lines.append(f"{name}: probe REMOVED")
             continue
         if name not in base:
-            lines.append(f"{name}: probe ADDED {cand[name]['values']}")
+            lines.append(f"{name}{_ADDED}{cand[name]['values']}")
             continue
         bv = base[name]["values"]
         cv = cand[name]["values"]
@@ -85,7 +96,8 @@ def main(argv: list[str]) -> int:
     print(f"baseline  {base['meta']}")
     print(f"candidate {cand['meta']}")
     diffs = compare(base["probes"], cand["probes"], args.rtol, args.atol)
-    for group in ("geometry", "mesh", "defect", "?"):
+    named = ("geometry", "mesh", "netgen", "defect")
+    for group in (*named, *sorted(set(diffs) - set(named))):
         lines = diffs.get(group, [])
         label = (
             "expected to change in Phase 4"
@@ -95,7 +107,11 @@ def main(argv: list[str]) -> int:
         print(f"\n== {group}: {len(lines)} difference(s) ({label})")
         for line in lines:
             print(f"  {line}")
-    blocking = sum(len(v) for g, v in diffs.items() if g != "defect")
+    added = sum(1 for v in diffs.values() for line in v if _ADDED in line)
+    blocking = sum(
+        1 for g, v in diffs.items() if g != "defect" for line in v if _ADDED not in line
+    )
+    print(f"\n{added} added probe(s), printed above, not compared")
     print("\nMATCH" if blocking == 0 else f"\n{blocking} blocking difference(s)")
     return 0 if blocking == 0 else 1
 
