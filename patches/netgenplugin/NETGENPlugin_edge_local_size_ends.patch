@@ -1,0 +1,35 @@
+pySMESH: a local size on an edge holds up to the edge's last vertex (NETGENPlugin V9_16_0;
+applies after NETGENPlugin_runtime_containment.patch).
+
+Defect: the plugin's setLocalSize(edge, size) restricts netgen's local mesh size at
+nb = (int)(1.5 * length / size) points u1 + i * (u2 - u1) / nb for i = 0 .. nb - 1
+(NETGENPlugin_Mesher.cxx, anonymous namespace). The loop stops one step before u2, so the
+last 1 / nb of every edge keeps the coarser size of its surroundings, and an edge shorter
+than size / 1.5 gets nb = 0: no restriction at all. Every local size on an edge, on a
+face (its edges) and every NETGEN_SimpleParameters segment count goes through it. Measured:
+a 2 x 2 x 2 cube with NETGEN_SimpleParameters_2D or _3D, number_of_segments 4, got 3
+segments on some edges (tests/test_mesher_netgen.py,
+test_simple_parameters_give_every_edge_of_a_cube_that_many_segments).
+
+Change, in NETGENPlugin_Mesher.cxx only: nb is at least 1, and the loop runs to i = nb, so
+the size is restricted at both ends of the edge and at nb - 1 points in between. A mesh
+with no local size on an edge and no simple hypothesis does not change.
+
+diff --git a/src/NETGENPlugin/NETGENPlugin_Mesher.cxx b/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
+--- a/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
++++ b/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
+@@ -468,9 +468,12 @@
+     }
+     else
+     {
+-      const int nb = (int)( 1.5 * SMESH_Algo::EdgeLength( edge ) / size );
++      // pySMESH: restrict at both ends, and at least once in between: the loop stopped
++      // one step before u2, so the last stretch of the edge kept a larger size, and an
++      // edge shorter than size / 1.5 got no restriction at all (nb == 0).
++      const int nb = std::max( 1, (int)( 1.5 * SMESH_Algo::EdgeLength( edge ) / size ));
+       Standard_Real delta = (u2-u1)/nb;
+-      for(int i=0; i<nb; i++)
++      for(int i=0; i<=nb; i++)
+       {
+         Standard_Real u = u1 + delta*i;
+         gp_Pnt p = curve->Value(u);

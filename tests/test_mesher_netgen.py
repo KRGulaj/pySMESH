@@ -65,6 +65,7 @@ from pysmesh import (
     NetgenParameters,
     NetgenParameters2D,
     NetgenSimpleParameters2D,
+    NetgenSimpleParameters3D,
     NumberOfSegments,
     PysmeshError,
     Quadrangle2D,
@@ -794,6 +795,36 @@ def test_second_order_puts_every_mid_edge_node_of_the_sphere_on_the_sphere() -> 
     assert quadratic
     assert mid_on_boundary
     assert float(np.abs(radii - 1.0).max()) <= 1e-9
+
+
+@pytest.mark.parametrize("dimension", [2, 3])
+def test_simple_parameters_give_every_edge_of_a_cube_that_many_segments(
+    dimension: int,
+) -> None:
+    """number_of_segments=4 on a cube: four segments on each edge.
+
+    The plugin sizes each edge as its length / 3.6 and restricts the local size to that
+    along the edge (``setLocalSize``); a cube's edges have one length, so no edge's size
+    reaches into another, and each edge spans 3.6 sizes: ``floor(3.6 + 0.5) = 4``
+    segments (oracle 5). NetgenSimpleParameters2D documents the count on edges of
+    several lengths.
+    """
+    s = Session()
+    s.add_box(2.0, 2.0, 2.0)
+    shape = ps.load_brep(s.brep())
+    with Mesher(shape) as mesher:
+        if dimension == 2:
+            mesher.assign(Netgen1D2D())
+            mesher.assign(NetgenSimpleParameters2D(number_of_segments=4))
+        else:
+            mesher.assign(Netgen1D2D3D())
+            mesher.assign(NetgenSimpleParameters3D(number_of_segments=4))
+        mesher.compute()
+        mesh = mesher.mesh()
+
+    counts = [_segments_on(mesh, e).size for e in range(1, len(shape.edges()) + 1)]
+
+    assert counts == [4] * len(shape.edges())
 
 
 def test_max_element_volume_bounds_the_netgen_3d_tetrahedra() -> None:
