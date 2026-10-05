@@ -962,6 +962,15 @@ class ViscousLayers(Hypothesis):
     them. On a solid that another algorithm meshes, :meth:`~pysmesh.Mesher.compute`
     raises before it meshes anything.
 
+    Several hypotheses can reach one solid, each with its own face set and stack (a
+    thickness per face set). :class:`PolyhedronPerSolid3D` grows each stack on its own
+    faces. :class:`Hexa3D` and :class:`Cartesian3D` read one hypothesis per solid, so
+    :meth:`~pysmesh.Mesher.compute` refuses a second one there. SMESH also refuses two
+    face sets that share a face, and two that hold faces sharing an edge with a different
+    ``layer_count``; :meth:`~pysmesh.Mesher.compute` raises with SMESH's reason before it
+    meshes anything. To detach one of several, pass
+    :meth:`~pysmesh.Mesher.unassign` an instance equal to it.
+
     Attributes:
         total_thickness: Total height of the layer stack.
         layer_count: Number of layers.

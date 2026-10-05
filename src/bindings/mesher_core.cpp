@@ -10,7 +10,9 @@
 #include "mesher/mesher.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
+#include <list>
 #include <map>
 #include <set>
 #include <utility>
@@ -25,6 +27,8 @@
 #include <SMESH_Hypothesis.hxx>
 #include <SMESH_Mesh.hxx>
 #include <SMESH_subMesh.hxx>
+#include <StdMeshers_ViscousLayers.hxx>
+#include <StdMeshers_ViscousLayers2D.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 
@@ -580,25 +584,40 @@ void Mesher::refuse_unread_layers() const {
   // ViscousLayers2D from Quadrangle_2D and builds no layer. Any other algorithm meshes the
   // sub-shape with no layer and no word (Prism_3D, RadialQuadrangle_1D2D), fails after
   // building half of them (PolygonPerFace_2D), or crashed (CompositeHexa_3D).
+  //
+  // A building algorithm can still refuse the layer hypotheses that reach it: Hexa_3D
+  // takes one ViscousLayers per solid (StdMeshers_Hexa_3D.cxx:136-147) and Cartesian_3D
+  // keeps the last one it lists (StdMeshers_Cartesian_3D.cxx:114-125), and the layer check
+  // of StdMeshers_ViscousLayers::CheckHypothesis refuses face sets that do not fit together.
+  // SMESH then leaves the sub-mesh MISSING_HYP, or drops the other hypotheses, and its
+  // Compute returns true with no element there (SMESH_Gen.cxx:249-253). So the layer check
+  // runs here first, with SMESH's reason; the algorithm runs it again in its own check
+  // before its Compute (SMESH_subMesh.cxx, COMPUTE), so this call changes no result.
   struct LayerKind {
     TopAbs_ShapeEnum type;
     const char* kind_name;
     const char* hypothesis;
     std::set<std::string> builders;
     const char* listed;
+    std::set<std::string> read_one;  // builders that read one hypothesis per sub-shape
   };
   const LayerKind kinds[] = {
       {TopAbs_SOLID, "SOLID", "ViscousLayers",
        {"Hexa_3D", "PolyhedronPerSolid_3D", "Cartesian_3D"},
-       "Hexa_3D, PolyhedronPerSolid_3D and Cartesian_3D"},
+       "Hexa_3D, PolyhedronPerSolid_3D and Cartesian_3D",
+       {"Hexa_3D", "Cartesian_3D"}},
       {TopAbs_FACE, "FACE", "ViscousLayers2D",
        {"Quadrangle_2D", "QuadFromMedialAxis_1D2D", "MEFISTO_2D"},
-       "Quadrangle_2D, QuadFromMedialAxis_1D2D and MEFISTO_2D"},
+       "Quadrangle_2D, QuadFromMedialAxis_1D2D and MEFISTO_2D",
+       {}},
   };
   for (const LayerKind& kind : kinds) {
     SMESH_HypoFilter filter(SMESH_HypoFilter::HasName(kind.hypothesis));
     for (TopExp_Explorer ex(data_->shape, kind.type); ex.More(); ex.Next()) {
-      if (mesh_->GetHypothesis(ex.Current(), filter, /*andAncestors=*/true) == nullptr) {
+      std::list<const SMESHDS_Hypothesis*> found;
+      const int count = mesh_->GetHypotheses(ex.Current(), filter, found,
+                                             /*andAncestors=*/true);
+      if (count == 0) {
         continue;
       }
       SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
@@ -607,22 +626,75 @@ void Mesher::refuse_unread_layers() const {
         continue;  // no algorithm of its own: the compute reports what is missing
       }
       const std::string name = algo->GetName();
-      if (kind.builders.count(name) != 0) {
-        continue;
-      }
       const std::pair<const char*, int> at =
           ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current()));
-      throw PysmeshError(
-          std::string("Mesher.compute: ") + kind.hypothesis + " reaches " +
-              (at.first[0] != 0 ? at.first : kind.kind_name) + " " +
-              std::to_string(at.second) + ", whose algorithm " + name +
-              " does not build viscous layers.",
-          std::string("Only ") + kind.listed + " build " + kind.hypothesis +
-              "; with " + name + " the layers would be missing, or the compute would fail "
-              "after building some. Assign one of those algorithms there, or assign the "
-              "layers only to the sub-shapes such an algorithm meshes.");
+      const std::string place =
+          std::string(at.first[0] != 0 ? at.first : kind.kind_name) + " " +
+          std::to_string(at.second);
+      if (kind.builders.count(name) == 0) {
+        throw PysmeshError(
+            std::string("Mesher.compute: ") + kind.hypothesis + " reaches " + place +
+                ", whose algorithm " + name + " does not build viscous layers.",
+            std::string("Only ") + kind.listed + " build " + kind.hypothesis +
+                "; with " + name + " the layers would be missing, or the compute would "
+                "fail after building some. Assign one of those algorithms there, or assign "
+                "the layers only to the sub-shapes such an algorithm meshes.");
+      }
+      if (count > 1 && kind.read_one.count(name) != 0) {
+        throw PysmeshError(
+            "Mesher.compute: " + std::to_string(count) + " " + kind.hypothesis +
+                " hypotheses reach " + place + ", but its algorithm " + name +
+                " reads one " + kind.hypothesis + " per " + kind.kind_name + ".",
+            "With several, " + name + " would mesh nothing there, or build one stack and "
+            "drop the others. Assign one hypothesis per " + std::string(kind.kind_name) +
+            ", or use PolyhedronPerSolid_3D, which grows each hypothesis's stack on its "
+            "own faces.");
+      }
+      SMESH_Hypothesis::Hypothesis_Status status = SMESH_Hypothesis::HYP_OK;
+      const SMESH_ComputeErrorPtr why =
+          kind.type == TopAbs_SOLID
+              ? StdMeshers_ViscousLayers::CheckHypothesis(*mesh_, ex.Current(), status)
+              : StdMeshers_ViscousLayers2D::CheckHypothesis(*mesh_, ex.Current(), status);
+      if (why && !why->IsOK()) {
+        const std::string reason =
+            why->myComment.empty() ? std::string(status_text(status))
+                                   : with_ordinals(why->myComment);
+        throw PysmeshError(
+            "Mesher.compute: the " + std::string(kind.hypothesis) + " hypotheses on " +
+                place + " do not fit together: " + reason + " (algorithm " + name + ").",
+            "SMESH checks them before it meshes " + place + ": a face set may share no "
+            "face with another one, and faces that share an edge need the same number of "
+            "layers. Change the face sets so that they meet these rules.");
+      }
     }
   }
+}
+
+std::string Mesher::with_ordinals(const std::string& text) const {
+  std::string out;
+  std::size_t i = 0;
+  while (i < text.size()) {
+    out += text[i];
+    if (text[i] != '#' || i + 1 >= text.size() || !std::isdigit(static_cast<unsigned char>(
+                                                       text[i + 1]))) {
+      ++i;
+      continue;
+    }
+    std::size_t end = i + 1;
+    while (end < text.size() && std::isdigit(static_cast<unsigned char>(text[end]))) {
+      ++end;
+    }
+    const std::string digits = text.substr(i + 1, end - i - 1);
+    out += digits;
+    const std::pair<const char*, int> at =
+        digits.size() > 9 ? std::pair<const char*, int>{"", 0}
+                          : ordinal_of_shape_index(std::stoi(digits));
+    if (at.first[0] != 0) {
+      out += std::string(" (") + at.first + " " + std::to_string(at.second) + ")";
+    }
+    i = end;
+  }
+  return out;
 }
 
 std::pair<const char*, int> Mesher::ordinal_of_shape_index(int shape_index) const {
@@ -663,28 +735,53 @@ void Mesher::assign(const std::string& name, const py::dict& params, const std::
                            "was not assigned.",
                        why);
   }
-  assigned_.push_back({name, kind, ordinal, hyp_id});
+  assigned_.push_back({name, kind, ordinal, hyp_id, params});
 }
 
-void Mesher::unassign(const std::string& name, const std::string& kind, int ordinal) {
+void Mesher::unassign(const std::string& name, const py::dict& params, const std::string& kind,
+                      int ordinal) {
   ensure_open();
   ensure_shape("Mesher.unassign");
   const TopoDS_Shape& target = sub_shape(kind, ordinal);
+  std::vector<std::vector<Assignment>::iterator> named;
   for (auto it = assigned_.begin(); it != assigned_.end(); ++it) {
-    if (it->name != name || it->kind != kind || it->ordinal != ordinal) {
-      continue;
+    if (it->name == name && it->kind == kind && it->ordinal == ordinal) {
+      named.push_back(it);
     }
-    const SMESH_Hypothesis::Hypothesis_Status status =
-        mesh_->RemoveHypothesis(target, it->hyp_id);
-    if (SMESH_Hypothesis::IsStatusFatal(status)) {
-      throw PysmeshError("Mesher.unassign: SMESH refused to detach '" + name + "' from " +
-                         where(kind, ordinal) + " — " + status_text(status) + ".");
-    }
-    assigned_.erase(it);
-    return;
   }
-  throw PysmeshError("Mesher.unassign: '" + name + "' is not assigned to " +
-                     where(kind, ordinal) + ".");
+  if (named.empty()) {
+    throw PysmeshError("Mesher.unassign: '" + name + "' is not assigned to " +
+                       where(kind, ordinal) + ".");
+  }
+  // SMESH attaches several auxiliary hypotheses of one type to one sub-shape (several
+  // ViscousLayers, each with its own face set). The name alone then does not say which one
+  // the caller means, so the parameters decide.
+  auto chosen = named.front();
+  if (named.size() > 1) {
+    chosen = assigned_.end();
+    for (const auto& it : named) {
+      if (it->params.equal(params)) {
+        chosen = it;
+        break;
+      }
+    }
+    if (chosen == assigned_.end()) {
+      throw PysmeshError(
+          "Mesher.unassign: " + std::to_string(named.size()) + " '" + name +
+              "' hypotheses are assigned to " + where(kind, ordinal) +
+              ", and none has the parameters given; nothing was detached.",
+          "With several of one name on one sub-shape, unassign detaches the one equal to "
+          "the instance it is given, field for field. Pass an instance equal to the one "
+          "to detach.");
+    }
+  }
+  const SMESH_Hypothesis::Hypothesis_Status status =
+      mesh_->RemoveHypothesis(target, chosen->hyp_id);
+  if (SMESH_Hypothesis::IsStatusFatal(status)) {
+    throw PysmeshError("Mesher.unassign: SMESH refused to detach '" + name + "' from " +
+                       where(kind, ordinal) + " — " + status_text(status) + ".");
+  }
+  assigned_.erase(chosen);
 }
 
 py::list Mesher::assignments() const {

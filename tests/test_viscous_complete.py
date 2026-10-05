@@ -1138,3 +1138,186 @@ def test_composite_hexa_3d_refuses_layers_instead_of_crashing() -> None:
     )
     assert line.startswith("COMPOSITE-RESULT refused ")
     assert "CompositeHexa_3D does not build viscous layers" in line
+
+
+# ---- VL6 several ViscousLayers hypotheses on one solid ------------------------------ #
+
+
+def _at_x1(items: list[object]) -> int:
+    """The ordinal of the face that lies in the plane x = 1."""
+    for item in items:
+        box = item.bbox  # type: ignore[attr-defined]
+        if abs(box[0] - 1.0) < TOL and abs(box[3] - 1.0) < TOL:
+            return int(item.id)  # type: ignore[attr-defined]
+    raise AssertionError("nothing in the plane x = 1")
+
+
+def _layer_set(
+    total: float, count: int, factor: float, walls: tuple[int, ...], group: str
+) -> ViscousLayers:
+    """A ViscousLayers hypothesis on ``walls``, its cells in ``group``."""
+    return ViscousLayers(
+        total_thickness=total,
+        layer_count=count,
+        stretch_factor=factor,
+        boundary=walls,
+        group_name=group,
+    )
+
+
+@pytest.mark.parametrize("count_b", [2, 3])
+def test_two_face_sets_on_one_solid_each_grow_their_own_closed_form_stack(
+    count_b: int,
+) -> None:
+    """PolyhedronPerSolid3D with one hypothesis on x = 0 and another on x = 1.
+
+    The faces x = 0 and x = 1 share no edge, so the layer counts may differ. Each wall gets
+    the planes of its own stack; the layer cells of each go into its own group (4 x 4
+    quadrangles per wall); the cells fill the unit box exactly.
+    """
+    box = _unit_box()
+    wall_a, wall_b = _at_x0(box.faces()), _at_x1(box.faces())
+
+    with Mesher(box) as mesher:
+        _assign_3d(mesher, "PolyhedronPerSolid3D")
+        mesher.assign(_layer_set(0.3, 3, 1.2, (wall_a,), "bl_a"))
+        mesher.assign(_layer_set(0.2, count_b, 1.0, (wall_b,), "bl_b"))
+        report = mesher.compute()
+        x = np.unique(np.round(mesher.mesh().node_coords[:, 0], 12))
+        groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
+        volume = float(mesher.quality(Volume()).values.sum())
+        inverted = mesher.select(BadOrientedVolume()).count
+
+    np.testing.assert_allclose(
+        x[(x > TOL) & (x <= 0.3 + TOL)], _layer_ends(0.3, 1.2, 3), atol=TOL
+    )
+    near_b = np.sort(1.0 - x[(x >= 0.8 - TOL) & (x < 1.0 - TOL)])
+    np.testing.assert_allclose(near_b, _layer_ends(0.2, 1.0, count_b), atol=TOL)
+    assert groups == {"bl_a": 16 * 3, "bl_b": 16 * count_b}
+    assert volume == pytest.approx(1.0, rel=1e-12)
+    assert (inverted, report.warnings) == (0, ())
+
+
+@pytest.mark.parametrize(
+    ("set_b", "count_b", "reason"),
+    [
+        ("y0", 3, "Several hypotheses define Viscous Layers on the face"),
+        ("y0_only_n2", 2, "different number of viscous layers on adjacent faces"),
+    ],
+)
+def test_layer_face_sets_that_do_not_fit_together_raise_smesh_reason(
+    set_b: str, count_b: int, reason: str
+) -> None:
+    """Two face sets that SMESH refuses: they share the face y = 0, or they are on the
+    adjacent faces x = 0 and y = 0 with 3 and 2 layers (``StdMeshers_ViscousLayers.cxx``,
+    ``findFacesWithLayers``). The reference meshed no volume and said nothing. Now the
+    compute raises with SMESH's reason, naming the face by its ordinal, and meshes nothing.
+    """
+    box = _unit_box()
+    x0, y0 = _at_x0(box.faces()), _at_y0(box.faces())
+    walls_a = (x0, y0) if set_b == "y0" else (x0,)
+
+    with Mesher(box) as mesher:
+        _assign_3d(mesher, "PolyhedronPerSolid3D")
+        mesher.assign(_layer_set(0.3, 3, 1.2, walls_a, "bl_a"))
+        mesher.assign(_layer_set(0.2, count_b, 1.0, (y0,), "bl_b"))
+
+        with pytest.raises(PysmeshError, match=reason) as raised:
+            mesher.compute()
+
+        assert mesher.mesh().element_count == 0
+    assert "SOLID 1" in str(raised.value)
+    if set_b == "y0":
+        assert f"FACE {y0}" in str(raised.value)
+
+
+@pytest.mark.parametrize("algorithm", ["Hexa3D", "Cartesian3D"])
+def test_a_second_layer_hypothesis_on_an_algorithm_that_reads_one_is_refused(
+    algorithm: str,
+) -> None:
+    """Hexa_3D takes one ViscousLayers per solid (``StdMeshers_Hexa_3D.cxx:136-147``):
+    with two, the reference meshed no volume and said nothing. Cartesian_3D keeps the last
+    one it lists (``StdMeshers_Cartesian_3D.cxx:114-125``): the reference built only one
+    stack. Now the compute refuses, names the solid and the algorithm, and meshes nothing.
+    """
+    box = _unit_box()
+    wall_a, wall_b = _at_x0(box.faces()), _at_x1(box.faces())
+
+    with Mesher(box) as mesher:
+        _assign_3d(mesher, algorithm)
+        mesher.assign(_layer_set(0.3, 3, 1.2, (wall_a,), "bl_a"))
+        mesher.assign(_layer_set(0.2, 3, 1.0, (wall_b,), "bl_b"))
+
+        with pytest.raises(PysmeshError, match="reads one ViscousLayers") as raised:
+            mesher.compute()
+
+        assert mesher.mesh().element_count == 0
+    native = {"Hexa3D": "Hexa_3D", "Cartesian3D": "Cartesian_3D"}[algorithm]
+    assert native in str(raised.value)
+    assert "SOLID 1" in str(raised.value)
+
+
+def test_unassign_removes_exactly_the_layer_hypothesis_it_is_given() -> None:
+    """Two ViscousLayers on one solid, the second one detached: the first one's stack is
+    built, and only its group exists. The reference detached the first one by name.
+    """
+    box = _unit_box()
+    second = _layer_set(0.2, 2, 1.0, (_at_x1(box.faces()),), "bl_b")
+
+    with Mesher(box) as mesher:
+        _assign_3d(mesher, "PolyhedronPerSolid3D")
+        mesher.assign(_layer_set(0.3, 3, 1.2, (_at_x0(box.faces()),), "bl_a"))
+        mesher.assign(second)
+        mesher.unassign(second)
+        mesher.compute()
+        x = np.unique(np.round(mesher.mesh().node_coords[:, 0], 12))
+        groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
+
+    np.testing.assert_allclose(
+        x[(x > TOL) & (x <= 0.3 + TOL)], _layer_ends(0.3, 1.2, 3), atol=TOL
+    )
+    assert groups == {"bl_a": 16 * 3}
+
+
+def test_a_solid_meshes_again_once_the_second_hexa_layer_hypothesis_is_detached() -> None:
+    """Hexa3D with two ViscousLayers, then the second one detached: the solid meshes with
+    the first one's stack. On the reference the solid stayed unmeshed: removing a
+    hypothesis never checked the algorithm again (``SMESH_subMesh.cxx``, state
+    ``MISSING_HYP``), so the compute succeeded with no volume.
+    """
+    total, count = STACK
+    box = _unit_box()
+    second = _layer_set(0.2, 3, 1.0, (_at_x1(box.faces()),), "bl_b")
+
+    with Mesher(box) as mesher:
+        _assign_3d(mesher, "Hexa3D")
+        mesher.assign(_layer_set(total, count, 1.2, (_at_x0(box.faces()),), "bl_a"))
+        mesher.assign(second)
+        mesher.unassign(second)
+        report = mesher.compute()
+        xyz = mesher.mesh().node_coords
+        groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
+
+    np.testing.assert_allclose(
+        _planes(xyz, total), _layer_ends(total, 1.2, count), atol=TOL
+    )
+    assert groups == {"bl_a": 4 * 4 * count}
+    assert report.volumes == 4 * 4 * 4 + 4 * 4 * count
+
+
+def test_unassign_refuses_a_layer_hypothesis_equal_to_none_of_several() -> None:
+    """Two ViscousLayers on one solid, and a third, different one given to unassign: it
+    raises, names the sub-shape, and detaches nothing. The reference detached the first.
+    """
+    box = _unit_box()
+
+    with Mesher(box) as mesher:
+        _assign_3d(mesher, "PolyhedronPerSolid3D")
+        mesher.assign(_layer_set(0.3, 3, 1.2, (_at_x0(box.faces()),), "bl_a"))
+        mesher.assign(_layer_set(0.2, 2, 1.0, (_at_x1(box.faces()),), "bl_b"))
+        before = mesher.assignments()
+
+        with pytest.raises(PysmeshError, match="2 'ViscousLayers'"):
+            mesher.unassign(_layer_set(0.25, 2, 1.0, (1,), "bl_c"))
+
+        assert mesher.assignments() == before

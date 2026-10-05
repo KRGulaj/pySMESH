@@ -346,6 +346,19 @@ failed after building some of them (`PolygonPerFace2D`), or the process crashed
 (`CompositeHexa3D`). Assign the layers only to the sub-shapes that a building algorithm
 meshes.
 
+Several `ViscousLayers` can reach one solid, each with its own face set, to give each face set
+its own thickness:
+
+| Algorithm | Several `ViscousLayers` on one solid |
+|---|---|
+| `PolyhedronPerSolid3D` | Each hypothesis grows its own stack on its own faces. |
+| `Hexa3D`, `Cartesian3D` | Not read: each reads one hypothesis per solid. `compute()` refuses a second one. |
+
+SMESH refuses two face sets that share a face, and two face sets with a different
+`layer_count` on faces that share an edge. `compute()` raises with SMESH's reason before it
+meshes anything, and names the face by its ordinal. To detach one of several hypotheses, give
+`Mesher.unassign` an instance equal to it, field for field.
+
 `Cartesian3D` grows its layers another way. It shrinks the shape by `T`, lays its grid in
 the shrunk shape, and fills the gap with layer cells. For that inner mesh it keeps every cut
 cell that has volume, whatever `CartesianParameters3D.size_threshold` says, because a dropped

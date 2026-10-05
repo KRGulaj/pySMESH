@@ -65,17 +65,20 @@ class _MeshOps(_MesherBase):
         """Detach an algorithm or a hypothesis previously attached to a sub-shape.
 
         Args:
-            item: The algorithm or hypothesis to detach. Only its name is used, so an
-                equivalent instance works.
+            item: The algorithm or hypothesis to detach. Where one of its name is
+                attached there, only the name is used, so any instance of the class
+                works. Where several are attached (an auxiliary hypothesis such as
+                :class:`ViscousLayers`, one per face set), the one equal to ``item``,
+                field for field, is detached.
             on: The sub-shape it was attached to.
 
         Raises:
-            PysmeshError: If nothing of that name is attached there, or SMESH refuses to
-                detach it.
+            PysmeshError: If nothing of that name is attached there, if several are and
+                none equals ``item``, or if SMESH refuses to detach it.
         """
         kind = "" if on is None else on.kind.name
         ordinal = 0 if on is None else on.ordinal
-        self._m.unassign(item.native_name, kind, ordinal)
+        self._m.unassign(item.native_name, item.params(), kind, ordinal)
 
     def assignments(self) -> tuple[tuple[str, SubShape | None], ...]:
         """Everything attached, in the order it was attached.
@@ -139,7 +142,11 @@ class _MeshOps(_MesherBase):
                 rather than cleared, because how far the assignment got is the diagnostic.
                 Also before anything is meshed, if a :class:`ViscousLayers` or
                 :class:`ViscousLayers2D` reaches a solid or a face whose algorithm does
-                not build layers; the message names the sub-shape and the algorithm.
+                not build layers; the message names the sub-shape and the algorithm. The
+                same holds if two :class:`ViscousLayers` reach a solid whose algorithm
+                reads one, or if the layer hypotheses there do not fit together (two face
+                sets share a face, or faces that share an edge have a different layer
+                count); the message gives SMESH's reason.
         """
         return _report(self._m.compute(progress, cancel))
 
