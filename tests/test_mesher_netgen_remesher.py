@@ -45,7 +45,6 @@ from pysmesh import (
     Mesher,
     NetgenRemesher2D,
     NetgenRemesherParameters2D,
-    PysmeshCancelled,
     PysmeshError,
     Regular1D,
     Session,
@@ -530,3 +529,64 @@ def test_a_remesh_is_the_same_in_every_process_and_on_repeat(tmp_path: Path) -> 
     assert runs[0] == runs[1]
     assert runs[0][0] == runs[0][3]
     assert len(set(runs[0][:3])) == 3
+
+
+_CHILD_NO_PARAMETERS: str = """
+import os, sys
+occt = os.environ.get("PYSMESH_OCCT_BIN")
+if occt:
+    os.add_dll_directory(occt)
+lib = os.path.join(sys.prefix, "Library", "bin")
+if os.path.isdir(lib):
+    os.add_dll_directory(lib)
+sys.path.insert(0, sys.argv[1])
+import numpy as np
+import pysmesh as ps
+
+data = np.load(sys.argv[2])
+with ps.Mesher.from_arrays(data["xyz"], data["tris"]) as m:
+    m.assign(ps.NetgenRemesher2D())
+    m.compute()
+    md = m.mesh()
+np.savez(sys.argv[3], xyz=md.node_coords, offsets=md.element_offsets,
+         nodes=md.element_nodes, types=md.element_type)
+"""
+
+
+def test_the_remesher_runs_without_parameters(tmp_path: Path) -> None:
+    """With no NetgenRemesherParameters2D the size is the box diagonal over 10.
+
+    The icosphere's box diagonal is 2 sqrt(3) = 3.46, so the target edge is 0.346. In a
+    child process: before NETGENPlugin_remesher_no_parameters.patch this compute read
+    address 0.
+    """
+    xyz0, tris0 = _icosphere(2)
+    np.savez(tmp_path / "input.npz", xyz=xyz0, tris=tris0)
+    package_root = str(Path(ps.__file__).resolve().parent.parent)
+    size = 2.0 * math.sqrt(3.0) / 10.0
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _CHILD_NO_PARAMETERS,
+            package_root,
+            str(tmp_path / "input.npz"),
+            str(tmp_path / "output.npz"),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=600.0,
+        env=dict(os.environ),
+        check=False,
+    )
+
+    assert proc.returncode == 0, f"exit {proc.returncode:#x}: {proc.stderr[-2000:]}"
+    out = np.load(tmp_path / "output.npz")
+    is_tri = out["types"] == int(ElementType.TRIANGLE)
+    start = out["offsets"][:-1][is_tri]
+    tris = out["nodes"][start[:, None] + np.arange(3)].astype(np.int64)
+    assert set(_edge_use(tris).values()) == {2}
+    lengths = _edge_lengths(out["xyz"], tris)
+    assert float(lengths.mean()) <= 1.25 * size
+    assert float(lengths.max()) <= 2.0 * size

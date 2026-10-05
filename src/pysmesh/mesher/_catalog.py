@@ -352,7 +352,8 @@ class NetgenRemesher2D(Algorithm):
     whole mesh (``on=None``). NETGEN reads the triangles (a quadrangle as two) as an STL
     surface, splits it into charts at its feature edges, and meshes each chart anew. The
     result replaces the mesh, bound to no sub-shape. It reads
-    :class:`NetgenRemesherParameters2D`.
+    :class:`NetgenRemesherParameters2D`; with none, the size is the bounding-box
+    diagonal over 10.
     """
 
     native_name: ClassVar[str] = "NETGEN_Remesher_2D"
