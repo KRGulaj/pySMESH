@@ -90,6 +90,7 @@
 #include <StdMeshers_MaxElementVolume.hxx>
 #include <StdMeshers_NumberOfSegments.hxx>
 #include <StdMeshers_ViscousLayerBuilder.hxx>
+#include <StdMeshers_PolygonPerFace_2D.hxx>
 #include <StdMeshers_PolyhedronPerSolid_3D.hxx>
 #include <StdMeshers_Prism_3D.hxx>
 #include <StdMeshers_Projection_2D.hxx>
@@ -2994,6 +2995,56 @@ void probe_p5_cartesian_too_thick() {
   }
 }
 
+// ------------------------------------------------------------------------------ P5PPF ---- //
+
+// StdMeshers_PolygonPerFace_2D_viscous_layers.patch: PolygonPerFace_2D with ViscousLayers2D
+// on one edge of the unit square (4 segments per edge, 3 layers): it failed with "Less that
+// 3 nodes on the wire" after building the layers. Now 4 x 3 layer quadrangles and one
+// polygon cover the square.
+void probe_p5_polygon_per_face_layers() {
+  section("P5PPF", "PolygonPerFace_2D builds ViscousLayers2D");
+  const TopoDS_Face face =
+      BRepBuilderAPI_MakeFace(gp_Pln(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 0, 1, 0, 1).Face();
+  Session s(face);
+  StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+  StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+  n->SetNumberOfSegments(4);
+  StdMeshers_PolygonPerFace_2D* a2 = s.make<StdMeshers_PolygonPerFace_2D>();
+  StdMeshers_ViscousLayers2D* layers = s.make<StdMeshers_ViscousLayers2D>();
+  layers->SetTotalThickness(0.3);
+  layers->SetNumberLayers(3);
+  layers->SetStretchFactor(1.2);
+  layers->SetBndShapes(std::vector<int>(1, s.meshDS()->ShapeToIndex(
+                           TopExp_Explorer(face, TopAbs_EDGE).Current())),
+                       /*toIgnore=*/false);
+  const bool assigned = s.assign(face, a1) && s.assign(face, n) && s.assign(face, a2) &&
+                        s.assign(face, layers);
+  const bool computed = s.compute();
+  int quadrangles = 0;
+  int polygons = 0;
+  double area = 0.0;
+  for (SMDS_FaceIteratorPtr it = s.meshDS()->facesIterator(); it->more();) {
+    const SMDS_MeshElement* f = it->next();
+    quadrangles += f->GetEntityType() == SMDSEntity_Quadrangle ? 1 : 0;
+    polygons += f->GetEntityType() == SMDSEntity_Polygon ? 1 : 0;
+    gp_XYZ twice(0, 0, 0);
+    for (int i = 0; i < f->NbNodes(); ++i) {
+      const SMDS_MeshNode* a = f->GetNode(i);
+      const SMDS_MeshNode* b = f->GetNode((i + 1) % f->NbNodes());
+      twice += gp_XYZ(a->X(), a->Y(), a->Z()) ^ gp_XYZ(b->X(), b->Y(), b->Z());
+    }
+    area += 0.5 * twice.Z();
+  }
+  char msg[220];
+  std::snprintf(msg, sizeof(msg),
+                "P5PPF unit square, layers on one edge: 12 layer quadrangles and 1 polygon of "
+                "total area 1; assigned %d computed %d quadrangles %d polygons %d area %.15g",
+                int(assigned), int(computed), quadrangles, polygons, area);
+  check(assigned && computed && quadrangles == 12 && polygons == 1 &&
+            std::abs(std::abs(area) - 1.0) < 1e-12,
+        msg);
+}
+
 }  // namespace
 
 void run_smesh_probe() {
@@ -3020,4 +3071,5 @@ void run_smesh_probe() {
   probe_p5_salome_exception_text();
   probe_p5_remove_hypothesis_state();
   probe_p5_cartesian_too_thick();
+  probe_p5_polygon_per_face_layers();
 }
