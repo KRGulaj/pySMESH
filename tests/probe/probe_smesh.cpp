@@ -120,7 +120,13 @@
 #include <StdMeshers_SegmentLengthAroundVertex.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepLib.hxx>
 #include <BRep_Tool.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <TopoDS_Shell.hxx>
+#include <TopoDS_Solid.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Vertex.hxx>
 
@@ -3047,6 +3053,105 @@ void probe_p5_polygon_per_face_layers() {
         msg);
 }
 
+// StdMeshers_Prism_3D_composite_side.patch: a unit box whose bottom EDGE y = 0 is split at
+// x = 0.5 and whose top EDGE above it is whole, so one side FACE has a composite
+// horizontal side (report §3 B1). Regular_1D with 4 segments, 2 on each half-EDGE,
+// Quadrangle_2D and Prism_3D: it failed with "Non-quadrilateral faces are not opposite".
+// Now 4 x 4 x 4 hexahedra fill the box, each half-EDGE keeps its 2 segments, and every top
+// node lies 1 above a bottom node.
+void probe_p5_prism_composite_side() {
+  section("P5PR1", "Prism_3D on a side FACE with a composite horizontal side");
+  const gp_Pnt b[5] = {gp_Pnt(0, 0, 0), gp_Pnt(0.5, 0, 0), gp_Pnt(1, 0, 0), gp_Pnt(1, 1, 0),
+                       gp_Pnt(0, 1, 0)};
+  const gp_Pnt t[4] = {gp_Pnt(0, 0, 1), gp_Pnt(1, 0, 1), gp_Pnt(1, 1, 1), gp_Pnt(0, 1, 1)};
+  const std::vector<std::vector<gp_Pnt>> loops = {
+      {b[0], b[1], b[2], b[3], b[4]}, {t[3], t[2], t[1], t[0]}, {b[0], b[1], b[2], t[1], t[0]},
+      {b[2], b[3], t[2], t[1]},       {b[3], b[4], t[3], t[2]}, {b[4], b[0], t[0], t[3]}};
+  BRepBuilderAPI_Sewing sewing(1e-6);
+  for (const std::vector<gp_Pnt>& loop : loops) {
+    BRepBuilderAPI_MakePolygon polygon;
+    for (const gp_Pnt& p : loop) {
+      polygon.Add(p);
+    }
+    polygon.Close();
+    sewing.Add(BRepBuilderAPI_MakeFace(polygon.Wire(), /*OnlyPlane=*/true).Face());
+  }
+  sewing.Perform();
+  TopoDS_Solid box = BRepBuilderAPI_MakeSolid(
+                         TopoDS::Shell(TopExp_Explorer(sewing.SewedShape(), TopAbs_SHELL).Current()))
+                         .Solid();
+  BRepLib::OrientClosedSolid(box);
+  Session s(box);
+
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(box, TopAbs_EDGE, edges);
+  std::vector<TopoDS_Shape> halves;
+  for (int i = 1; i <= edges.Extent(); ++i) {
+    TopoDS_Vertex v0, v1;
+    TopExp::Vertices(TopoDS::Edge(edges(i)), v0, v1);
+    if (std::abs(BRep_Tool::Pnt(v0).Distance(BRep_Tool::Pnt(v1)) - 0.5) < 1e-9) {
+      halves.push_back(edges(i));
+    }
+  }
+  StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+  StdMeshers_NumberOfSegments* four = s.make<StdMeshers_NumberOfSegments>();
+  four->SetNumberOfSegments(4);
+  StdMeshers_NumberOfSegments* two = s.make<StdMeshers_NumberOfSegments>();
+  two->SetNumberOfSegments(2);
+  StdMeshers_Quadrangle_2D* a2 = s.make<StdMeshers_Quadrangle_2D>();
+  StdMeshers_Prism_3D* a3 = s.make<StdMeshers_Prism_3D>();
+  bool assigned = halves.size() == 2 && s.assign(box, a1) && s.assign(box, four) &&
+                  s.assign(box, a2) && s.assign(box, a3);
+  for (const TopoDS_Shape& half : halves) {
+    assigned = s.assign(half, two) && assigned;
+  }
+  const bool computed = s.compute();
+
+  SMESH::Controls::Volume volume_ctl;
+  volume_ctl.SetMesh(s.meshDS());
+  double volume = 0.0;
+  int nonpositive = 0;
+  for (SMDS_ElemIteratorPtr it = s.meshDS()->elementsIterator(SMDSAbs_Volume); it->more();) {
+    const double v = numeric(volume_ctl, it->next()->GetID());
+    volume += v;
+    nonpositive += v <= 0.0 ? 1 : 0;
+  }
+  int half_segments = 0;
+  for (const TopoDS_Shape& half : halves) {
+    const SMESHDS_SubMesh* sm = s.meshDS()->MeshElements(half);
+    half_segments += sm ? int(sm->NbElements()) : 0;
+  }
+  std::vector<gp_Pnt> bottom, top;
+  for (SMDS_NodeIteratorPtr it = s.meshDS()->nodesIterator(); it->more();) {
+    const SMDS_MeshNode* n = it->next();
+    if (std::abs(n->Z()) < 1e-9) {
+      bottom.push_back(gp_Pnt(n->X(), n->Y(), 0));
+    } else if (std::abs(n->Z() - 1.0) < 1e-9) {
+      top.push_back(gp_Pnt(n->X(), n->Y(), 0));
+    }
+  }
+  int unlifted = 0;
+  for (const gp_Pnt& p : top) {
+    bool below = false;
+    for (const gp_Pnt& q : bottom) {
+      below = below || p.Distance(q) < 1e-9;
+    }
+    unlifted += below ? 0 : 1;
+  }
+  char msg[300];
+  std::snprintf(msg, sizeof(msg),
+                "P5PR1 box with a split bottom EDGE: 64 hexahedra of total volume 1, 2 + 2 "
+                "segments on the half-EDGEs, 25 top nodes each above a bottom node; assigned %d "
+                "computed %d volumes %d nonpositive %d volume %.15g half segments %d top %d "
+                "bottom %d unlifted %d",
+                int(assigned), int(computed), int(s.meshDS()->NbVolumes()), nonpositive, volume,
+                half_segments, int(top.size()), int(bottom.size()), unlifted);
+  check(assigned && computed && s.meshDS()->NbVolumes() == 64 && nonpositive == 0 &&
+            std::abs(volume - 1.0) < 1e-12 && half_segments == 4 && top.size() == 25 &&
+            bottom.size() == 25 && unlifted == 0,
+        msg);
+}
+
 }  // namespace
 
 void run_smesh_probe() {
@@ -3074,4 +3179,5 @@ void run_smesh_probe() {
   probe_p5_remove_hypothesis_state();
   probe_p5_cartesian_too_thick();
   probe_p5_polygon_per_face_layers();
+  probe_p5_prism_composite_side();
 }

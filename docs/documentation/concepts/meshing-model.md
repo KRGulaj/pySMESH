@@ -122,7 +122,7 @@ triangle stays below 5 degrees. After 3 passes the smallest angle is 21.35 degre
 | `Projection3D` | Copies a solid's mesh from another solid. | Nothing beyond the source solid's own mesh | `ProjectionSource3D` (required) |
 | `PolyhedronPerSolid3D` | One polyhedral element per solid, from the face mesh bounding it. Meshes every dimension itself; hides a lower-dimension algorithm beside it. Unlike `Cartesian3D`, it does consume an existing boundary mesh where one is present. | Nothing required; uses a boundary mesh if present | `ViscousLayers` (one or several, each with its own face set) |
 
-### `Prism3D`: the source face, and a side face it cannot sweep through
+### `Prism3D`: the source face, and a side face with a composite side
 
 `Prism3D` sweeps from a face that is already meshed. Assign the 2-D algorithm on one face
 alone, with a `SubShape`, and that face is meshed first and becomes the source. On two unit
@@ -135,12 +135,28 @@ source. If every face reads as a quadrangle, `Prism3D` tries the faces in turn. 
 it then reported the error of a face it had rejected, even when a later face worked: the
 stacked boxes failed with "Wrong source face".
 
-A side face whose bottom or top side has more than one edge cannot be swept through. This
+A side face whose bottom or top side has more than one edge has a composite side. This
 happens where a cap edge is split under a whole one: the side face between them has 5
-edges. `Prism3D` projects onto the first edge of a side only. If another face fits as the
-source, it sweeps from that face; otherwise the compute fails and names, for each face, why
-it is not the source. To sweep between the caps, split the opposite cap edge too, so that
-the side face becomes two quadrangles.
+edges. `Prism3D` projects the opposite side onto the composite side as a whole, each node
+at its share of the side's length. It sweeps through that face only if:
+
+- each split point gets a node, within the vertex tolerance;
+- each edge of the composite side gets the number of segments that its own 1-D hypothesis
+  gives, so that no hypothesis is dropped. Inside an edge the projection places the nodes,
+  as on every edge of the target cap;
+- the mesh is linear.
+
+On a regular n-gon prism (circumradius 1, height 1) with one bottom edge split at its
+midpoint, 4 segments on every edge and 2 on each half-edge, `Prism3D` sweeps between the
+caps for every n from 4 to 8: each top node lies 1 above a bottom node, the cells are the
+cap faces times 4, and the cell volumes sum to the prism volume within 1.6e-14 relative.
+Up to 5.0.0 it projected onto the first edge of a side only, and refused n = 4, 6 and 8.
+
+If the conditions fail, `Prism3D` tries another face as the source. With 4 segments on each
+half-edge under 4 on the whole edge, n = 5 sweeps from a side face; n = 8 has no face left,
+and the compute fails and names, for each face, why it is not the source. The way out:
+split the opposite cap edge at the same points, so that the side face becomes two
+quadrangles, or give the split edges the segments that the opposite side puts on them.
 
 `Prism3D` builds no viscous layers itself, but it sweeps the 2-D layers of its source face.
 Assign the 2-D algorithm and `ViscousLayers2D` on the source face alone: at every level of

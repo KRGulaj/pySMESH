@@ -370,11 +370,16 @@ class Prism3D(Algorithm):
     global 2-D algorithm only, a face that is not a quadrangle marks the source. If
     every face reads as a quadrangle, Prism3D tries the faces in turn.
 
-    A side face whose bottom or top side has more than one edge cannot be swept
-    through, for example where a cap edge is split under a whole one: Prism3D projects
-    onto the first edge of a side only. It then tries another face as the source. If
-    none fits, the compute fails and names, for each face, why it is not the source.
-    Split the opposite cap edge too, so that the side face becomes two quadrangles.
+    A side face whose bottom or top side has more than one edge has a composite side,
+    for example where a cap edge is split under a whole one. Prism3D projects the
+    opposite side onto it as a whole. It sweeps through that face only if each split
+    point gets a node, and each edge of the composite side gets the number of segments
+    that its own 1-D hypothesis gives. Inside an edge, the projection places the nodes,
+    as on every edge of the target cap. Otherwise Prism3D tries another face as the
+    source. If none fits, the compute fails and names, for each face, why it is not the
+    source. The way out: split the opposite cap edge at the same points, or give the
+    split edges the segments that the opposite side puts on them. A quadratic mesh is
+    refused on a composite side.
 
     It builds no viscous layers of its own, but it sweeps the 2-D layers of its source
     face: put :class:`ViscousLayers2D` on that face, beside a 2-D algorithm assigned on
