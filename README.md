@@ -178,6 +178,12 @@ Wheels are also attached to every
 [GitHub Release](https://github.com/KRGulaj/pySMESH/releases), for pinning a
 build by exact file.
 
+> **Upgrading from 5.0:** 5.1.0 adds NETGEN and completes the boundary
+> layers. No public name is removed. A few calls that returned a wrong mesh
+> in silence now raise `PysmeshError`, for example a compute that leaves a
+> sub-shape unmeshed. See the
+> [changelog](https://github.com/KRGulaj/pySMESH/blob/main/CHANGELOG.md).
+
 > **Upgrading from 4.x:** 5.0.0 moves to SMESH 9.16 and OCCT 8.0.1 and fixes
 > the defects of 4.2.2. No public name is removed. Some results change: 1-D
 > distributions, `Adaptive1D`, bounding boxes and default measures. Some calls
