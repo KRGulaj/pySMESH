@@ -71,6 +71,14 @@ from pysmesh import (
     MaxElementVolume,
     MaxLength,
     Mefisto2D,
+    Netgen1D2D,
+    Netgen1D2D3D,
+    Netgen2D,
+    Netgen3D,
+    NetgenParameters,
+    NetgenParameters2D,
+    NetgenSimpleParameters2D,
+    NetgenSimpleParameters3D,
     Mesher,
     NotConformAllowed,
     NumberOfLayers,
@@ -254,6 +262,11 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
     (RadialPrism3D(), None),
     (Projection3D(), None),
     (PolyhedronPerSolid3D(), None),
+    # NETGEN algorithms
+    (Netgen1D2D(), None),
+    (Netgen2D(), None),
+    (Netgen1D2D3D(), None),
+    (Netgen3D(), None),
     # 1-D hypotheses
     (NumberOfSegments(count=4), None),
     (NumberOfSegments(count=4, distribution=Distribution.SCALE, scale_factor=3.0), None),
@@ -288,6 +301,11 @@ _CATALOGUE: list[tuple[Algorithm | Hypothesis, SubShape | None]] = [
     (NotConformAllowed(), None),
     # 2-D and 3-D hypotheses
     (MaxElementArea(max_area=4.0), None),
+    # NETGEN hypotheses
+    (NetgenParameters(max_size=2.0), None),
+    (NetgenParameters2D(max_size=2.0), None),
+    (NetgenSimpleParameters2D(number_of_segments=3), None),
+    (NetgenSimpleParameters3D(local_length=0.5, max_element_volume=0.5), None),
     (LengthFromEdges(), None),
     (MaxElementVolume(max_volume=8.0), None),
     (QuadranglePreference(), None),

@@ -5,11 +5,11 @@
 """A process that loads pySMESH ends cleanly, with netgen linked statically into _core.
 
 netgen 6.2.2101 registers its archivable classes in a map in ngcore (``archive.cpp``,
-``type_register``), and each ``RegisterClassForArchive`` object took its class out of the
-map again in its destructor. In netgen's own build ngcore is a separate DLL, loaded first
-and unloaded last. Linked statically into ``_core``, netgen's registering objects (one of
-them ``regob`` in ``csg/brick.cpp``) are built before ``archive.cpp`` registers the
-destructor of the map's owner, so at exit the map is freed first and the later
+``type_register``), and each ``RegisterClassForArchive`` object took its class out of
+the map again in its destructor. In netgen's own build ngcore is a separate DLL, loaded
+first and unloaded last. Linked statically into ``_core``, netgen's registering objects
+(one of them ``regob`` in ``csg/brick.cpp``) are built before ``archive.cpp`` registers
+the destructor of the map's owner, so at exit the map is freed first and the later
 destructors read freed memory. Measured on the branch before the fix: 6 of 20 processes
 that only imported pySMESH ended with an access violation (0xC0000005) in
 ``Archive::IsRegistered``, called from ``~RegisterClassForArchive`` during

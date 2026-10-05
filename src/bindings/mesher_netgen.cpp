@@ -24,7 +24,6 @@
 
 #include "mesher/mesher.hpp"
 
-#include <fstream>
 #include <mutex>
 #include <string>
 
@@ -130,14 +129,6 @@ void set_parameters(NETGENPlugin_Hypothesis* h, const std::string& owner, Params
                          std::to_string(size) + ").");
     }
     h->SetLocalSizeOnEntry(kind + ":" + std::to_string(ordinal), size);
-  }
-
-  const std::string size_file = p.text("mesh_size_file");
-  if (!size_file.empty()) {
-    if (!std::ifstream(size_file).good()) {
-      throw PysmeshError(owner + ": cannot read the mesh size file '" + size_file + "'.");
-    }
-    h->SetMeshSizeFile(size_file);
   }
 
   h->SetQuadAllowed(p.flag("quad_allowed"));

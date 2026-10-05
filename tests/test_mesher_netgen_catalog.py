@@ -2,7 +2,8 @@
 # Copyright (C) 2026 Kajetan R. Gulaj
 # Created: 2026-10-05
 
-"""The NETGEN entries of the native catalogue, and the assignment rules of NETGEN_2D_ONLY.
+"""The NETGEN entries of the native catalogue, and the assignment rules of
+NETGEN_2D_ONLY.
 
 The native factory builds the four NETGEN algorithms and their hypotheses by their
 NETGENPlugin names. These tests talk to it by those names, as the catalogue's other
@@ -16,8 +17,9 @@ NETGEN_Parameters_2D on a face, and QuadranglePreference not beside NETGEN_Param
 of the three on one sub-shape (same priority, ``HYP_ALREADY_EXIST``), and it hands an
 algorithm at most one non-auxiliary hypothesis per sub-shape (``SMESH_Mesh.cxx``,
 ``GetHypotheses``: ``mainHypFound``), so the plugin's ``HYP_CONCURRENT`` branch is
-unreachable. The auxiliary QuadranglePreference passes SMESH; the binding asks the NETGEN
-algorithm, which reports ``HYP_INCOMPAT_HYPS``. Each refusal leaves the model as it was.
+unreachable. The auxiliary QuadranglePreference passes SMESH; the binding asks the
+NETGEN algorithm, which reports ``HYP_INCOMPAT_HYPS``. Each refusal leaves the model as
+it was.
 """
 
 from __future__ import annotations
@@ -34,7 +36,6 @@ _PARAMETERS_2D: dict[str, object] = {
     "min_size": 0.0,
     "fineness": 2,
     "local_sizes": [],
-    "mesh_size_file": "",
     "second_order": False,
     "optimize": True,
     "quad_allowed": False,
@@ -69,8 +70,14 @@ def _box() -> ps.Shape:
         ("NETGEN_2D_ONLY", {}),
         ("NETGEN_Parameters", _PARAMETERS_3D),
         ("NETGEN_Parameters_2D", _PARAMETERS_2D),
-        ("NETGEN_SimpleParameters_2D", {"number_of_segments": 3, "allow_quadrangles": False}),
-        ("NETGEN_SimpleParameters_3D", {"local_length": 0.5, "allow_quadrangles": False}),
+        (
+            "NETGEN_SimpleParameters_2D",
+            {"number_of_segments": 3, "allow_quadrangles": False},
+        ),
+        (
+            "NETGEN_SimpleParameters_3D",
+            {"local_length": 0.5, "allow_quadrangles": False},
+        ),
     ],
 )
 def test_the_native_factory_builds_every_netgen_entry_by_its_plugin_name(
@@ -86,7 +93,7 @@ def test_the_native_factory_builds_every_netgen_entry_by_its_plugin_name(
 
 
 def test_a_netgen_parameter_the_factory_does_not_read_is_refused() -> None:
-    """NETGEN_Parameters_2D does not take the volume-only fields of NETGEN_Parameters."""
+    """NETGEN_Parameters_2D refuses the volume-only fields of NETGEN_Parameters."""
     with Mesher(_box()) as mesher:
         with pytest.raises(PysmeshError, match="does not take the parameter"):
             mesher._m.assign("NETGEN_Parameters_2D", _PARAMETERS_3D, "", 0)
@@ -121,8 +128,8 @@ def test_netgen_2d_only_refuses_a_second_size_hypothesis_on_one_sub_shape(
 ) -> None:
     """Two of MaxElementArea, LengthFromEdges, NETGEN_Parameters_2D on one sub-shape.
 
-    The three are 2-D hypotheses of the same priority, so SMESH refuses the second on the
-    same sub-shape (HYP_ALREADY_EXIST), and the model stays as it was.
+    The three are 2-D hypotheses of the same priority, so SMESH refuses the second on
+    the same sub-shape (HYP_ALREADY_EXIST), and the model stays as it was.
     """
     with Mesher(_box()) as mesher:
         mesher._m.assign("Regular_1D", {}, "", 0)
