@@ -346,6 +346,13 @@ failed after building some of them (`PolygonPerFace2D`), or the process crashed
 (`CompositeHexa3D`). Assign the layers only to the sub-shapes that a building algorithm
 meshes.
 
+A face counts as meshed by another algorithm when an algorithm of its solid meshes it
+itself. `Cartesian3D` and `PolyhedronPerSolid3D` mesh every face of their solid, whatever 2-D
+algorithm sits on the face, so `ViscousLayers2D` on such a face is refused: use
+`ViscousLayers` on the solid. `Prism3D` meshes every face but the one its sweep starts from.
+Put `ViscousLayers2D` on that face, beside its own 2-D algorithm, and the sweep carries the
+layers through the solid. On a face with no 2-D algorithm of its own, `Prism3D` refuses them.
+
 Several `ViscousLayers` can reach one solid, each with its own face set, to give each face set
 its own thickness:
 

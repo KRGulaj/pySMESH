@@ -142,7 +142,8 @@ class _MeshOps(_MesherBase):
                 rather than cleared, because how far the assignment got is the diagnostic.
                 Also before anything is meshed, if a :class:`ViscousLayers` or
                 :class:`ViscousLayers2D` reaches a solid or a face whose algorithm does
-                not build layers; the message names the sub-shape and the algorithm. The
+                not build layers; the message names the sub-shape and the algorithm. A face
+                that an algorithm of its solid meshes itself counts as such a face. The
                 same holds if two :class:`ViscousLayers` reach a solid whose algorithm
                 reads one, or if the layer hypotheses there do not fit together (two face
                 sets share a face, or faces that share an edge have a different layer

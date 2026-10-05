@@ -1475,3 +1475,83 @@ def test_layers_in_a_narrow_gap_stop_at_half_of_it_with_a_warning(
     assert float(np.minimum(z, gap - z).max()) <= gap / 2 + TOL
     assert volume == pytest.approx(gap, rel=1e-12)
     assert inverted == 0
+
+
+# ---- VL9 ViscousLayers2D on a face that an all-dimension algorithm meshes ------------ #
+
+
+def _face_at(shape: ps.Shape, axis: int, value: float) -> ps.SubShape:
+    """The face of ``shape`` that lies in the plane ``coordinate[axis] = value``."""
+    for face in shape.faces():
+        box = face.bbox
+        if abs(box[axis] - value) < TOL and abs(box[axis + 3] - value) < TOL:
+            return ps.SubShape(ps.SubShapeKind.FACE, int(face.id))
+    raise AssertionError(f"no face in the plane {'xyz'[axis]} = {value}")
+
+
+@pytest.mark.parametrize(
+    ("setup", "native"),
+    [
+        ("polyhedron_on_face", "PolyhedronPerSolid_3D"),
+        ("polyhedron_on_shape", "PolyhedronPerSolid_3D"),
+        ("polyhedron_quadrangle", "PolyhedronPerSolid_3D"),
+        ("cartesian_on_face", "Cartesian_3D"),
+        ("cartesian_quadrangle", "Cartesian_3D"),
+        ("prism_projected_face", "Prism_3D"),
+    ],
+)
+def test_layers_2d_on_a_face_an_all_dimension_algorithm_meshes_are_refused(
+    setup: str, native: str
+) -> None:
+    """ViscousLayers2D on the face z = 0 of the unit box, whose mesh another algorithm
+    makes: PolyhedronPerSolid_3D and Cartesian_3D mesh every dimension themselves, and
+    Prism_3D projects the face z = 0 from the source z = 1. None of them builds 2-D
+    layers. The reference dropped the layers with no word, or failed after meshing
+    ("Less that 3 nodes on the wire", or "no message"). Now the compute refuses before it
+    meshes anything, and names the face and the algorithm (on the whole shape, the first
+    face the layers reach).
+    """
+    box = _unit_box()
+    bottom = _face_at(box, 2, 0.0)
+    walls = tuple(
+        int(e.id)
+        for e in box.edges()
+        if abs(e.bbox[2]) < TOL and abs(e.bbox[5]) < TOL and abs(e.bbox[3]) < TOL
+    )
+
+    with Mesher(box) as mesher:
+        if setup.startswith("cartesian"):
+            mesher.assign(Cartesian3D())
+            mesher.assign(
+                CartesianParameters3D(
+                    spacing_x="0.25", spacing_y="0.25", spacing_z="0.25"
+                )
+            )
+        else:
+            mesher.assign(Regular1D())
+            mesher.assign(NumberOfSegments(count=4))
+        if setup.endswith("quadrangle"):
+            mesher.assign(Quadrangle2D())
+        if setup.startswith("polyhedron"):
+            mesher.assign(PolyhedronPerSolid3D())
+        if setup == "prism_projected_face":
+            mesher.assign(Quadrangle2D(), on=_face_at(box, 2, 1.0))
+            mesher.assign(Prism3D())
+        mesher.assign(
+            ViscousLayers2D(
+                total_thickness=0.3,
+                layer_count=3,
+                stretch_factor=1.2,
+                boundary=walls,
+                group_name="bl",
+            ),
+            on=None if setup == "polyhedron_on_shape" else bottom,
+        )
+
+        with pytest.raises(PysmeshError, match="builds no 2-D layers") as raised:
+            mesher.compute()
+
+        assert mesher.mesh().element_count == 0
+    named = 1 if setup == "polyhedron_on_shape" else bottom.ordinal
+    assert native in str(raised.value)
+    assert f"reaches FACE {named}," in str(raised.value)

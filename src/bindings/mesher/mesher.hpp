@@ -76,6 +76,7 @@
 class SMDS_Mesh;
 class SMESHDS_GroupBase;
 class SMESHDS_Mesh;
+class SMESH_Algo;
 class SMESH_Gen;
 class SMESH_Hypothesis;
 class SMESH_Mesh;
@@ -469,6 +470,12 @@ class Mesher {
   // a second one where it reads one, or face sets that SMESH's layer check rejects. All
   // before anything is computed.
   void refuse_unread_layers() const;
+
+  // Raise if ViscousLayers2D reaches `face` (named `place`) while an algorithm of an
+  // enclosing SOLID meshes that face itself, so that no 2-D algorithm reads the layers.
+  // `own` is the face's own 2-D algorithm, or null.
+  void refuse_face_layers_meshed_from_above(const TopoDS_Shape& face, const std::string& place,
+                                            const SMESH_Algo* own) const;
 
   // `text` with the caller's (kind, ordinal) after each SMESHDS shape index "#N" in it, so
   // that an upstream message names the sub-shape the way the caller does.

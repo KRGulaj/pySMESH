@@ -1008,7 +1008,11 @@ class ViscousLayers2D(Hypothesis):
     The 2-D counterpart of :class:`ViscousLayers`, and the only 2-D form in the stack.
     :class:`Quadrangle2D`, :class:`QuadFromMedialAxis1D2D` and :class:`Mefisto2D`
     build them. On a face that another algorithm meshes,
-    :meth:`~pysmesh.Mesher.compute` raises before it meshes anything.
+    :meth:`~pysmesh.Mesher.compute` raises before it meshes anything. That includes a
+    face of a solid that :class:`Cartesian3D` or :class:`PolyhedronPerSolid3D` meshes
+    (they mesh every dimension themselves), and a face with no 2-D algorithm of its own
+    that :class:`Prism3D` projects. With :class:`Prism3D`, put the layers on the face the
+    sweep starts from, beside its own 2-D algorithm: the sweep carries them through.
 
     Attributes:
         total_thickness: Total height of the layer stack.

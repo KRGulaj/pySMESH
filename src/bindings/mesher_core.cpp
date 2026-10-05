@@ -622,15 +622,18 @@ void Mesher::refuse_unread_layers() const {
       }
       SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
       SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
-      if (algo == nullptr || algo->GetName() == nullptr) {
-        continue;  // no algorithm of its own: the compute reports what is missing
-      }
-      const std::string name = algo->GetName();
       const std::pair<const char*, int> at =
           ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current()));
       const std::string place =
           std::string(at.first[0] != 0 ? at.first : kind.kind_name) + " " +
           std::to_string(at.second);
+      if (kind.type == TopAbs_FACE) {
+        refuse_face_layers_meshed_from_above(ex.Current(), place, algo);
+      }
+      if (algo == nullptr || algo->GetName() == nullptr) {
+        continue;  // no algorithm at all: the compute reports what is missing
+      }
+      const std::string name = algo->GetName();
       if (kind.builders.count(name) == 0) {
         throw PysmeshError(
             std::string("Mesher.compute: ") + kind.hypothesis + " reaches " + place +
@@ -666,6 +669,52 @@ void Mesher::refuse_unread_layers() const {
             "face with another one, and faces that share an edge need the same number of "
             "layers. Change the face sets so that they meet these rules.");
       }
+    }
+  }
+}
+
+void Mesher::refuse_face_layers_meshed_from_above(const TopoDS_Shape& face,
+                                                  const std::string& place,
+                                                  const SMESH_Algo* own) const {
+  // ViscousLayers2D is read by the FACE's own 2-D algorithm. An algorithm of an enclosing
+  // SOLID that meshes faces itself (NeedDiscreteBoundary() false) leaves that 2-D algorithm
+  // out: Cartesian_3D and PolyhedronPerSolid_3D mesh every face of their solid, and
+  // Prism_3D every face but the source of its sweep, which carries a 2-D algorithm. Their
+  // layers were dropped with no word, or the compute failed after meshing ("Less that 3
+  // nodes on the wire", "no message").
+  for (const TopoDS_Shape& above : mesh_->GetAncestors(face)) {
+    if (above.ShapeType() != TopAbs_SOLID) {
+      continue;
+    }
+    SMESH_subMesh* solid_sub = mesh_->GetSubMeshContaining(above);
+    const SMESH_Algo* outer = solid_sub != nullptr ? solid_sub->GetAlgo() : nullptr;
+    if (outer == nullptr || outer->GetName() == nullptr || outer->NeedDiscreteBoundary()) {
+      continue;
+    }
+    const std::string name = outer->GetName();
+    const std::pair<const char*, int> at =
+        ordinal_of_shape_index(meshDS_->ShapeToIndex(above));
+    const std::string solid = std::string(at.first[0] != 0 ? at.first : "SOLID") + " " +
+                              std::to_string(at.second);
+    if (name == "Cartesian_3D" || name == "PolyhedronPerSolid_3D") {
+      throw PysmeshError(
+          "Mesher.compute: ViscousLayers2D reaches " + place + ", a face of " + solid +
+              ", whose algorithm " + name +
+              " meshes every dimension itself and builds no 2-D layers.",
+          name + " meshes the faces of " + solid + " without their 2-D algorithms, so "
+          "no ViscousLayers2D is read there: the layers would be missing, or the compute "
+          "would fail after building some. Grow the layers with ViscousLayers on " + solid +
+          " instead; " + name + " builds them.");
+    }
+    if (own == nullptr) {
+      throw PysmeshError(
+          "Mesher.compute: ViscousLayers2D reaches " + place +
+              ", which has no 2-D algorithm of its own: " + name + " of " + solid +
+              " meshes it and builds no 2-D layers.",
+          "Only Quadrangle_2D, QuadFromMedialAxis_1D2D and MEFISTO_2D build "
+          "ViscousLayers2D. With " + name + ", assign one of them on the face the sweep "
+          "starts from, with the layers there: the sweep carries that face's layers "
+          "through the solid.");
     }
   }
 }
