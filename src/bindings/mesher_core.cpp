@@ -712,9 +712,26 @@ void Mesher::refuse_face_layers_meshed_from_above(const TopoDS_Shape& face,
               ", which has no 2-D algorithm of its own: " + name + " of " + solid +
               " meshes it and builds no 2-D layers.",
           "Only Quadrangle_2D, QuadFromMedialAxis_1D2D and MEFISTO_2D build "
-          "ViscousLayers2D. With " + name + ", assign one of them on the face the sweep "
-          "starts from, with the layers there: the sweep carries that face's layers "
+          "ViscousLayers2D. With " + name + ", assign one of them on that face alone, "
+          "with the layers there: the sweep starts from it and carries its layers "
           "through the solid.");
+    }
+    // A 2-D algorithm inherited from the shape above leaves the choice of the face the
+    // sweep starts from to Prism_3D's own search, which may take another face: then the
+    // layers stayed on this face, and the cells of the sweep did not fit it (76 cells on a
+    // block of 4 x 4 x 4 with 12 layer quadrangles, no error). Only a 2-D algorithm on the
+    // face itself makes it the start of the sweep, before the search runs.
+    TopoDS_Shape assigned_to;
+    gen_->GetAlgo(mesh_->GetSubMesh(face), &assigned_to);
+    if (!assigned_to.IsSame(face)) {
+      throw PysmeshError(
+          "Mesher.compute: ViscousLayers2D reaches " + place + ", whose 2-D algorithm " +
+              std::string(own->GetName() != nullptr ? own->GetName() : "") +
+              " is assigned to a shape around it: " + name + " of " + solid +
+              " chooses the face its sweep starts from, may mesh " + place +
+              " itself, and then builds no 2-D layers there.",
+          "Assign the 2-D algorithm on that face alone, beside the layers: the sweep then "
+          "starts from it and carries its layers through the solid.");
     }
   }
 }

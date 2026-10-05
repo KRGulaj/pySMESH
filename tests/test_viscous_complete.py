@@ -1555,3 +1555,103 @@ def test_layers_2d_on_a_face_an_all_dimension_algorithm_meshes_are_refused(
     named = 1 if setup == "polyhedron_on_shape" else bottom.ordinal
     assert native in str(raised.value)
     assert f"reaches FACE {named}," in str(raised.value)
+
+
+# ---- VLc layers on sweeps ------------------------------------------------------------ #
+
+# Geometric1D(0.125, 2) fills an edge of 0.125 (2^4 - 1) = 1.875 with 4 segments exactly,
+# so no length is compensated (StdMeshers_Regular_1D.cxx, GEOMETRIC_1D, compensateError).
+SWEEP_HEIGHT: float = 1.875
+
+
+def _sweep_levels() -> NDArray[np.float64]:
+    """The node levels of Geometric1D(a1 = 0.125, q = 2): a1 (q^k - 1) / (q - 1)."""
+    k = np.arange(0, 5, dtype=np.float64)
+    return 0.125 * (2.0**k - 1.0)
+
+
+def _swept_block(factor: float, source_alone: bool) -> tuple[Mesher, ps.Shape]:
+    """A 2 x 1 x 1.875 block for Prism3D: 4 segments on the caps, Geometric1D(0.125, 2)
+    on the 4 vertical edges, ViscousLayers2D (0.3, 3, ``factor``) on the bottom face's
+    edge y = 0. Quadrangle2D on the bottom face alone, or on the whole shape."""
+    session = Session()
+    session.add_box(2.0, 1.0, SWEEP_HEIGHT)
+    block = ps.load_brep(session.brep())
+    bottom = _face_at(block, 2, 0.0)
+    wall = next(
+        int(e.id)
+        for e in block.edges()
+        if abs(e.bbox[1]) < TOL and abs(e.bbox[4]) < TOL and abs(e.bbox[5]) < TOL
+    )
+    mesher = Mesher(block)
+    mesher.assign(Regular1D())
+    mesher.assign(NumberOfSegments(count=4))
+    for edge in block.edges():
+        if edge.bbox[5] - edge.bbox[2] > 1.0:
+            mesher.assign(
+                ps.Geometric1D(start_length=0.125, common_ratio=2.0),
+                on=ps.SubShape(ps.SubShapeKind.EDGE, int(edge.id)),
+            )
+    mesher.assign(Quadrangle2D(), on=bottom if source_alone else None)
+    mesher.assign(Prism3D())
+    mesher.assign(
+        ViscousLayers2D(
+            total_thickness=0.3,
+            layer_count=3,
+            stretch_factor=factor,
+            boundary=(wall,),
+            group_name="bl",
+        ),
+        on=bottom,
+    )
+    return mesher, block
+
+
+@pytest.mark.parametrize("factor", [1.0, 1.2])
+def test_a_sweep_carries_the_source_face_layers_through_every_graded_level(
+    factor: float,
+) -> None:
+    """Prism3D from the bottom face, which grows ViscousLayers2D on its edge y = 0.
+
+    The sweep levels are the Geometric1D closed form z_k = 0.125 (2^k - 1); at every level
+    the layer lines lie at y = d_k; the cells (28 per level: 4 x 4 inner quadrangles and
+    4 x 3 layer ones) fill the block exactly, and none is inverted.
+    """
+    mesher, _ = _swept_block(factor, source_alone=True)
+    with mesher:
+        report = mesher.compute()
+        xyz = mesher.mesh().node_coords
+        groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
+        volume = float(mesher.quality(Volume()).values.sum())
+        inverted = mesher.select(BadOrientedVolume()).count
+
+    levels = np.unique(np.round(xyz[:, 2], 12))
+    np.testing.assert_allclose(levels, _sweep_levels(), atol=TOL)
+    inside = (xyz[:, 0] > TOL) & (xyz[:, 0] < 2.0 - TOL)
+    for level in levels:
+        at = xyz[inside & (np.abs(xyz[:, 2] - level) < TOL)]
+        y = np.unique(np.round(at[:, 1], 12))
+        np.testing.assert_allclose(
+            y[(y > TOL) & (y <= 0.3 + TOL)], _layer_ends(0.3, factor, 3), atol=TOL
+        )
+    assert report.volumes == 4 * (4 * 4 + 4 * 3)
+    assert groups == {"bl": 4 * 3}
+    assert volume == pytest.approx(2.0 * 1.0 * SWEEP_HEIGHT, rel=1e-12)
+    assert (inverted, report.warnings) == (0, ())
+
+
+def test_layers_2d_on_a_prism_face_with_an_inherited_2d_algorithm_are_refused() -> None:
+    """Quadrangle2D on the whole shape, ViscousLayers2D on the bottom face: Prism3D picks
+    the face it sweeps from itself, and swept from the top. The reference gave the bottom
+    face its layers and the volume cells none (76 cells that do not fit that face), with no
+    word. Now the compute refuses before it meshes anything, and names the way out.
+    """
+    mesher, block = _swept_block(1.2, source_alone=False)
+    with mesher:
+        with pytest.raises(PysmeshError, match="builds no 2-D layers") as raised:
+            mesher.compute()
+
+        assert mesher.mesh().element_count == 0
+    bottom = _face_at(block, 2, 0.0)
+    assert f"reaches FACE {bottom.ordinal}," in str(raised.value)
+    assert "on that face alone" in raised.value.details

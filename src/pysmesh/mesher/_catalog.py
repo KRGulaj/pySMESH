@@ -363,6 +363,11 @@ class Prism3D(Algorithm):
     onto the first edge of a side only. It then tries another face as the source. If
     none fits, the compute fails and names, for each face, why it is not the source.
     Split the opposite cap edge too, so that the side face becomes two quadrangles.
+
+    It builds no viscous layers of its own, but it sweeps the 2-D layers of its source
+    face: put :class:`ViscousLayers2D` on that face, beside a 2-D algorithm assigned on
+    that face alone. :meth:`~pysmesh.Mesher.compute` refuses 2-D layers on any other face
+    of the solid.
     """
 
     native_name: ClassVar[str] = "Prism_3D"
@@ -1010,9 +1015,10 @@ class ViscousLayers2D(Hypothesis):
     build them. On a face that another algorithm meshes,
     :meth:`~pysmesh.Mesher.compute` raises before it meshes anything. That includes a
     face of a solid that :class:`Cartesian3D` or :class:`PolyhedronPerSolid3D` meshes
-    (they mesh every dimension themselves), and a face with no 2-D algorithm of its own
-    that :class:`Prism3D` projects. With :class:`Prism3D`, put the layers on the face the
-    sweep starts from, beside its own 2-D algorithm: the sweep carries them through.
+    (they mesh every dimension themselves), and a face of a :class:`Prism3D` solid
+    without a 2-D algorithm assigned on that face alone. With :class:`Prism3D`, assign
+    the 2-D algorithm on the face the sweep starts from, with the layers there: the sweep
+    carries them through every level.
 
     Attributes:
         total_thickness: Total height of the layer stack.
