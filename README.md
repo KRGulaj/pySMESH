@@ -471,13 +471,15 @@ the host's, even at an identical version string.
 [tests/test_vtk_privacy.py](tests/test_vtk_privacy.py) fails the build if a
 binding ever exports one.
 
-> **Binary size:** the wheel is **38.1 MB**, holding 52 bundled DLLs. OCCT
+> **Binary size:** the wheel is **39.6 MB**, holding 52 bundled DLLs. OCCT
 > is the largest share at 18.8 MB, and private VTK costs 15.7 MB. That is the
 > deliberate trade for zero native footprint in the host environment. `_core`
 > links only three VTK components (`CommonCore`, `CommonDataModel`,
 > `FiltersVerdict`), so the bundle carries 17 VTK DLLs and no rendering, IO
-> or Python-wrapper module. CI reports the breakdown on every build and fails
-> if the wheel would exceed PyPI's 100 MB limit.
+> or Python-wrapper module. netgen and NETGENPlugin are linked into
+> `_core.pyd` and add no DLL; they add 1.5 MB to the wheel. CI reports the
+> breakdown on every build and fails if the wheel would exceed PyPI's 100 MB
+> limit.
 
 ## Build from source
 
