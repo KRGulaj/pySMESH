@@ -125,5 +125,15 @@ returned a result that was wrong, or crashed the process.
   spline's exact extent misses by that amount.
 - There is no free tetrahedral volume mesher. NETGEN is planned.
 
-Releases before 5.0.0 have no changelog entries. Their wheels are on the
-[GitHub Releases](https://github.com/KRGulaj/pySMESH/releases) page.
+## Earlier versions
+
+Releases before 5.0.0 have no detailed entries. This is what each major line added. Every
+wheel is on the [GitHub Releases](https://github.com/KRGulaj/pySMESH/releases) page. PyPI
+carries 4.0.0 and later.
+
+| Line | First release | What it added |
+|---|---|---|
+| 4.x | 4.0.0, 2026-08-24 | VTK is bundled privately in the wheel, as OCCT and Boost already were. The host no longer needs VTK 9.6.2, and the import-time VTK check is gone. One wheel per interpreter, CPython 3.11 to 3.14. |
+| 3.x | 3.0.0, 2026-08-09 | `Mesher`: SMESH's full meshing pipeline. Algorithms and hypotheses assigned per sub-shape, mesh editing, search, quality controls and the medial axis. |
+| 2.x | 2.0.0, 2026-08-09 | `Session`: stateful OCCT CAD modelling with persistent entity ids. Primitives, booleans with history, fillets, chamfers, transforms, healing and tessellation of the live shape. 2.1 to 2.3 shipped beside 3.1 to 3.3, with the same CAD and IGES additions. |
+| 1.x | 1.0.0, 2026-07-12 | One SMESH algorithm, `compute_viscous_layers` (`StdMeshers_ViscousLayers`, 3-D boundary-layer prisms). With it: OCCT `unify_same_domain` healing and standalone OCCT geometry operations (STEP, tessellation, offsets, distance and classification). |
