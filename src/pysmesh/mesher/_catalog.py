@@ -307,7 +307,10 @@ class Cartesian3D(Algorithm):
     layer nodes divide it at the closed-form fractions of the stack. The shrunk mesh
     keeps every cut cell that has volume, whatever ``size_threshold`` says, so the
     layers have no gap. A stack too thick for the shape, where one shrunk surface meets
-    another, fails the compute on the SOLID and leaves no cell.
+    or crosses another, fails the compute on the SOLID and leaves no cell; the error
+    names the largest total thickness for which the shrink works, found by bisection.
+    Keep a margin below it: where shrunk surfaces come closer together than the grid
+    spacing can follow, the layer cells fold over, and the compute fails there too.
 
     Sized by :class:`CartesianParameters3D`.
     """

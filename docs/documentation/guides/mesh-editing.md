@@ -449,9 +449,16 @@ mesh.release()
   short of `T`. The compute succeeds with a warning in `ComputeReport.warnings` that states
   the average thickness reached. On a single flat wall all three methods give the closed form.
 - `Cartesian3D` with layers: a stack too thick for the shape, so that one shrunk surface
-  meets another, is not supported. The compute fails on the solid with the reason ("the
-  solid offset inward by the total thickness ... is empty ... the layers are too thick for
-  the shape"), and leaves no cell. At an edge between two walls with layers, the corner cells have warped faces where
+  meets or crosses another, is not supported. The compute fails on the solid with the
+  reason ("the solid offset inward by the total thickness ... is empty", or "... is not a
+  valid solid", then "the layers are too thick for the shape"), and leaves no cell. The
+  error ends with the largest total thickness for which the shrink works, found by
+  bisection in at most 12 shrinks: on a 2 x 2 x 2 block with a bore of radius 0.4, where
+  the shrunk surfaces meet at 0.3, it names 0.299927. Keep a margin below that value. Where
+  the shrunk surfaces come closer together than the grid spacing can follow (0.0002 apart
+  at 0.2999, with a grid of 0.25), the layer cells fold over, and the compute fails with
+  "layer cells are inverted".
+- `Cartesian3D` with layers: at an edge between two walls with layers, the corner cells have warped faces where
   the grid lines on a wall cross that edge at an angle other than 90 degrees (the caps of a
   hexagonal prism). The mesh there is conforming, but the `Volume` control
   splits each warped cell on its own, so its sum can differ from the shape's volume by about

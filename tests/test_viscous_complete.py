@@ -1655,3 +1655,123 @@ def test_layers_2d_on_a_prism_face_with_an_inherited_2d_algorithm_are_refused() 
     bottom = _face_at(block, 2, 0.0)
     assert f"reaches FACE {bottom.ordinal}," in str(raised.value)
     assert "on that face alone" in raised.value.details
+
+
+# ---- VLd the largest workable thickness of Cartesian layers -------------------------- #
+
+# The child meshes the bored block (2 x 2 x 2, a bore of radius 0.4 on its axis) with
+# Cartesian3D at grid spacing 0.25 and layers of T = argv[2] on every face, and prints one
+# JSON line: the error details, or the cell count and the inverted cells. A child, because
+# the reference crashed once on a run of these inputs.
+_BORED_CHILD: str = """
+import json, os, sys
+occt = os.environ.get("PYSMESH_OCCT_BIN")
+if occt:
+    os.add_dll_directory(occt)
+lib = os.path.join(sys.prefix, "Library", "bin")
+if os.path.isdir(lib):
+    os.add_dll_directory(lib)
+sys.path.insert(0, sys.argv[1])
+import pysmesh as ps
+
+s = ps.Session()
+s.add_box(2.0, 2.0, 2.0)
+block = s.entities(ps.EntityKind.SOLID).tolist()
+s.add_cylinder(0.4, 2.0, origin=(1.0, 1.0, 0.0))
+everything = s.entities(ps.EntityKind.SOLID).tolist()
+s.cut(block, [i for i in everything if i not in block])
+with ps.Mesher(ps.load_brep(s.brep())) as m:
+    m.assign(ps.Cartesian3D())
+    m.assign(ps.CartesianParameters3D(spacing_x="0.25", spacing_y="0.25", spacing_z="0.25"))
+    m.assign(ps.ViscousLayers(total_thickness=float(sys.argv[2]), layer_count=3,
+                              stretch_factor=1.2, boundary=(), ignore=True, group_name="bl"))
+    try:
+        report = m.compute()
+        out = {"volumes": report.volumes, "inverted": m.select(ps.BadOrientedVolume()).count,
+               "bare": m.select(ps.BareBorderVolume()).count}
+    except ps.PysmeshError as e:
+        out = {"error": e.details, "left": m.mesh().element_count}
+print("BORED-RESULT " + json.dumps(out))
+"""
+_WORKABLE: str = r"The largest total thickness for which the offset works is about ([0-9.eE+-]+)"
+
+
+def _bored_with_layers(total: float) -> dict[str, object]:
+    """Run the bored-block child at total thickness ``total``; return its JSON result."""
+    package_root = str(Path(ps.__file__).resolve().parent.parent)
+    proc = subprocess.run(
+        [sys.executable, "-c", _BORED_CHILD, package_root, repr(total)],
+        capture_output=True,
+        text=True,
+        timeout=300.0,
+        env=dict(os.environ),
+        check=False,
+    )
+    assert proc.returncode == 0, (proc.returncode, proc.stderr[-2000:])
+    line = next(ln for ln in proc.stdout.splitlines() if ln.startswith("BORED-RESULT "))
+    return json.loads(line.split(" ", 1)[1])  # type: ignore[no-any-return]
+
+
+def test_layers_too_thick_name_a_thickness_that_meshes_and_one_just_above_that_fails() -> None:
+    """Layers of 0.3 in the bored block: the offset surfaces meet at 0.3 exactly (the bore,
+    radius 0.4 + T, reaches the walls, 1 - T from its axis).
+
+    The error names T*, the largest thickness for which the offset works, found by
+    bisection; T* is below 0.3 and within 0.3 / 2^12 of it. At 0.95 T* the compute meshes,
+    with no inverted cell and every boundary facet covered; at 1.05 T* it fails with the
+    same kind of message, naming T* again.
+    """
+    import re
+
+    refused = _bored_with_layers(0.3)
+
+    assert "error" in refused, refused
+    assert "too thick for the shape" in str(refused["error"])
+    found = re.search(_WORKABLE, str(refused["error"]))
+    assert found is not None, refused
+    limit = float(found.group(1))
+    assert 0.3 - 0.3 / 2**12 - 1e-6 <= limit < 0.3
+    below = _bored_with_layers(0.95 * limit)
+    assert below.get("error") is None, below
+    assert (below["inverted"], below["bare"]) == (0, 0)
+    above = _bored_with_layers(1.05 * limit)
+    assert "error" in above, above
+    assert "too thick for the shape" in str(above["error"])
+    assert re.search(_WORKABLE, str(above["error"])) is not None
+    assert above["left"] == 0
+
+
+@pytest.mark.parametrize("total", [0.5, 0.7])
+def test_layers_whose_offset_is_not_a_valid_solid_are_refused(total: float) -> None:
+    """Thicker still, the offset surfaces cross, and BRepOffset_MakeOffset reports success
+    with a solid that is not valid, partly outside the block. The reference failed with
+    "SOLID 1: no message" (0.5), or meshed 13 cells, 4 of them inverted, with nodes outside
+    the block (0.7). Now the compute fails with the reason and names T*, and leaves no cell.
+    """
+    import re
+
+    refused = _bored_with_layers(total)
+
+    assert "error" in refused, refused
+    assert "is not a valid solid" in str(refused["error"])
+    assert "too thick for the shape" in str(refused["error"])
+    found = re.search(_WORKABLE, str(refused["error"]))
+    assert found is not None
+    assert 0.29 < float(found.group(1)) < 0.3
+    assert refused["left"] == 0
+
+
+def test_layer_cells_that_fold_over_are_refused() -> None:
+    """Layers of 0.2999 in the bored block: the offset is a valid solid, but its bore comes
+    within 0.0002 of its walls, closer than the grid can follow, and 57 layer hexahedra
+    fold over. The reference returned them as a success. Now the compute fails, says why,
+    and leaves no cell; at 0.2995 (a gap of 0.001) it meshes with no inverted cell.
+    """
+    folded = _bored_with_layers(0.2999)
+    near = _bored_with_layers(0.2995)
+
+    assert "error" in folded, folded
+    assert "layer cells are inverted" in str(folded["error"])
+    assert folded["left"] == 0
+    assert near.get("error") is None, near
+    assert (near["inverted"], near["bare"]) == (0, 0)
