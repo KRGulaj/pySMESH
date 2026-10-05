@@ -1017,8 +1017,9 @@ class _NetgenSizing(_OptionalFields):
         segments_per_radius: Segments per radius of curvature, for curved edges and
             faces. Only with :attr:`Fineness.USER_DEFINED`; None keeps the ``MODERATE``
             value 2.
-        chordal_error: The largest distance allowed between a curved face and its
-            triangles, which limits the size there; None for no limit.
+        chordal_error: The distance between a curved face and its triangles that
+            NETGEN sizes the face for, from its curvature. It is a target: the mean
+            deviation keeps within it, single triangles can exceed it. None for none.
         local_sizes: ``(sub-shape, size)`` pairs: the element size near a vertex, along
             an edge, on a face or in a solid of the meshed shape.
         second_order: Make quadratic elements, with mid-edge nodes on the geometry.
