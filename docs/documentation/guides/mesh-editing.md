@@ -430,6 +430,10 @@ mesh.release()
 - `PolygonPerFace2D` builds no layers: after the layer step it finds too few nodes on the
   face wire.
 - `ViscousLayers2D` takes no extrusion method; only the 3-D hypothesis has one.
+- `ExtrusionMethod.FACE_OFFSET` and `NODE_OFFSET` do not smooth the layers. Where two walls
+  with layers meet at an edge, the two stacks collide there, and SMESH stops the inflation
+  short of `T`. The compute succeeds with a warning in `ComputeReport.warnings` that states
+  the average thickness reached. On a single flat wall all three methods give the closed form.
 - `Cartesian3D` with layers: a stack too thick for the shape, so that one shrunk surface
   meets another, is not supported. The compute fails on the solid with the reason ("the
   solid offset inward by the total thickness ... is empty ... the layers are too thick for

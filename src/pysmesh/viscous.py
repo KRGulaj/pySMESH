@@ -85,6 +85,13 @@ class ExtrusionMethod(IntEnum):
     """Layer-extrusion strategy — mirrors ``StdMeshers_ViscousLayers::ExtrusionMethod``.
 
     The integer values are persisted by SMESH (``SaveTo``/``LoadFrom``); do not reorder.
+
+    On a flat wall each method moves a node along the wall normal, so the layers lie on
+    the closed-form planes. Only ``SURF_OFFSET_SMOOTH`` smooths the layers. With
+    ``FACE_OFFSET`` or ``NODE_OFFSET``, where two walls with layers meet at an edge, the
+    two stacks collide there and SMESH stops the inflation short of the total thickness:
+    the compute succeeds with a warning that states the average thickness reached (0.253
+    and 0.256 for 0.3 on two adjacent faces of the unit box, SMESH 9.16).
     """
 
     SURF_OFFSET_SMOOTH = 0

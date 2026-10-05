@@ -1321,3 +1321,108 @@ def test_unassign_refuses_a_layer_hypothesis_equal_to_none_of_several() -> None:
             mesher.unassign(_layer_set(0.25, 2, 1.0, (1,), "bl_c"))
 
         assert mesher.assignments() == before
+
+
+# ---- VL7 the extrusion methods on the catalogue path -------------------------------- #
+
+
+def _method_stack(
+    algorithm: str, method: ExtrusionMethod, two_walls: bool
+) -> tuple[NDArray[np.float64], NDArray[np.float64], dict[str, int], ps.ComputeReport]:
+    """The unit box with the stack on x = 0 (and y = 0) by ``method``: every node, the
+    nodes of the layer cells, the group sizes, the report."""
+    total, count = STACK
+    box = _unit_box()
+    walls = (_at_x0(box.faces()),)
+    if two_walls:
+        walls += (_at_y0(box.faces()),)
+    with Mesher(box) as mesher:
+        _assign_3d(mesher, algorithm)
+        mesher.assign(
+            ViscousLayers(
+                total_thickness=total,
+                layer_count=count,
+                stretch_factor=1.2,
+                boundary=walls,
+                group_name="bl",
+                method=method,
+            )
+        )
+        report = mesher.compute()
+        mesh = mesher.mesh()
+        layer_ids = {int(i) for g in mesher.groups() for i in g.element_ids}
+        groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
+    rows = [r for r in range(mesh.element_count) if int(mesh.element_id[r]) in layer_ids]
+    layer_nodes = np.unique(np.concatenate([mesh.nodes_of(r) for r in rows]))
+    return mesh.node_coords, mesh.node_coords[layer_nodes], groups, report
+
+
+@pytest.mark.parametrize("algorithm", ["Hexa3D", "PolyhedronPerSolid3D"])
+@pytest.mark.parametrize("method", list(ExtrusionMethod))
+def test_each_extrusion_method_grows_the_closed_form_stack_on_a_flat_wall(
+    method: ExtrusionMethod, algorithm: str
+) -> None:
+    """ViscousLayers on the wall x = 0 of the unit box, by each extrusion method, through
+    Mesher. On a flat wall each method moves a node along the wall normal by the
+    closed-form depth (SMESH ``additional_hypo.rst``, "Viscous Layers"), so the stack
+    nodes lie on the planes x = d_k, and the wall gets 4 x 4 x N layer cells.
+    """
+    total, count = STACK
+
+    xyz, _, groups, report = _method_stack(algorithm, method, two_walls=False)
+
+    np.testing.assert_allclose(
+        _planes(xyz, total), _layer_ends(total, 1.2, count), atol=TOL
+    )
+    assert groups == {"bl": 4 * 4 * count}
+    assert report.warnings == ()
+
+
+@pytest.mark.parametrize("algorithm", ["Hexa3D", "PolyhedronPerSolid3D"])
+def test_smoothed_layers_on_two_adjacent_walls_keep_the_closed_form_on_each(
+    algorithm: str,
+) -> None:
+    """SURF_OFFSET_SMOOTH on the walls x = 0 and y = 0: the stacks meet along the edge
+    between them, and away from it (y > T) the x = 0 stack lies on the closed-form planes.
+    """
+    total, count = STACK
+
+    xyz, _, groups, report = _method_stack(
+        algorithm, ExtrusionMethod.SURF_OFFSET_SMOOTH, two_walls=True
+    )
+
+    away = xyz[xyz[:, 1] > total + TOL]
+    np.testing.assert_allclose(
+        _planes(away, total), _layer_ends(total, 1.2, count), atol=TOL
+    )
+    assert groups == {"bl": 2 * 4 * 4 * count}
+    assert report.warnings == ()
+
+
+@pytest.mark.parametrize("algorithm", ["Hexa3D", "PolyhedronPerSolid3D"])
+@pytest.mark.parametrize(
+    "method", [ExtrusionMethod.FACE_OFFSET, ExtrusionMethod.NODE_OFFSET]
+)
+def test_unsmoothed_layers_on_two_adjacent_walls_stop_short_with_a_warning(
+    method: ExtrusionMethod, algorithm: str
+) -> None:
+    """FACE_OFFSET and NODE_OFFSET do not smooth the layers (``StdMeshers_ViscousLayers.cxx``
+    ``AverageHyp::ToSmooth``), so on the walls x = 0 and y = 0 the two stacks collide along
+    the edge between them and SMESH stops the inflation short of T. That is upstream's
+    local limiting (``:5005-5015``): the compute succeeds with a warning on the solid that
+    states the average thickness it reached, below T, and no layer node lies deeper than T
+    from the nearer wall.
+    """
+    total, count = STACK
+
+    _, layer_xyz, groups, report = _method_stack(algorithm, method, two_walls=True)
+
+    (warning,) = report.warnings
+    assert (warning.kind, warning.ordinal) == (ps.SubShapeKind.SOLID, 1)
+    head = f"Thickness {total:g} of viscous layers not reached, "
+    assert warning.text.startswith(head + "average reached thickness is ")
+    reached = float(warning.text.rsplit(" ", 1)[1])
+    assert 0.0 < reached < total
+    depth = np.minimum(layer_xyz[:, 0], layer_xyz[:, 1])
+    assert float(depth.max()) <= total + TOL
+    assert groups == {"bl": 2 * 4 * 4 * count}
