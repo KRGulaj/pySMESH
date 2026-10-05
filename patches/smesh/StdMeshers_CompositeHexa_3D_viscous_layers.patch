@@ -1,46 +1,216 @@
-pySMESH: CompositeHexa_3D refuses viscous layers instead of crashing (SMESH V9_16_0).
+pySMESH: CompositeHexa_3D builds viscous layers (SMESH V9_16_0). This replaces the Phase 4
+patch of the same name, which refused them.
 
 Defect: CompositeHexa_3D with a ViscousLayers hypothesis on its solid ends the process with an
-access violation.
+access violation, and a ViscousLayers on the solid itself is refused as incompatible. Hexa_3D
+hands a solid with more than 6 FACEs to CompositeHexa_3D (StdMeshers_Hexa_3D.cxx:568-575), so
+Hexa_3D cannot build layers on such a block either.
 
-Symptom: the unit box, Regular_1D with 4 segments, Quadrangle_2D, CompositeHexa_3D and
-ViscousLayers (0.3 thick, 3 layers, factor 1.2) on one face, all assigned to a compound root
-holding the box (as pySMESH loads a shape): the compute crashes. On a bare SOLID, SMESH
-refuses the hypothesis at assignment (HYP_INCOMPATIBLE), so Compute never sees it.
+Symptom (measured in Phase 4, before the refusal): the unit box, Regular_1D with 4 segments,
+Quadrangle_2D, CompositeHexa_3D and ViscousLayers (0.3 thick, 3 layers, factor 1.2) on one
+FACE, all on a compound root as pySMESH loads a shape: the compute crashes.
 
-Root cause, measured with instrumented builds: Compute takes the hypothesis by name
-(StdMeshers_CompositeHexa_3D.cxx:858-859) and calls StdMeshers_ViscousLayers::Compute (:862).
-The layer builder takes its hypotheses from the algorithm's used hypotheses, filtered by the
-compatible list (StdMeshers_ViscousLayers.cxx:2153-2215), and CompositeHexa_3D lists none, so
-the builder fails with "ViscousLayers hypothesis not found". StdMeshers_ViscousLayers::Compute
-then returns a null proxy mesh and drops that error (:1347-1349), and Compute dereferences the
-null pointer (:872). Listing ViscousLayers as compatible builds the layers, but the layer
-quadrangles on the four side faces give their grids more rows than the opposite faces have,
-and the box grid then holds null nodes (16 of 200 on the probe box): the compute crashes
-later. Supporting the layers needs a face-grid loader that leaves the layer cells out.
+Root cause, measured with instrumented builds:
+* Compute takes the hypothesis by name (StdMeshers_CompositeHexa_3D.cxx:858-859) and calls
+  StdMeshers_ViscousLayers::Compute (:862). The layer builder takes its hypotheses from the
+  algorithm's used hypotheses, filtered by the compatible list (StdMeshers_ViscousLayers.cxx:
+  2153-2215), and CompositeHexa_3D lists none, so the builder fails with "ViscousLayers
+  hypothesis not found". StdMeshers_ViscousLayers::Compute then returns a null proxy mesh and
+  drops that error (:1347-1349), and Compute dereferences the null pointer (:872).
+* Made compatible, the layers are built before the side grids are loaded (:862, then
+  _QuadFaceGrid::LoadGrid, :1454-1500, and GetNbHoriSegments, :1791-1834). The EDGEs of a side
+  FACE that the layers shrank then carry the layer nodes too, so the side grids have more rows
+  than the opposite FACEs, and the box grid holds null nodes (16 of 200 on the probe box): the
+  compute crashes later. Hexa_3D reads the side structure before the layers and maps every
+  grid node to its node in the layer proxy mesh afterwards (StdMeshers_Hexa_3D.cxx:600-612,
+  :722-731).
+* CheckHypothesis accepts everything (:292-298).
+The algorithm is from SMESH 0635c9fc8 (2009-02-17, "Merge from BR_V5_DEV 16Feb09"); its layer
+call, for Hexa_3D handing a composite block over, from 0743fa8f5 (2019-04-18, "IPAL54529:
+[CKD]: Hexahedron(ijk) fails on a composite block if Viscous Layers assigned"). Upstream master
+at 83f8bf482 (2026-09-14) has the same code.
 
-Change, in StdMeshers_CompositeHexa_3D.cxx only: when a ViscousLayers hypothesis applies,
-Compute returns COMPERR_BAD_PARMETERS, "CompositeHexa_3D does not build viscous layers;
-Hexa_3D does", before any layer is built.
+Change, in StdMeshers_CompositeHexa_3D.cxx only:
+* the constructor lists ViscousLayers as compatible;
+* CheckHypothesis takes one ViscousLayers per solid (two give HYP_INCOMPATIBLE, as in
+  Hexa_3D) and runs StdMeshers_ViscousLayers::CheckHypothesis on it;
+* Compute finds the six sides and loads their grids from the mesh as it is, computes the grid
+  sizes, then builds the layers, and replaces each grid node by its node in the layer proxy
+  mesh (_QuadFaceGrid::MapToProxyNodes). Each grid node is looked up again by its id first: the
+  layers mesh a side FACE again on a failed smoothing, which removes its nodes; then the
+  compute fails with "The viscous layers meshed a side FACE of the block again, so its grid of
+  nodes no longer holds" instead of reading a removed node.
+On a 2 x 1 x 1 block fused from two unit cubes (10 FACEs) with the layers on its split wall,
+the mesh equals Hexa_3D's on the plain 2 x 1 x 1 box, node for node.
 
-Not changed: CompositeHexa_3D with no ViscousLayers hypothesis.
+Not changed: CompositeHexa_3D with no ViscousLayers: the grids are loaded from the same mesh
+in the same order, and the box is built the same way, bit for bit.
+
 diff --git a/src/StdMeshers/StdMeshers_CompositeHexa_3D.cxx b/src/StdMeshers/StdMeshers_CompositeHexa_3D.cxx
 --- a/src/StdMeshers/StdMeshers_CompositeHexa_3D.cxx
 +++ b/src/StdMeshers/StdMeshers_CompositeHexa_3D.cxx
-@@ -859,9 +859,13 @@
+@@ -212,6 +212,13 @@
+   //!< Return normalized parameters of nodes within the unitary cube
+   gp_XYZ& GetIJK(int iCol, int iRow) { return myIJK[ myIndexer( iCol, iRow )]; }
+ 
++  //!< pySMESH: the ids of the nodes of the loaded grid
++  vector<smIdType> GetNodeIDs() const;
++
++  //!< pySMESH: replace the nodes of the loaded grid by their nodes in a proxy mesh
++  bool MapToProxyNodes( const SMESH_ProxyMesh&   proxyMesh,
++                        const vector<smIdType>& nodeIDs );
++
+ public: //** Access to member fields **//
+ 
+   //!< Return i-th face side (0<i<4)
+@@ -281,6 +288,7 @@
+ {
+   _name = "CompositeHexa_3D";
+   _shapeType = (1 << TopAbs_SHELL) | (1 << TopAbs_SOLID);       // 1 bit /shape type
++  _compatibleHypothesis.push_back("ViscousLayers"); // pySMESH: Compute builds them
+ }
+ 
+ //================================================================================
+@@ -289,13 +297,31 @@
+  */
+ //================================================================================
+ 
+-bool StdMeshers_CompositeHexa_3D::CheckHypothesis(SMESH_Mesh&         /*aMesh*/,
+-                                                  const TopoDS_Shape& /*aShape*/,
++bool StdMeshers_CompositeHexa_3D::CheckHypothesis(SMESH_Mesh&         aMesh,
++                                                  const TopoDS_Shape& aShape,
+                                                   Hypothesis_Status&  aStatus)
+ {
+   _blockRenumberHyp = nullptr;
+   aStatus = HYP_OK;
+-  return true;
++
++  // pySMESH: one ViscousLayers, checked as Hexa_3D checks it (StdMeshers_Hexa_3D.cxx)
++  const StdMeshers_ViscousLayers* viscousLayersHyp = nullptr;
++  const list<const SMESHDS_Hypothesis*>& hyps =
++    GetUsedHypothesis( aMesh, aShape, /*ignoreAuxiliary=*/false );
++  for ( list<const SMESHDS_Hypothesis*>::const_iterator h = hyps.begin(); h != hyps.end(); ++h )
++    if ( const StdMeshers_ViscousLayers* vl = dynamic_cast<const StdMeshers_ViscousLayers*>( *h ))
++    {
++      if ( viscousLayersHyp )
++      {
++        aStatus = HYP_INCOMPATIBLE;
++        return false;
++      }
++      viscousLayersHyp = vl;
++    }
++  if ( viscousLayersHyp )
++    error( StdMeshers_ViscousLayers::CheckHypothesis( aMesh, aShape, aStatus ));
++
++  return aStatus == HYP_OK;
+ }
+ 
+ namespace
+@@ -854,14 +880,15 @@
+   helper.SetElementsOnShape( true );
+ 
+   // get Viscous Mesh
+-  SMESH_ProxyMesh::Ptr proxyMesh;
++  // pySMESH: the side grids are loaded from the mesh as it is, before the layers: built
++  // first, the layer quadrangles on the side FACEs gave the side grids more rows than the
++  // opposite FACEs have, and the box grid held null nodes. The layers are built next, and
++  // every grid node is then replaced by its node in their proxy mesh, as Hexa_3D does
++  // (StdMeshers_Hexa_3D.cxx, GetProxyNode).
++  SMESH_ProxyMesh::Ptr proxyMesh( new SMESH_ProxyMesh( theMesh ));
+   SMESH_HypoFilter vlFilter( SMESH_HypoFilter::HasName( StdMeshers_ViscousLayers::GetHypType() ));
    const SMESH_Hypothesis *          hyp = theMesh.GetHypothesis( theShape, vlFilter, true );
    const StdMeshers_ViscousLayers* vlHyp = static_cast< const StdMeshers_ViscousLayers* >( hyp );
-   if ( vlHyp )
+-  if ( vlHyp )
 -    proxyMesh = vlHyp->Compute( theMesh, theShape, /*toMakeN2NMap=*/true );
 -  else
 -    proxyMesh.reset( new SMESH_ProxyMesh( theMesh ));
-+    // pySMESH: the layers fail here (the hypothesis is not among the compatible ones, so
-+    // the builder does not find it), and Compute then read a null proxy mesh and crashed.
-+    // Made compatible, the layer quadrangles on the side FACEs give the side grids more
-+    // rows than the opposite FACEs have, and the box grid gets null nodes. Refuse it.
-+    return error( COMPERR_BAD_PARMETERS,
-+                  "CompositeHexa_3D does not build viscous layers; Hexa_3D does" );
-+  proxyMesh.reset( new SMESH_ProxyMesh( theMesh ));
  
    // -------------------------
    // Try to find 6 side faces
+@@ -885,6 +912,26 @@
+   if ( !fRight ->LoadGrid( *proxyMesh )) return error( fRight ->GetError() );
+   if ( !fTop   ->LoadGrid( *proxyMesh )) return error( fTop   ->GetError() );
+ 
++  int x, xSize = fBottom->GetNbHoriSegments(*proxyMesh) + 1, X = xSize - 1;
++  int y, ySize = fBottom->GetNbVertSegments(*proxyMesh) + 1, Y = ySize - 1;
++  int z, zSize = fFront ->GetNbVertSegments(*proxyMesh) + 1, Z = zSize - 1;
++
++  if ( vlHyp )
++  {
++    _QuadFaceGrid* sides[6] = { fBottom, fBack, fLeft, fFront, fRight, fTop };
++    vector<smIdType> nodeIDs[6];
++    for ( int i = 0; i < 6; ++i )
++      nodeIDs[ i ] = sides[ i ]->GetNodeIDs();
++
++    proxyMesh = vlHyp->Compute( theMesh, theShape, /*toMakeN2NMap=*/true );
++    if ( !proxyMesh )
++      return false;
++
++    for ( int i = 0; i < 6; ++i )
++      if ( !sides[ i ]->MapToProxyNodes( *proxyMesh, nodeIDs[ i ] ))
++        return error( sides[ i ]->GetError() );
++  }
++
+   // compute normalized parameters of nodes on sides (PAL23189)
+   fBottom->ComputeIJK( COO_X, COO_Y, /*z=*/0. );
+   fBack  ->ComputeIJK( COO_X, COO_Z, /*y=*/1. );
+@@ -895,9 +942,6 @@
+ 
+   StdMeshers_RenumberHelper renumHelper( theMesh, _blockRenumberHyp );
+ 
+-  int x, xSize = fBottom->GetNbHoriSegments(*proxyMesh) + 1, X = xSize - 1;
+-  int y, ySize = fBottom->GetNbVertSegments(*proxyMesh) + 1, Y = ySize - 1;
+-  int z, zSize = fFront ->GetNbVertSegments(*proxyMesh) + 1, Z = zSize - 1;
+   _Indexer colIndex( xSize, ySize );
+   vector< vector< const SMDS_MeshNode* > > columns( colIndex.size() );
+ 
+@@ -1880,6 +1924,49 @@
+ 
+ //================================================================================
+ /*!
++ * \brief pySMESH: Return the ids of the nodes of the loaded grid
++ */
++//================================================================================
++
++vector<smIdType> _QuadFaceGrid::GetNodeIDs() const
++{
++  vector<smIdType> ids( myGrid.size() );
++  for ( size_t i = 0; i < myGrid.size(); ++i )
++    ids[ i ] = myGrid[ i ]->GetID();
++  return ids;
++}
++
++//================================================================================
++/*!
++ * \brief pySMESH: Replace the nodes of the loaded grid by their nodes in a proxy mesh
++ *  \param [in] proxyMesh - the proxy mesh of the viscous layers
++ *  \param [in] nodeIDs - the ids the grid nodes had before the layers were built
++ *  \return bool - false if a node of the grid is gone, so the grid no longer holds
++ *
++ *  The layers shrink the mesh of a side FACE without layers in place, and on a failed
++ *  smoothing they mesh it again, which removes its nodes. So each node is looked up by its
++ *  id: it must still be the same node.
++ */
++//================================================================================
++
++bool _QuadFaceGrid::MapToProxyNodes( const SMESH_ProxyMesh&   proxyMesh,
++                                     const vector<smIdType>& nodeIDs )
++{
++  if ( nodeIDs.size() != myGrid.size() )
++    return error(ERR_LI("Error in _QuadFaceGrid::MapToProxyNodes()"));
++  const SMESHDS_Mesh* meshDS = proxyMesh.GetMeshDS();
++  for ( size_t i = 0; i < myGrid.size(); ++i )
++  {
++    if ( meshDS->FindNode( nodeIDs[ i ] ) != myGrid[ i ] )
++      return error( "The viscous layers meshed a side FACE of the block again, "
++                    "so its grid of nodes no longer holds" );
++    myGrid[ i ] = proxyMesh.GetProxyNode( myGrid[ i ] );
++  }
++  return true;
++}
++
++//================================================================================
++/*!
+  * \brief Return normal to the face at vertex v
+  */
+ //================================================================================

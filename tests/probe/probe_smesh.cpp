@@ -2768,11 +2768,12 @@ void probe_p4_mefisto_max_element_area() {
 // ------------------------------------------------------------------------------ P4L6 ----- //
 
 // StdMeshers_CompositeHexa_3D_viscous_layers.patch: CompositeHexa_3D with ViscousLayers used
-// to read a null proxy mesh and crash; it now fails the compute with an error that says so.
+// to read a null proxy mesh and crash (up to 4.2.2), then refused them (5.0.0). It now loads
+// the side grids before the layers are built and builds them: on the unit box with 4
+// segments and 3 layers on one face, 4 x 4 x 4 inner hexahedra and 4 x 4 x 3 layer ones.
 void probe_p4_composite_hexa_layers() {
-  section("P4L6", "CompositeHexa_3D refuses viscous layers instead of crashing");
-  // Under a compound root, as load_brep gives a shape: on a bare SOLID, SMESH refuses the
-  // hypothesis at assignment (HYP_INCOMPATIBLE), and Compute never sees it.
+  section("P4L6", "CompositeHexa_3D builds viscous layers");
+  // Under a compound root, as load_brep gives a shape.
   BRep_Builder builder;
   TopoDS_Compound box;
   builder.MakeCompound(box);
@@ -2795,14 +2796,15 @@ void probe_p4_composite_hexa_layers() {
   const bool computed = s.compute();
   TopExp_Explorer solid(box, TopAbs_SOLID);
   const SMESH_ComputeErrorPtr err = s.mesh().GetSubMesh(solid.Current())->GetComputeError();
-  const bool named = err && err->myComment.find("does not build viscous layers") !=
-                                std::string::npos;
+  const bool clean = !err || err->IsOK();
+  const smIdType volumes = s.meshDS()->NbVolumes();
   char msg[300];
   std::snprintf(msg, sizeof(msg),
-                "P4L6 CompositeHexa_3D + ViscousLayers: the compute fails on the SOLID, naming "
-                "the reason (it crashed before); assigned %d computed %d error '%s'",
-                int(assigned), int(computed), err ? err->myComment.c_str() : "(none)");
-  check(assigned && !computed && named, msg);
+                "P4L6 CompositeHexa_3D + ViscousLayers builds 64 + 48 hexahedra with no error; "
+                "assigned %d computed %d volumes %lld error '%s'",
+                int(assigned), int(computed), static_cast<long long>(volumes),
+                clean ? "(none)" : err->myComment.c_str());
+  check(assigned && computed && clean && volumes == 4 * 4 * 4 + 4 * 4 * 3, msg);
 }
 
 // ------------------------------------------------------------------------------ P5EXC ---- //

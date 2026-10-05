@@ -1070,9 +1070,9 @@ def test_an_algorithm_that_builds_no_layers_refuses_them_before_computing(
     assert native in str(raised.value)
 
 
-# The child assigns ViscousLayers with CompositeHexa3D on the unit box and computes. On
-# the reference the process died with an access violation: the layers fail there, and
-# CompositeHexa_3D then read a null proxy mesh.
+# The child assigns ViscousLayers with CompositeHexa3D on the unit box and computes. Up
+# to 4.2.2 the process died with an access violation: the layers failed there, and
+# CompositeHexa_3D then read a null proxy mesh; 5.0.0 refused the layers.
 _COMPOSITE_CHILD: str = """
 import os, sys
 occt = os.environ.get("PYSMESH_OCCT_BIN")
@@ -1095,18 +1095,20 @@ with ps.Mesher(ps.load_brep(s.brep())) as m:
                               boundary=(1,), group_name="bl"))
     try:
         m.compute()
-        print("COMPOSITE-RESULT computed")
+        groups = {g.name: int(g.element_ids.size) for g in m.groups()}
+        bad = m.select(ps.BadOrientedVolume()).count
+        print("COMPOSITE-RESULT computed", groups["bl"], bad)
     except ps.PysmeshError as e:
         print("COMPOSITE-RESULT refused " + str(e))
 """
 
 
-def test_composite_hexa_3d_refuses_layers_instead_of_crashing() -> None:
-    """In a child process: CompositeHexa3D with ViscousLayers raises, it does not crash.
-
-    Made to read the hypothesis, CompositeHexa_3D still cannot use the layers: the layer
-    quadrangles give the side faces more rows than the opposite faces, and its box grid
-    gets null nodes (StdMeshers_CompositeHexa_3D_viscous_layers.patch).
+def test_composite_hexa_3d_builds_layers_on_the_unit_box_in_a_child_process() -> None:
+    """In a child process: CompositeHexa3D with ViscousLayers on one face of the unit
+    box (4 segments, 3 layers) builds 4 x 4 x 3 layer cells, none inverted. It crashed
+    up to 4.2.2 and was refused in 5.0.0;
+    StdMeshers_CompositeHexa_3D_viscous_layers.patch now loads the side grids before the
+    layers are built.
     """
     package_root = str(Path(ps.__file__).resolve().parent.parent)
 
@@ -1123,8 +1125,7 @@ def test_composite_hexa_3d_refuses_layers_instead_of_crashing() -> None:
     line = next(
         ln for ln in proc.stdout.splitlines() if ln.startswith("COMPOSITE-RESULT ")
     )
-    assert line.startswith("COMPOSITE-RESULT refused ")
-    assert "CompositeHexa_3D does not build viscous layers" in line
+    assert line.split()[1:] == ["computed", str(4 * 4 * 3), "0"], line
 
 
 # ---- VL6 several ViscousLayers hypotheses on one solid ----------------------------- #
@@ -1219,15 +1220,16 @@ def test_layer_face_sets_that_do_not_fit_together_raise_smesh_reason(
         assert f"FACE {y0}" in str(raised.value)
 
 
-@pytest.mark.parametrize("algorithm", ["Hexa3D", "Cartesian3D"])
+@pytest.mark.parametrize("algorithm", ["Hexa3D", "CompositeHexa3D", "Cartesian3D"])
 def test_a_second_layer_hypothesis_on_an_algorithm_that_reads_one_is_refused(
     algorithm: str,
 ) -> None:
     """Hexa_3D takes one ViscousLayers per solid (``StdMeshers_Hexa_3D.cxx:136-147``):
-    with two, the reference meshed no volume and said nothing. Cartesian_3D keeps the
-    last one it lists (``StdMeshers_Cartesian_3D.cxx:114-125``): the reference built
-    only one stack. Now the compute refuses, names the solid and the algorithm, and
-    meshes nothing.
+    with two, the reference meshed no volume and said nothing. CompositeHexa_3D takes
+    one as Hexa_3D does (VLa); the reference refused it as a non-builder. Cartesian_3D
+    keeps the last one it lists (``StdMeshers_Cartesian_3D.cxx:114-125``): the reference
+    built only one stack. Now the compute refuses, names the solid and the algorithm,
+    and meshes nothing.
     """
     box = _unit_box()
     wall_a, wall_b = _at_x0(box.faces()), _at_x1(box.faces())
@@ -1241,7 +1243,11 @@ def test_a_second_layer_hypothesis_on_an_algorithm_that_reads_one_is_refused(
             mesher.compute()
 
         assert mesher.mesh().element_count == 0
-    native = {"Hexa3D": "Hexa_3D", "Cartesian3D": "Cartesian_3D"}[algorithm]
+    native = {
+        "Hexa3D": "Hexa_3D",
+        "CompositeHexa3D": "CompositeHexa_3D",
+        "Cartesian3D": "Cartesian_3D",
+    }[algorithm]
     assert native in str(raised.value)
     assert "SOLID 1" in str(raised.value)
 
@@ -1915,3 +1921,152 @@ def test_polygon_per_face_grows_layers_on_an_inclined_hexagon_edge() -> None:
     assert _loose_edges(mesh, on_rim) == (0, 0)
     assert float(areas.sum()) == pytest.approx(1.5 * math.sqrt(3.0), rel=1e-12)
     assert float(areas.min()) > 0.0
+
+
+# ---- VLa CompositeHexa3D with ViscousLayers ---------------------------------------- #
+
+
+def _block(split: bool) -> ps.Shape:
+    """A 2 x 1 x 1 block: two unit cubes fused (10 faces), or one box (6 faces)."""
+    session = Session()
+    if split:
+        session.add_box(1.0, 1.0, 1.0)
+        first = session.entities(ps.EntityKind.SOLID).tolist()
+        session.add_box(1.0, 1.0, 1.0, origin=(1.0, 0.0, 0.0))
+        every = session.entities(ps.EntityKind.SOLID).tolist()
+        session.fuse(first, [i for i in every if i not in first])
+    else:
+        session.add_box(2.0, 1.0, 1.0)
+    return ps.load_brep(session.brep())
+
+
+def _block_layers(
+    algorithm: str, split: bool, walls: str
+) -> tuple[ps.MeshData, ps.ComputeReport, dict[str, int], int, int]:
+    """The block meshed at LocalLength 0.25 with the stack (0.3, 3, 1.2) on the faces in
+    the plane x = 0 or y = 0, or on every face: the mesh, the report, the group sizes,
+    and the inverted and bare-border cell counts."""
+    block = _block(split)
+    axis = {"x0": 0, "y0": 1}.get(walls)
+    chosen = tuple(
+        int(f.id)
+        for f in block.faces()
+        if axis is not None and abs(f.bbox[axis]) < TOL and abs(f.bbox[axis + 3]) < TOL
+    )
+    with Mesher(block) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(ps.LocalLength(length=0.25))
+        mesher.assign(Quadrangle2D())
+        mesher.assign(CompositeHexa3D() if algorithm == "CompositeHexa3D" else Hexa3D())
+        mesher.assign(
+            ViscousLayers(
+                total_thickness=0.3,
+                layer_count=3,
+                stretch_factor=1.2,
+                boundary=chosen,
+                ignore=walls == "all",
+                group_name="bl",
+            )
+        )
+        report = mesher.compute()
+        groups = {g.name: int(g.element_ids.size) for g in mesher.groups()}
+        inverted = mesher.select(BadOrientedVolume()).count
+        bare = mesher.select(BareBorderVolume()).count
+        mesh = mesher.mesh()
+    return mesh, report, groups, inverted, bare
+
+
+def _nearest(a: NDArray[np.float64], b: NDArray[np.float64]) -> NDArray[np.float64]:
+    """For each point of ``a``, the distance to the nearest point of ``b``."""
+    return np.linalg.norm(a[:, None, :] - b[None, :, :], axis=2).min(axis=1)
+
+
+@pytest.mark.parametrize("algorithm", ["CompositeHexa3D", "Hexa3D"])
+def test_composite_hexa_layers_on_a_split_wall_equal_hexa_on_the_plain_block(
+    algorithm: str,
+) -> None:
+    """The stack on the wall y = 0, which the split block has as two faces.
+
+    CompositeHexa3D on the split block, and Hexa3D, which hands the 10-face block to
+    CompositeHexa3D, give the mesh that Hexa3D gives on the plain 2 x 1 x 1 box: the
+    same nodes, the same cells and the same layer group. The layer nodes lie on the
+    planes y = d_k; the cells fill the block, of volume 2, with no gap and none
+    inverted. The reference refused, or crashed, with layers on CompositeHexa3D.
+    """
+    total, count = STACK
+
+    mesh, report, groups, inverted, bare = _block_layers(algorithm, True, "y0")
+    plain, plain_report, plain_groups, _, _ = _block_layers("Hexa3D", False, "y0")
+
+    xyz = mesh.node_coords
+    assert len(xyz) == len(plain.node_coords)
+    assert float(_nearest(xyz, plain.node_coords).max()) < TOL
+    assert (report.volumes, groups) == (plain_report.volumes, plain_groups)
+    y = np.unique(np.round(xyz[:, 1], 12))
+    np.testing.assert_allclose(
+        y[(y > TOL) & (y <= total + TOL)], _layer_ends(total, 1.2, count), atol=TOL
+    )
+    assert groups == {"bl": 8 * 4 * count}
+    assert _shared_split_volume(mesh) == pytest.approx(2.0, rel=1e-12)
+    assert (inverted, bare) == (0, 0)
+
+
+def test_composite_hexa_layers_on_an_end_wall_equal_hexa_in_the_layer_zone() -> None:
+    """The stack on the end wall x = 0 of the split block, by CompositeHexa3D.
+
+    In the layer zone x <= T the nodes are those of Hexa3D on the plain box, on the
+    planes x = d_k. Beyond it the layers shrink the side faces: the plain box shrinks
+    each long side edge as one, the split block only the edges of the half next to the
+    wall, and the vertices of the split at x = 1 keep their nodes there. The cell counts
+    are equal; the cells fill the block exactly, none inverted.
+    """
+    total, count = STACK
+
+    mesh, report, groups, inverted, bare = _block_layers("CompositeHexa3D", True, "x0")
+    plain, plain_report, _, _, _ = _block_layers("Hexa3D", False, "x0")
+
+    xyz = mesh.node_coords
+    zone = xyz[xyz[:, 0] <= total + TOL]
+    plain_zone = plain.node_coords[plain.node_coords[:, 0] <= total + TOL]
+    assert len(zone) == len(plain_zone)
+    assert float(_nearest(zone, plain_zone).max()) < TOL
+    x = np.unique(np.round(xyz[:, 0], 12))
+    np.testing.assert_allclose(
+        x[(x > TOL) & (x <= total + TOL)], _layer_ends(total, 1.2, count), atol=TOL
+    )
+    seam = np.array(
+        [[1.0, y, z] for y in (0.0, 1.0) for z in (0.0, 1.0)], dtype=np.float64
+    )
+    assert float(_nearest(seam, xyz).max()) < TOL
+    assert report.volumes == plain_report.volumes
+    assert groups == {"bl": 4 * 4 * count}
+    assert _shared_split_volume(mesh) == pytest.approx(2.0, rel=1e-12)
+    assert (inverted, bare) == (0, 0)
+
+
+def test_composite_hexa_layers_on_every_face_sit_at_the_closed_form() -> None:
+    """The stack on every face of the split block, by CompositeHexa3D.
+
+    The layer nodes that grow from the middle node of the whole wall x = 0, (0, 0.5,
+    0.5), lie on the planes x = d_k, as on the plain box with Hexa3D; the smoothing of
+    SURF_OFFSET_SMOOTH moves them sideways by less than 1e-3 there, so the column is
+    read within 0.01 of its line. Each of the 10 faces gets one layer cell per
+    quadrangle per layer (8 x 4 x 4 x 2 + 4 x 4 x 2 = 160 quadrangles); the cell count
+    is that of Hexa3D on the plain box; the cells fill the block exactly, none inverted.
+    On the split walls the layer builder thins the stack near the seam x = 1 (SMESH's
+    smoothing at the seam vertices, not CompositeHexa3D), so no plane is read there.
+    """
+    total, count = STACK
+    ends = _layer_ends(total, 1.2, count)
+
+    mesh, report, groups, inverted, bare = _block_layers("CompositeHexa3D", True, "all")
+    _, plain_report, _, _, _ = _block_layers("Hexa3D", False, "all")
+
+    xyz = mesh.node_coords
+    column = (np.abs(xyz[:, 1] - 0.5) < 0.01) & (np.abs(xyz[:, 2] - 0.5) < 0.01)
+    x = np.unique(np.round(xyz[column, 0], 12))
+    np.testing.assert_allclose(x[(x > TOL) & (x <= total + TOL)], ends, atol=TOL)
+    assert groups == {"bl": 160 * count}
+    assert report.volumes == plain_report.volumes
+    assert _shared_split_volume(mesh) == pytest.approx(2.0, rel=1e-9)
+    assert (inverted, bare) == (0, 0)

@@ -340,10 +340,14 @@ class CompositeHexa3D(Algorithm):
     The counterpart of :class:`Hexa3D` for a block an import has cut into more than six
     faces.
 
-    It builds no viscous layers. With :class:`ViscousLayers` on its solid,
-    :meth:`~pysmesh.Mesher.compute` raises before it meshes anything; SMESH's own
-    compute crashed there, because the layer cells on the side faces break its block
-    grid. Use :class:`Hexa3D` for a block with layers.
+    With :class:`ViscousLayers` on its solid it builds the layers, one hypothesis per
+    solid, as :class:`Hexa3D` does; :class:`Hexa3D` hands a block of more than six faces
+    to it. Where the split of a side does not meet the layers, the mesh is the one
+    :class:`Hexa3D` makes on the same block with six faces. Where it does, it differs
+    there: a vertex of the split keeps its node when the layers shrink a side face (on a
+    2 x 1 x 1 block of two fused cubes, up to 0.1 away from the six-face mesh), and with
+    layers on the faces around a split wall SMESH's smoothing thins that wall's stack
+    near the split by about 1 %.
     """
 
     native_name: ClassVar[str] = "CompositeHexa_3D"
@@ -971,13 +975,14 @@ class ProjectionSource3D(Hypothesis):
 class ViscousLayers(Hypothesis):
     """Prism layers grown inward from named faces of a solid.
 
-    :class:`Hexa3D`, :class:`PolyhedronPerSolid3D` and :class:`Cartesian3D` build
-    them. On a solid that another algorithm meshes, :meth:`~pysmesh.Mesher.compute`
-    raises before it meshes anything.
+    :class:`Hexa3D`, :class:`CompositeHexa3D`, :class:`PolyhedronPerSolid3D` and
+    :class:`Cartesian3D` build them. On a solid that another algorithm meshes,
+    :meth:`~pysmesh.Mesher.compute` raises before it meshes anything.
 
     Several hypotheses can reach one solid, each with its own face set and stack (a
     thickness per face set). :class:`PolyhedronPerSolid3D` grows each stack on its own
-    faces. :class:`Hexa3D` and :class:`Cartesian3D` read one hypothesis per solid, so
+    faces. :class:`Hexa3D`, :class:`CompositeHexa3D` and :class:`Cartesian3D` read one
+    hypothesis per solid, so
     :meth:`~pysmesh.Mesher.compute` refuses a second one there. SMESH also refuses two
     face sets that share a face, and two that hold faces sharing an edge with a
     different ``layer_count``; :meth:`~pysmesh.Mesher.compute` raises with SMESH's

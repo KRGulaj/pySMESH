@@ -578,18 +578,19 @@ std::string Mesher::describe_concurrency(const TopoDS_Shape& target,
 }
 
 void Mesher::refuse_unread_layers() const {
-  // Only some algorithms build layers in their Compute: Hexa_3D, PolyhedronPerSolid_3D and
+  // Only some algorithms build layers in their Compute: Hexa_3D, CompositeHexa_3D
+  // (StdMeshers_CompositeHexa_3D_viscous_layers.patch), PolyhedronPerSolid_3D and
   // Cartesian_3D read ViscousLayers; Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D and
   // PolygonPerFace_2D (StdMeshers_PolygonPerFace_2D_viscous_layers.patch) read
   // ViscousLayers2D. The compatible lists do not tell: RadialQuadrangle_1D2D inherits
   // ViscousLayers2D from Quadrangle_2D and builds no layer. Any other algorithm meshes the
-  // sub-shape with no layer and no word (Prism_3D, RadialQuadrangle_1D2D), or crashed
-  // (CompositeHexa_3D).
+  // sub-shape with no layer and no word (Prism_3D, RadialQuadrangle_1D2D).
   //
   // A building algorithm can still refuse the layer hypotheses that reach it: Hexa_3D
-  // takes one ViscousLayers per solid (StdMeshers_Hexa_3D.cxx:136-147) and Cartesian_3D
-  // keeps the last one it lists (StdMeshers_Cartesian_3D.cxx:114-125), and the layer check
-  // of StdMeshers_ViscousLayers::CheckHypothesis refuses face sets that do not fit together.
+  // (StdMeshers_Hexa_3D.cxx:136-147) and CompositeHexa_3D take one ViscousLayers per solid,
+  // Cartesian_3D keeps the last one it lists (StdMeshers_Cartesian_3D.cxx:114-125), and the
+  // layer check of StdMeshers_ViscousLayers::CheckHypothesis refuses face sets that do not
+  // fit together.
   // SMESH then leaves the sub-mesh MISSING_HYP, or drops the other hypotheses, and its
   // Compute returns true with no element there (SMESH_Gen.cxx:249-253). So the layer check
   // runs here first, with SMESH's reason; the algorithm runs it again in its own check
@@ -604,9 +605,9 @@ void Mesher::refuse_unread_layers() const {
   };
   const LayerKind kinds[] = {
       {TopAbs_SOLID, "SOLID", "ViscousLayers",
-       {"Hexa_3D", "PolyhedronPerSolid_3D", "Cartesian_3D"},
-       "Hexa_3D, PolyhedronPerSolid_3D and Cartesian_3D",
-       {"Hexa_3D", "Cartesian_3D"}},
+       {"Hexa_3D", "CompositeHexa_3D", "PolyhedronPerSolid_3D", "Cartesian_3D"},
+       "Hexa_3D, CompositeHexa_3D, PolyhedronPerSolid_3D and Cartesian_3D",
+       {"Hexa_3D", "CompositeHexa_3D", "Cartesian_3D"}},
       {TopAbs_FACE, "FACE", "ViscousLayers2D",
        {"Quadrangle_2D", "QuadFromMedialAxis_1D2D", "MEFISTO_2D", "PolygonPerFace_2D"},
        "Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D and PolygonPerFace_2D",

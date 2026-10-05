@@ -117,7 +117,7 @@ and the total thickness in a closed form (`first_layer_thickness`). There are
 three ways to build them:
 
 - **Inside a `Mesher`:** `ViscousLayers` on a solid, with `Hexa3D`,
-  `PolyhedronPerSolid3D` or `Cartesian3D`. `ViscousLayers2D` on a face, with
+  `CompositeHexa3D`, `PolyhedronPerSolid3D` or `Cartesian3D`. `ViscousLayers2D` on a face, with
   `Quadrangle2D`, `QuadFromMedialAxis1D2D`, `Mefisto2D` or `PolygonPerFace2D`. An
   algorithm that cannot build layers refuses them by name.
 - **In two steps, with `ViscousLayerBuilder`:** `Mesher.shrink_geometry` returns
