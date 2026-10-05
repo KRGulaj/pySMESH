@@ -151,6 +151,7 @@ PATCH_MANIFEST: Final[tuple[tuple[str, str], ...]] = (
     ("netgenplugin/NETGENPlugin_local_size_by_subshape.patch", "src/NETGENPlugin"),
     ("netgenplugin/NETGENPlugin_runtime_containment.patch", "src/NETGENPlugin"),
     ("netgenplugin/NETGENPlugin_edge_local_size_ends.patch", "src/NETGENPlugin"),
+    ("netgenplugin/NETGENPlugin_face_maxh_index.patch", "src/NETGENPlugin"),
 )
 
 # netgen slice: the directories of extern/netgen that prepare.py copies to

@@ -1,0 +1,43 @@
+pySMESH: a size given to a face goes to that face (NETGENPlugin V9_16_0; applies after
+NETGENPlugin_edge_local_size_ends.patch).
+
+Defect: with NETGEN_V6 defined, NETGENPlugin_Mesher.cxx sets a face's maximal size with
+occgeo.SetFaceMaxH(faceNgID-1, val, netgen::mparam) for a local size on a face
+(SetLocalSize), and with occgeo.SetFaceMaxH(i-1, size, netgen::mparam) for the chordal
+error of a cylinder, sphere or torus face (SetLocalSizeForChordalError). faceNgID and i are
+1-based indices into occgeo.fmap. In netgen 6.2.2101 the overload
+SetFaceMaxH(int facenr, double faceh, const MeshingParameters&) also takes a 1-based face
+number (libsrc/occ/occgeom.hpp:353-372: face_maxh[facenr-1], and nothing for facenr < 1);
+only SetFaceMaxH(size_t facenr, double faceh) is 0-based. So the size went to the face
+before, and face 1's size went nowhere. Measured on a 4 x 4 x 4 cube at max_size 1.0 with
+a local size of 0.1 on one face: the parallel face 4 away is refined to a mean triangle edge
+of 0.114 to 0.116, and a chordal error of 0.002 on a cylinder of radius 1 left its lateral
+face at a mean edge of 0.41 (tests/test_mesher_netgen_face_size.py).
+
+Change, in NETGENPlugin_Mesher.cxx only: both calls pass the 1-based index. A mesh with no
+local size on a face and no chordal error does not change.
+
+diff --git a/src/NETGENPlugin/NETGENPlugin_Mesher.cxx b/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
+--- a/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
++++ b/src/NETGENPlugin/NETGENPlugin_Mesher.cxx
+@@ -816,7 +816,9 @@
+     if ( faceNgID >= 1 )
+     {
+ #ifdef NETGEN_V6
+-      occgeo.SetFaceMaxH(faceNgID-1, val, netgen::mparam);
++      // pySMESH: this overload takes the 1-based face number (occgeom.hpp), as fmap does;
++      // faceNgID-1 gave the size to the face before, and none for face 1.
++      occgeo.SetFaceMaxH(faceNgID, val, netgen::mparam);
+ #else
+       occgeo.SetFaceMaxH(faceNgID, val);
+ #endif
+@@ -885,7 +887,8 @@
+       double maxCurv = Max( Abs( surfProp.MaxCurvature()), Abs( surfProp.MinCurvature() ));
+       double    size = elemSizeForChordalError( _chordalError, 1 / maxCurv );
+ #ifdef NETGEN_V6
+-      occgeo.SetFaceMaxH( i-1, size * sizeCoef, netgen::mparam );
++      // pySMESH: 1-based, as above.
++      occgeo.SetFaceMaxH( i, size * sizeCoef, netgen::mparam );
+ #else
+       occgeo.SetFaceMaxH( i, size * sizeCoef );
+ #endif
