@@ -1,0 +1,2460 @@
+pySMESH: netgen writes to its own message streams, never straight to the console
+(netgen 6.2.2101; applies after occgeom_save_without_stl.patch).
+
+Why: netgen has two message streams of its own, netgen::mycout and netgen::myerr
+(general/template.hpp; meshing/global.cpp sets them to &cout and &cerr), which
+PrintMessage, PrintWarning and PrintError use and which an embedding program can point
+elsewhere. Many netgen sources write past them, straight to std::cout and std::cerr, and
+pySMESH is embedded in a host program whose console it must leave alone. Measured with a
+capture of fd 1 and fd 2 on the NETGEN algorithms
+(docs/reports/agents/phase5_netgen/g2/np3_output_scan.py and np3_failure_timing.py):
+"retry Surface 1" on every sphere, the "WARNING! NOT ALL FACES HAVE BEEN MESHED" block on a
+failed face and on a cancel (occ/occgenmesh.cpp), "el1 = ...", "el2 = ...",
+"layer1 = ...", "layer2 = ..." for each pair of intersecting surface triangles (184 blocks
+on one sphere; meshing/meshclass.cpp), and "meshed area = ...", "maximal area = ...",
+"GIVING UP" (meshing/meshing2.cpp). A test reaches only some paths; the others are the
+same kind of message on the same meshing code.
+
+Change, made by a script (docs/reports/agents/phase5_netgen/scripts/
+netgen_console_rewrite.py) in the code, not in comments or string literals, of every file
+pySMESH compiles or includes from libsrc/{meshing,occ,general,linalg,gprim,stlgeom,include}
+and of nglib/nglib.cpp: std::cout / cout becomes (*::netgen::mycout), and std::cerr / cerr /
+clog becomes (*::netgen::myerr). The lines that define or assign the two streams
+(meshing/global.cpp, Ng_Init) do not change. Run on its own, netgen prints exactly what
+it printed before; inside pySMESH, NETGENPlugin_runtime_containment.patch points both
+streams at a stream with no buffer. libsrc/interface, csg and geom2d (file formats and
+geometry kinds pySMESH never calls) and ngcore (its logger is switched off; the rest is
+GCC-only or unused) are left as they are. No mesh changes: only where the text goes.
+
+diff --git a/libsrc/general/dynamicmem.cpp b/libsrc/general/dynamicmem.cpp
+--- a/libsrc/general/dynamicmem.cpp
++++ b/libsrc/general/dynamicmem.cpp
+@@ -54,7 +54,7 @@
+ 
+     if (!ptr)
+       {
+-	cerr << "BaseynamicMem, cannot allocate " << s << " bytes" << endl;
++	(*::netgen::myerr) << "BaseynamicMem, cannot allocate " << s << " bytes" << endl;
+ 	Print ();
+ 	throw ("BaseDynamicMem::Alloc: out of memory");
+       }
+@@ -71,7 +71,7 @@
+ 
+     if (!ptr)
+       {
+-	cerr << "BaseynamicMem, cannot Reallocate " << s << " bytes" << endl;
++	(*::netgen::myerr) << "BaseynamicMem, cannot Reallocate " << s << " bytes" << endl;
+ 	Print ();
+ 	throw ("BaseDynamicMem::Alloc: out of memory");
+       }
+@@ -106,7 +106,7 @@
+ 
+   void BaseDynamicMem :: Print ()
+   {
+-    cout << "****************** Dynamic Mem Report ****************" << endl;
++    (*::netgen::mycout) << "****************** Dynamic Mem Report ****************" << endl;
+     BaseDynamicMem * p = first;
+     size_t mem = 0;
+     int cnt = 0;
+@@ -115,22 +115,22 @@
+ 	mem += p->size;
+ 	cnt++;
+ 
+-	cout << setw(10) << p->size << " Bytes";
+-	cout << ", addr = " << (void*)p->ptr;
++	(*::netgen::mycout) << setw(10) << p->size << " Bytes";
++	(*::netgen::mycout) << ", addr = " << (void*)p->ptr;
+ 	if (p->name)
+-	  cout << " in block " << p->name;
+-	cout << endl;
++	  (*::netgen::mycout) << " in block " << p->name;
++	(*::netgen::mycout) << endl;
+ 
+ 	p = p->next;
+       }
+ 
+     if (mem > 100000000)
+-      cout << "memory in dynamic memory: " << mem/1048576 << " MB" << endl;
++      (*::netgen::mycout) << "memory in dynamic memory: " << mem/1048576 << " MB" << endl;
+     else if (mem > 100000)
+-      cout << "memory in dynamic memory: " << mem/1024 << " kB" << endl;
++      (*::netgen::mycout) << "memory in dynamic memory: " << mem/1024 << " kB" << endl;
+     else
+-      cout << "memory in dynamic memory: " << mem << " Bytes" << endl;
+-    cout << "number of blocks:         " << cnt << endl;
++      (*::netgen::mycout) << "memory in dynamic memory: " << mem << " Bytes" << endl;
++    (*::netgen::mycout) << "number of blocks:         " << cnt << endl;
+     //  cout << "******************************************************" << endl;
+   }
+ 
+diff --git a/libsrc/general/hashtabl.hpp b/libsrc/general/hashtabl.hpp
+--- a/libsrc/general/hashtabl.hpp
++++ b/libsrc/general/hashtabl.hpp
+@@ -984,7 +984,7 @@
+ 
+   void PrintMemInfo (ostream & ost) const
+   {
+-    cout << "Hashtable: " << Size() 
++    (*::netgen::mycout) << "Hashtable: " << Size() 
+          << " entries of size " << sizeof(INDEX_3) << " + " << sizeof(T) 
+          << " = " << Size() * (sizeof(INDEX_3) + sizeof(T)) << " bytes" << endl;
+     
+@@ -1239,7 +1239,7 @@
+ inline void INDEX_2_CLOSED_HASHTABLE<T> :: 
+ PrintMemInfo (ostream & ost) const
+ {
+-  cout << "Hashtable: " << Size() 
++  (*::netgen::mycout) << "Hashtable: " << Size() 
+        << " entries of size " << sizeof(INDEX_2) << " + " << sizeof(T) 
+        << " = " << Size() * (sizeof(INDEX_2) + sizeof(T)) << " bytes." 
+        << " Used els: " << UsedElements() 
+diff --git a/libsrc/general/mpi_interface.hpp b/libsrc/general/mpi_interface.hpp
+--- a/libsrc/general/mpi_interface.hpp
++++ b/libsrc/general/mpi_interface.hpp
+@@ -19,7 +19,7 @@
+ #ifdef PARALLEL
+   template <class T>
+   inline MPI_Datatype MyGetMPIType ( ) 
+-  { cerr << "ERROR in GetMPIType() -- no type found" << endl;return 0; }
++  { (*::netgen::myerr) << "ERROR in GetMPIType() -- no type found" << endl;return 0; }
+   template <>
+   inline MPI_Datatype MyGetMPIType<int> ( )
+   { return MPI_INT; }
+diff --git a/libsrc/general/mystring.cpp b/libsrc/general/mystring.cpp
+--- a/libsrc/general/mystring.cpp
++++ b/libsrc/general/mystring.cpp
+@@ -57,7 +57,7 @@
+ 
+ void DefaultStringErrHandler()
+ {
+-  cerr << "Error : string operation out of range\n" << flush;
++  (*::netgen::myerr) << "Error : string operation out of range\n" << flush;
+ }
+ 
+ void (*MyStr::ErrHandler)() = DefaultStringErrHandler;
+diff --git a/libsrc/general/netgenout.hpp b/libsrc/general/netgenout.hpp
+--- a/libsrc/general/netgenout.hpp
++++ b/libsrc/general/netgenout.hpp
+@@ -60,7 +60,7 @@
+ 
+ public:
+   NetgenOutStream() :
+-    out(&std::cout),
++    out(&(*::netgen::mycout)),
+     print(1),
+     printheader(1)
+   {
+diff --git a/libsrc/general/ngarray.cpp b/libsrc/general/ngarray.cpp
+--- a/libsrc/general/ngarray.cpp
++++ b/libsrc/general/ngarray.cpp
+@@ -24,7 +24,7 @@
+ #ifdef NONE  
+   void BASE_Array :: ReSize (int minsize, int elementsize)
+   {
+-    cout << "resize, minsize = " << minsize << endl;
++    (*::netgen::mycout) << "resize, minsize = " << minsize << endl;
+ 
+     if (inc == -1)
+       throw Exception ("Try to resize fixed size array");
+@@ -50,7 +50,7 @@
+       }
+     
+     allocsize = nsize;
+-    cout << "resize done" << endl;
++    (*::netgen::mycout) << "resize done" << endl;
+   }
+   
+   
+diff --git a/libsrc/general/ngarray.hpp b/libsrc/general/ngarray.hpp
+--- a/libsrc/general/ngarray.hpp
++++ b/libsrc/general/ngarray.hpp
+@@ -112,7 +112,7 @@
+     {
+ #ifdef DEBUG
+       if (i-BASE < 0 || i-BASE >= size)
+-	cout << "array<" << typeid(T).name() << "> out of range, i = " << i << ", s = " << size << endl;
++	(*::netgen::mycout) << "array<" << typeid(T).name() << "> out of range, i = " << i << ", s = " << size << endl;
+ #endif
+ 
+       return data[i-BASE]; 
+@@ -131,7 +131,7 @@
+     {
+ #ifdef DEBUG
+       if (i < 1 || i > size)
+-	cout << "NgArray<" << typeid(T).name() 
++	(*::netgen::mycout) << "NgArray<" << typeid(T).name() 
+ 	     << ">::Elem out of range, i = " << i
+ 	     << ", s = " << size << endl;
+ #endif
+@@ -145,7 +145,7 @@
+     {
+ #ifdef DEBUG
+       if (i < 1 || i > size)
+-	cout << "NgArray<" << typeid(T).name() << ">::Get out of range, i = " << i
++	(*::netgen::mycout) << "NgArray<" << typeid(T).name() << ">::Get out of range, i = " << i
+ 	     << ", s = " << size << endl;
+ #endif
+ 
+@@ -157,7 +157,7 @@
+     { 
+ #ifdef DEBUG
+       if (i < 1 || i > size)
+-	cout << "NgArray<" << typeid(T).name() << ">::Set out of range, i = " << i
++	(*::netgen::mycout) << "NgArray<" << typeid(T).name() << ">::Set out of range, i = " << i
+ 	     << ", s = " << size << endl;
+ #endif
+ 
+diff --git a/libsrc/general/table.hpp b/libsrc/general/table.hpp
+--- a/libsrc/general/table.hpp
++++ b/libsrc/general/table.hpp
+@@ -243,7 +243,7 @@
+   { 
+ #ifdef DEBUG
+     if (i-BASE < 0 || i-BASE >= data.Size())
+-      cout << "table out of range, i = " << i << ", s = " << data.Size() << endl;
++      (*::netgen::mycout) << "table out of range, i = " << i << ", s = " << data.Size() << endl;
+ #endif
+ 
+     return NgFlatArray<T> (data[i-BASE].size, (T*)data[i-BASE].col);
+diff --git a/libsrc/gprim/geom3d.hpp b/libsrc/gprim/geom3d.hpp
+--- a/libsrc/gprim/geom3d.hpp
++++ b/libsrc/gprim/geom3d.hpp
+@@ -433,7 +433,7 @@
+ #ifdef DEBUG
+     else
+       {
+-	cerr << "Vec div by 0, v = " << (*this) << endl;
++	(*::netgen::myerr) << "Vec div by 0, v = " << (*this) << endl;
+ 	//      MyError ("Vec3d::operator /=: Divisioin by zero");
+       }
+ #endif
+diff --git a/libsrc/gprim/geomtest3d.cpp b/libsrc/gprim/geomtest3d.cpp
+--- a/libsrc/gprim/geomtest3d.cpp
++++ b/libsrc/gprim/geomtest3d.cpp
+@@ -1128,7 +1128,7 @@
+   double res2 =  - pol.MaxUnitTriangle ();
+ 
+   if (fabs (res - res2) > 1e-8)
+-    cout << "res and res2 differ: " << res << " != " << res2 << endl;
++    (*::netgen::mycout) << "res and res2 differ: " << res << " != " << res2 << endl;
+   return res2;
+ }
+ 
+diff --git a/libsrc/gprim/spline.cpp b/libsrc/gprim/spline.cpp
+--- a/libsrc/gprim/spline.cpp
++++ b/libsrc/gprim/spline.cpp
+@@ -37,7 +37,7 @@
+   void CircleSeg<3> :: LineIntersections (const double a, const double b, const double c,
+ 					  NgArray < Point<3> > & points, const double eps) const
+   {
+-    cerr << "CircleSeg<3>::LineIntersections not implemented" << endl;
++    (*::netgen::myerr) << "CircleSeg<3>::LineIntersections not implemented" << endl;
+   }
+   
+   template <> 
+diff --git a/libsrc/gprim/spline.hpp b/libsrc/gprim/spline.hpp
+--- a/libsrc/gprim/spline.hpp
++++ b/libsrc/gprim/spline.hpp
+@@ -61,7 +61,7 @@
+     /// returns a (not necessarily unit-length) tangent vector for 0 <= t <= 1
+     virtual Vec<D> GetTangent (const double t) const
+     { 
+-      cerr << "GetTangent not implemented for spline base-class"  << endl; 
++      (*::netgen::myerr) << "GetTangent not implemented for spline base-class"  << endl; 
+       Vec<D> dummy; return dummy;
+     }
+ 
+@@ -111,10 +111,10 @@
+     virtual string GetType(void) const {return "splinebase";}
+ 
+     virtual void Project (const Point<D> point, Point<D> & point_on_curve, double & t) const
+-    { cerr << "Project not implemented for spline base-class" << endl;}
++    { (*::netgen::myerr) << "Project not implemented for spline base-class" << endl;}
+ 
+     virtual void GetRawData (NgArray<double> & data) const
+-    { cerr << "GetRawData not implemented for spline base-class" << endl;}
++    { (*::netgen::myerr) << "GetRawData not implemented for spline base-class" << endl;}
+ 
+   };
+ 
+diff --git a/libsrc/linalg/bfgs.cpp b/libsrc/linalg/bfgs.cpp
+--- a/libsrc/linalg/bfgs.cpp
++++ b/libsrc/linalg/bfgs.cpp
+@@ -331,7 +331,7 @@
+ 	{
+ 	  if (LDLtUpdate (l, d, 1 / a1, y) != 0)
+ 	    {
+-              cerr << "BFGS update error1" << endl;
++              (*::netgen::myerr) << "BFGS update error1" << endl;
+ 	      (*testout) << "BFGS update error1" << endl;
+ 	      (*testout) << "l " << endl << l << endl
+ 			 << "d " << d << endl;
+@@ -341,7 +341,7 @@
+ 
+ 	  if (LDLtUpdate (l, d, -1 / a2, bs) != 0)
+ 	    {
+-              cerr << "BFGS update error2" << endl;
++              (*::netgen::myerr) << "BFGS update error2" << endl;
+ 	      (*testout) << "BFGS update error2" << endl;
+ 	      (*testout) << "l " << endl << l << endl
+ 			 << "d " << d << endl;
+diff --git a/libsrc/linalg/densemat.cpp b/libsrc/linalg/densemat.cpp
+--- a/libsrc/linalg/densemat.cpp
++++ b/libsrc/linalg/densemat.cpp
+@@ -320,7 +320,7 @@
+                   {
+                     if (x <= 0)
+                       {
+-                        cerr << "Matrix indefinite 1" << endl;
++                        (*::netgen::myerr) << "Matrix indefinite 1" << endl;
+                         return;
+                       }
+ 		  
+@@ -461,7 +461,7 @@
+ 	  
+             if (max < 1e-20)
+               {
+-                cerr << "Inverse matrix: matrix singular" << endl;
++                (*::netgen::myerr) << "Inverse matrix: matrix singular" << endl;
+                 *testout << "Inverse matrix: matrix singular" << endl;
+                 return;
+               }
+@@ -1264,7 +1264,7 @@
+                   {
+                     if (x <= 0)
+                       {
+-                        cerr << "Matrix indefinite" << endl;
++                        (*::netgen::myerr) << "Matrix indefinite" << endl;
+                         return;
+                       }
+ 		  
+diff --git a/libsrc/linalg/densemat.hpp b/libsrc/linalg/densemat.hpp
+--- a/libsrc/linalg/densemat.hpp
++++ b/libsrc/linalg/densemat.hpp
+@@ -66,11 +66,11 @@
+       }
+     if (!height) 
+       {
+-	cout << "DenseMatrix::Mult height = 0" << endl;
++	(*::netgen::mycout) << "DenseMatrix::Mult height = 0" << endl;
+       }
+     if (!width) 
+       {
+-	cout << "DenseMatrix::Mult width = 0" << endl;
++	(*::netgen::mycout) << "DenseMatrix::Mult width = 0" << endl;
+       }
+     
+     if (width != v.Size())
+diff --git a/libsrc/linalg/linopt.cpp b/libsrc/linalg/linopt.cpp
+--- a/libsrc/linalg/linopt.cpp
++++ b/libsrc/linalg/linopt.cpp
+@@ -19,7 +19,7 @@
+     
+   if (a.Width() != 3)
+     {
+-    cerr << "LinearOptimize only implemented for 3 unknowns" << endl;
++    (*::netgen::myerr) << "LinearOptimize only implemented for 3 unknowns" << endl;
+     return;
+     }
+     
+diff --git a/libsrc/linalg/linsearch.cpp b/libsrc/linalg/linsearch.cpp
+--- a/libsrc/linalg/linsearch.cpp
++++ b/libsrc/linalg/linsearch.cpp
+@@ -31,18 +31,18 @@
+ 
+ double MinFunction :: Func (const Vector & /* x */) const
+ {
+-  cerr << "Func of MinFunction called" << endl;
++  (*::netgen::myerr) << "Func of MinFunction called" << endl;
+   return 0;
+ }
+ 
+ void MinFunction :: Grad (const Vector & /* x */, Vector & /* g */) const
+ {
+-  cerr << "Grad of MinFunction called" << endl;
++  (*::netgen::myerr) << "Grad of MinFunction called" << endl;
+ }
+   
+ double MinFunction :: FuncGrad (const Vector & x, Vector & g) const
+ {
+-  cerr << "Grad of MinFunction called" << endl;
++  (*::netgen::myerr) << "Grad of MinFunction called" << endl;
+   return 0;
+   /*
+   int n = x.Size();
+diff --git a/libsrc/meshing/adfront2.cpp b/libsrc/meshing/adfront2.cpp
+--- a/libsrc/meshing/adfront2.cpp
++++ b/libsrc/meshing/adfront2.cpp
+@@ -22,7 +22,7 @@
+ 	mgi = new MultiPointGeomInfo (*amgi);
+ 	for (int i = 1; i <= mgi->GetNPGI(); i++)
+ 	  if (mgi->GetPGI(i).trignum <= 0)
+-	    cout << "WARNING: Add FrontPoint2, illegal geominfo = " << mgi->GetPGI(i).trignum << endl;
++	    (*::netgen::mycout) << "WARNING: Add FrontPoint2, illegal geominfo = " << mgi->GetPGI(i).trignum << endl;
+       }
+     else
+       mgi = NULL;
+@@ -138,7 +138,7 @@
+   
+     if (!gi1.trignum || !gi2.trignum)
+       {
+-	cout << "WARNING: in AdFront::AddLine, illegal geominfo" << endl;
++	(*::netgen::mycout) << "WARNING: in AdFront::AddLine, illegal geominfo" << endl;
+       }
+   
+     lines[li].SetGeomInfo (gi1, gi2);
+@@ -154,7 +154,7 @@
+ 	if (allflines->Used (INDEX_2 (GetGlobalIndex (pi1), 
+ 				      GetGlobalIndex (pi2))))
+ 	  {
+-	    cerr << "ERROR Adfront2::AddLine: line exists" << endl;
++	    (*::netgen::myerr) << "ERROR Adfront2::AddLine: line exists" << endl;
+ 	    (*testout) << "ERROR Adfront2::AddLine: line exists" << endl;
+ 	  }
+ 
+@@ -422,7 +422,7 @@
+    
+     if (loclines.Size() == 1)
+       {
+-	cout << "loclines.Size = 1" << endl;
++	(*::netgen::mycout) << "loclines.Size = 1" << endl;
+ 	(*testout) << "loclines.size = 1" << endl
+ 		   << " h = " << xh << endl
+ 		   << " nearline.size = " << nearlines.Size() << endl
+diff --git a/libsrc/meshing/basegeom.cpp b/libsrc/meshing/basegeom.cpp
+--- a/libsrc/meshing/basegeom.cpp
++++ b/libsrc/meshing/basegeom.cpp
+@@ -327,7 +327,7 @@
+                         nsubedges = i;
+                         mps.SetSize(nsubedges-1);
+                         params.SetSize(nsubedges+1);
+-                        cout << "divide edge: local h too small" << endl;
++                        (*::netgen::mycout) << "divide edge: local h too small" << endl;
+                       }
+ 
+                   } while(i < nsubedges);
+@@ -337,7 +337,7 @@
+ 
+                 if(params[nsubedges] <= params[nsubedges-1])
+                   {
+-                    cout << "CORRECTED" << endl;
++                    (*::netgen::mycout) << "CORRECTED" << endl;
+                     mps.SetSize (nsubedges-2);
+                     params.SetSize (nsubedges);
+                     params[nsubedges-1] = 1.;
+diff --git a/libsrc/meshing/bcfunctions.cpp b/libsrc/meshing/bcfunctions.cpp
+--- a/libsrc/meshing/bcfunctions.cpp
++++ b/libsrc/meshing/bcfunctions.cpp
+@@ -75,12 +75,12 @@
+ 
+       if(printmessage_importance >= 3)
+       {
+-         cout << endl << "-------- Face Colours --------" << endl;
++         (*::netgen::mycout) << endl << "-------- Face Colours --------" << endl;
+          for( int i = 1; i <= face_colours.Size(); i++)
+          {
+-            cout << face_colours.Elem(i) << endl;
+-         }
+-         cout << "------------------------------" << endl;
++            (*::netgen::mycout) << face_colours.Elem(i) << endl;
++         }
++         (*::netgen::mycout) << "------------------------------" << endl;
+       }
+    }
+ 
+diff --git a/libsrc/meshing/bisect.cpp b/libsrc/meshing/bisect.cpp
+--- a/libsrc/meshing/bisect.cpp
++++ b/libsrc/meshing/bisect.cpp
+@@ -428,7 +428,7 @@
+ 		}
+ 	      default:
+ 		{
+-		  cerr << "Error: Sort for Bisect, SE has " << el.GetNP() << " points" << endl;
++		  (*::netgen::myerr) << "Error: Sort for Bisect, SE has " << el.GetNP() << " points" << endl;
+ 		  ned = 0;
+ 		}
+ 	      }
+@@ -2573,7 +2573,7 @@
+ 	    }
+ 	  case PYRAMID:
+ 	    {
+-	      cerr << "Refinement :: UpdateEdgeMarks not yet implemented for pyramids"
++	      (*::netgen::myerr) << "Refinement :: UpdateEdgeMarks not yet implemented for pyramids"
+ 		   << endl;
+ 	      break;
+ 	    }
+@@ -2581,7 +2581,7 @@
+ 	  case PRISM:
+ 	  case PRISM12:
+ 	    {
+-	      cerr << "Refinement :: UpdateEdgeMarks not yet implemented for prisms"
++	      (*::netgen::myerr) << "Refinement :: UpdateEdgeMarks not yet implemented for prisms"
+ 		   << endl;
+ 	      break;
+ 	    }
+diff --git a/libsrc/meshing/boundarylayer.cpp b/libsrc/meshing/boundarylayer.cpp
+--- a/libsrc/meshing/boundarylayer.cpp
++++ b/libsrc/meshing/boundarylayer.cpp
+@@ -6,18 +6,18 @@
+ 
+    void InsertVirtualBoundaryLayer (Mesh & mesh)
+    {
+-      cout << "Insert virt. b.l." << endl;
++      (*::netgen::mycout) << "Insert virt. b.l." << endl;
+ 
+       int surfid;
+ 
+-      cout << "Boundary Nr:";
++      (*::netgen::mycout) << "Boundary Nr:";
+       cin >> surfid;
+ 
+       int i;
+       int np = mesh.GetNP();
+ 
+-      cout << "Old NP: " << mesh.GetNP() << endl;
+-      cout << "Trigs: " << mesh.GetNSE() << endl;
++      (*::netgen::mycout) << "Old NP: " << mesh.GetNP() << endl;
++      (*::netgen::mycout) << "Trigs: " << mesh.GetNSE() << endl;
+ 
+       NgBitArray bndnodes(np);
+       NgArray<int> mapto(np);
+@@ -26,7 +26,7 @@
+       for (i = 1; i <= mesh.GetNSeg(); i++)
+       {
+          int snr = mesh.LineSegment(i).edgenr;
+-         cout << "snr = " << snr << endl;
++         (*::netgen::mycout) << "snr = " << snr << endl;
+          if (snr == surfid)
+          {
+             bndnodes.Set (mesh.LineSegment(i)[0]);
+@@ -84,8 +84,8 @@
+          }
+       }
+ 
+-      cout << "New NP: " << mesh.GetNP() << endl;
+-      cout << "Quads: " << nq << endl;
++      (*::netgen::mycout) << "New NP: " << mesh.GetNP() << endl;
++      (*::netgen::mycout) << "Quads: " << nq << endl;
+    }
+ 
+   void GenerateBoundaryLayer(Mesh& mesh, const BoundaryLayerParameters& blp)
+diff --git a/libsrc/meshing/classifyhpel.hpp b/libsrc/meshing/classifyhpel.hpp
+--- a/libsrc/meshing/classifyhpel.hpp
++++ b/libsrc/meshing/classifyhpel.hpp
+@@ -64,7 +64,7 @@
+ 	
+ 	if (debug)
+ 	  {
+-	    cout << "debug" << endl;
++	    (*::netgen::mycout) << "debug" << endl;
+ 	    *testout  << "debug" << endl;
+ 	    *testout << "ep = " << ep1 << ep2 << ep3 << ep4 << endl;
+ 	    *testout << "cp = " << cp1 << cp2 << cp3 << cp4 << endl;
+@@ -402,7 +402,7 @@
+       }
+   
+   
+-  if (debug) cout << "type = " << type << endl;
++  if (debug) (*::netgen::mycout) << "type = " << type << endl;
+ 
+   if (type == HP_NONE)
+     {
+@@ -413,7 +413,7 @@
+ 		 << "isedge = " << isedge1 << isedge2 << isedge3 
+ 		 << isedge4 << isedge5 << isedge6 << endl
+ 		 << "isface = " << isface1 << isface2 << isface3 << isface4 << endl;
+-      cout << "undefined element !!! " << endl;
++      (*::netgen::mycout) << "undefined element !!! " << endl;
+ 
+       
+     }
+@@ -597,7 +597,7 @@
+ 	  
+ 	case 2:
+ 	  if(sve[0] <= 1) 
+-	    cout << " **** WARNING: Edge between to different singular faces should be marked singular " << endl; 
++	    (*::netgen::mycout) << " **** WARNING: Edge between to different singular faces should be marked singular " << endl; 
+ 		      
+ 	  if(sve[1] <= 1)   
+ 	    if(sve[2] <=1) 
+diff --git a/libsrc/meshing/curvedelems.cpp b/libsrc/meshing/curvedelems.cpp
+--- a/libsrc/meshing/curvedelems.cpp
++++ b/libsrc/meshing/curvedelems.cpp
+@@ -1608,7 +1608,7 @@
+       case QUAD : info.nv = 4; break;
+       case TRIG6: return true;
+       default:
+-	cerr << "undef element in CalcSurfaceTrafo" << endl;
++	(*::netgen::myerr) << "undef element in CalcSurfaceTrafo" << endl;
+       }
+     info.ndof = info.nv;
+ 
+@@ -1690,7 +1690,7 @@
+       case TRIG6: info.nv = 6; break;
+       case QUAD8 : info.nv = 8; break;
+       default:
+-	cerr << "undef element in CalcSurfaceTrafo" << endl;
++	(*::netgen::myerr) << "undef element in CalcSurfaceTrafo" << endl;
+       }
+     info.ndof = info.nv;
+ 
+@@ -4100,7 +4100,7 @@
+       case TRIG6: info.nv = 6; break;
+       case QUAD8 : info.nv = 8; break;
+       default:
+-	cerr << "undef element in CalcMultPointSurfaceTrafo" << endl;
++	(*::netgen::myerr) << "undef element in CalcMultPointSurfaceTrafo" << endl;
+       }
+     info.ndof = info.nv;
+ 
+diff --git a/libsrc/meshing/delaunay.cpp b/libsrc/meshing/delaunay.cpp
+--- a/libsrc/meshing/delaunay.cpp
++++ b/libsrc/meshing/delaunay.cpp
+@@ -205,13 +205,13 @@
+ #ifdef DELAUNAY_DEBUG
+ 	if (pi <= 0 || pi > links.Size())
+ 	  {
+-	    cerr << "link, error " << endl;
+-	    cerr << "pi = " << pi << " linked.s = " << linked.Size() << endl;
++	    (*::netgen::myerr) << "link, error " << endl;
++	    (*::netgen::myerr) << "pi = " << pi << " linked.s = " << linked.Size() << endl;
+ 	    exit(1);
+ 	  }
+ 	if (linked.Size() > links.Size())
+ 	  {
+-	    cerr << "links have loop" << endl;
++	    (*::netgen::myerr) << "links have loop" << endl;
+ 	    exit(1);
+ 	  }
+ #endif
+@@ -437,7 +437,7 @@
+ 		
+ 	      if (hval > -1e-12)
+ 		{
+-		  cerr << "vec to outer" << endl;
++		  (*::netgen::myerr) << "vec to outer" << endl;
+ 		  (*testout) << "vec to outer, hval = " << hval << endl;
+ 		  (*testout) << "v1 x v2 = " << Cross (v1, v2) << endl;
+ 		  (*testout) << "facep: "
+diff --git a/libsrc/meshing/delaunay2d.cpp b/libsrc/meshing/delaunay2d.cpp
+--- a/libsrc/meshing/delaunay2d.cpp
++++ b/libsrc/meshing/delaunay2d.cpp
+@@ -552,7 +552,7 @@
+ 		Point<2> p2d (npoints[hi](0), npoints[hi](1));
+ 		if (!adfront.Inside(p2d))
+ 		  {
+-		    cout << "add outside point" << endl;
++		    (*::netgen::mycout) << "add outside point" << endl;
+ 		    (*testout) << "outside" << endl;
+ 		  }
+ 	      }
+diff --git a/libsrc/meshing/geomsearch.cpp b/libsrc/meshing/geomsearch.cpp
+--- a/libsrc/meshing/geomsearch.cpp
++++ b/libsrc/meshing/geomsearch.cpp
+@@ -167,8 +167,8 @@
+             INDEX ind=ix+(iy-1)*size.i1+(iz-1)*size.i2*size.i1;
+             if (ind < 1 || ind > size.i1 * size.i2 * size.i3)
+               {
+-                cerr << "Illegal hash-position";
+-                cerr << "Position: " << ix << "," << iy << "," << iz << endl;
++                (*::netgen::myerr) << "Illegal hash-position";
++                (*::netgen::myerr) << "Position: " << ix << "," << iy << "," << iz << endl;
+ 		    throw NgException ("Illegal position in Geomsearch");
+               }
+             hashtable.Elem(ind)->Append(elemnum);		      
+diff --git a/libsrc/meshing/global.cpp b/libsrc/meshing/global.cpp
+--- a/libsrc/meshing/global.cpp
++++ b/libsrc/meshing/global.cpp
+@@ -10,8 +10,8 @@
+   {
+     string name;
+   public:
+-    TraceGlobal(string _name) : name(_name) { cout << "init global " << name << endl; }
+-    ~TraceGlobal() { cout << "exit global " << name << endl; }
++    TraceGlobal(string _name) : name(_name) { (*::netgen::mycout) << "init global " << name << endl; }
++    ~TraceGlobal() { (*::netgen::mycout) << "exit global " << name << endl; }
+   };
+   
+   // stringstream emptystr;
+@@ -63,7 +63,7 @@
+ 
+   DLL_HEADER void MyError(const char * ch)
+   {
+-    cout << ch;
++    (*::netgen::mycout) << ch;
+     (*testout) << "Error !!! " << ch << endl << flush;
+   }
+ 
+diff --git a/libsrc/meshing/hprefinement.cpp b/libsrc/meshing/hprefinement.cpp
+--- a/libsrc/meshing/hprefinement.cpp
++++ b/libsrc/meshing/hprefinement.cpp
+@@ -109,7 +109,7 @@
+       case HP_HEX: np=8; break;      
+ 
+       default:
+-        cerr << "HPRefElement: illegal type " << type << endl;
++        (*::netgen::myerr) << "HPRefElement: illegal type " << type << endl;
+         throw NgException ("HPRefElement::SetType: illegal type");
+       } 
+ 
+@@ -543,7 +543,7 @@
+ 
+     if (!hps)
+       {
+-	cout << "Attention hps : hp-refinement not implemented for case " << type << endl;
++	(*::netgen::mycout) << "Attention hps : hp-refinement not implemented for case " << type << endl;
+ 	PrintSysError ("hp-refinement not implemented for case ", type);
+       }
+ 
+@@ -572,7 +572,7 @@
+ 	  case PYRAMID: hpel.type = HP_PYRAMID; break; 
+ 
+           default:
+-            cerr << "HPRefElement: illegal elementtype (1) " << mesh[i].GetType() << endl;
++            (*::netgen::myerr) << "HPRefElement: illegal elementtype (1) " << mesh[i].GetType() << endl;
+             throw NgException ("HPRefElement: illegal elementtype (1)");
+ 	  } 
+ 	elements.Append(hpel); 
+@@ -588,7 +588,7 @@
+ 	  case QUAD: hpel.type = HP_QUAD; break; 
+ 
+           default:
+-            cerr << "HPRefElement: illegal elementtype (1b) " << mesh[i].GetType() << endl;
++            (*::netgen::myerr) << "HPRefElement: illegal elementtype (1b) " << mesh[i].GetType() << endl;
+             throw NgException ("HPRefElement: illegal elementtype (1b)");
+ 	  } 
+ 	elements.Append(hpel);
+@@ -639,7 +639,7 @@
+ 		
+ 	if (!hprs) 
+ 	  {
+-	    cout << "Refinementstruct not defined for element " << el.type << endl;
++	    (*::netgen::mycout) << "Refinementstruct not defined for element " << el.type << endl;
+ 	    continue;
+ 	  }
+ 
+@@ -701,7 +701,7 @@
+ 	  case HP_HEX: oldnp = 8; break;
+             
+           default:
+-            cerr << "HPRefElement: illegal type (3) " << hprs->geom << endl;
++            (*::netgen::myerr) << "HPRefElement: illegal type (3) " << hprs->geom << endl;
+             throw NgException ("HPRefElement::SetType: illegal type (3)");
+ 	  }
+ 
+@@ -921,7 +921,7 @@
+ 	      case HP_PYRAMID: newel.np=5; break; 
+ 
+               default:
+-                cerr << "HPRefElement: illegal type (4) " << hprsnew->geom << endl;
++                (*::netgen::myerr) << "HPRefElement: illegal type (4) " << hprsnew->geom << endl;
+                 throw NgException ("HPRefElement: illegal type (4)");
+                 
+ 	      }
+@@ -967,7 +967,7 @@
+ 	    {
+ 
+                
+-	      cout << " Degenerate Hex found " << endl; 
++	      (*::netgen::mycout) << " Degenerate Hex found " << endl; 
+               *testout << " Degenerate Hex found " << endl; 
+ 	      HPRefElement el = elements[i];
+ 	      HPRefElement newel = el;
+@@ -1148,15 +1148,15 @@
+ 
+ 	  default:
+ 	    {
+-	      cerr << "statistics error, unknown element type" << endl;
++	      (*::netgen::myerr) << "statistics error, unknown element type" << endl;
+ 	    }
+ 	  }
+       }
+ 
+-    cout << "level = " << maxlevel << endl;
+-    cout << "nsegm = " << nsegm << endl;
+-    cout << "ntrig = " << ntrig << ", nquad = " << nquad << endl;
+-    cout << "ntet = " << ntet << ", npyr = " << npyramid
++    (*::netgen::mycout) << "level = " << maxlevel << endl;
++    (*::netgen::mycout) << "nsegm = " << nsegm << endl;
++    (*::netgen::mycout) << "ntrig = " << ntrig << ", nquad = " << nquad << endl;
++    (*::netgen::mycout) << "ntet = " << ntet << ", npyr = " << npyramid
+ 	 << ", nprism = " << nprism << ", nhex = " << nhex << endl;
+ 
+     return;
+@@ -1166,7 +1166,7 @@
+       {
+ 	memcost = (ntet + nprism + nhex) * pow (static_cast<double>(p), 6.0);
+ 	cpucost = (ntet + nprism + nhex) * pow (static_cast<double>(p), 9.0);
+-	cout << "costs for p = " << p << ": mem = " << memcost << ", cpu = " << cpucost << endl;
++	(*::netgen::mycout) << "costs for p = " << p << ": mem = " << memcost << ", cpu = " << cpucost << endl;
+       }
+ 
+     double memcosttet = 0;
+@@ -1228,14 +1228,14 @@
+ 	    ;
+ 	  }
+       }
+-    cout << "TET: hp-memcost = " << memcosttet 
++    (*::netgen::mycout) << "TET: hp-memcost = " << memcosttet 
+ 	 << ", scmemcost = " << memcostsctet
+ 	 << ", cpucost = " << cpucosttet
+ 	 << endl;
+-    cout << "PRI: hp-memcost = " << memcostprism
++    (*::netgen::mycout) << "PRI: hp-memcost = " << memcostprism
+ 	 << ", scmemcost = " << memcostscprism
+ 	 << ", cpucost = " << cpucostprism << endl;
+-    cout << "HEX: hp-memcost = " << memcosthex
++    (*::netgen::mycout) << "HEX: hp-memcost = " << memcosthex
+ 	 << ", scmemcost = " << memcostschex
+ 	 << ", cpucost = " << cpucosthex << endl;
+ #endif
+@@ -1496,7 +1496,7 @@
+ 
+ 
+               default:
+-                cerr << "HPRefElement: illegal elementtype (2) " << mesh[i].GetType() << endl;
++                (*::netgen::myerr) << "HPRefElement: illegal elementtype (2) " << mesh[i].GetType() << endl;
+                 throw NgException ("HPRefElement: illegal elementtype (2)");
+                 
+ 	      }
+@@ -1610,7 +1610,7 @@
+ 		sing = 1; 
+ 	      } 
+ 	  }
+-	cout << endl; 
++	(*::netgen::mycout) << endl; 
+ 
+ 	for (int i = 1; i <= mesh.GetNSeg(); i++)
+ 	  if (mesh.LineSegment(i).singedge_left * levels >= act_ref)
+@@ -1918,12 +1918,12 @@
+ 	      hpel.type = ClassifyPyramid(hpel, edges, edgepoint_dom, cornerpoint, edgepoint, faces,
+ 						  face_edges, surf_edges, facepoint); 	    	    
+ 	      
+-	      cout << " ** Pyramid classified  " << hpel.type << endl; 
++	      (*::netgen::mycout) << " ** Pyramid classified  " << hpel.type << endl; 
+ 	      break; 
+ 	    }
+ 	  default:
+ 	    {
+-	      cout << "illegal element type for hp-prepare elements " << hpel.type << endl;
++	      (*::netgen::mycout) << "illegal element type for hp-prepare elements " << hpel.type << endl;
+ 	      throw NgException ("hprefinement.cpp: don't know how to set parameters");
+ 	    }
+ 	  }
+@@ -1940,7 +1940,7 @@
+ 	  {
+ 	    (*testout) << "hp-element-type " << hpel.type << " not implemented   " << endl;
+ 	    (*testout) << " elType " << hprs->geom << endl; 
+- (cout) << " elType " << hprs->geom << endl;        
++ ((*::netgen::mycout)) << " elType " << hprs->geom << endl;        
+ 	    cnt_nonimplement++;
+ 	    misses[hpel.type]++;
+ 	  }
+@@ -1965,7 +1965,7 @@
+ 
+     for (int i = 0; i < misses.Size(); i++)
+       if (misses[i])
+-	cout << " in update classification missing case " << i << " occurred " << misses[i] << " times" << endl;
++	(*::netgen::mycout) << " in update classification missing case " << i << " occurred " << misses[i] << " times" << endl;
+ 
+     return(sing); 
+   }
+diff --git a/libsrc/meshing/improve3.cpp b/libsrc/meshing/improve3.cpp
+--- a/libsrc/meshing/improve3.cpp
++++ b/libsrc/meshing/improve3.cpp
+@@ -3000,7 +3000,7 @@
+ 		    }
+ 		  else
+ 		    {
+-		      cout << "problem with domain indices" << endl;
++		      (*::netgen::mycout) << "problem with domain indices" << endl;
+ 		      (*testout) << "problem: mattype = " << mattype << ", othermattype = " << othermattype 
+ 				 << " elem " << elem << " mt " << elem.GetIndex() << endl
+ 				 << " pi1 " << pi1 << " pi2 " << pi2 << endl;
+@@ -3192,7 +3192,7 @@
+ 	    }
+ 	  if(outerpoints[nsuround] != sp2)
+ 	    {
+-	      cerr << "OJE OJE OJE" << endl;
++	      (*::netgen::myerr) << "OJE OJE OJE" << endl;
+ 	      (*testout) << "OJE OJE OJE" << endl;
+ 	      (*testout) << "hasbothpoints: " << endl;
+ 	      for(int ii=0; ii < hasbothpoints.Size(); ii++)
+@@ -3254,7 +3254,7 @@
+ 	    }
+ 	  if(nsuroundother > 0 && outerpointsother[nsuroundother] != sp1other)
+ 	    {
+-	      cerr << "OJE OJE OJE (other)" << endl;
++	      (*::netgen::myerr) << "OJE OJE OJE (other)" << endl;
+ 	      (*testout) << "OJE OJE OJE (other)" << endl;
+ 	      (*testout) << "pi1 " << pi1 << " pi2 " << pi2 << " sp1 " << sp1 << " sp2 " << sp2 << endl;
+ 	      (*testout) << "hasbothpoints: " << endl;
+@@ -3866,7 +3866,7 @@
+ 
+   bad1 = mesh.CalcTotalBad (mp);
+   (*testout) << "Total badness = " << bad1 << endl;
+-  cout << "tot bad = " << bad1 << endl;
++  (*::netgen::mycout) << "tot bad = " << bad1 << endl;
+ 
+   auto elementsonnode = mesh.CreatePoint2ElementTable();
+   
+diff --git a/libsrc/meshing/localh.cpp b/libsrc/meshing/localh.cpp
+--- a/libsrc/meshing/localh.cpp
++++ b/libsrc/meshing/localh.cpp
+@@ -620,7 +620,7 @@
+       {        
+ 	if (father->flags.isinner)
+           {
+-            cout << "how is this possible ???" << endl;
++            (*::netgen::mycout) << "how is this possible ???" << endl;
+             box->flags.pinner = 1;
+           }
+ 	else
+diff --git a/libsrc/meshing/meshclass.cpp b/libsrc/meshing/meshclass.cpp
+--- a/libsrc/meshing/meshclass.cpp
++++ b/libsrc/meshing/meshclass.cpp
+@@ -298,7 +298,7 @@
+       }
+ 
+     if (el.index<=0 || el.index > facedecoding.Size())
+-      cerr << "has no facedecoding: fd.size = " << facedecoding.Size() << ", ind = " << el.index << endl;
++      (*::netgen::myerr) << "has no facedecoding: fd.size = " << facedecoding.Size() << ", ind = " << el.index << endl;
+ 
+     surfelements.Last().next = facedecoding[el.index-1].firstelement;
+     facedecoding[el.index-1].firstelement = si;
+@@ -326,7 +326,7 @@
+ 
+     surfelements[sei] = el;
+     if (el.index > facedecoding.Size())
+-      cerr << "has no facedecoding: fd.size = " << facedecoding.Size() << ", ind = " << el.index << endl;
++      (*::netgen::myerr) << "has no facedecoding: fd.size = " << facedecoding.Size() << ", ind = " << el.index << endl;
+ 
+     // add lock-free to list ... slow, call RebuildSurfaceElementLists later
+     /*
+@@ -871,7 +871,7 @@
+ 
+   void Mesh :: Load (const string & filename)
+   {
+-    cout << "filename = " << filename << endl;
++    (*::netgen::mycout) << "filename = " << filename << endl;
+     istream * infile = NULL;
+ 
+     if (filename.find(".vol.gz") != string::npos)
+@@ -894,7 +894,7 @@
+   {
+     if (! (infile.good()) )
+       {
+-        cout << "cannot load mesh" << endl;
++        (*::netgen::mycout) << "cannot load mesh" << endl;
+         throw NgException ("mesh file not found");
+       }
+ 
+@@ -1808,7 +1808,7 @@
+               }
+           }
+         else 
+-          cerr << "illegal element for buildboundaryedges" << endl;
++          (*::netgen::myerr) << "illegal element for buildboundaryedges" << endl;
+       }
+ 
+ 
+@@ -2038,7 +2038,7 @@
+   {
+     if (fixpoints.Size() != GetNP())
+       {
+-        cerr << "Mesh::FixPoints: sizes don't fit" << endl;
++        (*::netgen::myerr) << "Mesh::FixPoints: sizes don't fit" << endl;
+         return;
+       }
+     int np = GetNP();
+@@ -2574,7 +2574,7 @@
+ 
+             if (faceht.Used (key))
+               {
+-                cerr << "ERROR: Segment " << seg << " already used" << endl;
++                (*::netgen::myerr) << "ERROR: Segment " << seg << " already used" << endl;
+                 (*testout) << "ERROR: Segment " << seg << " already used" << endl;
+               }
+ 
+@@ -2618,7 +2618,7 @@
+                 int data;
+ 
+                 if (seg.I1() < PointIndex::BASE || seg.I2() < PointIndex::BASE)
+-                  cerr << "seg = " << seg << endl;
++                  (*::netgen::myerr) << "seg = " << seg << endl;
+ 
+                 if (faceht.Used(seg))
+                   {
+@@ -3980,10 +3980,10 @@
+                           (*testout) << "Intersecting: " << endl;
+                           (*testout) << "openelement " << sei << " with open element " << sej << endl;
+                       
+-                          cout << "el1 = " << tri << endl;
+-                          cout << "el2 = " << tri2 << endl;
+-                          cout << "layer1 = " <<  (*this)[tri[0]].GetLayer() << endl;
+-                          cout << "layer2 = " <<  (*this)[tri2[0]].GetLayer() << endl;
++                          (*::netgen::mycout) << "el1 = " << tri << endl;
++                          (*::netgen::mycout) << "el2 = " << tri2 << endl;
++                          (*::netgen::mycout) << "layer1 = " <<  (*this)[tri[0]].GetLayer() << endl;
++                          (*::netgen::mycout) << "layer2 = " <<  (*this)[tri2[0]].GetLayer() << endl;
+                         }
+                       
+                       for (int k = 1; k <= 3; k++)
+@@ -4103,7 +4103,7 @@
+ 
+         if (!segmentht)
+           {
+-            cerr << "no segmentht allocated" << endl;
++            (*::netgen::myerr) << "no segmentht allocated" << endl;
+             return 0;
+           }
+ 
+@@ -4517,7 +4517,7 @@
+                       }
+                   }
+               }
+-            if (firsttet) cout << "no legal";
++            if (firsttet) (*::netgen::mycout) << "no legal";
+             (*testout) << endl;
+           }
+ 
+@@ -4671,7 +4671,7 @@
+                     firsttet = 0;
+                   }
+               }
+-            if (firsttet) cout << "no legal";
++            if (firsttet) (*::netgen::mycout) << "no legal";
+             (*testout) << endl;
+           }
+       }
+@@ -6336,8 +6336,8 @@
+                     }
+                 if(index == -1)
+                   {
+-                    cout << "point coordinates = " << pt << endl;
+-                    cout << "mapped coordinates = " << mapped_pt << endl;
++                    (*::netgen::mycout) << "point coordinates = " << pt << endl;
++                    (*::netgen::mycout) << "mapped coordinates = " << mapped_pt << endl;
+                     throw Exception("Did not find mapped point with nr " + ToString(pi) + ", are you sure your mesh is periodic?");
+                   }
+                 auto other_pi = other_el.PNums()[index];
+@@ -6346,8 +6346,8 @@
+               }
+             else
+               {
+-                cout << "point coordinates = " << pt << endl;
+-                cout << "mapped coordinates = " << mapped_pt << endl;
++                (*::netgen::mycout) << "point coordinates = " << pt << endl;
++                (*::netgen::mycout) << "mapped coordinates = " << mapped_pt << endl;
+                 throw Exception("Mapped point with nr " + ToString(pi) + " is outside of mesh, are you sure your mesh is periodic?");
+               }
+           }
+@@ -6931,11 +6931,11 @@
+ 
+     ost << "boundaryedges: ";
+     if (boundaryedges)
+-      boundaryedges->PrintMemInfo (cout);
++      boundaryedges->PrintMemInfo ((*::netgen::mycout));
+ 
+     ost << "surfelementht: ";
+     if (surfelementht)
+-      surfelementht->PrintMemInfo (cout);
++      surfelementht->PrintMemInfo ((*::netgen::mycout));
+   }
+ 
+   shared_ptr<Mesh> Mesh :: Mirror ( netgen::Point<3> p_plane, Vec<3> n_plane )
+diff --git a/libsrc/meshing/meshfunc2d.cpp b/libsrc/meshing/meshfunc2d.cpp
+--- a/libsrc/meshing/meshfunc2d.cpp
++++ b/libsrc/meshing/meshfunc2d.cpp
+@@ -97,7 +97,7 @@
+ 		break;
+ 	      }
+ 	    default:
+-	      cerr << "Optimization code " << optstr[j-1] << " not defined" << endl;
++	      (*::netgen::myerr) << "Optimization code " << optstr[j-1] << " not defined" << endl;
+ 	    }  
+ 	}
+     mesh.Compress(); // better: compress in individual steps, if necessary
+diff --git a/libsrc/meshing/meshing2.cpp b/libsrc/meshing/meshing2.cpp
+--- a/libsrc/meshing/meshing2.cpp
++++ b/libsrc/meshing/meshing2.cpp
+@@ -526,7 +526,7 @@
+ 	if (debugparam.haltface && debugparam.haltfacenr == facenr)
+ 	  {
+ 	    debugflag = 1;
+-	    cout << "set debugflag" << endl;
++	    (*::netgen::mycout) << "set debugflag" << endl;
+ 	  }
+ 	
+ 	if (debugparam.haltlargequalclass && qualclass == 50)
+@@ -1206,7 +1206,7 @@
+ 			    lam1 > 0 && lam2 > 0 && (lam1 + lam2) < 1)
+ 			  {
+ #ifdef DEVELOP
+-			    cout << "overlap" << endl;
++			    (*::netgen::mycout) << "overlap" << endl;
+ 			    (*testout) << "overlap:" << endl
+ 				       << "tri = " << tp1 << "-" << tp2 << "-" << tp3 << endl
+ 				       << "point = " << p << endl
+@@ -1256,7 +1256,7 @@
+ 		    int exval = adfront.ExistsLine (nlgpi1, nlgpi2);
+ 		    if (exval)
+ 		      {
+-			cout << "ERROR: new line exits, val = " << exval << endl;
++			(*::netgen::mycout) << "ERROR: new line exits, val = " << exval << endl;
+ 			(*testout) << "ERROR: new line exits, val = " << exval << endl;
+ 			found = 0;
+ 
+@@ -1339,7 +1339,7 @@
+ 		if (!upgeominfo.Get(loclines.Get(i).I1()).trignum || 
+ 		    !upgeominfo.Get(loclines.Get(i).I2()).trignum)
+ 		  {
+-		    cout << "new el: illegal geominfo" << endl;
++		    (*::netgen::mycout) << "new el: illegal geominfo" << endl;
+ 		  }
+ 
+ 		adfront.AddLine (pindex.Get(loclines.Get(i).I1()),
+@@ -1403,7 +1403,7 @@
+ 
+ 		if(maxarea > 0 && meshedarea-meshedarea_before > maxarea)
+ 		  {
+-		    cerr << "meshed area = " << meshedarea-meshedarea_before << endl
++		    (*::netgen::myerr) << "meshed area = " << meshedarea-meshedarea_before << endl
+ 			 << "maximal area = " << maxarea << endl
+ 			 << "GIVING UP" << endl;
+ 		    return MESHING2_GIVEUP;
+@@ -1459,7 +1459,7 @@
+ 
+ 	    if (morerisc)
+ 	      {
+-		cout << "generated due to morerisc" << endl;
++		(*::netgen::mycout) << "generated due to morerisc" << endl;
+ 		//	      multithread.drawing = 1;
+ 		//	      glrender(1);
+ 	      }
+@@ -1470,7 +1470,7 @@
+ 	    if ( debugparam.haltsuccess || debugflag )
+ 	      {
+ 		// adfront.PrintOpenSegments (*testout);
+-		cout << "success of rule" << rules.Get(rulenr)->Name() << endl;
++		(*::netgen::mycout) << "success of rule" << rules.Get(rulenr)->Name() << endl;
+ 		multithread.drawing = 1;
+ 		multithread.testmode = 1;
+ 		multithread.pause = 1;
+@@ -1530,7 +1530,7 @@
+ 
+ 	    if ( debugparam.haltnosuccess || debugflag )
+ 	      {
+-		cout << "Problem with seg " << gpi1 << " - " << gpi2
++		(*::netgen::mycout) << "Problem with seg " << gpi1 << " - " << gpi2
+ 		     << ", class = " << qualclass << endl;
+ 
+ 		(*testout) << "Problem with seg " << gpi1 << " - " << gpi2
+diff --git a/libsrc/meshing/meshing3.cpp b/libsrc/meshing/meshing3.cpp
+--- a/libsrc/meshing/meshing3.cpp
++++ b/libsrc/meshing/meshing3.cpp
+@@ -1196,7 +1196,7 @@
+ 	      (*testout) << npoints.Get(i) << endl;
+ 	      if (!adfront->Inside(npoints.Get(i)))
+ 		{
+-		  cout << "add outside point" << endl;
++		  (*::netgen::mycout) << "add outside point" << endl;
+ 		  (*testout) << "outside" << endl;
+ 		}
+ 	    }
+diff --git a/libsrc/meshing/meshtype.cpp b/libsrc/meshing/meshtype.cpp
+--- a/libsrc/meshing/meshtype.cpp
++++ b/libsrc/meshing/meshtype.cpp
+@@ -427,7 +427,7 @@
+         }
+       default:
+         {
+-          cerr << "Element2d::Invert2, illegal element type " << int(typ) << endl;
++          (*::netgen::myerr) << "Element2d::Invert2, illegal element type " << int(typ) << endl;
+         }
+       }
+   }
+@@ -590,7 +590,7 @@
+   {
+     if (shape.Size() != GetNP())
+       {
+-        cerr << "Element::GetShape: Length not fitting" << endl;
++        (*::netgen::myerr) << "Element::GetShape: Length not fitting" << endl;
+         return;
+       }
+ 
+@@ -760,7 +760,7 @@
+ #ifdef DEBUG
+     if (pmat.Width() != np || pmat.Height() != 2)
+       {
+-        cerr << "Element::GetPointMatrix: sizes don't fit" << endl;
++        (*::netgen::myerr) << "Element::GetPointMatrix: sizes don't fit" << endl;
+         return;
+       }
+ #endif
+@@ -1118,7 +1118,7 @@
+       case 13: typ = PYRAMID13; break;
+       case 15: typ = PRISM15; break;
+       case 20: typ = HEX20; break;
+-      default: cerr << "Element::Element: unknown element with " << np << " points" << endl;
++      default: (*::netgen::myerr) << "Element::Element: unknown element with " << np << " points" << endl;
+       }
+     orderx = ordery = orderz = 1;
+     is_curved = typ != TET; // false;
+@@ -1202,7 +1202,7 @@
+       case 20: typ = HEX20; break;
+         // 
+       default: break;
+-        cerr << "Element::SetNP unknown element with " << np << " points" << endl;
++        (*::netgen::myerr) << "Element::SetNP unknown element with " << np << " points" << endl;
+       }
+   }
+ 
+@@ -1224,7 +1224,7 @@
+       case HEX20: np = 20; break;
+ 
+       default: break;
+-        cerr << "Element::SetType unknown type  " << int(typ) << endl;
++        (*::netgen::myerr) << "Element::SetType unknown type  " << int(typ) << endl;
+       }
+     is_curved = (np > 4); 
+   }
+@@ -1470,7 +1470,7 @@
+         }
+       default:
+         {
+-          cerr << "GetTetsLocal not implemented for el with " << GetNP() << " nodes" << endl;
++          (*::netgen::myerr) << "GetTetsLocal not implemented for el with " << GetNP() << " nodes" << endl;
+         }
+       }
+   }
+@@ -1570,7 +1570,7 @@
+         }
+       default:
+         {
+-          cout << "GetNodesLocal not impelemented for element " << GetType() << endl;
++          (*::netgen::mycout) << "GetNodesLocal not impelemented for element " << GetType() << endl;
+           np = 0;
+         }
+       }
+@@ -1676,7 +1676,7 @@
+         }
+       default:
+         {
+-          cout << "GetNodesLocal not impelemented for element " << GetType() << endl;
++          (*::netgen::mycout) << "GetNodesLocal not impelemented for element " << GetType() << endl;
+           np = 0;
+ 	  pp = NULL;
+         }
+@@ -1924,7 +1924,7 @@
+   {
+     if (shape.Size() != GetNP())
+       {
+-        cerr << "Element::GetShape: Length not fitting" << endl;
++        (*::netgen::myerr) << "Element::GetShape: Length not fitting" << endl;
+         return;
+       }
+ 
+@@ -2164,7 +2164,7 @@
+     int np = GetNP();
+     if (dshape.Height() != 3 || dshape.Width() != np)
+       {
+-        cerr << "Element::DShape: Sizes don't fit" << endl;
++        (*::netgen::myerr) << "Element::DShape: Sizes don't fit" << endl;
+         return;
+       }
+ 
+@@ -2745,7 +2745,7 @@
+ 
+     else
+       {
+-        cout << "getmap, identnr = " << identnr << endl;
++        (*::netgen::mycout) << "getmap, identnr = " << identnr << endl;
+ 
+         for (int i = 1; i <= identifiedpoints_nr.GetNBags(); i++)
+           for (int j = 1; j <= identifiedpoints_nr.GetBagSize(i); j++)
+diff --git a/libsrc/meshing/meshtype.hpp b/libsrc/meshing/meshtype.hpp
+--- a/libsrc/meshing/meshtype.hpp
++++ b/libsrc/meshing/meshtype.hpp
+@@ -166,7 +166,7 @@
+     {
+ #ifdef DEBUG
+       if (ai < PointIndex::BASE)
+-        cout << "illegal PointIndex, use PointIndex::INVALID instead" << endl;
++        (*::netgen::mycout) << "illegal PointIndex, use PointIndex::INVALID instead" << endl;
+         // throw Exception("illegal PointIndex, use PointIndex::INVALID instead");
+ #endif
+     }
+@@ -644,7 +644,7 @@
+     {
+ #ifdef DEBUG
+       if (pnum[0] < PointIndex::BASE && !deleted)
+-	cerr << "Surfelement has illegal pnum, but not marked as deleted" << endl;
++	(*::netgen::myerr) << "Surfelement has illegal pnum, but not marked as deleted" << endl;
+ #endif    
+       return deleted; 
+     }
+@@ -976,7 +976,7 @@
+     { 
+ #ifdef DEBUG
+       if (pnum[0] < PointIndex::BASE && !flags.deleted)
+-	cerr << "Volelement has illegal pnum, but not marked as deleted" << endl;
++	(*::netgen::myerr) << "Volelement has illegal pnum, but not marked as deleted" << endl;
+ #endif    
+ 
+       return flags.deleted; 
+diff --git a/libsrc/meshing/parallelmesh.cpp b/libsrc/meshing/parallelmesh.cpp
+--- a/libsrc/meshing/parallelmesh.cpp
++++ b/libsrc/meshing/parallelmesh.cpp
+@@ -1309,7 +1309,7 @@
+ 	      }
+ 	    // if (sel.GetPartition() == -1)
+             if (surf_partition[sei] == -1)
+-	      cerr << "no volume element found" << endl;
++	      (*::netgen::myerr) << "no volume element found" << endl;
+ 	  }
+ 
+ 
+@@ -1346,7 +1346,7 @@
+ 	      }
+ 	    // if (sel.GetPartition() == -1)
+             if (seg_partition[si] == -1)
+-	      cerr << "no volume element found" << endl;
++	      (*::netgen::myerr) << "no volume element found" << endl;
+ 	  }
+       }
+     else
+@@ -1375,9 +1375,9 @@
+ 	    
+ 	    // if (seg.GetPartition() == -1) {
+             if (seg_partition[segi] == -1) {
+-	      cout << endl << "segi: " << segi << endl;
+-	      cout << "points: " << seg[0] << " " << seg[1] << endl;
+-	      cout << "surfels: " << endl << sels << endl;
++	      (*::netgen::mycout) << endl << "segi: " << segi << endl;
++	      (*::netgen::mycout) << "points: " << seg[0] << " " << seg[1] << endl;
++	      (*::netgen::mycout) << "surfels: " << endl << sels << endl;
+ 	      throw NgException("no surface element found");
+ 	    }
+ 	  }
+@@ -1644,11 +1644,11 @@
+ 	NgProfiler::StartTimer (timermetis);
+ 	
+ #ifdef METIS4
+-	cout << "call metis(4)_PartMeshDual ... " << flush;
++	(*::netgen::mycout) << "call metis(4)_PartMeshDual ... " << flush;
+ 	METIS_PartMeshDual (&ne, &nn, &elmnts[0], &etype, &numflag, &nparts,
+ 			    &edgecut, &epart[0], &npart[0]);
+ #else
+-	cout << "call metis(5)_PartMeshDual ... " << endl;
++	(*::netgen::mycout) << "call metis(5)_PartMeshDual ... " << endl;
+ 	// idx_t options[METIS_NOPTIONS];
+ 	
+ 	NgArray<idx_t> eptr(ne+1);
+@@ -1662,9 +1662,9 @@
+ 	
+ 	NgProfiler::StopTimer (timermetis);
+ 	
+-	cout << "complete" << endl;
++	(*::netgen::mycout) << "complete" << endl;
+ #ifdef METIS4
+-	cout << "edge-cut: " << edgecut << ", balance: " 
++	(*::netgen::mycout) << "edge-cut: " << edgecut << ", balance: " 
+ 	     << ComputeElementBalance(ne, nparts, &epart[0]) << endl;
+ #endif
+ 	
+@@ -1758,7 +1758,7 @@
+     METIS_PartGraphKway ( &nn, xadj, adjacency, v_weights, e_weights, &weightflag, 
+ 			  &numflag, &nparts, options, &edgecut, part );
+ #else
+-    cout << "currently not supported (metis5), A" << endl;
++    (*::netgen::mycout) << "currently not supported (metis5), A" << endl;
+ #endif
+ 
+     NgArray<int> nodesinpart(ntasks);
+@@ -1786,7 +1786,7 @@
+     delete [] part;
+     delete [] adjacency;
+ #else
+-    cout << "parthybridmesh not available" << endl;
++    (*::netgen::mycout) << "parthybridmesh not available" << endl;
+ #endif
+   }
+ 
+@@ -1873,7 +1873,7 @@
+     METIS_PartGraphKway ( &ne, xadj, adjacency, v_weights, e_weights, &weightflag, 
+ 			  &numflag, &nparts, options, &edgecut, part );
+ #else
+-    cout << "currently not supported (metis5), B" << endl;
++    (*::netgen::mycout) << "currently not supported (metis5), B" << endl;
+ #endif
+ 
+ 
+@@ -1902,7 +1902,7 @@
+     delete [] part;
+     delete [] adjacency;
+ #else
+-    cout << "partdualmesh not available" << endl;
++    (*::netgen::mycout) << "partdualmesh not available" << endl;
+ #endif
+ 
+   }
+@@ -2000,7 +2000,7 @@
+       // (*this) [sei].SetPartition (part[sei]+1);
+       surf_partition[sei] = part[sei]+1;
+ #else
+-    cout << "partdualmesh not available" << endl;
++    (*::netgen::mycout) << "partdualmesh not available" << endl;
+ #endif
+ 
+   }
+diff --git a/libsrc/meshing/paralleltop.cpp b/libsrc/meshing/paralleltop.cpp
+--- a/libsrc/meshing/paralleltop.cpp
++++ b/libsrc/meshing/paralleltop.cpp
+@@ -84,7 +84,7 @@
+         auto dps = GetDistantProcs(pi);
+         // check sorted:
+         for (int j = 0; j+1 < dps.Size(); j++)
+-          if (dps[j+1] < dps[j]) cout << "wrong sort" << endl;
++          if (dps[j+1] < dps[j]) (*::netgen::mycout) << "wrong sort" << endl;
+         
+         if (dps.Size() == 0 || dps[0] > comm.Rank())
+           L2G(pi) = num_master_points++;
+@@ -219,7 +219,7 @@
+     if (glob_vert.Size() > 1)
+       for (auto i : Range(glob_vert).Modify(0,-1))
+         if (glob_vert[i] > glob_vert[i+1])
+-          cout << "wrong ordering of globvert" << endl;
++          (*::netgen::mycout) << "wrong ordering of globvert" << endl;
+   }
+   
+   /*
+diff --git a/libsrc/meshing/parser2.cpp b/libsrc/meshing/parser2.cpp
+--- a/libsrc/meshing/parser2.cpp
++++ b/libsrc/meshing/parser2.cpp
+@@ -574,7 +574,7 @@
+ 
+   if (!ist->good())
+     {
+-      cerr << "Rule description file " << filename << " not found" << endl;
++      (*::netgen::myerr) << "Rule description file " << filename << " not found" << endl;
+       delete ist;
+       exit (1);
+     }
+diff --git a/libsrc/meshing/parser3.cpp b/libsrc/meshing/parser3.cpp
+--- a/libsrc/meshing/parser3.cpp
++++ b/libsrc/meshing/parser3.cpp
+@@ -1002,7 +1002,7 @@
+   
+   if (!ist->good())
+     {
+-      cerr << "Rule description file " << filename << " not found" << endl;
++      (*::netgen::myerr) << "Rule description file " << filename << " not found" << endl;
+       delete ist;
+       exit (1);
+     }
+diff --git a/libsrc/meshing/refine.cpp b/libsrc/meshing/refine.cpp
+--- a/libsrc/meshing/refine.cpp
++++ b/libsrc/meshing/refine.cpp
+@@ -765,7 +765,7 @@
+ 
+     if (wrongels)
+       {
+-	cout << "WARNING: " << wrongels << " with wrong orientation found" << endl;
++	(*::netgen::mycout) << "WARNING: " << wrongels << " with wrong orientation found" << endl;
+ 
+ 	int np = mesh.GetNP();
+ 	NgArray<Point<3> > should(np);
+@@ -801,7 +801,7 @@
+ 		lam *= 0.5;
+ 		cnttrials--;
+ 
+-		cout << "lam = " << lam << endl;
++		(*::netgen::mycout) << "lam = " << lam << endl;
+ 
+ 		for (int i = 1; i <= np; i++)
+ 		  if (boundp.Test(i))
+@@ -873,7 +873,7 @@
+ 		    else
+ 		      mesh.VolumeElement(i).flags.badel = 0;
+ 		  }
+-		cout << "wrongels = " << wrongels << endl;
++		(*::netgen::mycout) << "wrongels = " << wrongels << endl;
+ 	      }
+ 	    while (wrongels && cnttrials > 0);
+ 	  
+@@ -884,7 +884,7 @@
+ 
+     if (cnttrials <= 0)
+       {
+-	cerr << "ERROR: Sorry, reverted elements" << endl;
++	(*::netgen::myerr) << "ERROR: Sorry, reverted elements" << endl;
+       }
+  
+     mesh.ComputeNVertices();
+diff --git a/libsrc/meshing/secondorder.cpp b/libsrc/meshing/secondorder.cpp
+--- a/libsrc/meshing/secondorder.cpp
++++ b/libsrc/meshing/secondorder.cpp
+@@ -486,7 +486,7 @@
+       
+     if (wrongels)
+       {
+-	cout << "WARNING: " << wrongels << " illegal element(s) found" << endl;
++	(*::netgen::mycout) << "WARNING: " << wrongels << " illegal element(s) found" << endl;
+ 
+ 	int np = mesh.GetNP();
+ 	NgArray<Point<3> > should(np);
+@@ -532,10 +532,10 @@
+ 		lam *= 0.5;
+ 		cnttrials--;
+ 
+-		cout << "lam = " << lam << endl;
++		(*::netgen::mycout) << "lam = " << lam << endl;
+ 
+ 		factry = lam + (1-lam) * facok;
+-		cout << "trying: " << factry << endl;
++		(*::netgen::mycout) << "trying: " << factry << endl;
+ 
+ 		for (int i = 1; i <= np; i++)
+ 		  if (boundp.Test(i))
+@@ -575,7 +575,7 @@
+ 		    else
+ 		      mesh.VolumeElement(i).flags.badel = 0;
+ 		  }
+-		cout << "wrongels = " << wrongels << endl;
++		(*::netgen::mycout) << "wrongels = " << wrongels << endl;
+ 	      }
+ 	    while (wrongels && cnttrials > 0);
+ 
+@@ -595,7 +595,7 @@
+       {
+ 	if (illegalels.Test(i))
+ 	  {
+-	    cout << "illegal element: " << i << endl;
++	    (*::netgen::mycout) << "illegal element: " << i << endl;
+ 	    mesh.VolumeElement(i).flags.badel = 1;	
+ 	  }
+ 	else
+diff --git a/libsrc/meshing/smoothing2.5.cpp b/libsrc/meshing/smoothing2.5.cpp
+--- a/libsrc/meshing/smoothing2.5.cpp
++++ b/libsrc/meshing/smoothing2.5.cpp
+@@ -251,7 +251,7 @@
+ 	  }
+ 	else
+ 	  {
+-	    cout << "el not ok (point " << pi << ": " << mesh[pi] << ")" << endl;
++	    (*::netgen::mycout) << "el not ok (point " << pi << ": " << mesh[pi] << ")" << endl;
+ 	  }
+       }
+ 
+diff --git a/libsrc/meshing/smoothing3.cpp b/libsrc/meshing/smoothing3.cpp
+--- a/libsrc/meshing/smoothing3.cpp
++++ b/libsrc/meshing/smoothing3.cpp
+@@ -1055,7 +1055,7 @@
+       for (k = 1; k <= el.GetNP(); k++)
+ 	if (el.PNum(k) == actpind)
+ 	  lpi = k;
+-      if (!lpi) cerr << "loc point not found" << endl;
++      if (!lpi) (*::netgen::myerr) << "loc point not found" << endl;
+ 
+       badness += elements[eli-1].
+ 	CalcJacobianBadnessGradient (points, lpi, hderiv);
+@@ -1128,7 +1128,7 @@
+       for (k = 1; k <= el.GetNP(); k++)
+ 	if (el.PNum(k) == actpind)
+ 	  lpi = k;
+-      if (!lpi) cerr << "loc point not found" << endl;
++      if (!lpi) (*::netgen::myerr) << "loc point not found" << endl;
+ 
+       badness += elements[eli-1].
+ 	CalcJacobianBadnessDirDeriv (points, lpi, vdir, hderiv);
+@@ -1710,7 +1710,7 @@
+ 	}
+       else
+ 	{
+-	  cout << "el not ok" << endl;
++	  (*::netgen::mycout) << "el not ok" << endl;
+ 	}
+     }
+   PrintDot ('\n');
+@@ -1897,7 +1897,7 @@
+ 	  }
+ 	else
+ 	  {
+-	    cout << "el not ok" << endl;
++	    (*::netgen::mycout) << "el not ok" << endl;
+ 	    (*testout) << "el not ok" << endl
+ 		       << "   func " << ((brother == -1) ? pf.Func(x) : pf_sum.Func (x)) << endl;
+ 	    if(brother != -1)
+diff --git a/libsrc/meshing/specials.cpp b/libsrc/meshing/specials.cpp
+--- a/libsrc/meshing/specials.cpp
++++ b/libsrc/meshing/specials.cpp
+@@ -48,7 +48,7 @@
+       el.GetBox(mesh.Points(), box);
+ 
+       if (i % 10000 == 0)
+-	cout << "+" << flush;
++	(*::netgen::mycout) << "+" << flush;
+ 
+       if (box.Intersect(otherbox))
+ 	{
+@@ -60,7 +60,7 @@
+       if (remove)
+ 	mesh.VolumeElement(i).Delete();
+     }
+-  cout << endl;
++  (*::netgen::mycout) << endl;
+ 
+   NgBitArray connected(mesh.GetNP());
+   connected.Clear();
+@@ -96,10 +96,10 @@
+ 		}
+ 	    }
+ 	}
+-      cout << "." << flush;
++      (*::netgen::mycout) << "." << flush;
+     }
+   while (changed);
+-  cout << endl;
++  (*::netgen::mycout) << endl;
+ 
+   for (i = 1; i <= mesh.GetNE(); i++)
+     {
+@@ -167,11 +167,11 @@
+   int i;
+   double ri, ra, rinf;
+ 
+-  cout << "ri = ";
++  (*::netgen::mycout) << "ri = ";
+   cin >> ri;
+-  cout << "ra = ";
++  (*::netgen::mycout) << "ra = ";
+   cin >> ra;
+-  cout << "rinf = ";
++  (*::netgen::mycout) << "rinf = ";
+   cin >> rinf;
+ 
+   double det = ri * ra * rinf - ri * ri * rinf;
+diff --git a/libsrc/meshing/surfacegeom.cpp b/libsrc/meshing/surfacegeom.cpp
+--- a/libsrc/meshing/surfacegeom.cpp
++++ b/libsrc/meshing/surfacegeom.cpp
+@@ -176,7 +176,7 @@
+     //Stay in reference domain [0,1]^2
+     if (gi.u < 0 || gi.u > 1 || gi.v < 0 || gi.v > 1)
+       {
+-        cout << "Warning: Projected point outside [0,1]^2: u=" << gi.u << ",v=" << gi.v <<". Setting back." << endl;
++        (*::netgen::mycout) << "Warning: Projected point outside [0,1]^2: u=" << gi.u << ",v=" << gi.v <<". Setting back." << endl;
+         gi.u = min(max(gi.u,0.0),1.0);
+         gi.v = min(max(gi.v,0.0),1.0);
+       }
+diff --git a/libsrc/meshing/topology.cpp b/libsrc/meshing/topology.cpp
+--- a/libsrc/meshing/topology.cpp
++++ b/libsrc/meshing/topology.cpp
+@@ -1242,7 +1242,7 @@
+ 	      }
+ 
+ 	    if (cnt_err && ntasks == 1)
+-	      cout << cnt_err << " elements are not matching !!!" << endl;
++	      (*::netgen::mycout) << cnt_err << " elements are not matching !!!" << endl;
+ 	  }
+         // NgProfiler::StopTimer (timer2c);
+       }
+@@ -1371,7 +1371,7 @@
+       case HEX:
+ 	return hex_points;
+       default:
+-	cerr << "Ng_ME_GetVertices, illegal element type " << et << endl;
++	(*::netgen::myerr) << "Ng_ME_GetVertices, illegal element type " << et << endl;
+       }
+     return 0;
+   }
+@@ -1406,7 +1406,7 @@
+     
+     else
+       {
+-        cerr << "GetElementFaces with orientation currently not supported" << endl;
++        (*::netgen::myerr) << "GetElementFaces with orientation currently not supported" << endl;
+         /*
+           for (int i = 1; i <= nfa; i++)
+           {
+@@ -1797,7 +1797,7 @@
+   {
+     // cout << "id = " << id << "getedgevertices, ednr = " << ednr << ", ned = " << edge2vert.Size() << "&v1 = " << &v1 << endl;
+     if (ednr < 1 || ednr > edge2vert.Size())
+-      cerr << "illegal edge nr: " << ednr << ", numedges = " << edge2vert.Size() 
++      (*::netgen::myerr) << "illegal edge nr: " << ednr << ", numedges = " << edge2vert.Size() 
+ 	   << " id = " << id 
+ 	   << endl;
+     v1 = edge2vert.Get(ednr)[0];
+diff --git a/libsrc/meshing/validate.cpp b/libsrc/meshing/validate.cpp
+--- a/libsrc/meshing/validate.cpp
++++ b/libsrc/meshing/validate.cpp
+@@ -279,7 +279,7 @@
+     auto geo = mesh.GetGeometry();
+     if(!geo)
+       {
+-	cerr << "No 2D Optimizer!" << endl;
++	(*::netgen::myerr) << "No 2D Optimizer!" << endl;
+ 	return;
+       }    
+ 
+diff --git a/libsrc/occ/occconstruction.cpp b/libsrc/occ/occconstruction.cpp
+--- a/libsrc/occ/occconstruction.cpp
++++ b/libsrc/occ/occconstruction.cpp
+@@ -38,7 +38,7 @@
+   void OCCConstructGeometry (OCCGeometry & geom)
+   {
+ #ifdef NOTHING
+-    cout << "OCC construction" << endl;
++    (*::netgen::mycout) << "OCC construction" << endl;
+ 
+     BRep_Builder builder;
+     BRepPrimAPI_MakeBox mbox(gp_Pnt(-10e5, -15e5, 0), gp_Pnt(20e5, 15e5, 10e5));
+@@ -89,7 +89,7 @@
+ 	  my_fuse = exp_solid.Current();
+ 	else
+ 	  {
+-	    cout << "fuse, cnt = " << cnt << endl;
++	    (*::netgen::mycout) << "fuse, cnt = " << cnt << endl;
+ 	    if (cnt != 7 && cnt != 9)
+ 	      my_fuse = BRepAlgoAPI_Fuse (my_fuse, exp_solid.Current());
+ 	  }
+diff --git a/libsrc/occ/occgenmesh.cpp b/libsrc/occ/occgenmesh.cpp
+--- a/libsrc/occ/occgenmesh.cpp
++++ b/libsrc/occ/occgenmesh.cpp
+@@ -291,7 +291,7 @@
+             nsubedges = i;
+             ps.SetSize(nsubedges-1);
+             params.SetSize(nsubedges+1);
+-            cout << "divide edge: local h too small" << endl;
++            (*::netgen::mycout) << "divide edge: local h too small" << endl;
+           }
+       } while (i < nsubedges);
+ 
+@@ -300,7 +300,7 @@
+ 
+     if (params[nsubedges] <= params[nsubedges-1])
+       {
+-        cout << "CORRECTED" << endl;
++        (*::netgen::mycout) << "CORRECTED" << endl;
+         ps.SetSize (nsubedges-2);
+         params.SetSize (nsubedges);
+         params[nsubedges-1] = s1;
+@@ -465,7 +465,7 @@
+ 
+                     if (system.Mass() < eps)
+                       {
+-                        cout << "ignoring edge " << geom.emap.FindIndex (edge)
++                        (*::netgen::mycout) << "ignoring edge " << geom.emap.FindIndex (edge)
+                              << ". closed edge with length < " << eps << endl;
+                         continue;
+                       }
+@@ -734,7 +734,7 @@
+         if(1==0 && !geom.fvispar[k-1].IsDrawable())
+           {
+             (*testout) << "ignoring face " << k << endl;
+-            cout << "ignoring face " << k << endl;
++            (*::netgen::mycout) << "ignoring face " << k << endl;
+             continue;
+           }
+ 
+@@ -764,7 +764,7 @@
+           PrintMessage (2, "Face ", k, " / ", mesh.GetNFD(), " (parameter space projection)");
+         tprint.Stop();
+         if (surfmesherror)
+-          cout << "Surface meshing error occurred before (in " << surfmesherror << " faces)" << endl;
++          (*::netgen::mycout) << "Surface meshing error occurred before (in " << surfmesherror << " faces)" << endl;
+ 
+         //      Meshing2OCCSurfaces meshing(f2, bb);
+         meshing.SetStartTime (starttime);
+@@ -942,7 +942,7 @@
+ 
+                 mesh.Compress();
+ 
+-                cout << "retry Surface " << k << endl;
++                (*::netgen::mycout) << "retry Surface " << k << endl;
+ 
+                 k--;
+                 projecttype*=-1;
+@@ -977,12 +977,12 @@
+ 
+     if (surfmesherror)
+       {
+-        cout << "WARNING! NOT ALL FACES HAVE BEEN MESHED" << endl;
+-        cout << "SURFACE MESHING ERROR OCCURRED IN " << surfmesherror << " FACES:" << endl;
++        (*::netgen::mycout) << "WARNING! NOT ALL FACES HAVE BEEN MESHED" << endl;
++        (*::netgen::mycout) << "SURFACE MESHING ERROR OCCURRED IN " << surfmesherror << " FACES:" << endl;
+         for (int i = 1; i <= geom.fmap.Extent(); i++)
+           if (geom.facemeshstatus[i-1] == -1)
+             {
+-              cout << "Face " << i << endl;
++              (*::netgen::mycout) << "Face " << i << endl;
+               //               problemfile << "problem with face " << i << endl;
+               //               problemfile << "vertices: " << endl;
+               TopExp_Explorer exp0,exp1,exp2;
+@@ -1003,8 +1003,8 @@
+               //               problemfile << endl;
+ 
+             }
+-        cout << endl << endl;
+-        cout << "for more information open IGES/STEP Topology Explorer" << endl;
++        (*::netgen::mycout) << endl << endl;
++        (*::netgen::mycout) << "for more information open IGES/STEP Topology Explorer" << endl;
+         //            problemfile.close();
+         throw NgException ("Problem in Surface mesh generation");
+       }
+diff --git a/libsrc/occ/occgeom.cpp b/libsrc/occ/occgeom.cpp
+--- a/libsrc/occ/occgeom.cpp
++++ b/libsrc/occ/occgeom.cpp
+@@ -67,7 +67,7 @@
+ 
+     if (anEntity.IsNull())
+       {
+-        cout<<"Warning: cannot get entity from shape" <<endl;
++        (*::netgen::mycout)<<"Warning: cannot get entity from shape" <<endl;
+         return "none";
+       }
+ 
+@@ -79,7 +79,7 @@
+     if (!bReprItem.IsNull())
+         return bReprItem->Description()->ToCString();
+ 
+-    cout<<"Warning: unknown entity type " << anEntity->DynamicType() << endl;
++    (*::netgen::mycout)<<"Warning: unknown entity type " << anEntity->DynamicType() << endl;
+     return "none";
+   }
+ 
+@@ -113,13 +113,13 @@
+       TopExp_Explorer e;
+       int count = 0;
+       for (e.Init(shape, TopAbs_COMPSOLID); e.More(); e.Next()) count++;
+-      cout << "CompSolids: " << count << endl;
+-
+-      cout << "Solids    : " << somap.Extent() << endl;
+-      cout << "Shells    : " << shmap.Extent() << endl;
+-      cout << "Faces     : " << fmap.Extent() << endl;
+-      cout << "Edges     : " << emap.Extent() << endl;
+-      cout << "Vertices  : " << vmap.Extent() << endl;
++      (*::netgen::mycout) << "CompSolids: " << count << endl;
++
++      (*::netgen::mycout) << "Solids    : " << somap.Extent() << endl;
++      (*::netgen::mycout) << "Shells    : " << shmap.Extent() << endl;
++      (*::netgen::mycout) << "Faces     : " << fmap.Extent() << endl;
++      (*::netgen::mycout) << "Edges     : " << emap.Extent() << endl;
++      (*::netgen::mycout) << "Vertices  : " << vmap.Extent() << endl;
+    }
+ 
+ 
+@@ -153,29 +153,29 @@
+ 
+       (*testout) << endl;
+ 
+-      cout << "Highest entry in topology hierarchy: " << endl;
++      (*::netgen::mycout) << "Highest entry in topology hierarchy: " << endl;
+       if (count)
+-         cout << count << " composite solid(s)" << endl;
++         (*::netgen::mycout) << count << " composite solid(s)" << endl;
+       else
+          if (geom->somap.Extent())
+-            cout << geom->somap.Extent() << " solid(s)" << endl;
++            (*::netgen::mycout) << geom->somap.Extent() << " solid(s)" << endl;
+          else
+             if (geom->shmap.Extent())
+-               cout << geom->shmap.Extent() << " shells(s)" << endl;
++               (*::netgen::mycout) << geom->shmap.Extent() << " shells(s)" << endl;
+             else
+                if (geom->fmap.Extent())
+-                  cout << geom->fmap.Extent() << " face(s)" << endl;
++                  (*::netgen::mycout) << geom->fmap.Extent() << " face(s)" << endl;
+                else
+                   if (geom->wmap.Extent())
+-                     cout << geom->wmap.Extent() << " wire(s)" << endl;
++                     (*::netgen::mycout) << geom->wmap.Extent() << " wire(s)" << endl;
+                   else
+                      if (geom->emap.Extent())
+-                        cout << geom->emap.Extent() << " edge(s)" << endl;
++                        (*::netgen::mycout) << geom->emap.Extent() << " edge(s)" << endl;
+                      else
+                         if (geom->vmap.Extent())
+-                           cout << geom->vmap.Extent() << " vertices(s)" << endl;
++                           (*::netgen::mycout) << geom->vmap.Extent() << " vertices(s)" << endl;
+                         else
+-                           cout << "no entities" << endl;
++                           (*::netgen::mycout) << "no entities" << endl;
+ 
+    }
+ 
+@@ -249,7 +249,7 @@
+ #if OCC_VERSION_HEX >= 0x070200
+     if (aBuilder.HasErrors())
+       {
+-        cout << "builder has errors" << endl;
++        (*::netgen::mycout) << "builder has errors" << endl;
+         return;
+       }
+     // Check for the warnings
+@@ -308,11 +308,11 @@
+       }
+ 
+ 
+-      cout << "Starting geometry healing procedure (tolerance: " << tolerance << ")" << endl
++      (*::netgen::mycout) << "Starting geometry healing procedure (tolerance: " << tolerance << ")" << endl
+          << "-----------------------------------" << endl;
+ 
+       {
+-         cout << endl << "- repairing faces" << endl;
++         (*::netgen::mycout) << endl << "- repairing faces" << endl;
+ 
+          Handle(ShapeFix_Face) sff;
+          Handle(ShapeBuild_ReShape) rebuild = new ShapeBuild_ReShape;
+@@ -346,17 +346,17 @@
+                sff->Status(ShapeExtend_DONE4) ||
+                sff->Status(ShapeExtend_DONE5))
+             {
+-               cout << "repaired face " << fmap.FindIndex(face) << " ";
++               (*::netgen::mycout) << "repaired face " << fmap.FindIndex(face) << " ";
+                if(sff->Status(ShapeExtend_DONE1))
+-                  cout << "(some wires are fixed)" <<endl;
++                  (*::netgen::mycout) << "(some wires are fixed)" <<endl;
+                else if(sff->Status(ShapeExtend_DONE2))
+-                  cout << "(orientation of wires fixed)" <<endl;
++                  (*::netgen::mycout) << "(orientation of wires fixed)" <<endl;
+                else if(sff->Status(ShapeExtend_DONE3))
+-                  cout << "(missing seam added)" <<endl;
++                  (*::netgen::mycout) << "(missing seam added)" <<endl;
+                else if(sff->Status(ShapeExtend_DONE4))
+-                  cout << "(small area wire removed)" <<endl;
++                  (*::netgen::mycout) << "(small area wire removed)" <<endl;
+                else if(sff->Status(ShapeExtend_DONE5))
+-                  cout << "(natural bounds added)" <<endl;
++                  (*::netgen::mycout) << "(natural bounds added)" <<endl;
+                TopoDS_Face newface = sff->Face();
+ 
+                rebuild->Replace(face, newface);
+@@ -386,7 +386,7 @@
+ 
+       if (fixsmalledges)
+       {
+-         cout << endl << "- fixing small edges" << endl;
++         (*::netgen::mycout) << endl << "- fixing small edges" << endl;
+ 
+          Handle(ShapeFix_Wire) sfw;
+          Handle(ShapeBuild_ReShape) rebuild = new ShapeBuild_ReShape;
+@@ -417,18 +417,18 @@
+                   sfw->StatusSmall(ShapeExtend_FAIL2) ||
+                   sfw->StatusSmall(ShapeExtend_FAIL3)))
+                {
+-                  cout << "Fixed small edge in wire " << wmap.FindIndex (oldwire) << endl;
++                  (*::netgen::mycout) << "Fixed small edge in wire " << wmap.FindIndex (oldwire) << endl;
+                   replace = true;
+ 
+                }
+                else if (sfw->StatusSmall(ShapeExtend_FAIL1))
+-                  cerr << "Failed to fix small edge in wire " << wmap.FindIndex (oldwire)
++                  (*::netgen::myerr) << "Failed to fix small edge in wire " << wmap.FindIndex (oldwire)
+                   << ", edge cannot be checked (no 3d curve and no pcurve)" << endl;
+                else if (sfw->StatusSmall(ShapeExtend_FAIL2))
+-                  cerr << "Failed to fix small edge in wire " << wmap.FindIndex (oldwire)
++                  (*::netgen::myerr) << "Failed to fix small edge in wire " << wmap.FindIndex (oldwire)
+                   << ", edge is null-length and has different vertives at begin and end, and lockvtx is True or ModifiyTopologyMode is False" << endl;
+                else if (sfw->StatusSmall(ShapeExtend_FAIL3))
+-                  cerr << "Failed to fix small edge in wire " << wmap.FindIndex (oldwire)
++                  (*::netgen::myerr) << "Failed to fix small edge in wire " << wmap.FindIndex (oldwire)
+                   << ", CheckConnected has failed" << endl;
+ 
+                replace = sfw->FixEdgeCurves() || replace;
+@@ -469,7 +469,7 @@
+                   BRepGProp::LinearProperties(edge, system);
+                   if (system.Mass() < tolerance)
+                   {
+-                     cout << "removing degenerated edge " << emap.FindIndex(edge)
++                     (*::netgen::mycout) << "removing degenerated edge " << emap.FindIndex(edge)
+                         << " from vertex " << vmap.FindIndex(TopExp::FirstVertex (edge))
+                         << " to vertex " << vmap.FindIndex(TopExp::LastVertex (edge)) << endl;
+                      rebuild->Remove(edge);
+@@ -507,12 +507,12 @@
+ 
+          if (sfwf->FixWireGaps())
+          {
+-            cout << endl << "- fixing wire gaps" << endl;
+-            if (sfwf->StatusWireGaps(ShapeExtend_OK)) cout << "no gaps found" << endl;
+-            if (sfwf->StatusWireGaps(ShapeExtend_DONE1)) cout << "some 2D gaps fixed" << endl;
+-            if (sfwf->StatusWireGaps(ShapeExtend_DONE2)) cout << "some 3D gaps fixed" << endl;
+-            if (sfwf->StatusWireGaps(ShapeExtend_FAIL1)) cout << "failed to fix some 2D gaps" << endl;
+-            if (sfwf->StatusWireGaps(ShapeExtend_FAIL2)) cout << "failed to fix some 3D gaps" << endl;
++            (*::netgen::mycout) << endl << "- fixing wire gaps" << endl;
++            if (sfwf->StatusWireGaps(ShapeExtend_OK)) (*::netgen::mycout) << "no gaps found" << endl;
++            if (sfwf->StatusWireGaps(ShapeExtend_DONE1)) (*::netgen::mycout) << "some 2D gaps fixed" << endl;
++            if (sfwf->StatusWireGaps(ShapeExtend_DONE2)) (*::netgen::mycout) << "some 3D gaps fixed" << endl;
++            if (sfwf->StatusWireGaps(ShapeExtend_FAIL1)) (*::netgen::mycout) << "failed to fix some 2D gaps" << endl;
++            if (sfwf->StatusWireGaps(ShapeExtend_FAIL2)) (*::netgen::mycout) << "failed to fix some 3D gaps" << endl;
+          }
+ 
+          sfwf->SetPrecision(tolerance);
+@@ -523,7 +523,7 @@
+             {
+                TopoDS_Edge edge = TopoDS::Edge(exp1.Current());
+                if ( BRep_Tool::Degenerated(edge) )
+-                  cout << "degenerated edge at position 4" << endl;
++                  (*::netgen::mycout) << "degenerated edge at position 4" << endl;
+             }
+          }
+ 
+@@ -531,10 +531,10 @@
+ 
+          if (sfwf->FixSmallEdges())
+          {
+-            cout << endl << "- fixing wire frames" << endl;
+-            if (sfwf->StatusSmallEdges(ShapeExtend_OK)) cout << "no small edges found" << endl;
+-            if (sfwf->StatusSmallEdges(ShapeExtend_DONE1)) cout << "some small edges fixed" << endl;
+-            if (sfwf->StatusSmallEdges(ShapeExtend_FAIL1)) cout << "failed to fix some small edges" << endl;
++            (*::netgen::mycout) << endl << "- fixing wire frames" << endl;
++            if (sfwf->StatusSmallEdges(ShapeExtend_OK)) (*::netgen::mycout) << "no small edges found" << endl;
++            if (sfwf->StatusSmallEdges(ShapeExtend_DONE1)) (*::netgen::mycout) << "some small edges fixed" << endl;
++            if (sfwf->StatusSmallEdges(ShapeExtend_FAIL1)) (*::netgen::mycout) << "failed to fix some small edges" << endl;
+          }
+ 
+ 
+@@ -555,7 +555,7 @@
+          {
+             TopoDS_Edge edge = TopoDS::Edge(exp1.Current());
+             if ( BRep_Tool::Degenerated(edge) )
+-               cout << "degenerated edge at position 5" << endl;
++               (*::netgen::mycout) << "degenerated edge at position 5" << endl;
+          }
+       }
+ 
+@@ -565,7 +565,7 @@
+       if (fixspotstripfaces)
+       {
+ 
+-         cout << endl << "- fixing spot and strip faces" << endl;
++         (*::netgen::mycout) << endl << "- fixing spot and strip faces" << endl;
+          Handle(ShapeFix_FixSmallFace) sffsm = new ShapeFix_FixSmallFace();
+          sffsm -> Init (shape);
+          sffsm -> SetPrecision (tolerance);
+@@ -581,7 +581,7 @@
+          {
+             TopoDS_Edge edge = TopoDS::Edge(exp1.Current());
+             if ( BRep_Tool::Degenerated(edge) )
+-               cout << "degenerated edge at position 6" << endl;
++               (*::netgen::mycout) << "degenerated edge at position 6" << endl;
+          }
+       }
+ 
+@@ -589,7 +589,7 @@
+ 
+       if (sewfaces)
+       {
+-         cout << endl << "- sewing faces" << endl;
++         (*::netgen::mycout) << endl << "- sewing faces" << endl;
+ 
+          BRepOffsetAPI_Sewing sewedObj(tolerance);
+ 
+@@ -604,7 +604,7 @@
+          if (!sewedObj.SewedShape().IsNull())
+             shape = sewedObj.SewedShape();
+          else
+-            cout << " not possible";
++            (*::netgen::mycout) << " not possible";
+       }
+ 
+ 
+@@ -624,7 +624,7 @@
+ 
+       if (makesolids)
+       {
+-         cout << endl << "- making solids" << endl;
++         (*::netgen::mycout) << endl << "- making solids" << endl;
+ 
+          BRepBuilderAPI_MakeSolid ms;
+          int count = 0;
+@@ -636,7 +636,7 @@
+ 
+          if (!count)
+          {
+-            cout << " not possible (no shells)" << endl;
++            (*::netgen::mycout) << " not possible (no shells)" << endl;
+          }
+          else
+          {
+@@ -666,7 +666,7 @@
+                //delete sfs; sfs = NULL;
+             }
+             else
+-               cout << " not possible" << endl;
++               (*::netgen::mycout) << " not possible" << endl;
+          }
+       }
+ 
+@@ -674,7 +674,7 @@
+ 
+       if (splitpartitions)
+       {
+-         cout << "- running SALOME partition splitter" << endl;
++         (*::netgen::mycout) << "- running SALOME partition splitter" << endl;
+ 
+          TopExp_Explorer e2;
+          Partition_Spliter ps;
+@@ -690,13 +690,13 @@
+          ps.Compute();
+          shape = ps.Shape();
+ 
+-         cout << " before: " << count << " solids" << endl;
++         (*::netgen::mycout) << " before: " << count << " solids" << endl;
+ 
+          count = 0;
+          for (e2.Init (shape, TopAbs_SOLID);
+             e2.More(); e2.Next()) count++;
+ 
+-            cout << " after : " << count << " solids" << endl;
++            (*::netgen::mycout) << " after : " << count << " solids" << endl;
+       }
+ 
+       BuildFMap();
+@@ -708,7 +708,7 @@
+          {
+             TopoDS_Edge edge = TopoDS::Edge(exp1.Current());
+             if ( BRep_Tool::Degenerated(edge) )
+-               cout << "degenerated edge at position 8" << endl;
++               (*::netgen::mycout) << "degenerated edge at position 8" << endl;
+          }
+       }
+ 
+@@ -736,18 +736,18 @@
+       for (exp0.Init(shape, TopAbs_COMPOUND); exp0.More(); exp0.Next()) nnrc++;
+       for (exp0.Init(shape, TopAbs_COMPSOLID); exp0.More(); exp0.Next()) nnrcs++;
+ 
+-      cout << "-----------------------------------" << endl;
+-      cout << "Compounds       : " << nnrc << " (" << nrc << ")" << endl;
+-      cout << "Composite solids: " << nnrcs << " (" << nrcs << ")" << endl;
+-      cout << "Solids          : " << nnrso << " (" << nrso << ")" << endl;
+-      cout << "Shells          : " << nnrsh << " (" << nrsh << ")" << endl;
+-      cout << "Wires           : " << nnrw << " (" << nrw << ")" << endl;
+-      cout << "Faces           : " << nnrf << " (" << nrf << ")" << endl;
+-      cout << "Edges           : " << nnre << " (" << nre << ")" << endl;
+-      cout << "Vertices        : " << nnrv << " (" << nrv << ")" << endl;
+-      cout << endl;
+-      cout << "Totol surface area : " << newsurfacecont << " (" << surfacecont << ")" << endl;
+-      cout << endl;
++      (*::netgen::mycout) << "-----------------------------------" << endl;
++      (*::netgen::mycout) << "Compounds       : " << nnrc << " (" << nrc << ")" << endl;
++      (*::netgen::mycout) << "Composite solids: " << nnrcs << " (" << nrcs << ")" << endl;
++      (*::netgen::mycout) << "Solids          : " << nnrso << " (" << nrso << ")" << endl;
++      (*::netgen::mycout) << "Shells          : " << nnrsh << " (" << nrsh << ")" << endl;
++      (*::netgen::mycout) << "Wires           : " << nnrw << " (" << nrw << ")" << endl;
++      (*::netgen::mycout) << "Faces           : " << nnrf << " (" << nrf << ")" << endl;
++      (*::netgen::mycout) << "Edges           : " << nnre << " (" << nre << ")" << endl;
++      (*::netgen::mycout) << "Vertices        : " << nnrv << " (" << nrv << ")" << endl;
++      (*::netgen::mycout) << endl;
++      (*::netgen::mycout) << "Totol surface area : " << newsurfacecont << " (" << surfacecont << ")" << endl;
++      (*::netgen::mycout) << endl;
+    }
+ 
+ 
+@@ -1014,7 +1014,7 @@
+    void OCCGeometry :: SewFaces ()
+    {
+       (*testout) << "Trying to sew faces ..." << endl;
+-      cout << "Trying to sew faces ..." << flush;
++      (*::netgen::mycout) << "Trying to sew faces ..." << flush;
+ 
+       BRepOffsetAPI_Sewing sewedObj(1);
+  
+@@ -1029,10 +1029,10 @@
+       if (!sewedObj.SewedShape().IsNull())
+       {
+          shape = sewedObj.SewedShape();
+-         cout << " done" << endl;
++         (*::netgen::mycout) << " done" << endl;
+       }
+       else
+-         cout << " not possible";
++         (*::netgen::mycout) << " not possible";
+    }
+ 
+ 
+@@ -1044,7 +1044,7 @@
+       TopExp_Explorer exp0;
+ 
+       (*testout) << "Trying to build solids ..." << endl;
+-      cout << "Trying to build solids ..." << flush;
++      (*::netgen::mycout) << "Trying to build solids ..." << flush;
+ 
+       BRepBuilderAPI_MakeSolid ms;
+       int count = 0;
+@@ -1056,7 +1056,7 @@
+ 
+       if (!count)
+       {
+-         cout << " not possible (no shells)" << endl;
++         (*::netgen::mycout) << " not possible (no shells)" << endl;
+          return;
+       }
+ 
+@@ -1085,10 +1085,10 @@
+             shape = newshape;
+          }
+ 
+-         cout << " done" << endl;
++         (*::netgen::mycout) << " done" << endl;
+       }
+       else
+-         cout << " not possible" << endl;
++         (*::netgen::mycout) << " not possible" << endl;
+    }
+ 
+ 
+@@ -1096,12 +1096,12 @@
+ 
+    void OCCGeometry :: BuildVisualizationMesh (double deflection)
+    {
+-      cout << "Preparing visualization (deflection = " << deflection << ") ... " << flush;
++      (*::netgen::mycout) << "Preparing visualization (deflection = " << deflection << ") ... " << flush;
+ 
+       BRepTools::Clean (shape);
+       // BRepMesh_IncrementalMesh::
+       BRepMesh_IncrementalMesh (shape, deflection, true);
+-      cout << "done" << endl;
++      (*::netgen::mycout) << "done" << endl;
+    }
+ 
+ 
+@@ -1129,7 +1129,7 @@
+    PointGeomInfo OCCGeometry :: ProjectPoint(int surfi, Point<3> & p) const
+    {
+       static int cnt = 0;
+-      if (++cnt % 1000 == 0) cout << "Project cnt = " << cnt << endl;
++      if (++cnt % 1000 == 0) (*::netgen::mycout) << "Project cnt = " << cnt << endl;
+ 
+       gp_Pnt pnt(p(0), p(1), p(2));
+ 
+@@ -1790,7 +1790,7 @@
+ 	   case TopAbs_VERTEX:
+ 	     count2 = vmap.FindIndex(TopoDS::Vertex(e.Current())); break;
+ 	   default:
+-	     cout << "RecursiveTopologyTree: Case " << e.Current().ShapeType() << " not handeled" << endl;
++	     (*::netgen::mycout) << "RecursiveTopologyTree: Case " << e.Current().ShapeType() << " not handeled" << endl;
+          }
+ 
+          int nrsubshapes = 0;
+@@ -1825,7 +1825,7 @@
+ 
+    void OCCGeometry :: GetTopologyTree (stringstream & str)
+    {
+-      cout << "Building topology tree ... " << flush;
++      (*::netgen::mycout) << "Building topology tree ... " << flush;
+       RecursiveTopologyTree (shape, str, TopAbs_COMPSOLID, false, "CompSolids");
+       RecursiveTopologyTree (shape, str, TopAbs_SOLID, true, "FreeSolids");
+       RecursiveTopologyTree (shape, str, TopAbs_SHELL, true, "FreeShells");
+@@ -1860,7 +1860,7 @@
+       int twistedfaces = 0;
+       // int edgessamebutnotidentified = 0;
+ 
+-      cout << "checking faces ... " << flush;
++      (*::netgen::mycout) << "checking faces ... " << flush;
+ 
+       int i;
+       for (i = 1; i <= fmap.Extent(); i++)
+@@ -1959,8 +1959,8 @@
+          }
+       }
+ 
+-      cout << "done" << endl;
+-      cout << "checking edges ... " << flush;
++      (*::netgen::mycout) << "done" << endl;
++      (*::netgen::mycout) << "checking edges ... " << flush;
+ 
+       // double dmax;
+       // int cnt = 0;
+@@ -1988,7 +1988,7 @@
+ 
+       str << flush;
+ 
+-      cout << "done" << endl;
++      (*::netgen::mycout) << "done" << endl;
+    }
+ 
+ 
+diff --git a/libsrc/occ/occgeom.hpp b/libsrc/occ/occgeom.hpp
+--- a/libsrc/occ/occgeom.hpp
++++ b/libsrc/occ/occgeom.hpp
+@@ -321,7 +321,7 @@
+ 
+     OCCSurface GetSurface (int surfi)
+     {
+-      cout << "OCCGeometry::GetSurface using PLANESPACE" << endl;
++      (*::netgen::mycout) << "OCCGeometry::GetSurface using PLANESPACE" << endl;
+       return OCCSurface (TopoDS::Face(fmap(surfi)), PLANESPACE);
+     }
+ 
+diff --git a/libsrc/occ/Partition_Spliter.cxx b/libsrc/occ/Partition_Spliter.cxx
+--- a/libsrc/occ/Partition_Spliter.cxx
++++ b/libsrc/occ/Partition_Spliter.cxx
+@@ -276,7 +276,7 @@
+ 
+ #ifdef PART_PERF
+     MESSAGE("+++ CompletPart3d()");
+-    aCron.Show( cout );
++    aCron.Show( (*::netgen::mycout) );
+     aCron.Reset();
+     aCron.Start();
+ #endif
+@@ -289,7 +289,7 @@
+ 
+ #ifdef PART_PERF
+     MESSAGE("+++ FindToolsToReconstruct()");
+-    aCron.Show( cout );
++    aCron.Show( (*::netgen::mycout) );
+     aCron.Reset();
+     aCron.Start();
+ #endif
+@@ -325,7 +325,7 @@
+     
+ #ifdef PART_PERF
+     MESSAGE("+++ CompletPart2d()");
+-    aCron.Show( cout );
++    aCron.Show( (*::netgen::mycout) );
+     aCron.Reset();
+     aCron.Start();
+ #endif
+@@ -434,7 +434,7 @@
+     }
+ #ifdef PART_PERF
+     MESSAGE("+++ Cut Edges");
+-    aCron.Show( cout );
++    aCron.Show( (*::netgen::mycout) );
+     aCron.Reset();
+     aCron.Start();
+ #endif
+@@ -446,7 +446,7 @@
+     
+ #ifdef PART_PERF
+     MESSAGE("+++ MergeEqualEdges()");
+-    aCron.Show( cout );
++    aCron.Show( (*::netgen::mycout) );
+     aCron.Reset();
+     aCron.Start();
+ #endif
+@@ -491,7 +491,7 @@
+     myDoneStep = TopAbs_FACE;
+ #ifdef PART_PERF
+     MESSAGE("+++ MakeFaces()");
+-    aCron.Show( cout );
++    aCron.Show( (*::netgen::mycout) );
+     aCron.Reset();
+     aCron.Start();
+ #endif
+@@ -534,7 +534,7 @@
+   }
+ #ifdef PART_PERF
+     MESSAGE("+++ MakeShells()");
+-    aCron.Show( cout );
++    aCron.Show( (*::netgen::mycout) );
+ #endif
+ 
+   //-----------------------------------------------
+diff --git a/libsrc/occ/utilities.h b/libsrc/occ/utilities.h
+--- a/libsrc/occ/utilities.h
++++ b/libsrc/occ/utilities.h
+@@ -81,13 +81,13 @@
+ #define BEGIN_OF(msg) {REPERE;MYTRACE<<"Begin of: "     <<msg<<endl;REPERE;} 
+ #define END_OF(msg)   {REPERE;MYTRACE<<"Normal end of: "<<msg<<endl;REPERE;} 
+ 
+-#define HERE {cout<<flush ;cerr<<"- Trace "<<__FILE__<<" ["<<__LINE__<<"] : "<<flush ;}
++#define HERE {(*::netgen::mycout)<<flush ;(*::netgen::myerr)<<"- Trace "<<__FILE__<<" ["<<__LINE__<<"] : "<<flush ;}
+ 
+-#define INTERRUPTION(code) {HERE;cerr<<"INTERRUPTION return code= "<<code<< endl;std::exit(code);}
++#define INTERRUPTION(code) {HERE;(*::netgen::myerr)<<"INTERRUPTION return code= "<<code<< endl;std::exit(code);}
+ 
+ #ifndef ASSERT
+ #define ASSERT(condition) \
+-        if (!(condition)){HERE;cerr<<"CONDITION "<<#condition<<" NOT VERIFIED"<<endl;INTERRUPTION(1);}
++        if (!(condition)){HERE;(*::netgen::myerr)<<"CONDITION "<<#condition<<" NOT VERIFIED"<<endl;INTERRUPTION(1);}
+ #endif /* ASSERT */
+ 
+ 
+diff --git a/libsrc/stlgeom/meshstlsurface.cpp b/libsrc/stlgeom/meshstlsurface.cpp
+--- a/libsrc/stlgeom/meshstlsurface.cpp
++++ b/libsrc/stlgeom/meshstlsurface.cpp
+@@ -73,7 +73,7 @@
+ 	  int trig1, trig2, trig1b, trig2b;
+ 
+ 	  if (p1 == p2) 
+-	    cout << "Add Segment, p1 == p2 == " << p1 << endl;
++	    (*::netgen::mycout) << "Add Segment, p1 == p2 == " << p1 << endl;
+ 
+ 	  // Test auf geschlossener Rand mit 2 Segmenten 
+ 	      
+@@ -108,7 +108,7 @@
+ 
+ 	  if (trig1 <= 0 || trig2 <= 0 || trig1b <= 0 || trig2b <= 0)
+ 	    {
+-	      cout << "negative trigs, "
++	      (*::netgen::mycout) << "negative trigs, "
+ 		   << ", trig1 = " << trig1
+ 		   << ", trig1b = " << trig1b
+ 		   << ", trig2 = " << trig2
+@@ -672,7 +672,7 @@
+     {
+       const Segment & seg = mesh.GetOpenSegment (i);
+       if (seg.si < 1 || seg.si > mesh.GetNFD())
+-	cerr << "segment index " << seg.si << " out of range [1, " << mesh.GetNFD() << "]" << endl;
++	(*::netgen::myerr) << "segment index " << seg.si << " out of range [1, " << mesh.GetNFD() << "]" << endl;
+       opensegments.Add (seg.si, i);
+     }
+   
+diff --git a/libsrc/stlgeom/stlgeom.cpp b/libsrc/stlgeom/stlgeom.cpp
+--- a/libsrc/stlgeom/stlgeom.cpp
++++ b/libsrc/stlgeom/stlgeom.cpp
+@@ -360,7 +360,7 @@
+ 
+ 	  if (!nbt)
+ 	    {
+-	      cerr << "ERROR: stlgeom::Smoothnormals, nbt = 0" << endl;
++	      (*::netgen::myerr) << "ERROR: stlgeom::Smoothnormals, nbt = 0" << endl;
+ 	    }
+ 
+ 	  // smoothed normal
+diff --git a/libsrc/stlgeom/stltopology.cpp b/libsrc/stlgeom/stltopology.cpp
+--- a/libsrc/stlgeom/stltopology.cpp
++++ b/libsrc/stlgeom/stltopology.cpp
+@@ -440,7 +440,7 @@
+ 		}
+               else
+                 {
+-                  cout << "Skipping flat triangle " 
++                  (*::netgen::mycout) << "Skipping flat triangle " 
+                        << "l1 = " << Dist(pts[0], pts[1])
+                        << ", l2 = " << Dist(pts[0], pts[2])
+                        << ", l3 = " << Dist(pts[2], pts[1]) << endl;
+@@ -532,7 +532,7 @@
+ 	      pointtree->Insert (p, foundpos);
+ 	    }
+           if (Dist(p, points[foundpos]) > 1e-10)
+-            cout << "identify close points: " << p << " " << points[foundpos]
++            (*::netgen::mycout) << "identify close points: " << p << " " << points[foundpos]
+                  << ", dist = " << Dist(p, points[foundpos])
+                  << endl;
+ 	  st[k] = foundpos;
+diff --git a/nglib/nglib.cpp b/nglib/nglib.cpp
+--- a/nglib/nglib.cpp
++++ b/nglib/nglib.cpp
+@@ -518,7 +518,7 @@
+       MeshFromSpline2D (*(SplineGeometry2d*)geom, m, mparam);
+       // new shared_ptr<Mesh> (m);  // hack to keep mesh m alive 
+       
+-      cout << m->GetNSE() << " elements, " << m->GetNP() << " points" << endl;
++      (*::netgen::mycout) << m->GetNSE() << " elements, " << m->GetNP() << " points" << endl;
+ 
+       *mesh = (Ng_Mesh*)m.get();
+       return NG_OK;
+@@ -1193,7 +1193,7 @@
+ 
+    DLL_HEADER void MyError2 (const char * ch)
+    {
+-      cerr << ch;
++      (*::netgen::myerr) << ch;
+    }
+ 
+ 

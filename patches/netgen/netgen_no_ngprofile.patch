@@ -1,0 +1,35 @@
+pySMESH: netgen ignores the NGPROFILE environment variable (netgen 6.2.2101).
+
+Why: ngcore's profiler (core/profiler.cpp) has one static NgProfiler, whose destructor
+writes a timing table to "netgen.prof" in the working directory when NGPROFILE is set
+(at process exit, since the profiler is static). pySMESH runs inside a host process: an
+environment variable of that process must not make pySMESH write a file into the host's
+working directory (tests/test_mesher_netgen_containment.py).
+
+Change, in libsrc/core/profiler.cpp only: the NGPROFILE branch of ~NgProfiler is gone. The
+branch that writes the profile to NgProfiler::filename stays; only netgen's Python module
+sets that name, and pySMESH does not build it. No mesh changes.
+
+diff --git a/libsrc/core/profiler.cpp b/libsrc/core/profiler.cpp
+--- a/libsrc/core/profiler.cpp
++++ b/libsrc/core/profiler.cpp
+@@ -35,17 +35,8 @@
+         fclose(prof); // NOLINT
+       }
+ 
+-    if (getenv ("NGPROFILE"))
+-      {
+-       std::string filename = "netgen.prof";
+-#ifdef PARALLEL
+-       filename += "."+ToString(id);
+-#endif
+-       if (id == 0) logger->info( "write profile to file {}", filename );
+-       FILE *prof = fopen(filename.c_str(),"w"); // NOLINT
+-       Print (prof);
+-       fclose(prof); // NOLINT
+-      }
++    // pySMESH: NGPROFILE is not read. It made the process write netgen.prof into its
++    // working directory at exit, and pySMESH writes no file there.
+   }
+ 
+   void NgProfiler :: Print (FILE * prof)

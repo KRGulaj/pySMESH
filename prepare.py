@@ -143,6 +143,8 @@ PATCH_MANIFEST: Final[tuple[tuple[str, str], ...]] = (
     ("netgen/0004-occt-8.0-netgen-partition.patch", "."),
     ("netgen/0005-occt-8.0-netgen-occ.patch", "."),
     ("netgen/occgeom_save_without_stl.patch", "src/Netgen"),
+    ("netgen/netgen_console_writes.patch", "src/Netgen"),
+    ("netgen/netgen_no_ngprofile.patch", "src/Netgen"),
     ("netgen/e1d71a78_no_need_to_remove_archive_type_infos.patch", "src/Netgen"),
     # --- NETGENPlugin V9_16_0 : root staged/src/NETGENPlugin (looooo's layout) ---
     ("netgenplugin/NETGENPlugin_occt8.patch", "src/NETGENPlugin"),
