@@ -140,6 +140,7 @@ happens where a cap edge is split under a whole one: the side face between them 
 edges. `Prism3D` projects the opposite side onto the composite side as a whole, each node
 at its share of the side's length. It sweeps through that face only if:
 
+- the edges of the composite side join smoothly, as the parts of a split edge do;
 - each split point gets a node, within the vertex tolerance;
 - each edge of the composite side gets the number of segments that its own 1-D hypothesis
   gives, so that no hypothesis is dropped. Inside an edge the projection places the nodes,
@@ -153,9 +154,11 @@ cap faces times 4, and the cell volumes sum to the prism volume within 1.6e-14 r
 Up to 5.0.0 it projected onto the first edge of a side only, and refused n = 4, 6 and 8.
 
 If the conditions fail, `Prism3D` tries another face as the source. With 4 segments on each
-half-edge under 4 on the whole edge, n = 5 sweeps from a side face; n = 8 has no face left,
-and the compute fails and names, for each face, why it is not the source. The way out:
-split the opposite cap edge at the same points, so that the side face becomes two
+half-edge under 4 on the whole edge, n = 5 sweeps from a side face, as in 5.0.0; n = 6 and
+8 have no face left, and the compute fails and names, for each face, why it is not the
+source. So does a box with one bottom edge split and 4 segments on every edge: the
+message names the two half-edges, their 8 segments and the 4 below. The way out: split
+the opposite cap edge at the same points, so that the side face becomes two
 quadrangles, or give the split edges the segments that the opposite side puts on them.
 
 `Prism3D` builds no viscous layers itself, but it sweeps the 2-D layers of its source face.
