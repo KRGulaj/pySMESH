@@ -57,7 +57,9 @@
 #include <SMESHDS_Group.hxx>
 #include <SMESHDS_SubMesh.hxx>
 #include <SMESHDS_Mesh.hxx>
+#include <SMESH_Comment.hxx>
 #include <SMESH_ComputeError.hxx>
+#include <Utils_SALOME_Exception.hxx>
 #include <SMESH_ControlsDef.hxx>
 #include <BRepMesh_DataStructureOfDelaun.hxx>
 #include <BRepMesh_Triangle.hxx>
@@ -2802,6 +2804,95 @@ void probe_p4_composite_hexa_layers() {
   check(assigned && !computed && named, msg);
 }
 
+// ------------------------------------------------------------------------------ P5EXC ---- //
+
+// SMESH_subMesh_salome_exception_text.patch: a SALOME_Exception thrown by an algorithm's
+// Compute lost the first 7 characters of its text, for the "Salome " of a "Salome Exception"
+// prefix that only the const char* constructor adds (Utils_SALOME_Exception.cxx, makeText).
+// No public input reaches such a throw site in this build, so a stub 3-D algorithm throws
+// each kind: a std::string, an SMESH_Comment, a text shorter than 7 characters, and a
+// const char* text, which carries the prefix.
+class ThrowingAlgo3D : public SMESH_3D_Algo {
+ public:
+  enum class Kind { kString, kComment, kShort, kPrefixed };
+
+  ThrowingAlgo3D(int hypId, SMESH_Gen* gen, Kind kind) : SMESH_3D_Algo(hypId, gen), kind_(kind) {
+    _name = "ProbeThrowing_3D";
+  }
+
+  bool CheckHypothesis(SMESH_Mesh&, const TopoDS_Shape&,
+                       SMESH_Hypothesis::Hypothesis_Status& status) override {
+    status = SMESH_Hypothesis::HYP_OK;
+    return true;
+  }
+
+  bool Compute(SMESH_Mesh&, const TopoDS_Shape&) override {
+    switch (kind_) {
+      case Kind::kString:
+        throw SALOME_Exception(std::string("ViscousBuilder2D: a text from a std::string"));
+      case Kind::kComment:
+        throw SALOME_Exception(SMESH_Comment("ViscousBuilder2D: not SMDS_TOP_EDGE node "
+                                             "position: ") << 0 << " of node " << 12);
+      case Kind::kShort:
+        throw SALOME_Exception(std::string("abc"));
+      case Kind::kPrefixed:
+        throw SALOME_Exception("a text from a const char*");
+    }
+    return false;
+  }
+
+  bool Evaluate(SMESH_Mesh&, const TopoDS_Shape&, MapShapeNbElems&) override { return false; }
+
+ private:
+  Kind kind_;
+};
+
+// The compute error text the SOLID gets when the stub throws `kind` on the unit box.
+std::string thrown_text(ThrowingAlgo3D::Kind kind) {
+  BRep_Builder builder;
+  TopoDS_Compound box;
+  builder.MakeCompound(box);
+  builder.Add(box, BRepPrimAPI_MakeBox(1.0, 1.0, 1.0).Shape());
+  Session s(box);
+  StdMeshers_Regular_1D* a1 = s.make<StdMeshers_Regular_1D>();
+  StdMeshers_NumberOfSegments* n = s.make<StdMeshers_NumberOfSegments>();
+  n->SetNumberOfSegments(2);
+  StdMeshers_Quadrangle_2D* a2 = s.make<StdMeshers_Quadrangle_2D>();
+  ThrowingAlgo3D* a3 = s.make<ThrowingAlgo3D>(kind);
+  const bool assigned =
+      s.assign(box, a1) && s.assign(box, n) && s.assign(box, a2) && s.assign(box, a3);
+  if (!assigned || s.compute()) {
+    return "(the stub was not assigned, or the compute succeeded)";
+  }
+  TopExp_Explorer solid(box, TopAbs_SOLID);
+  const SMESH_ComputeErrorPtr err = s.mesh().GetSubMesh(solid.Current())->GetComputeError();
+  return err ? err->myComment : std::string("(no compute error)");
+}
+
+void probe_p5_salome_exception_text() {
+  section("P5EXC", "a SALOME_Exception from a compute keeps its full text");
+  const struct {
+    ThrowingAlgo3D::Kind kind;
+    const char* want;
+    const char* what;
+  } cases[] = {
+      {ThrowingAlgo3D::Kind::kString, "ViscousBuilder2D: a text from a std::string",
+       "a std::string text reaches the compute error whole"},
+      {ThrowingAlgo3D::Kind::kComment,
+       "ViscousBuilder2D: not SMDS_TOP_EDGE node position: 0 of node 12",
+       "an SMESH_Comment text reaches the compute error whole"},
+      {ThrowingAlgo3D::Kind::kShort, "abc",
+       "a text shorter than 7 characters is kept, not read past its end"},
+      {ThrowingAlgo3D::Kind::kPrefixed, "Exception : a text from a const char*",
+       "a text with the \"Salome Exception\" prefix keeps exactly its former text"},
+  };
+  for (const auto& c : cases) {
+    const std::string got = thrown_text(c.kind);
+    check(got == c.want, std::string("P5EXC ") + c.what + ": got '" + got + "', want '" +
+                             c.want + "'");
+  }
+}
+
 }  // namespace
 
 void run_smesh_probe() {
@@ -2825,4 +2916,5 @@ void run_smesh_probe() {
   probe_p4_cartesian_layers();
   probe_p4_mefisto_max_element_area();
   probe_p4_composite_hexa_layers();
+  probe_p5_salome_exception_text();
 }
