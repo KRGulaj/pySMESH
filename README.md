@@ -23,8 +23,8 @@ Meta:
 
 - **License:** LGPL-2.1-only (see [LICENSE](LICENSE), [NOTICE.md](NOTICE.md))
 - **Platform:** Windows x64, CPython 3.11 to 3.14
-- **Runtime dependencies:** NumPy. Nothing else. SMESH, OCCT, Boost and VTK all ship
-  inside the wheel.
+- **Runtime dependencies:** NumPy. Nothing else. SMESH, NETGEN, OCCT, Boost and VTK all
+  ship inside the wheel.
 
 ## What it covers
 
@@ -117,8 +117,10 @@ and the total thickness in a closed form (`first_layer_thickness`). There are
 three ways to build them:
 
 - **Inside a `Mesher`:** `ViscousLayers` on a solid, with `Hexa3D`,
-  `CompositeHexa3D`, `PolyhedronPerSolid3D` or `Cartesian3D`. `ViscousLayers2D` on a face, with
-  `Quadrangle2D`, `QuadFromMedialAxis1D2D`, `Mefisto2D` or `PolygonPerFace2D`. An
+  `CompositeHexa3D`, `PolyhedronPerSolid3D`, `Cartesian3D`, `Netgen3D` or
+  `Netgen1D2D3D`. `ViscousLayers2D` on a face, with `Quadrangle2D`,
+  `QuadFromMedialAxis1D2D`, `Mefisto2D`, `PolygonPerFace2D`, `Netgen2D` or `Netgen1D2D`.
+  With NETGEN, prisms grow on the chosen walls and tetrahedra fill the rest. An
   algorithm that cannot build layers refuses them by name.
 - **In two steps, with `ViscousLayerBuilder`:** `Mesher.shrink_geometry` returns
   the shape shrunk by the layer thickness. Mesh it with any algorithm, then
@@ -133,11 +135,15 @@ three ways to build them:
 | `Cartesian3D` | Any solid, by a body-fitted Cartesian grid: hexahedra inside, cut polyhedra at the wall. `CartesianParameters3D` sets the grid (spacing functions, explicit coordinates, axes, a fixed point) and the quanta that turn small cut cells into hexahedra. Takes viscous layers. |
 | `Mefisto2D` | Any face, by free triangles sized by `MaxElementArea` or by `LengthFromEdges`. |
 | `PolygonPerFace2D`, `PolyhedronPerSolid3D` | One polygon per face, one polyhedron per solid. |
+| `Netgen1D2D3D`, `Netgen3D` | Any solid, by NETGEN tetrahedra: in one algorithm from the edges up, or from the mesh of its faces (pyramids join quadrangle faces). `NetgenParameters` sets the size, the fineness preset, local sizes per sub-shape, a chordal error and second order. Takes viscous layers. |
+| `Netgen1D2D`, `Netgen2D` | Any face, by NETGEN triangles, or quad-dominant with `quad_allowed`. Takes viscous layers. |
+| `NetgenRemesher2D` | A triangle surface with no CAD behind it, meshed again chart by chart, at its feature edges. See [Discrete meshes](#discrete-meshes-no-cad). |
 
 Free 1-D sizing: `LocalLength`, `MaxLength`, `AutomaticLength`, and the
 curvature-driven `Deflection1D` and `Adaptive1D`. `MaxElementVolume` bounds
-3-D cells, and `QuadraticMesh` makes second-order elements. The build carries
-no free tetrahedral volume mesher; NETGEN is planned.
+3-D cells, and `QuadraticMesh` makes second-order elements. NETGEN (netgen 6.2.2101,
+SALOME's NETGENPlugin `V9_16_0`) is built into `_core`; see the
+[NETGEN guide](docs/documentation/guides/netgen.md).
 
 ### Reporting
 
@@ -344,7 +350,7 @@ gone = mesher.remove_elements(patches.at(2), free_nodes=True)
 print(gone.elements, gone.nodes)
 ```
 
-Three things are worth knowing:
+Four things are worth knowing:
 
 - **Ids are the handle.** Nodes and elements keep their ids for as long as
   they exist, and nothing is ever renumbered. `add_nodes` and
@@ -356,10 +362,13 @@ Three things are worth knowing:
   once faces have been deleted. Passing `name_prefix` stores each patch as
   a group, and SMESH maintains that membership itself: a deleted element
   leaves the group, survivors keep their place.
+- **The one algorithm it takes.** `NetgenRemesher2D`, on the whole mesh,
+  meshes the triangles again with NETGEN, chart by chart. The new mesh
+  replaces the old one.
 - **What such a mesher cannot do.** Anything that resolves a sub-shape
-  ordinal: `compute`, `assign`/`unassign`, `add_group_on_shape`, the
-  pattern mapping, `smooth(in_uv_space=True)`, and the `ElementsOnShape` and
-  `Deflection2D` controls. Each refuses by name. Everything else, the
+  ordinal: `compute` with any other algorithm, `assign`/`unassign`,
+  `add_group_on_shape`, the pattern mapping, `smooth(in_uv_space=True)`, and
+  the `ElementsOnShape` and `Deflection2D` controls. Each refuses by name. Everything else, the
   editor, search, quality controls, groups by id or by filter, behaves
   identically. Check with `mesher.has_shape`.
 
@@ -442,7 +451,8 @@ environment can trigger a dependency solver cascade that downgrades
 unrelated packages. pySMESH's build makes that
 impossible by construction.
 
-- **SMESH and KERNEL are statically linked** into a single `_core.pyd`.
+- **SMESH, KERNEL, netgen and NETGENPlugin are statically linked** into a single
+  `_core.pyd`.
 - **OCCT, Boost and VTK are private** to that binary. Their DLLs are
   **bundled into the wheel** and name-mangled, so they never appear in the
   host environment and cannot collide with the host's own copies.

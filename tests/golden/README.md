@@ -329,8 +329,9 @@ Prism_3D now sweeps between the caps. The oracle is the structure of a straight 
 
 Phase 5 links netgen 6.2.2101 and NETGENPlugin V9_16_0 into `_core`. The capture records
 `with_netgen: True` in `meta` (False before), and a new group, `netgen`, of 12 probes. No
-`geometry`, `mesh` or `defect` value changes: the capture equals the Phase 4 reference at
-`--rtol 0 --atol 0`. `compare.py` prints a probe that the baseline lacks with its values,
+`geometry`, `mesh` or `defect` value changes: the capture equals the reference at
+`--rtol 0 --atol 0`. The reference is the Phase 5 SMESH item's capture (main after its
+merge), and the Phase 4 capture before it. The 12 NETGEN values are the same in both. `compare.py` prints a probe that the baseline lacks with its values,
 and it does not block: it has no baseline value to differ from. Before Phase 5 the script
 printed only four named groups.
 

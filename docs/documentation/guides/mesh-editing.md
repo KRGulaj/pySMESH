@@ -336,13 +336,22 @@ Only some algorithms build the layers in their compute:
 
 | Hypothesis | Algorithms that build it |
 |---|---|
-| `ViscousLayers` | `Hexa3D`, `CompositeHexa3D`, `PolyhedronPerSolid3D`, `Cartesian3D` |
-| `ViscousLayers2D` | `Quadrangle2D`, `QuadFromMedialAxis1D2D`, `Mefisto2D`, `PolygonPerFace2D` |
+| `ViscousLayers` | `Hexa3D`, `CompositeHexa3D`, `PolyhedronPerSolid3D`, `Cartesian3D`, `Netgen3D`, `Netgen1D2D3D` |
+| `ViscousLayers2D` | `Quadrangle2D`, `QuadFromMedialAxis1D2D`, `Mefisto2D`, `PolygonPerFace2D`, `Netgen2D`, `Netgen1D2D` |
 
 If a layer hypothesis reaches a solid (a face) that another algorithm meshes, `compute()`
 raises before it meshes anything, and names the sub-shape and the algorithm. Without that
 check the layers were dropped with no word (`Prism3D`, `RadialQuadrangle1D2D`). Assign the
 layers only to the sub-shapes that a building algorithm meshes.
+
+The NETGEN algorithms grow the stack first and then fill the rest with tetrahedra (in a
+face, triangles). A wall triangle gives `N` prisms. A wall quadrangle, from a
+quad-dominant surface mesh (`quad_allowed`, or `Netgen2D` with `QuadranglePreference`),
+gives `N` hexahedra, and the tetrahedra meet the inner side of the stack through
+pyramids. On a 2 x 3 x 4 box with `T` 0.3, `N` 3, `f` 1.2 on its bottom face, the layer
+nodes lie on the planes 0.0824, 0.1813 and 0.3 of the closed form, every cell is
+positive, and the cells fill the box. `Netgen3D` with `ViscousLayers` needs a surface
+mesh on every face of the solid, as without layers.
 
 `PolygonPerFace2D` grows the layer quadrangles first, and then fills the rest of the face
 with one polygon whose sides are the inner sides of the layer cells. Up to 5.0.0 it was
@@ -364,7 +373,7 @@ its own thickness:
 
 | Algorithm | Several `ViscousLayers` on one solid |
 |---|---|
-| `PolyhedronPerSolid3D` | Each hypothesis grows its own stack on its own faces. |
+| `PolyhedronPerSolid3D`, `Netgen3D`, `Netgen1D2D3D` | Each hypothesis grows its own stack on its own faces. |
 | `Hexa3D`, `CompositeHexa3D`, `Cartesian3D` | Not read: each reads one hypothesis per solid. `compute()` refuses a second one. |
 
 SMESH refuses two face sets that share a face, and two face sets with a different
@@ -448,7 +457,14 @@ mesh.release()
 - Between two walls with layers that are closer than `2 T`, SMESH stops each stack before
   the stacks meet, at half the gap or less. The compute succeeds with a warning on the solid
   in `ComputeReport.warnings`: "Thickness T of viscous layers not reached, average reached
-  thickness is ...". The closed form then holds only where the stack reached `T`.
+  thickness is ...". The closed form then holds only where the stack reached `T`. With
+  NETGEN on a 2 x 2 x 0.4 plate with `T` 0.3 on its top and bottom, the average reached
+  is 0.133.
+- In a groove too narrow for the first layer, SMESH's builder fails before it grows
+  anything: "failed at the very first inflation step". On a block with a V-groove 0.5
+  deep and layers of `T` 0.1 on every face, NETGEN meshes a 20 degree groove with a
+  thickness warning (0.057 reached), and a 5 or 1 degree groove fails on the solid.
+  Leave the faces of such a groove out of `boundary`, or make the groove wider.
 - `ExtrusionMethod.FACE_OFFSET` and `NODE_OFFSET` do not smooth the layers. Where two walls
   with layers meet at an edge, the two stacks collide there, and SMESH stops the inflation
   short of `T`. The compute succeeds with a warning in `ComputeReport.warnings` that states
@@ -463,6 +479,11 @@ mesh.release()
   the shrunk surfaces come closer together than the grid spacing can follow (0.0002 apart
   at 0.2999, with a grid of 0.25), the layer cells fold over, and the compute fails with
   "layer cells are inverted".
+- Two stacks that meet at an edge: the layer cells along that edge can have warped
+  quadrangle faces. The mesh is conforming and fills the solid (the bilinear faces close
+  it), but the `Volume` control splits each warped cell on its own. With NETGEN, `T` 0.3 on the bottom and `T` 0.2 on a side of a
+  2 x 3 x 4 box, the `Volume` sum is 23.996 for the box's 24 (1.7e-4 relative). With
+  the side stack alone it is 24 to 1e-12.
 - `Cartesian3D` with layers: at an edge between two walls with layers, the corner cells have warped faces where
   the grid lines on a wall cross that edge at an angle other than 90 degrees (the caps of a
   hexagonal prism). The mesh there is conforming, but the `Volume` control

@@ -86,6 +86,26 @@ print(gone.elements, gone.nodes)   # exactly what went, including the freed node
 regrouped = {g.name: g.element_ids for g in mesher.groups()}
 ```
 
+## Remeshing the surface with NETGEN
+
+A shape-free mesher takes one algorithm: `NetgenRemesher2D`, assigned on the whole
+mesh, with `NetgenRemesherParameters2D` beside it. `compute()` then meshes the
+triangles again. NETGEN reads them as an STL surface, splits it into charts at its
+feature edges, and meshes each chart. The new mesh replaces the old one and is bound
+to no sub-shape.
+
+```python
+from pysmesh.mesher import NetgenRemesher2D, NetgenRemesherParameters2D
+
+mesher.assign(NetgenRemesher2D())
+mesher.assign(NetgenRemesherParameters2D(max_size=0.1))
+report = mesher.compute()
+```
+
+The old elements are gone after the remesh. Their ids can come back on new elements, and
+a group made before the remesh is empty. See
+[Free meshing with NETGEN](../guides/netgen.md#the-remesher) for the parameters.
+
 ## What a shape-free mesher cannot do
 
 Every operation that resolves a sub-shape ordinal refuses on a mesher with `has_shape`
@@ -93,8 +113,8 @@ Every operation that resolves a sub-shape ordinal refuses on a mesher with `has_
 
 | Operation | Why it needs a shape |
 |---|---|
-| `Mesher.compute` | Runs the assigned algorithms over the geometry |
-| `Mesher.assign` / `Mesher.unassign` | Attaches an algorithm or hypothesis to a sub-shape |
+| `Mesher.compute` | Runs the assigned algorithms over the geometry. The one exception is `NetgenRemesher2D`. |
+| `Mesher.assign` / `Mesher.unassign` | Attaches an algorithm or hypothesis to a sub-shape. The exceptions are `NetgenRemesher2D` and `NetgenRemesherParameters2D` on the whole mesh. |
 | `Mesher.add_group_on_shape` | Names a group by a sub-shape's ordinal |
 | `Mesher.pattern_from_face` / `apply_pattern_to_face` / `apply_pattern_to_block` | Reads or maps a pattern against a face's or block's geometry |
 | `Mesher.smooth(on_shape=True)` | Moves nodes in the parameter space of the face each one sits on |

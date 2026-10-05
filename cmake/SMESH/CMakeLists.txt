@@ -6,7 +6,8 @@
 #     instead defines *every* module's ``*_EXPORTS`` macro globally so the SMESH export
 #     headers always pick the ``__declspec(dllexport)`` branch (never dllimport), which is
 #     what lets the static libraries cross-reference each other's symbols.
-#   * NETGEN / NETGENPlugin / MeshVSLink / MED / CGNS drivers are not built.
+#   * MeshVSLink / MED / CGNS drivers are not built. NETGEN and NETGENPlugin are built
+#     outside this file, by cmake/Netgen and cmake/NETGENPlugin.
 #   * install() rules dropped (we ship a Python extension, not a C++ SDK).
 # ${SMESH_SRC_DIR} is set by the root CMakeLists to staged/src/SMESH/src. The per-target
 # OCCT toolkit lists (TK*) are copied verbatim from looooo — they are the load-bearing
