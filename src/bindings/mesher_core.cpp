@@ -594,10 +594,12 @@ std::string Mesher::describe_concurrency(const TopoDS_Shape& target,
 
 void Mesher::refuse_unread_layers() const {
   // Only some algorithms build layers in their Compute: Hexa_3D, CompositeHexa_3D
-  // (StdMeshers_CompositeHexa_3D_viscous_layers.patch), PolyhedronPerSolid_3D and
-  // Cartesian_3D read ViscousLayers; Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D and
-  // PolygonPerFace_2D (StdMeshers_PolygonPerFace_2D_viscous_layers.patch) read
-  // ViscousLayers2D. The compatible lists do not tell: RadialQuadrangle_1D2D inherits
+  // (StdMeshers_CompositeHexa_3D_viscous_layers.patch), PolyhedronPerSolid_3D,
+  // Cartesian_3D, NETGEN_3D and NETGEN_2D3D read ViscousLayers; Quadrangle_2D,
+  // QuadFromMedialAxis_1D2D, MEFISTO_2D, PolygonPerFace_2D
+  // (StdMeshers_PolygonPerFace_2D_viscous_layers.patch), NETGEN_2D and NETGEN_2D_ONLY
+  // read ViscousLayers2D. The NETGEN algorithms take several ViscousLayers per solid
+  // (NETGENPlugin_NETGEN_3D.cxx, CheckHypothesis). The compatible lists do not tell: RadialQuadrangle_1D2D inherits
   // ViscousLayers2D from Quadrangle_2D and builds no layer. Any other algorithm meshes the
   // sub-shape with no layer and no word (Prism_3D, RadialQuadrangle_1D2D).
   //
@@ -620,12 +622,16 @@ void Mesher::refuse_unread_layers() const {
   };
   const LayerKind kinds[] = {
       {TopAbs_SOLID, "SOLID", "ViscousLayers",
-       {"Hexa_3D", "CompositeHexa_3D", "PolyhedronPerSolid_3D", "Cartesian_3D"},
-       "Hexa_3D, CompositeHexa_3D, PolyhedronPerSolid_3D and Cartesian_3D",
+       {"Hexa_3D", "CompositeHexa_3D", "PolyhedronPerSolid_3D", "Cartesian_3D", "NETGEN_3D",
+        "NETGEN_2D3D"},
+       "Hexa_3D, CompositeHexa_3D, PolyhedronPerSolid_3D, Cartesian_3D, NETGEN_3D and "
+       "NETGEN_2D3D",
        {"Hexa_3D", "CompositeHexa_3D", "Cartesian_3D"}},
       {TopAbs_FACE, "FACE", "ViscousLayers2D",
-       {"Quadrangle_2D", "QuadFromMedialAxis_1D2D", "MEFISTO_2D", "PolygonPerFace_2D"},
-       "Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D and PolygonPerFace_2D",
+       {"Quadrangle_2D", "QuadFromMedialAxis_1D2D", "MEFISTO_2D", "PolygonPerFace_2D",
+        "NETGEN_2D", "NETGEN_2D_ONLY"},
+       "Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D, PolygonPerFace_2D, NETGEN_2D "
+       "and NETGEN_2D_ONLY",
        {}},
   };
   for (const LayerKind& kind : kinds) {
@@ -737,8 +743,9 @@ void Mesher::refuse_face_layers_meshed_from_above(const TopoDS_Shape& face,
           "Mesher.compute: ViscousLayers2D reaches " + place +
               ", which has no 2-D algorithm of its own: " + name + " of " + solid +
               " meshes it and builds no 2-D layers.",
-          "Only Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D and PolygonPerFace_2D "
-          "build ViscousLayers2D. With " + name + ", assign one of them on that face alone, "
+          "Only Quadrangle_2D, QuadFromMedialAxis_1D2D, MEFISTO_2D, PolygonPerFace_2D, "
+          "NETGEN_2D and NETGEN_2D_ONLY build ViscousLayers2D. With " + name +
+          ", assign one of them on that face alone, "
           "with the layers there: the sweep starts from it and carries its layers "
           "through the solid.");
     }

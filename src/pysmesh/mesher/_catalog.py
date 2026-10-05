@@ -1418,14 +1418,15 @@ class ProjectionSource3D(Hypothesis):
 class ViscousLayers(Hypothesis):
     """Prism layers grown inward from named faces of a solid.
 
-    :class:`Hexa3D`, :class:`CompositeHexa3D`, :class:`PolyhedronPerSolid3D` and
-    :class:`Cartesian3D` build them. On a solid that another algorithm meshes,
-    :meth:`~pysmesh.Mesher.compute` raises before it meshes anything.
+    :class:`Hexa3D`, :class:`CompositeHexa3D`, :class:`PolyhedronPerSolid3D`,
+    :class:`Cartesian3D`, :class:`Netgen3D` and :class:`Netgen1D2D3D` build them. On a
+    solid that another algorithm meshes, :meth:`~pysmesh.Mesher.compute` raises before
+    it meshes anything.
 
     Several hypotheses can reach one solid, each with its own face set and stack (a
-    thickness per face set). :class:`PolyhedronPerSolid3D` grows each stack on its own
-    faces. :class:`Hexa3D`, :class:`CompositeHexa3D` and :class:`Cartesian3D` read one
-    hypothesis per solid, so
+    thickness per face set). :class:`PolyhedronPerSolid3D`, :class:`Netgen3D` and
+    :class:`Netgen1D2D3D` grow each stack on its own faces. :class:`Hexa3D`,
+    :class:`CompositeHexa3D` and :class:`Cartesian3D` read one hypothesis per solid, so
     :meth:`~pysmesh.Mesher.compute` refuses a second one there. SMESH also refuses two
     face sets that share a face, and two that hold faces sharing an edge with a
     different ``layer_count``; :meth:`~pysmesh.Mesher.compute` raises with SMESH's
@@ -1467,9 +1468,10 @@ class ViscousLayers2D(Hypothesis):
     """Quadrangle layers grown inward from named edges of a face.
 
     The 2-D counterpart of :class:`ViscousLayers`, and the only 2-D form in the stack.
-    :class:`Quadrangle2D`, :class:`QuadFromMedialAxis1D2D`, :class:`Mefisto2D` and
-    :class:`PolygonPerFace2D` build them. On a face that another algorithm meshes,
-    :meth:`~pysmesh.Mesher.compute` raises before it meshes anything. That includes a
+    :class:`Quadrangle2D`, :class:`QuadFromMedialAxis1D2D`, :class:`Mefisto2D`,
+    :class:`PolygonPerFace2D`, :class:`Netgen1D2D` and :class:`Netgen2D` build them. On
+    a face that another algorithm meshes, :meth:`~pysmesh.Mesher.compute` raises before
+    it meshes anything. That includes a
     face of a solid that :class:`Cartesian3D` or :class:`PolyhedronPerSolid3D` meshes
     (they mesh every dimension themselves), and a face of a :class:`Prism3D` solid
     without a 2-D algorithm assigned on that face alone. With :class:`Prism3D`, assign
