@@ -5,14 +5,15 @@
 """A cancel stops a long NETGEN compute in a stated time and leaves a reusable Mesher.
 
 The cancel predicate reaches netgen through ``SMESH_Gen::CancelCompute``, which sets
-netgen's global flag ``multithread.terminate`` (``NETGENPlugin_NETGEN_2D3D::CancelCompute``).
-netgen checks that flag between its steps and per inserted point in its Delaunay loop,
-not inside every step. Measured on the reference machine (16 threads), 23 cancels spread
-over four runs of 5 to 33 s (``g2/np9_latency.txt`` in the record directory): the worst
-latency was 2.2 s, a cancel early in volume meshing. A stage timing of that case: netgen's
-volume step ran on for 0.7 to 2.1 s after the flag was set, and the plugin then copied the
-partial mesh into SMESH (0.16 to 0.47 s) before pySMESH cleared it. The stated bound is
-5 s, about twice the worst measured latency.
+netgen's global flag ``multithread.terminate``
+(``NETGENPlugin_NETGEN_2D3D::CancelCompute``). netgen checks that flag between its steps
+and per inserted point in its Delaunay loop, not inside every step. Measured on the
+reference machine (16 threads), 23 cancels spread over four runs of 5 to 33 s
+(``g2/np9_latency.txt`` in the record directory): the worst latency was 2.2 s, a cancel
+early in volume meshing. A stage timing of that case: netgen's volume step ran on for
+0.7 to 2.1 s after the flag was set, and the plugin then copied the partial mesh into
+SMESH (0.16 to 0.47 s) before pySMESH cleared it. The stated bound is 5 s, about twice
+the worst measured latency.
 """
 
 from __future__ import annotations

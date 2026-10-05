@@ -178,7 +178,10 @@ def _copytree(src: Path, dst: Path) -> None:
 
 
 def _stage_sources() -> None:
-    """Copy the compiled slices from extern/ into staged/src/{Kernel,Geom,SMESH,Netgen}."""
+    """Copy the compiled slices from extern/ into staged/src/.
+
+    The slices go to ``Kernel``, ``Geom``, ``SMESH``, ``Netgen`` and ``NETGENPlugin``.
+    """
     logger.info("staging KERNEL slice (salome_bootstrap + kernel)")
     for src_rel, dst_rel in KERNEL_SLICE:
         _copytree(EXTERN / src_rel, STAGED / "src/Kernel/src" / dst_rel)

@@ -5,17 +5,18 @@
 """A NETGEN size given to a face lands on that face, and nowhere else.
 
 NETGENPlugin limits a face's element size through ``OCCGeometry::SetFaceMaxH``, for a
-local size on a face and for a chordal error on a curved face (``NETGENPlugin_Mesher.cxx``,
-``SetLocalSize`` and ``SetLocalSizeForChordalError``). netgen 6.2.2101 has two overloads:
-``SetFaceMaxH(int facenr, double, const MeshingParameters&)`` takes a 1-based face number,
-``SetFaceMaxH(size_t facenr, double)`` a 0-based one (``occgeom.hpp:353-380``). The plugin
-called the 1-based one with ``faceNgID - 1``: the size went to another face, and face 1
-got none (``NETGENPlugin_face_maxh_index.patch``). Oracle 5 of ``test_mesher_netgen.py``:
-a face whose own size is ``h`` has a mean triangle edge of at most 1.5 ``h``.
+local size on a face and for a chordal error on a curved face
+(``NETGENPlugin_Mesher.cxx``, ``SetLocalSize`` and ``SetLocalSizeForChordalError``).
+netgen 6.2.2101 has two overloads: ``SetFaceMaxH(int facenr, double, const
+MeshingParameters&)`` takes a 1-based face number, ``SetFaceMaxH(size_t facenr,
+double)`` a 0-based one (``occgeom.hpp:353-380``). The plugin called the 1-based one
+with ``faceNgID - 1``: the size went to another face, and face 1 got none
+(``NETGENPlugin_face_maxh_index.patch``). Oracle 5 of ``test_mesher_netgen.py``: a face
+whose own size is ``h`` has a mean triangle edge of at most 1.5 ``h``.
 
-A chordal error ``c`` sizes a curved face from its curvature. Under OCCT 8 the plugin read
-one of the two principal curvatures before OCCT computed it, so a cylinder face got no
-size at all (``NETGENPlugin_curvature_before_read.patch``).
+A chordal error ``c`` sizes a curved face from its curvature. Under OCCT 8 the plugin
+read one of the two principal curvatures before OCCT computed it, so a cylinder face got
+no size at all (``NETGENPlugin_curvature_before_read.patch``).
 """
 
 from __future__ import annotations
@@ -157,10 +158,11 @@ def test_a_chordal_error_sizes_a_face_of_constant_curvature(kind: str) -> None:
     """chordal_error 0.002 on a cylinder and a sphere of radius 1, max_size 0.4.
 
     For a face of radius R the plugin targets h = 0.95 sqrt(3) sqrt(c (2R - c)), 0.104
-    here (``elemSizeForChordalError``). An equilateral triangle of side h inscribed in the
-    surface has a circumradius of 0.95 sqrt(c (2R - c)), so its centroid lies at most
-    about 0.95^2 c = 0.9 c inside. Oracle 5: mean triangle edge at most 1.5 h. Deviation:
-    the mean centroid deviation is at most c with the chordal error, and above c without.
+    here (``elemSizeForChordalError``). An equilateral triangle of side h inscribed in
+    the surface has a circumradius of 0.95 sqrt(c (2R - c)), so its centroid lies at
+    most about 0.95^2 c = 0.9 c inside. Oracle 5: mean triangle edge at most 1.5 h.
+    Deviation: the mean centroid deviation is at most c with the chordal error, and
+    above c without.
     """
     shape, face = _curved(kind)
     size = 0.95 * math.sqrt(3.0) * math.sqrt(_CHORDAL * (2.0 - _CHORDAL))
@@ -178,7 +180,8 @@ def test_a_chordal_error_sizes_a_face_of_varying_curvature() -> None:
 
     The cone is neither a cylinder, a sphere nor a torus: the plugin samples its
     curvature at the nodes of an OCCT triangulation of deflection c and along its edges.
-    The mean centroid deviation is at most c with the chordal error, and above c without.
+    The mean centroid deviation is at most c with the chordal error, and above c
+    without.
     """
     shape, face = _curved("cone")
 

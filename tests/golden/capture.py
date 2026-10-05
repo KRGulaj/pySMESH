@@ -980,7 +980,7 @@ def _medial_axis() -> dict[str, Value]:
     }
 
 
-# ---- NETGEN: netgen 6.2.2101 through NETGENPlugin (Phase 5) ----------------------------- #
+# ---- NETGEN: netgen 6.2.2101 through NETGENPlugin (Phase 5) ------------------------ #
 
 # The primitives' exact volumes, for the volume error of a tetrahedral mesh of them.
 _CYLINDER_VOLUME: Final[float] = math.pi * 1.5**2 * 4.0

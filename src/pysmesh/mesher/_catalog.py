@@ -102,8 +102,8 @@ class Fineness(IntEnum):
     """How fine NETGEN meshes: a preset of three sizing values.
 
     The integer values are NETGENPlugin's (``NETGENPlugin_Hypothesis::Fineness``); do
-    not reorder. A preset sets the growth rate, the segments per edge and the segments per
-    radius of curvature together (``NETGENPlugin_Hypothesis.cxx``, ``SetFineness``):
+    not reorder. A preset sets the growth rate, the segments per edge and the segments
+    per radius of curvature together (``NETGENPlugin_Hypothesis.cxx``, ``SetFineness``):
 
     ===============  ===========  =================  ===================
     preset           growth rate  segments per edge  segments per radius
@@ -1014,7 +1014,7 @@ class CartesianParameters3D(Hypothesis):
     threshold_for_internal_faces: bool = False
 
 
-# ---- NETGEN hypotheses -------------------------------------------------------------- #
+# ---- NETGEN hypotheses ------------------------------------------------------------- #
 
 
 @dataclass(frozen=True)

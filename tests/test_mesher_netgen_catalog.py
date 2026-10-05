@@ -94,18 +94,22 @@ def test_the_native_factory_builds_every_netgen_entry_by_its_plugin_name(
 
 def test_a_netgen_parameter_the_factory_does_not_read_is_refused() -> None:
     """NETGEN_Parameters_2D refuses the volume-only fields of NETGEN_Parameters."""
-    with Mesher(_box()) as mesher:
-        with pytest.raises(PysmeshError, match="does not take the parameter"):
-            mesher._m.assign("NETGEN_Parameters_2D", _PARAMETERS_3D, "", 0)
+    with (
+        Mesher(_box()) as mesher,
+        pytest.raises(PysmeshError, match="does not take the parameter"),
+    ):
+        mesher._m.assign("NETGEN_Parameters_2D", _PARAMETERS_3D, "", 0)
 
 
 def test_a_preset_field_is_refused_unless_the_fineness_is_user_defined() -> None:
     """growth_rate with the MODERATE preset is refused by the factory as well."""
     params = {**_PARAMETERS_2D, "growth_rate": 0.2}
 
-    with Mesher(_box()) as mesher:
-        with pytest.raises(PysmeshError, match="only with Fineness.USER_DEFINED"):
-            mesher._m.assign("NETGEN_Parameters_2D", params, "", 0)
+    with (
+        Mesher(_box()) as mesher,
+        pytest.raises(PysmeshError, match="only with Fineness.USER_DEFINED"),
+    ):
+        mesher._m.assign("NETGEN_Parameters_2D", params, "", 0)
 
 
 _SIZE_PARAMS: dict[str, dict[str, object]] = {

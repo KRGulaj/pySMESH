@@ -777,7 +777,7 @@ def test_second_order_puts_every_mid_edge_node_of_the_sphere_on_the_sphere() -> 
         mesher.assign(NetgenParameters(max_size=0.5, second_order=True))
         mesher.compute()
         mesh = mesher.mesh()
-    types = set(int(t) for t in mesh.element_type)
+    types = {int(t) for t in mesh.element_type}
     boundary = mesh.node_kind != int(SubShapeKind.SOLID)
     radii = np.linalg.norm(mesh.node_coords[boundary], axis=1)
     quadratic = [
@@ -943,9 +943,11 @@ def test_simple_parameters_refuse_no_segment_rule_two_or_a_bad_size(
 def test_a_local_size_on_an_ordinal_the_shape_lacks_is_refused() -> None:
     """The factory resolves every local size's sub-shape before anything is assigned."""
     item = NetgenParameters(local_sizes=((SubShape(SubShapeKind.FACE, 99), 0.1),))
-    with Mesher(_make_case("box").shape) as mesher:
-        with pytest.raises(PysmeshError, match="99"):
-            mesher.assign(item)
+    with (
+        Mesher(_make_case("box").shape) as mesher,
+        pytest.raises(PysmeshError, match="99"),
+    ):
+        mesher.assign(item)
 
 
 def test_replace_keeps_the_frozen_validation() -> None:

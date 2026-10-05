@@ -600,9 +600,9 @@ def test_a_cancelled_remesh_leaves_the_input_or_a_whole_remesh(delay: float) -> 
 
     The mesh after the cancel is the input, as the details say, or, when the cancel came
     after the remesher replaced the mesh, a closed remesh; never a part of one. Before
-    NETGENPlugin_remesher_partial_result.patch netgen's stopped surface meshing came back
-    as NG_OK, and a cancel 0.25 s in left about 21 800 triangles with 372 open edges.
-    The same mesher then remeshes to the end.
+    NETGENPlugin_remesher_partial_result.patch netgen's stopped surface meshing came
+    back as NG_OK, and a cancel 0.25 s in left about 21 800 triangles with 372 open
+    edges. The same mesher then remeshes to the end.
     """
     xyz0, tris0 = _icosphere(3)
     start = time.perf_counter()
