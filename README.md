@@ -172,6 +172,13 @@ Wheels are also attached to every
 [GitHub Release](https://github.com/KRGulaj/pySMESH/releases), for pinning a
 build by exact file.
 
+> **Upgrading from 4.x:** 5.0.0 moves to SMESH 9.16 and OCCT 8.0.1 and fixes
+> the defects of 4.2.2. No public name is removed. Some results change: 1-D
+> distributions, `Adaptive1D`, bounding boxes and default measures. Some calls
+> that returned a bad shape or mesh in silence now raise `PysmeshError`. Read
+> the [changelog](https://github.com/KRGulaj/pySMESH/blob/main/CHANGELOG.md)
+> before you upgrade.
+
 > **Upgrading from 3.x:** 4.0.0 removes the shared VTK requirement. Earlier
 > versions linked the host environment's VTK and refused to import unless it
 > was exactly 9.6.2. That constraint is gone. pySMESH now carries its own
