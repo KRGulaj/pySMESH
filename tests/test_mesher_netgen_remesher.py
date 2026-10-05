@@ -31,6 +31,7 @@ import math
 import os
 import subprocess
 import sys
+import time
 from itertools import pairwise
 from pathlib import Path
 
@@ -45,6 +46,7 @@ from pysmesh import (
     Mesher,
     NetgenRemesher2D,
     NetgenRemesherParameters2D,
+    PysmeshCancelled,
     PysmeshError,
     Regular1D,
     Session,
@@ -590,3 +592,40 @@ def test_the_remesher_runs_without_parameters(tmp_path: Path) -> None:
     lengths = _edge_lengths(out["xyz"], tris)
     assert float(lengths.mean()) <= 1.25 * size
     assert float(lengths.max()) <= 2.0 * size
+
+
+@pytest.mark.parametrize("delay", [0.1, 0.25, 0.5])
+def test_a_cancelled_remesh_leaves_the_input_or_a_whole_remesh(delay: float) -> None:
+    """A cancel ``delay`` s into the remesh of a 1280-triangle icosphere at 0.02 (~5 s).
+
+    The mesh after the cancel is the input, as the details say, or, when the cancel came
+    after the remesher replaced the mesh, a closed remesh; never a part of one. Before
+    NETGENPlugin_remesher_partial_result.patch netgen's stopped surface meshing came back
+    as NG_OK, and a cancel 0.25 s in left about 21 800 triangles with 372 open edges.
+    The same mesher then remeshes to the end.
+    """
+    xyz0, tris0 = _icosphere(3)
+    start = time.perf_counter()
+
+    def cancel_after_the_delay() -> bool:
+        return time.perf_counter() - start >= delay
+
+    with Mesher.from_arrays(xyz0, tris0) as mesher:
+        mesher.assign(NetgenRemesher2D())
+        mesher.assign(NetgenRemesherParameters2D(max_size=0.02))
+        with pytest.raises(PysmeshCancelled, match="cancelled") as raised:
+            mesher.compute(cancel=cancel_after_the_delay)
+        kept = mesher.mesh()
+        report = mesher.compute()
+    is_tri = kept.element_type == int(ElementType.TRIANGLE)
+    begin = kept.element_offsets[:-1][is_tri]
+    tris = kept.element_nodes[begin[:, None] + np.arange(3)].astype(np.int64)
+
+    assert set(_edge_use(tris).values()) == {2}
+    if "as it was before" in raised.value.details:
+        assert np.array_equal(kept.node_coords, xyz0)
+        assert len(tris) == len(tris0)
+    else:
+        assert "remeshed one" in raised.value.details
+        assert len(tris) > 10 * len(tris0)
+    assert report.faces > 10 * len(tris0)

@@ -1,0 +1,38 @@
+pySMESH: NETGEN_Remesher_2D does not take a stopped or failed netgen surface meshing for a
+result (NETGENPlugin V9_16_0; applies after NETGENPlugin_remesher_no_parameters.patch).
+
+Defect: Ng_STL_GenerateSurfaceMesh (nglib.cpp) returns NG_OK whatever STLSurfaceMeshing
+returns: MESHING3_TERMINATE (the mesher was stopped) and the failures only print, and the
+surface optimisation then runs on the partial mesh. NETGENPlugin_Remesher_2D::Compute checks
+only ng_res, so it removed the input mesh and wrote the partial one. Measured (pySMESH record
+g3/nr1_cancel.txt): a cancel 0.23 s into the remesh of an icosphere at max size 0.02 left
+19 453 triangles with 393 edges not shared by two triangles. A stop that netgen reports by an
+exception already returns before the mesh is touched (LoadMeshOnCancel off).
+
+Change, in NETGENPlugin_Remesher_2D.cxx only: after Ng_STL_GenerateSurfaceMesh, a set
+netgen::multithread.terminate returns false before the mesh is touched, unless
+LoadMeshOnCancel; otherwise STLGeometry::surfacemeshed, which netgen sets only for
+MESHING3_OK, must be set, or the remesh is an error. A completed remesh does not change.
+
+diff --git a/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx b/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx
+--- a/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx
++++ b/src/NETGENPlugin/NETGENPlugin_Remesher_2D.cxx
+@@ -744,6 +744,18 @@
+   }
+   if ( ng_res != NG_OK )
+     return error( "Error in Surface Meshing" );
++  // pySMESH: Ng_STL_GenerateSurfaceMesh returns NG_OK also when the surface meshing
++  // was stopped or failed (nglib.cpp: it only prints), with a partial mesh. A stop
++  // keeps the input mesh, as a stop by exception does above; a failure is an error.
++  if ( netgen::multithread.terminate )
++  {
++    if ( !hyp || !hyp->GetLoadMeshOnCancel() )
++      return false;
++  }
++  else if ( !((netgen::STLGeometry*) ngStlGeo)->surfacemeshed )
++  {
++    return error( "Error in Surface Meshing: netgen did not mesh every chart" );
++  }
+ 
+   int nbN = ngMesh->GetNP();
+   int nbE = ngMesh->GetNSeg();

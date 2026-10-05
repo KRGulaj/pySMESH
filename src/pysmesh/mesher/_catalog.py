@@ -353,7 +353,9 @@ class NetgenRemesher2D(Algorithm):
     surface, splits it into charts at its feature edges, and meshes each chart anew. The
     result replaces the mesh, bound to no sub-shape. It reads
     :class:`NetgenRemesherParameters2D`; with none, the size is the bounding-box
-    diagonal over 10.
+    diagonal over 10. A cancel leaves the input mesh, or the whole remesh when it came
+    after the remesher replaced the mesh; the details of the PysmeshCancelled say
+    which.
     """
 
     native_name: ClassVar[str] = "NETGEN_Remesher_2D"
