@@ -24,6 +24,7 @@ ellipse with semi-axes 2.9 and 1.7, closed on its first point, with the
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 
 import numpy as np
 import pytest
@@ -304,3 +305,228 @@ def test_match_faces_finds_each_swept_face_by_the_centroid_faces_reports() -> No
     ids = shape.match_faces(centroids, tol=1e-9)
 
     assert ids.tolist() == [f.id for f in faces]
+
+
+# --------------------------------------------- Exactness on analytic solids (M3) --- #
+
+# The plate, PLATE_X x PLATE_Y x PLATE_Z, its four vertical corners rounded by CORNER_R.
+PLATE_X: float = 60.0
+PLATE_Y: float = 40.0
+PLATE_Z: float = 7.0
+CORNER_R: float = 0.7
+# Through holes (x, y, radius). The first is the 2 mm hole of the hole gate.
+THROUGH_HOLES: tuple[tuple[float, float, float], ...] = (
+    (8.0, 8.0, 1.0),
+    (16.0, 8.0, 1.5),
+    (30.0, 10.0, 4.5),
+)
+# A blind hole down from the top face: (x, y, radius, depth).
+BLIND_HOLE: tuple[float, float, float, float] = (50.0, 10.0, 2.0, 4.0)
+# A cylindrical boss on the top face: (x, y, radius, height).
+BOSS: tuple[float, float, float, float] = (12.0, 30.0, 3.0, 5.0)
+# A rectangular pocket in the top face: corner (x, y), size (dx, dy), depth. Its four
+# vertical inner corners are rounded by POCKET_R.
+POCKET: tuple[float, float, float, float, float] = (30.0, 22.0, 20.0, 12.0, 3.0)
+POCKET_R: float = 1.0
+# The area a fillet of radius 1 takes out of a square corner: 1 - pi / 4.
+BLEND: float = 1.0 - math.pi / 4.0
+
+
+def _vertical_edges(
+    s: Session, xs: tuple[float, float], ys: tuple[float, float]
+) -> list[EntityId]:
+    """The vertical line edges standing at x in ``xs`` and y in ``ys``."""
+    table = s.bounding_boxes(EntityKind.EDGE)
+    found = []
+    for i, b in zip(table.ids, table.bbox, strict=True):
+        upright = b[0] == b[3] and b[1] == b[4] and b[5] > b[2]
+        if upright and b[0] in xs and b[1] in ys:
+            found.append(EntityId(int(i)))
+    return found
+
+
+def _add_solid(s: Session, add: Callable[[Session], object]) -> list[EntityId]:
+    """Run ``add`` and return the solids it issued."""
+    before = _ids(s, EntityKind.SOLID)
+    add(s)
+    return _new_ids(s, EntityKind.SOLID, before)
+
+
+def _plate(hole_2mm: bool, corners: int) -> tuple[Session, EntityId]:
+    """The plate with every feature; ``corners`` of its vertical corners rounded."""
+    s = Session()
+    s.add_box(PLATE_X, PLATE_Y, PLATE_Z)
+    rounded = _vertical_edges(s, (0.0, PLATE_X), (0.0, PLATE_Y))[:corners]
+    s.fillet(rounded, CORNER_R)
+    holes = THROUGH_HOLES if hole_2mm else THROUGH_HOLES[1:]
+    tools = [(x, y, -1.0, r, PLATE_Z + 2.0) for x, y, r in holes]
+    x, y, r, depth = BLIND_HOLE
+    tools.append((x, y, PLATE_Z - depth, r, depth + 1.0))
+    for x, y, z, r, h in tools:
+        body = list(s.entities(EntityKind.SOLID))
+        tool = _add_solid(
+            s, lambda t, x=x, y=y, z=z, r=r, h=h: t.add_cylinder(r, h, (x, y, z))
+        )
+        s.cut([EntityId(int(i)) for i in body], tool)
+    x, y, r, h = BOSS
+    body = [EntityId(int(i)) for i in s.entities(EntityKind.SOLID)]
+    boss = _add_solid(s, lambda t: t.add_cylinder(r, h, (x, y, PLATE_Z)))
+    s.fuse(body, boss)
+    x, y, dx, dy, depth = POCKET
+    body = [EntityId(int(i)) for i in s.entities(EntityKind.SOLID)]
+    pocket = _add_solid(
+        s, lambda t: t.add_box(dx, dy, depth + 1.0, origin=(x, y, PLATE_Z - depth))
+    )
+    s.fillet(_vertical_edges(s, (x, x + dx), (y, y + dy)), POCKET_R)
+    s.cut(body, pocket)
+    solids = [EntityId(int(i)) for i in s.entities(EntityKind.SOLID)]
+    assert len(solids) == 1
+    return s, solids[0]
+
+
+def _plate_volume(hole_2mm: bool, corners: int) -> float:
+    """The plate's volume in closed form: the box less or plus each feature."""
+    holes = THROUGH_HOLES if hole_2mm else THROUGH_HOLES[1:]
+    _, _, blind_r, blind_depth = BLIND_HOLE
+    _, _, boss_r, boss_h = BOSS
+    _, _, dx, dy, depth = POCKET
+    return math.fsum(
+        [
+            PLATE_X * PLATE_Y * PLATE_Z,
+            -corners * BLEND * CORNER_R**2 * PLATE_Z,
+            *(-math.pi * r * r * PLATE_Z for _, _, r in holes),
+            -math.pi * blind_r**2 * blind_depth,
+            math.pi * boss_r**2 * boss_h,
+            -(dx * dy - 4.0 * BLEND * POCKET_R**2) * depth,
+        ]
+    )
+
+
+@pytest.fixture(scope="module")
+def plates() -> dict[str, tuple[Session, EntityId]]:
+    """The full plate, the plate without its 2 mm hole, and one with 3 round corners."""
+    return {
+        "full": _plate(hole_2mm=True, corners=4),
+        "no_hole": _plate(hole_2mm=False, corners=4),
+        "three_corners": _plate(hole_2mm=True, corners=3),
+    }
+
+
+def _volume(plate: tuple[Session, EntityId]) -> float:
+    """The plate's volume at the default precision."""
+    s, solid = plate
+    return float(s.mass_properties([solid]).measure[0])
+
+
+def test_the_plate_volume_equals_its_closed_form(
+    plates: dict[str, tuple[Session, EntityId]],
+) -> None:
+    """Holes, a blind hole, a boss, a filleted pocket and rounded corners: within 1e-13.
+
+    Planes and cylinders only, every edge a line or a circle. The adaptive rule read it
+    6.6e-13 high at the default and reported an error of 4e-16.
+    """
+    expected = _plate_volume(hole_2mm=True, corners=4)
+
+    volume = _volume(plates["full"])
+
+    assert volume == pytest.approx(expected, rel=1e-13)
+
+
+def test_removing_the_2_mm_hole_changes_the_volume_by_pi_r2_h(
+    plates: dict[str, tuple[Session, EntityId]],
+) -> None:
+    """The volume a caller removes with the hole, pi r^2 h, within 1e-12 of itself."""
+    r = THROUGH_HOLES[0][2]
+
+    removed = _volume(plates["no_hole"]) - _volume(plates["full"])
+
+    assert removed == pytest.approx(math.pi * r * r * PLATE_Z, rel=1e-12)
+
+
+def test_rounding_one_more_corner_changes_the_volume_by_its_blend_times_length(
+    plates: dict[str, tuple[Session, EntityId]],
+) -> None:
+    """A corner fillet removes (r^2 - pi r^2 / 4) L, within 1e-11 of itself.
+
+    The adaptive rule read the difference 4.1e-9 off.
+    """
+    removed = _volume(plates["three_corners"]) - _volume(plates["full"])
+
+    assert removed == pytest.approx(BLEND * CORNER_R**2 * PLATE_Z, rel=1e-11)
+
+
+# The primitives of gate (d): each builder and the closed forms of its solid's volume,
+# its face areas and its edge lengths (a degenerated edge, a sphere's pole, measures 0).
+_R1, _R2, _H = 2.3, 0.9, 3.1
+_SLANT = math.hypot(_H, _R1 - _R2)
+PRIMITIVES: dict[str, tuple[Callable[[Session], object], dict[str, list[float]]]] = {
+    "box": (
+        lambda s: s.add_box(3.0, 7.0, 11.0, origin=(0.37, -2.9, 4.2)),
+        {
+            "volume": [231.0],
+            "areas": [21.0, 21.0, 33.0, 33.0, 77.0, 77.0],
+            "lengths": [3.0] * 4 + [7.0] * 4 + [11.0] * 4,
+        },
+    ),
+    "cylinder": (
+        lambda s: s.add_cylinder(1.7, 4.2, (0.37, -2.9, 1.3), (0.3, -0.4, 0.866)),
+        {
+            "volume": [math.pi * 1.7**2 * 4.2],
+            "areas": [2.0 * math.pi * 1.7 * 4.2] + [math.pi * 1.7**2] * 2,
+            "lengths": [2.0 * math.pi * 1.7] * 2 + [4.2],
+        },
+    ),
+    "cone": (
+        lambda s: s.add_cone(_R1, _R2, _H, (1.0, 2.0, 3.0), (0.6, 0.0, 0.8)),
+        {
+            "volume": [math.pi * _H * (_R1**2 + _R1 * _R2 + _R2**2) / 3.0],
+            "areas": [
+                math.pi * (_R1 + _R2) * _SLANT,
+                math.pi * _R1**2,
+                math.pi * _R2**2,
+            ],
+            "lengths": [2.0 * math.pi * _R1, 2.0 * math.pi * _R2, _SLANT],
+        },
+    ),
+    "sphere": (
+        lambda s: s.add_sphere(2.3, (1.0, 2.0, 3.0)),
+        {
+            "volume": [4.0 / 3.0 * math.pi * 2.3**3],
+            "areas": [4.0 * math.pi * 2.3**2],
+            "lengths": [0.0, 0.0, math.pi * 2.3],
+        },
+    ),
+    "torus": (
+        lambda s: s.add_torus(5.0, 1.2, (-1.0, 0.5, 2.0), (0.0, 0.6, 0.8)),
+        {
+            "volume": [2.0 * math.pi**2 * 5.0 * 1.2**2],
+            "areas": [4.0 * math.pi**2 * 5.0 * 1.2],
+            "lengths": [2.0 * math.pi * 1.2, 2.0 * math.pi * (5.0 + 1.2)],
+        },
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(PRIMITIVES))
+def test_every_measure_of_a_primitive_is_its_closed_form_within_1e_14(
+    name: str,
+) -> None:
+    """The solid's volume, every face's area and every edge's length, within 1e-14.
+
+    A pole's degenerated edge measures exactly 0.
+    """
+    build, expected = PRIMITIVES[name]
+    s = Session()
+    build(s)
+    measured = {
+        key: sorted(float(m) for m in s.mass_properties(sorted(_ids(s, kind))).measure)
+        for key, kind in (
+            ("volume", EntityKind.SOLID),
+            ("areas", EntityKind.FACE),
+            ("lengths", EntityKind.EDGE),
+        )
+    }
+
+    for key, values in expected.items():
+        assert measured[key] == pytest.approx(sorted(values), rel=1e-14, abs=0.0), key

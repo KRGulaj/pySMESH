@@ -123,9 +123,9 @@ class _HealOps(_SessionBase):
           shell that bounds the space outside it is reversed. That changes a flag, not the
           geometry, so every face id stays alive.
         * A solid is committed only if it encloses more than ``Precision::Confusion()``
-          (1e-7 model units) times its area. The volume is integrated with GProp's adaptive
-          rule. A face sewn onto its own copy closes a shell that encloses nothing, and it is
-          refused.
+          (1e-7 model units) times its area. The volume is taken by the rule of
+          :meth:`mass_properties`. A face sewn onto its own copy closes a shell that
+          encloses nothing, and it is refused.
         * Closed shells are placed against each other. Shells apart from each other are
           separate solids. A shell inside another, with their surfaces apart, is a cavity of
           the shell it lies directly inside. A shell inside that cavity is a solid of its own.
