@@ -144,7 +144,7 @@ class _QueryOps(_SessionBase):
         **The rule.** Every measure is taken to ``precision`` or, without one, to the
         default relative precision 1e-6, and its centroid follows the same rule. A
         solid's volume and a face's area are summed over the faces, each face about one
-        common point, and each face is integrated by one of three rules:
+        common point, and each face is integrated by one of four rules:
 
         * **Exact.** A plane, cylinder, cone, sphere or torus whose every edge is a
           line, a circle or an ellipse, both in space and as its curve on the face (or a
@@ -162,10 +162,22 @@ class _QueryOps(_SessionBase):
           that prism to 1e-15. Revolved a full turn, the same profile reads 5e-8 at the
           default and 5e-9 at 1e-9: the copy's curves on its surface are fitted again
           within the edge tolerance, and that limits it near 3e-9.
-        * **Adaptive.** Every other face: B-spline and Bezier surfaces, an offset
-          surface, and an analytic surface with a free-form edge, such as the wall of a
-          fused pipe tee. OCCT's adaptive rule, which refines each face until two steps
-          agree to ``precision``.
+        * **Approximated.** An offset surface, a surface of extrusion or of revolution
+          over an offset curve, or a surface of no type OCCT names. OCCT's adaptive rule
+          has the same fault on these: it read the wall of an offset ellipse prism 0.7 %
+          to 5.4 % off, with an error estimate of 0. No B-spline is exact here, so the
+          face is integrated on two B-spline approximations of its surface that keep its
+          parameters and its own edges, within tau and 10 tau of it, tau being a
+          hundredth of ``precision`` times the face's size. The finer one gives the
+          measure and the change between them counts as error. Measured at the default:
+          the walls of an ellipse prism offset by -0.5 to 0.5 within 8.3e-11 of their
+          closed form, the volumes within 3.6e-10 (OCCT's own fitted edges stop it
+          there). If OCCT returns no approximation, the face keeps OCCT's adaptive rule
+          and its whole measure counts as error.
+        * **Adaptive.** Every other face: B-spline and Bezier surfaces, and an analytic
+          surface with a free-form edge, such as the wall of a fused pipe tee. OCCT's
+          adaptive rule, which refines each face until two steps agree to
+          ``precision``.
 
         An edge's length is taken by an adaptive Gauss-Kronrod rule along its curve,
         because GProp has no adaptive rule for a curve. It refines until the summed
@@ -181,8 +193,10 @@ class _QueryOps(_SessionBase):
         **Cost.** Against 5.1.0, measured at the default: the plate takes 0.9 ms
         against 3.2 ms, and the largest solid of the production assembly, 436 faces,
         4.1 s against 4.4 s. A converted face pays for its copy: the spline prism takes
-        5 ms against 1.2 ms, and the area of its revolved side 59 ms against 1.2 ms.
-        Edges are unchanged.
+        5 ms against 1.2 ms, and the area of its revolved side 59 ms against 1.2 ms. An
+        approximated face pays for two approximations: 14 ms for the offset ellipse
+        prism's wall, 3.8 s for an offset spline prism's wall whose fitted edges have
+        many spans. Edges are unchanged.
 
         Each id is measured: two ids of one merged shape (aliases, see
         :meth:`entities`) give that shape's measure twice. Name each shape once, for

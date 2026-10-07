@@ -240,9 +240,21 @@ struct Measure {
 //     (BRepBuilderAPI_NurbsConvert). OCCT's adaptive rule has no case for either surface: it
 //     takes one span of degree 2 and never refines along the basis curve, so a prism over a
 //     closed B-spline read 10 % off with an error estimate of 1e-17.
+//   * Approximated. An offset surface, a surface of no type GProp knows, or a surface of
+//     extrusion or revolution whose basis curve converts only approximately (an offset
+//     curve). GProp's adaptive rule has the same fault on these, and no B-spline is exact,
+//     so the face is integrated on two B-spline approximations of its surface, on the same
+//     parameters and with the face's own curves (GeomConvert_ApproxSurface, then the
+//     surface swapped in place): within tau and 10 tau, tau = 0.01 x precision x the
+//     face's box diagonal. The finer copy's measure is used; the change between the two
+//     counts as error. On an offset of an exact ellipse prism the finer copy reads the
+//     closed forms within 6e-10. If OCCT returns no approximation, the face keeps the
+//     adaptive rule and its whole measure counts as error.
 //   * Adaptive. Every other face: GProp's adaptive rule, unchanged, to `precision`.
 //
-// `error` is the largest estimate over the adaptive and converted faces, 0 when there is none.
+// `error` is the largest estimate over the adaptive, converted and approximated faces, and
+// at least the approximated faces' summed change relative to the total; 0 when there is
+// none.
 Measure measured_volume(const TopoDS_Shape& s, double precision);
 
 // The area of the faces of `s` and their centroid under the same face rule.

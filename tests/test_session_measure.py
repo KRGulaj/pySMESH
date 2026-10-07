@@ -530,3 +530,64 @@ def test_every_measure_of_a_primitive_is_its_closed_form_within_1e_14(
 
     for key, values in expected.items():
         assert measured[key] == pytest.approx(sorted(values), rel=1e-14, abs=0.0), key
+
+
+# ------------------------------------------------------ Offset surfaces (M4) --- #
+
+# An exact ellipse, extruded and offset as a solid: the wall becomes an offset surface.
+# For |d| below the ellipse's least radius of curvature, B_AXIS^2 / A_AXIS = 0.997, the
+# offset is the prism over the offset ellipse, its caps moved by d: the wall's area is
+# (L + 2 pi d)(h + 2 d) and the volume (pi a b + L d + pi d^2)(h + 2 d) (Steiner), L the
+# ellipse's length by the edge rule. OCCT's offset caps are bounded by approximated
+# intersection edges, which leaves every rule within 6e-10 of these forms, not closer.
+OFFSETS: tuple[float, ...] = (-0.5, -0.2, 0.2, 0.5)
+OFFSET_RTOL: float = 1e-8
+
+
+def _offset_ellipse_prism(d: float) -> tuple[Session, EntityId, float, float]:
+    """The exact ellipse prism offset by d, its wall, and the two closed forms."""
+    s = Session()
+    s.add_ellipse((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), A_AXIS, B_AXIS)
+    (edge,) = _ids(s, EntityKind.EDGE)
+    length, _ = _edge_rule(s, EntityId(edge))
+    s.make_face([EntityId(edge)])
+    s.extrude([EntityId(i) for i in _ids(s, EntityKind.FACE)], (0.0, 0.0, HEIGHT))
+    s.offset([EntityId(i) for i in _ids(s, EntityKind.SOLID)], d)
+    height = HEIGHT + 2.0 * d
+    wall = (length + 2.0 * math.pi * d) * height
+    area = math.pi * A_AXIS * B_AXIS + length * d + math.pi * d * d
+    return s, _face_of_type(s, "Offset"), wall, area * height
+
+
+@pytest.mark.parametrize("d", OFFSETS)
+def test_an_offset_ellipse_prism_wall_area_meets_its_closed_form(d: float) -> None:
+    """(L + 2 pi d)(h + 2 d) at the default. The defect read 0.7 % to 5.4 % off."""
+    s, wall, expected, _ = _offset_ellipse_prism(d)
+
+    table = s.mass_properties([wall])
+
+    assert float(table.measure[0]) == pytest.approx(expected, rel=OFFSET_RTOL)
+
+
+@pytest.mark.parametrize("d", OFFSETS)
+def test_an_offset_ellipse_prism_volume_meets_steiner(d: float) -> None:
+    """(pi a b + L d + pi d^2)(h + 2 d) at the default. The defect read 2-9 % off."""
+    s, _, _, expected = _offset_ellipse_prism(d)
+    solids = [EntityId(i) for i in _ids(s, EntityKind.SOLID)]
+
+    table = s.mass_properties(solids)
+
+    assert float(table.measure[0]) == pytest.approx(expected, rel=OFFSET_RTOL)
+
+
+@pytest.mark.parametrize("d", OFFSETS)
+def test_the_error_reported_on_an_offset_wall_covers_its_area_error(d: float) -> None:
+    """The reported error is at least the area's distance from its closed form.
+
+    The defect reported 0 or 1e-16 on an area 0.7 % to 5.4 % off.
+    """
+    s, wall, expected, _ = _offset_ellipse_prism(d)
+
+    table = s.mass_properties([wall])
+
+    assert float(table.error[0]) >= abs(float(table.measure[0]) - expected) / expected

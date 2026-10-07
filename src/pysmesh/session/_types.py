@@ -455,9 +455,12 @@ class MassTable:
         error: (N,) float64 — the relative error the rule reports reaching on
             ``measure`` (see "The rule" in :meth:`Session.mass_properties`). For a
             solid or a face it is the largest of GProp's own estimates over its
-            adaptive and converted faces: the relative change between the last two
-            refinement steps. An exact face adds 0, so a solid of exact faces only
-            reports 0.0. For an edge it is the difference between the 15-point Kronrod
+            adaptive, converted and approximated faces: the relative change between the
+            last two refinement steps. It is at least the approximated faces' summed
+            change between their two approximations, relative to the measure. An exact
+            face adds 0, so a solid of exact faces only reports 0.0. A face OCCT could
+            not approximate adds its whole measure, so the error reads about 1 or more.
+            For an edge it is the difference between the 15-point Kronrod
             and the nested 7-point Gauss estimates. That over-states the error of the
             Kronrod value returned. Neither is a bound: on a tube swept along a spline
             GProp reported 9e-9 on the area while the area still moved 1e-6 as the
