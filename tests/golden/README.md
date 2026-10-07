@@ -369,3 +369,40 @@ radius 1.5 and height 4, the sphere of radius 1.7 and the torus (3, 0.8).
   pyramid on each and fills the rest with tetrahedra.
 - `second_order_sphere` and the two surface probes have no `volume_rel_error`: a quadratic
   cell's volume and a surface mesh have no exact counterpart here.
+
+## Explained differences since the face rule of the measure (5.1.1 fixes)
+
+5.1.1 measures a solid's volume and a face's area face by face (see "The rule" in
+`Session.mass_properties`). An analytic face whose edges are lines, circles or ellipses,
+in space and on the face, takes OCCT's fixed rule, which is exact there. An extrusion or
+revolution face takes an exact B-spline copy, and an offset face two B-spline
+approximations. Every other face keeps OCCT's adaptive rule, with OCCT's own calls. No
+probe of the capture has an extrusion, revolution or offset face, so every change here
+comes from the exact rule on analytic faces.
+
+Against the 5.1.0 capture, `compare.py` gives MATCH at `--rtol 1e-12`. At `--rtol 0
+--atol 0`, 32 `geometry` and 2 `defect` values change, and none of `mesh` or `netgen`. The
+Cartesian viscous-layer probes are equal to the reference in this capture. Each change is
+listed in `docs/reports/agents/fix511/final/golden_explain.txt` (gitignored), with the
+closed form where the probe has one:
+
+* 31 `geometry` and the 2 `defect` values are volumes and areas of analytic solids. They
+  move by round-off: the largest change is 1.5e-14, and every new value lies within 2.2e-15
+  of its closed form (the torus volume, 1.9e-15 before). Exact now, from 3.9e-16 to
+  1.5e-14 off before: the C5 quarter cylinder's volume and area (pi / 4, pi + 2), the
+  filleted box, the primitive sphere, the offset sphere and the hollowed box (51.288).
+  The others move within 1e-15 of their closed forms, some toward them and some away:
+  both rules sum Gauss points, in a different order.
+* `exchange/production_step.volume_fixed_rule` sums the `Shape.solids()` volumes of the
+  production assembly: 3.3684720794880767 to 3.368472079485605 (7.3e-13). Its analytic
+  faces now take the exact rule; its B-spline faces keep the adaptive rule. Measured on its
+  largest solid (436 faces, 232 analytic), the volume moves 2.8e-11 toward its value at
+  1e-9.
+
+| Probe | Before | Now | Closed form |
+|---|---|---|---|
+| `C5/common_alias_ids.volume` | 0.7853981633974597 | 0.7853981633974483 | pi / 4 = 0.7853981633974483 |
+| `C5/common_alias_ids.area` | 5.1415926535898 | 5.141592653589793 | pi + 2 = 5.141592653589793 |
+| `primitive/torus.volume` | 37.899280900183214 | 37.89928090018323 | 37.89928090018314 |
+| `primitive/cylinder.volume` | 28.274333882308134 | 28.274333882308163 | 28.274333882308138 |
+| `exchange/production_step.volume_fixed_rule` | 3.3684720794880767 | 3.368472079485605 | none |

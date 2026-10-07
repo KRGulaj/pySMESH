@@ -2,12 +2,13 @@
 # Copyright (C) 2026 Kajetan R. Gulaj
 # Created: 2026-10-07
 
-"""Gates for the measure rule: volumes, areas and centroids against oracles GProp cannot set.
+"""Gates for the measure rule: volumes, areas and centroids against independent oracles.
 
 OCCT's adaptive rule (``BRepGProp_Face``) has no case for a surface of extrusion or of
-revolution. It integrates such a face as one span of degree 2, never refines along the
-basis curve, and reports an error of about 1e-16. On a prism over a closed B-spline it read
-the volume 10 % off, and the value stepped with the precision instead of converging.
+revolution. It integrates such a face as one span of degree 2, never refines along
+the basis curve, and reports an error of about 1e-16. On a prism over a closed
+B-spline it read the volume 10 % off, and the value stepped with the precision
+instead of converging.
 
 Every oracle here is independent of GProp:
 
@@ -16,8 +17,8 @@ Every oracle here is independent of GProp:
 * Pappus's theorems for a profile revolved a full turn;
 * the length and the centroid of an edge by pySMESH's own Gauss-Kronrod edge rule.
 
-The profile is the one the defect was found on: a B-spline fitted through 37 points of an
-ellipse with semi-axes 2.9 and 1.7, closed on its first point, with the
+The profile is the one the defect was found on: a B-spline fitted through 37 points
+of an ellipse with semi-axes 2.9 and 1.7, closed on its first point, with the
 :meth:`Session.add_spline` defaults (degree 3, 40 poles).
 """
 
@@ -40,8 +41,8 @@ SAMPLES: int = 37
 # The prism's height, and the revolution axis: the line x = AXIS_X, z = 0, along y.
 HEIGHT: float = 4.2
 AXIS_X: float = -5.0
-# Curve samples for the shoelace sums. The polygon's error falls as 1 / N^2; measured on this
-# profile it is 4.6e-11 of the area at this density (1.8e-8 at 20 001).
+# Curve samples for the shoelace sums. The polygon's error falls as 1 / N^2: measured
+# on this profile, 4.6e-11 of the area at this density (1.8e-8 at 20 001).
 SHOELACE_SAMPLES: int = 400_001
 
 DEFAULT_PRECISION: float = 1e-6
@@ -72,7 +73,7 @@ def _profile(s: Session) -> tuple[EntityId, EntityId]:
 
 
 def _shoelace(s: Session, edge: EntityId) -> tuple[float, NDArray[np.float64]]:
-    """The area inside a closed planar edge in z = 0, and its centroid, by shoelace sums."""
+    """The area inside a closed planar edge in z = 0 and its centroid, by shoelace."""
     t0, t1 = s.edge_parameter_bounds([edge])[0]
     points = s.curve_at(edge, np.linspace(t0, t1, SHOELACE_SAMPLES)).points[:-1]
     x, y = points[:, 0], points[:, 1]
@@ -102,8 +103,9 @@ def _prism() -> tuple[Session, EntityId, float, NDArray[np.float64]]:
 def _revolved() -> tuple[Session, EntityId, float]:
     """The profile revolved a full turn about the axis x = AXIS_X, z = 0, along y.
 
-    Returns the session, the solid's id, and its volume by Pappus: 2 pi rbar A, with A and
-    the distance rbar from the axis to the profile's centroid from the shoelace sums.
+    Returns the session, the solid's id, and its volume by Pappus: 2 pi rbar A, with A
+    and the distance rbar from the axis to the profile's centroid from the shoelace
+    sums.
     """
     s = Session()
     edge, cap = _profile(s)
@@ -118,7 +120,7 @@ def _revolved() -> tuple[Session, EntityId, float]:
 
 
 def test_a_spline_prism_volume_at_the_default_equals_cap_area_times_height() -> None:
-    """The defect: 71.799 at the default against 65.050 (+10 %), reported error 1.9e-17."""
+    """The defect: 71.799 at the default against 65.050 (+10 %), error 1.9e-17."""
     s, solid, area, _ = _prism()
 
     table = s.mass_properties([solid])
@@ -132,7 +134,7 @@ def test_a_spline_prism_volume_at_the_default_equals_cap_area_times_height() -> 
 def test_a_spline_prism_volume_converges_within_ten_times_the_precision(
     precision: float,
 ) -> None:
-    """The defect read 57.97, 71.80 and 61.48 as the precision went from 1e-4 to 1e-9."""
+    """The defect read 57.97, 71.80 and 61.48 as the precision went 1e-4 to 1e-9."""
     s, solid, area, _ = _prism()
 
     table = s.mass_properties([solid], precision=precision)
@@ -157,7 +159,7 @@ def test_a_spline_prism_centroid_lies_half_the_height_above_the_cap_centroid() -
 def test_a_revolved_spline_profile_volume_meets_pappus_within_ten_times_the_precision(
     precision: float | None,
 ) -> None:
-    """Pappus: V = 2 pi rbar A, to the default precision without one, else to 10 times it.
+    """Pappus: V = 2 pi rbar A, to the default precision without one, else to 10 x it.
 
     The defect read 1.5e-5 high at the default and 3.2e-7 low at 1e-9.
     """
@@ -181,7 +183,11 @@ SIDE_H: float = 3.1
 def _face_of_type(s: Session, name: str) -> EntityId:
     """The single face of the session whose surface is of the named type."""
     table = s.entity_types(EntityKind.FACE)
-    found = [EntityId(int(i)) for i, t in zip(table.ids, table.types) if t == name]
+    found = [
+        EntityId(int(i))
+        for i, t in zip(table.ids, table.types, strict=True)
+        if t == name
+    ]
     assert len(found) == 1, (name, list(table.types))
     return found[0]
 
@@ -193,7 +199,7 @@ def _edge_rule(s: Session, edge: EntityId) -> tuple[float, NDArray[np.float64]]:
 
 
 def _swept_side(revolve: bool) -> tuple[Session, EntityId, EntityId]:
-    """The prism or the revolved solid of the profile, its swept face and the profile edge."""
+    """The prism or the revolved solid of the profile, its swept face, the profile."""
     s = Session()
     edge, cap = _profile(s)
     if revolve:
@@ -207,8 +213,8 @@ def _ring_weighted_axial(s: Session, edge: EntityId) -> float:
     """The mean of the profile's y weighted by r ds, r its distance from the axis.
 
     The centroid of a surface of revolution lies on the axis at this height (Pappus's
-    surface theorem weights each arc element by the ring it sweeps). Polygon sums over the
-    curve samples.
+    surface theorem weights each arc element by the ring it sweeps). Polygon sums
+    over the curve samples.
     """
     t0, t1 = s.edge_parameter_bounds([edge])[0]
     points = s.curve_at(edge, np.linspace(t0, t1, SHOELACE_SAMPLES)).points
@@ -229,7 +235,7 @@ def test_a_spline_prism_side_area_equals_the_curve_length_times_the_height() -> 
 
 
 def test_a_spline_prism_side_centroid_lies_half_the_height_above_the_curve() -> None:
-    """The side's centroid is the curve's, raised by half the height (1e-9 of the height).
+    """The side's centroid is the curve's, raised by half the height (1e-9 of it).
 
     The defect put it 0.056 off the curve's centroid in x.
     """
@@ -243,11 +249,11 @@ def test_a_spline_prism_side_centroid_lies_half_the_height_above_the_curve() -> 
 
 
 def test_a_revolved_spline_side_area_at_1e_9_meets_pappus_within_1e_8() -> None:
-    """Pappus: A = 2 pi r L, L the curve's length and r its centroid's distance from the axis.
+    """Pappus: A = 2 pi r L, L the curve length, r its centroid's distance to the axis.
 
-    The defect read 3.4e-8 high at 1e-9. At the default both rules are within 1e-6 (the
-    defect 8.5e-7, the B-spline copy 1.7e-7), and at 1e-8 the defect stays within ten times
-    the precision, so only 1e-9 tells them apart.
+    The defect read 3.4e-8 high at 1e-9. At the default both rules are within 1e-6
+    (the defect 8.5e-7, the B-spline copy 1.7e-7), and at 1e-8 the defect stays
+    within ten times the precision, so only 1e-9 tells them apart.
     """
     s, side, edge = _swept_side(revolve=True)
     length, centroid = _edge_rule(s, edge)
