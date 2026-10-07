@@ -195,8 +195,12 @@ py::dict Session::add_brep(const py::bytes& data, const std::string& inside_out,
     try {
       BRepTools::Read(imported, stream, builder, driver.range());
       if (!imported.IsNull()) {
-        wrong = shape_checks::inside_out_solids(imported);
+        wrong = shape_checks::inside_out_solids(imported, "Session.add_brep");
       }
+    } catch (const PysmeshError&) {
+      // A solid the measure rule cannot measure is refused by name, not as a failed read.
+      py::gil_scoped_acquire acquire;
+      throw;
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(std::string("Session.add_brep: BREP read failed: ") + e.what());
@@ -1094,7 +1098,8 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
         stage = "measuring the volume of the lofted solid failed";
         for (TopExp_Explorer ex(result, TopAbs_SOLID); ex.More() && solid && cap_refusal.empty();
              ex.Next()) {
-          const EnclosedVolume enclosed = enclosed_volume(ex.Current());
+          const EnclosedVolume enclosed =
+              enclosed_volume(ex.Current(), "Session.thru_sections", "the lofted solid");
           if (enclosed.volume <= enclosed.tolerance) {
             hollow = enclosed;
             break;
@@ -1110,6 +1115,10 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
               shape_checks::self_interference_refusal("Session.thru_sections", result);
         }
       }
+    } catch (const PysmeshError&) {
+      // A lofted solid the measure rule cannot measure is refused by name, with no stage.
+      py::gil_scoped_acquire acquire;
+      throw;
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(std::string("Session.thru_sections: ") + stage + ": " + e.what());

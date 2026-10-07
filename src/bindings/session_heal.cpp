@@ -118,7 +118,7 @@ std::optional<std::string> orient_and_measure(ClosedShell& c) {
   }
 
   BRepBndLib::Add(c.shell, c.box);
-  const EnclosedVolume enclosed = enclosed_volume(c.solid);
+  const EnclosedVolume enclosed = enclosed_volume(c.solid, "Session.sew", "a closed shell");
   c.volume = enclosed.volume;
   c.area = enclosed.area;
   c.exact = enclosed.exact;
@@ -142,7 +142,8 @@ void make_exact(ClosedShell& c) {
   if (c.exact) {
     return;
   }
-  const EnclosedVolume enclosed = enclosed_volume(c.solid, /*precise=*/true);
+  const EnclosedVolume enclosed =
+      enclosed_volume(c.solid, "Session.sew", "a closed shell", /*precise=*/true);
   c.volume = enclosed.volume;
   c.area = enclosed.area;
   c.exact = true;
@@ -632,10 +633,13 @@ struct ChangedFaces {
   std::vector<TopoDS_Shape> made;
 };
 
-double area_of(const TopoDS_Shape& s) {
-  GProp_GProps props;
-  BRepGProp::SurfaceProperties(s, props);
-  return props.Mass();
+// The area of `s` by the library's measure rule at its default precision, the rule whose
+// areas Session.mass_properties reports. `what` names `s` in a refusal.
+double area_of(const TopoDS_Shape& s, const std::string& what) {
+  const shape_checks::Measure m =
+      shape_checks::measured_area(s, shape_checks::kDefaultMassPrecision);
+  shape_checks::require_measured(m, "Session.defeature", what);
+  return m.mass;
 }
 
 // The faces of the input the result does not have, and the reverse, less every pair that is
@@ -680,7 +684,7 @@ ChangedFaces changed_faces(const TopoDS_Shape& owner, const TopoDS_Shape& result
     }
     TopLoc_Location g_loc;
     const Handle(Geom_Surface) & g_surf = BRep_Tool::Surface(TopoDS::Face(g), g_loc);
-    const double g_area = area_of(g);
+    const double g_area = area_of(g, "a face the removal changed");
     const double same = 2.0 * Precision::Confusion() * edge_length_of(g);
     bool twin = false;
     for (std::size_t j = 0; j < c.made.size() && !twin; ++j) {
@@ -694,7 +698,7 @@ ChangedFaces changed_faces(const TopoDS_Shape& owner, const TopoDS_Shape& result
         continue;
       }
       if (made_area[j] < 0.0) {
-        made_area[j] = area_of(c.made[j]);
+        made_area[j] = area_of(c.made[j], "a face the removal made");
       }
       if (std::abs(made_area[j] - g_area) <= same) {
         paired[j] = true;
@@ -717,17 +721,19 @@ ChangedFaces changed_faces(const TopoDS_Shape& owner, const TopoDS_Shape& result
 
 // Measure the removal that turned `owner` into `result` by deleting `named`.
 //
-// Both integrals use BRepGProp's adaptive rule. Its default rule integrates each face with a
-// fixed number of Gauss points, which is exact enough on an analytic face and not on a
-// free-form one: on a tube swept along a spline, whose B-spline wall is split in two on one
-// surface and whose half-wall "removal" is a no-op, the fixed rule measures a volume change
-// of 3.0e-6, well past the 1.9e-6 tolerance, where the adaptive rule measures 1.3e-8.
+// Both integrals use the library's measure rule (shape_checks::measured_area and
+// measured_volume), which takes GProp's fixed rule only on the faces where it is exact.
+// The fixed rule integrates each face with a fixed number of Gauss points, which is exact
+// enough on an analytic face and not on a free-form one: on a tube swept along a spline,
+// whose B-spline wall is split in two on one surface and whose half-wall "removal" is a
+// no-op, the fixed rule measures a volume change of 3.0e-6, well past the 1.9e-6 tolerance,
+// where the adaptive rule measures 1.3e-8.
 //
 // The volume change is integrated in ONE call, over the result's changed faces together with
 // the input's changed faces reversed. Those bound exactly the region between the two
 // patches, a closed surface, so its volume is the change and does not depend on the point it
 // is taken about. Two separate calls would not do: the volume of an open patch does depend
-// on that point, and VolumeProperties picks its own from each shape it is given. Measured on
+// on that point, and the rule picks its own from each shape it is given. Measured on
 // an imprinted box, the removed and the new patch over one 13 x 11 face came out 326.857
 // and 343.2 in two calls, for a change that is zero.
 //
@@ -736,11 +742,9 @@ ChangedFaces changed_faces(const TopoDS_Shape& owner, const TopoDS_Shape& result
 //   * Area. The rule refines each face until two steps agree to Eps relative, so over the
 //     changed faces, of area A_c, a tenth of tol_area asks for Eps = 0.1 x tol_area / A_c.
 //   * Volume. A face contributes (1/3) x the integral of (x - p).n over it, p the point
-//     VolumeProperties takes the volume about. OCCT does not document p, and its source is
-//     not in this tree; it is inferred from what VolumeProperties returns. A lone planar face
-//     measures exactly 0, so p lies in that face's own plane, which means p is taken from the
-//     shape and not fixed at the origin. Taken from the shape, p lies inside its bounding
-//     box, so |x - p| is at most D, the box's diagonal. Eps x D x A_c / 3 then bounds the
+//     the rule takes the volume about: the mean of the shape's vertices, as BRepGProp takes
+//     it (roughBaryCenter, BRepGProp.cxx:84). It lies inside the shape's bounding box, so
+//     |x - p| is at most D, the box's diagonal. Eps x D x A_c / 3 then bounds the
 //     error, and a tenth of eps x A asks for Eps = 0.3 x eps x A / (D x A_c).
 //
 // Both sides of the area difference are integrated with the same Eps, because the rule's
@@ -753,7 +757,7 @@ Removal measure_removal(const TopoDS_Shape& owner, const TopoDS_Shape& result,
   const double eps = Precision::Confusion();
   Removal r;
   const TopoDS_Compound named_faces = compound_of(named);
-  r.named_area = area_of(named_faces);
+  r.named_area = area_of(named_faces, "the named faces");
   r.named_edge_length = edge_length_of(named_faces);
   r.tol_area = 2.0 * eps * r.named_edge_length;
 
@@ -767,7 +771,8 @@ Removal measure_removal(const TopoDS_Shape& owner, const TopoDS_Shape& result,
   const TopoDS_Compound between = compound_of(boundary);
 
   // Guarded against a zero, not floored at a size: a floor would be a unit.
-  const double changed_area = std::max(area_of(between), eps);
+  const double changed_area =
+      std::max(area_of(between, "the region between the removed and the new faces"), eps);
   Bnd_Box box;
   BRepBndLib::Add(between, box);
   const double diagonal = std::max(std::sqrt(box.SquareExtent()), eps);
@@ -775,13 +780,15 @@ Removal measure_removal(const TopoDS_Shape& owner, const TopoDS_Shape& result,
   const double volume_eps =
       std::min(0.3 * eps * r.named_area / (diagonal * changed_area), kAdaptiveEpsCap);
 
-  GProp_GProps area_gone, area_made;
-  BRepGProp::SurfaceProperties(gone, area_gone, area_eps);
-  BRepGProp::SurfaceProperties(made, area_made, area_eps);
-  r.d_area = area_made.Mass() - area_gone.Mass();
-  GProp_GProps volume;
-  BRepGProp::VolumeProperties(between, volume, volume_eps);
-  r.d_volume = volume.Mass();
+  const shape_checks::Measure area_gone = shape_checks::measured_area(gone, area_eps);
+  shape_checks::require_measured(area_gone, "Session.defeature", "the removed faces");
+  const shape_checks::Measure area_made = shape_checks::measured_area(made, area_eps);
+  shape_checks::require_measured(area_made, "Session.defeature", "the new faces");
+  r.d_area = area_made.mass - area_gone.mass;
+  const shape_checks::Measure volume = shape_checks::measured_volume(between, volume_eps);
+  shape_checks::require_measured(volume, "Session.defeature",
+                                 "the region between the removed and the new faces");
+  r.d_volume = volume.mass;
   r.tol_volume = eps * std::max(r.named_area, r.named_area + r.d_area);
   return r;
 }
@@ -1070,6 +1077,10 @@ py::dict Session::defeature(const std::vector<EntityId>& face_ids, bool parallel
                                blocks.size() > 1 ? steps.Next() : Message_ProgressRange());
         }
       }
+    } catch (const PysmeshError&) {
+      // A region the measure rule cannot measure is refused by name, not as an OCCT failure.
+      py::gil_scoped_acquire acquire;
+      throw;
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(std::string("Session.defeature: OCCT's defeaturing threw: ") +
@@ -1099,11 +1110,14 @@ py::dict Session::defeature(const std::vector<EntityId>& face_ids, bool parallel
   }
   if (!idle.empty()) {
     // What the body measures, quoted in the message so the caller sees what was left
-    // unchanged. Only a refusal pays for it, and GProp's fixed rule is precise enough for a
-    // number printed to six digits.
-    GProp_GProps body_volume, body_area;
-    BRepGProp::VolumeProperties(owner, body_volume);
-    BRepGProp::SurfaceProperties(owner, body_area);
+    // unchanged, by the library's measure rule at its default precision. Only a refusal pays
+    // for it.
+    const shape_checks::Measure body_volume =
+        shape_checks::measured_volume(owner, shape_checks::kDefaultMassPrecision);
+    shape_checks::require_measured(body_volume, "Session.defeature", "the body");
+    const shape_checks::Measure body_area =
+        shape_checks::measured_area(owner, shape_checks::kDefaultMassPrecision);
+    shape_checks::require_measured(body_area, "Session.defeature", "the body");
     std::vector<std::size_t> blamed_idx;
     std::string message = "Session.defeature: ";
     std::string details;
@@ -1125,8 +1139,8 @@ py::dict Session::defeature(const std::vector<EntityId>& face_ids, bool parallel
                    " own removes nothing: OCCT declines it";
       } else {
         message += face_list(named) + " left the body's volume " +
-                   format_g(body_volume.Mass(), 6) + " and area " +
-                   format_g(body_area.Mass(), 6) + " unchanged";
+                   format_g(body_volume.mass, 6) + " and area " +
+                   format_g(body_area.mass, 6) + " unchanged";
         details += face_list(named) + ": the removal changed the volume by " +
                    format_g(f.removal.d_volume, 3) + " (tolerance " +
                    format_g(f.removal.tol_volume, 3) + ") and the area by " +

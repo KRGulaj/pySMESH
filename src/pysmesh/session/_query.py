@@ -141,25 +141,62 @@ class _QueryOps(_SessionBase):
         properties of a *solid* visit every edge once per owning face, so a total edge length
         taken that way comes out doubled.
 
-        **The rule.** Every measure is integrated adaptively, to ``precision`` or,
-        without one, to the default relative precision 1e-6, and its centroid follows
-        the same rule. OCCT's fixed Gauss rule, which earlier releases used by default,
-        is not used: it read a wing lofted through one-edge sections 20 % low, a fused
-        pipe tee 1.39e-6 high, a parabolic edge 4.4e-4 long, and one face of a
-        production STEP assembly 26 % off. The rule is:
+        **The rule.** Every measure is taken to ``precision`` or, without one, to the
+        default relative precision 1e-6, and its centroid follows the same rule. A
+        solid's volume and a face's area are summed over the faces, each face about one
+        common point, and each face is integrated by one of four rules:
 
-        * a solid's volume and a face's area by GProp's adaptive rule, which refines each face
-          until two steps agree to ``precision``;
-        * an edge's length by an adaptive Gauss-Kronrod rule along its curve, because GProp
-          has no adaptive rule for a curve. It refines until the summed error estimate is
-          within ``precision`` times the length.
+        * **Exact.** A plane, cylinder, cone, sphere or torus whose every edge is a
+          line, a circle or an ellipse, both in space and as its curve on the face (or a
+          pole). OCCT's fixed Gauss rule is exact there, so it is used whatever the
+          precision, and the face adds no error. Measured: box, cylinder, cone, sphere,
+          torus and their sectors, and a plate with three holes, a blind hole, a boss, a
+          filleted pocket and rounded corners, within 4.6e-16 of their closed forms. An
+          ellipse cut on a cylinder, or a tilted circle on a sphere, has a free-form
+          curve on the face, where the fixed rule read 1e-9 off: such a face takes the
+          adaptive rule.
+        * **Converted.** A surface of extrusion or of revolution over a line, a conic, a
+          Bezier or a B-spline curve: OCCT's adaptive rule on an exact B-spline copy of
+          the face. OCCT's adaptive rule has no case for either surface: it read a prism
+          over a closed spline 10 % off, with an error estimate of 1e-17. The copy reads
+          that prism to 1e-15. Revolved a full turn, the same profile reads 5e-8 at the
+          default and 5e-9 at 1e-9: the copy's curves on its surface are fitted again
+          within the edge tolerance, and that limits it near 3e-9.
+        * **Approximated.** An offset surface, a surface of extrusion or of revolution
+          over an offset curve, or a surface of no type OCCT names. OCCT's adaptive rule
+          has the same fault on these: it read the wall of an offset ellipse prism 0.7 %
+          to 5.4 % off, with an error estimate of 0. No B-spline is exact here, so the
+          face is integrated on two B-spline approximations of its surface that keep its
+          parameters and its own edges, within tau and 10 tau of it, tau being a
+          hundredth of ``precision`` times the face's size. The finer one gives the
+          measure and the change between them counts as error. Measured at the default:
+          the walls of an ellipse prism offset by -0.5 to 0.5 within 8.3e-11 of their
+          closed form, the volumes within 3.6e-10 (OCCT's own fitted edges stop it
+          there). If OCCT returns no approximation, the face keeps OCCT's adaptive rule
+          and its whole measure counts as error.
+        * **Adaptive.** Every other face: B-spline and Bezier surfaces, and an analytic
+          surface with a free-form edge, such as the wall of a fused pipe tee. OCCT's
+          adaptive rule, which refines each face until two steps agree to
+          ``precision``.
+
+        An edge's length is taken by an adaptive Gauss-Kronrod rule along its curve,
+        because GProp has no adaptive rule for a curve. It refines until the summed
+        error estimate is within ``precision`` times the length.
+
+        OCCT's fixed rule on every face, which earlier releases used by default, read a
+        wing lofted through one-edge sections 20 % low, a fused pipe tee 1.39e-6 high, a
+        parabolic edge 4.4e-4 long, and one face of a production STEP assembly 26 % off.
 
         ``precision`` is the rule's target, not a guaranteed error. Read
         :attr:`MassTable.error` for what the rule reports reaching.
 
-        **Cost.** Against the fixed rule, measured: 1.3 times on the tee at 1e-9. On the
-        largest solid of the production assembly, 436 faces, 5.0 times at 1e-6 and 8.5 times
-        at 1e-9. Edges cost less than with the fixed rule.
+        **Cost.** Against 5.1.0, measured at the default: the plate takes 0.9 ms
+        against 3.2 ms, and the largest solid of the production assembly, 436 faces,
+        4.1 s against 4.4 s. A converted face pays for its copy: the spline prism takes
+        5 ms against 1.2 ms, and the area of its revolved side 59 ms against 1.2 ms. An
+        approximated face pays for two approximations: 14 ms for the offset ellipse
+        prism's wall, 3.8 s for an offset spline prism's wall whose fitted edges have
+        many spans. Edges are unchanged.
 
         Each id is measured: two ids of one merged shape (aliases, see
         :meth:`entities`) give that shape's measure twice. Name each shape once, for
@@ -167,9 +204,10 @@ class _QueryOps(_SessionBase):
 
         Args:
             entities: Entity ids, of any kinds.
-            precision: The relative precision of the adaptive rule, in ``(0, 1e-3]``.
-                ``None`` is the default, 1e-6. Above 1e-3 GProp's rule is no longer
-                adaptive, so such a value is refused rather than answered by the fixed rule.
+            precision: The relative precision of the adaptive and converted faces and
+                of the edges, in ``(0, 1e-3]``. ``None`` is the default, 1e-6. Above
+                1e-3 GProp's rule is no longer adaptive, so such a value is refused
+                rather than answered by the fixed rule.
 
         Returns:
             The measures, centroids and error estimates, in the order the entities were
@@ -178,7 +216,9 @@ class _QueryOps(_SessionBase):
         Raises:
             PysmeshError: If an id was never issued, or is dead. Also on a ``precision``
                 that is not a finite number > 0, or that is above 1e-3. The message names
-                the value.
+                the value. Also when a shape cannot be measured: the B-spline copy of
+                a face fails, or the rule returns a measure, a centroid or an error
+                that is not finite. The message names the entity and the reason.
         """
         raw = self._s.mass_properties(_ids(entities), precision)
         return MassTable(

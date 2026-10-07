@@ -9,6 +9,8 @@
 
 #include "offset_guard.hpp"
 
+#include "shape_checks.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <initializer_list>
@@ -16,9 +18,7 @@
 
 #include <BRepAdaptor_Curve.hxx>
 #include <BRepAdaptor_Surface.hxx>
-#include <BRepGProp.hxx>
 #include <BRep_Tool.hxx>
-#include <GProp_GProps.hxx>
 #include <GeomAbs_SurfaceType.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -285,12 +285,15 @@ const char* radius_detail() {
          "built.";
 }
 
-SolidVolumes solid_volumes(const TopoDS_Shape& s) {
+SolidVolumes solid_volumes(const TopoDS_Shape& s, const std::string& op,
+                           const std::string& whose) {
   SolidVolumes out;
   for (TopExp_Explorer ex(s, TopAbs_SOLID); ex.More(); ex.Next()) {
-    GProp_GProps props;
-    BRepGProp::VolumeProperties(ex.Current(), props);
-    const double v = props.Mass();
+    const shape_checks::Measure m = shape_checks::measured_volume(
+        ex.Current(), shape_checks::kDefaultMassPrecision);
+    shape_checks::require_measured(
+        m, op, "solid " + std::to_string(out.count + 1) + " of " + whose);
+    const double v = m.mass;
     out.least = (out.count == 0) ? v : std::min(out.least, v);
     out.total += v;
     ++out.count;
@@ -334,10 +337,11 @@ SolidVolumes solid_volumes(const TopoDS_Shape& s) {
 // a cavity — and only statement 3 sees that. The inside-out plate has a cavity and has its
 // walls, and only statement 1 sees it.
 std::string not_a_thick_solid(const TopoDS_Shape& owner, const TopoDS_Shape& result,
-                              double thickness, const ShapeSet& opened, const ShapeSet& rims) {
+                              double thickness, const ShapeSet& opened, const ShapeSet& rims,
+                              const std::string& op) {
   std::vector<std::string> broken;
 
-  const SolidVolumes got = solid_volumes(result);
+  const SolidVolumes got = solid_volumes(result, op, "the result");
   const double volume = got.total;
   if (got.count == 0) {
     broken.push_back("It holds no solid at all.");
@@ -346,7 +350,7 @@ std::string not_a_thick_solid(const TopoDS_Shape& owner, const TopoDS_Shape& res
                      ", so the wall came back turned inside out.");
   }
 
-  const double input_volume = solid_volumes(owner).total;
+  const double input_volume = solid_volumes(owner, op, "the input").total;
   if (thickness < 0.0 && volume >= input_volume) {
     broken.push_back("Its volume " + std::to_string(volume) +
                      " is not less than the input solid's " + std::to_string(input_volume) +
@@ -421,18 +425,18 @@ std::string not_a_thick_solid(const TopoDS_Shape& owner, const TopoDS_Shape& res
 // shell: every distance from -0.5 to +5.0 offsets correctly, and -1.0 and beyond is already
 // refused by the analyzer.
 std::string not_an_offset_body(const TopoDS_Shape& owner, const TopoDS_Shape& result,
-                               double distance) {
+                               double distance, const std::string& op) {
   // Whether there is a volume to speak about, not what the top-level shape is called. The
   // session hands a SOLID or a SHELL; the stateless module hands whatever the caller's BREP
   // held, which is a COMPOUND as often as not. A compound of solids has a total volume and
   // the statements below hold of it; a shell has none and they do not.
-  const SolidVolumes was = solid_volumes(owner);
+  const SolidVolumes was = solid_volumes(owner, op, "the input");
   if (was.count == 0) {
     return std::string();
   }
   std::vector<std::string> broken;
 
-  const SolidVolumes got = solid_volumes(result);
+  const SolidVolumes got = solid_volumes(result, op, "the result");
   if (got.count == 0) {
     broken.push_back("It holds no solid, though the body it was built from is one.");
   } else if (got.least <= 0.0) {

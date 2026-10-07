@@ -316,6 +316,14 @@ py::dict Session::mass_properties(const std::vector<EntityId>& entity_ids,
     py::gil_scoped_release release;
     measures = shape_checks::measures(shapes, p);
   }
+  for (std::size_t k = 0; k < entity_ids.size(); ++k) {
+    const EntityRecord& rec = state_.registry->alive.at(entity_ids[k]);
+    for (std::size_t j = first[k]; j < first[k + 1]; ++j) {
+      shape_checks::require_measured(measures[j], "Session.mass_properties",
+                                     std::string(kind_name(rec.kind)) + " " +
+                                         std::to_string(entity_ids[k]));
+    }
+  }
 
   const auto n = static_cast<py::ssize_t>(entity_ids.size());
   py::array_t<double> measure(n);

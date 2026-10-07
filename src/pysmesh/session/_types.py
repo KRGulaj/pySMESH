@@ -317,9 +317,9 @@ class EntityTable:
         kind: The entity kind this table covers.
         ids: (N,) int64, ascending.
         measure: (N,) float64 — volume for solids, area for faces, length for edges, 0.0
-            for vertices. Summed over every shape a split entity denotes. Integrated
-            adaptively to the default relative precision 1e-6, as
-            :meth:`Session.mass_properties` does without a precision.
+            for vertices. Summed over every shape a split entity denotes. Taken by the
+            rule of :meth:`Session.mass_properties` at its default relative precision
+            1e-6, as that method does without a precision.
         centroid: (N, 3) float64, measure-weighted over a split entity's shapes.
         bbox: (N, 6) float64 — xmin, ymin, zmin, xmax, ymax, zmax, covering every shape.
             The box of the geometry, as in :class:`BoundsTable`.
@@ -452,17 +452,23 @@ class MassTable:
         measure: (N,) float64 — volume for a solid, area for a face, length for an edge,
             0.0 for a vertex. Summed over every shape a split entity denotes.
         centroid: (N, 3) float64, measure-weighted over a split entity's shapes.
-        error: (N,) float64 — the relative error the adaptive rule reports reaching on
-            ``measure``, when :meth:`Session.mass_properties` was given a ``precision``.
-            For a solid or a face it is GProp's own estimate: the relative change between
-            its last two refinement steps. For an edge it is the difference between the
-            15-point Kronrod and the nested 7-point Gauss estimates. That over-states the
-            error of the Kronrod value returned. Neither is a bound: on a tube swept along
-            a spline GProp reported 9e-9 on the area while the area still moved 1e-6 as
-            the precision tightened. A value above the precision means the rule stopped
-            before it reached it. Summed over a split entity's shapes, weighted by their
-            measures. 0.0 for a vertex. Always finite: the rule is adaptive with or
-            without an explicit precision.
+        error: (N,) float64 — the relative error the rule reports reaching on
+            ``measure`` (see "The rule" in :meth:`Session.mass_properties`). For a
+            solid or a face it is the largest of GProp's own estimates over its
+            adaptive, converted and approximated faces: the relative change between the
+            last two refinement steps. It is at least the approximated faces' summed
+            change between their two approximations, relative to the measure. An exact
+            face adds 0, so a solid of exact faces only reports 0.0. A face OCCT could
+            not approximate adds its whole measure, so the error reads about 1 or more.
+            For an edge it is the difference between the 15-point Kronrod
+            and the nested 7-point Gauss estimates. That over-states the error of the
+            Kronrod value returned. Neither is a bound: on a tube swept along a spline
+            GProp reported 9e-9 on the area while the area still moved 1e-6 as the
+            precision tightened, and on a spline profile revolved a full turn it
+            reported 2.7e-10 at 1e-12 on a volume 3.2e-9 off. A value above the
+            precision means the rule stopped before it reached it. Summed over a split
+            entity's shapes, weighted by their measures. 0.0 for a vertex. Always
+            finite: a rule that returns a value that is not finite raises.
     """
 
     ids: NDArray[np.int64]

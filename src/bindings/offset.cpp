@@ -320,7 +320,7 @@ py::dict make_thick_solid(const py::bytes& brep, const std::vector<int>& remove_
     opened_set.Add(f);
   }
   const std::string collapsed = offset_guard::not_a_thick_solid(
-      shape, result, thickness, opened_set, rims_of(mk, faces_to_remove));
+      shape, result, thickness, opened_set, rims_of(mk, faces_to_remove), "make_thick_solid");
   if (!collapsed.empty()) {
     throw PysmeshError(
         "make_thick_solid: the result at thickness " + std::to_string(thickness) +
@@ -436,7 +436,8 @@ py::dict offset_shape(const py::bytes& brep, double offset, double tol) {
   // which is a proper subset, and offset outward it is a proper superset. The cover for
   // every face the radius rule cannot speak for — a plane, a B-spline, a surface of
   // revolution.
-  const std::string wrong = offset_guard::not_an_offset_body(shape, result, offset);
+  const std::string wrong =
+      offset_guard::not_an_offset_body(shape, result, offset, "offset_shape");
   if (!wrong.empty()) {
     throw PysmeshError(
         "offset_shape: the result at distance " + std::to_string(offset) +

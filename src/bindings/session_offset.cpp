@@ -506,7 +506,8 @@ py::dict Session::make_thick_solid(const std::vector<EntityId>& face_ids, double
         if (bad.empty()) {
           collapsed = offset_guard::not_a_thick_solid(work.shape, result, thickness,
                                                      opened_work,
-                                                     rims_of(hist, opened_work));
+                                                     rims_of(hist, opened_work),
+                                                     "Session.make_thick_solid");
         }
       }
     }
@@ -641,7 +642,8 @@ py::dict Session::offset(const std::vector<EntityId>& entity_ids, double distanc
         // Only when the shape passed, for the reason make_thick_solid gives: a result the
         // analyzer already rejects is refused below on that verdict.
         if (bad.empty()) {
-          wrong_body = offset_guard::not_an_offset_body(work.shape, result, distance);
+          wrong_body = offset_guard::not_an_offset_body(work.shape, result, distance,
+                                                          "Session.offset");
         }
       }
     }

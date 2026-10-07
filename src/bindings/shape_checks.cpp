@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <queue>
 #include <utility>
@@ -21,21 +22,31 @@
 #include <BOPAlgo_CheckerSI.hxx>
 #include <BOPDS_DS.hxx>
 #include <BOPDS_Pair.hxx>
+#include <Adaptor3d_Curve.hxx>
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Curve2d.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepBuilderAPI_NurbsConvert.hxx>
 #include <BRepCheck.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepCheck_Result.hxx>
 #include <BRepCheck_Status.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
+#include <BRepGProp_Domain.hxx>
+#include <BRepGProp_Face.hxx>
+#include <BRepGProp_MeshProps.hxx>
+#include <BRepGProp_Sinert.hxx>
+#include <BRepGProp_Vinert.hxx>
 #include <BRepLib_FindSurface.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepTools.hxx>
+#include <BRepTools_Modification.hxx>
+#include <BRepTools_Modifier.hxx>
 #include <BRepTopAdaptor_FClass2d.hxx>
 #include <BRepTools_ReShape.hxx>
 #include <BRep_Builder.hxx>
@@ -54,7 +65,9 @@
 #include <Geom_BezierCurve.hxx>
 #include <Geom_BezierSurface.hxx>
 #include <Geom_Curve.hxx>
+#include <GeomConvert_ApproxSurface.hxx>
 #include <Geom_Plane.hxx>
+#include <Geom_RectangularTrimmedSurface.hxx>
 #include <NCollection_Array1.hxx>
 #include <NCollection_IndexedDataMap.hxx>
 #include <NCollection_IndexedMap.hxx>
@@ -359,7 +372,8 @@ TessellatedVolume tessellated_volume(const TopoDS_Shape& solid, double deflectio
   return out;
 }
 
-EnclosedVolume enclosed_volume(const TopoDS_Shape& solid, bool precise) {
+EnclosedVolume enclosed_volume(const TopoDS_Shape& solid, const std::string& op,
+                               const std::string& entity, bool precise) {
   const double eps = Precision::Confusion();
   EnclosedVolume out;
   Bnd_Box box;
@@ -384,9 +398,10 @@ EnclosedVolume enclosed_volume(const TopoDS_Shape& solid, bool precise) {
   const double lever = diagonal * out.area / 3.0;
   const double tight = std::min(0.3 * eps / diagonal, kAdaptiveEpsCap);
   for (const double precision : {kAdaptiveEpsCap, tight}) {
-    GProp_GProps volume;
-    const double reached = BRepGProp::VolumeProperties(solid, volume, precision);
-    out.volume = volume.Mass();
+    const Measure volume = measured_volume(solid, precision);
+    require_measured(volume, op, entity);
+    const double reached = volume.error;
+    out.volume = volume.mass;
     if (std::abs(out.volume) > out.tolerance + std::max(precision, reached) * lever ||
         precision <= tight) {
       break;
@@ -396,7 +411,7 @@ EnclosedVolume enclosed_volume(const TopoDS_Shape& solid, bool precise) {
 }
 
 
-std::vector<InsideOutSolid> inside_out_solids(const TopoDS_Shape& shape) {
+std::vector<InsideOutSolid> inside_out_solids(const TopoDS_Shape& shape, const std::string& op) {
   std::vector<InsideOutSolid> out;
   const std::vector<TopoDS_Shape> solids = solids_of({shape});
   // One classification per solid, the solids side by side: each classifier reads its own
@@ -413,7 +428,8 @@ std::vector<InsideOutSolid> inside_out_solids(const TopoDS_Shape& shape) {
     if (states[i] != TopAbs_IN) {
       continue;
     }
-    const EnclosedVolume enclosed = enclosed_volume(solids[i]);
+    const EnclosedVolume enclosed =
+        enclosed_volume(solids[i], op, "solid " + std::to_string(i + 1));
     if (enclosed.volume < -enclosed.tolerance) {
       out.push_back({static_cast<int>(i) + 1, enclosed.volume});
     }
@@ -761,6 +777,347 @@ class KronrodRule {
   math_Vector gauss_w_;
 };
 
+// ---- the face rule (shape_checks.hpp, measured_volume) ----------------------------------- //
+
+// How one face is integrated.
+enum class FaceRule {
+  kExact,         // GProp's fixed rule, exact on this class
+  kConverted,     // GProp's adaptive rule on an exact B-spline copy of the face
+  kApproximated,  // GProp's adaptive rule on two B-spline approximations of the face
+  kAdaptive,      // GProp's adaptive rule on the face itself
+};
+
+bool is_conic_or_line(GeomAbs_CurveType t) {
+  return t == GeomAbs_Line || t == GeomAbs_Circle || t == GeomAbs_Ellipse;
+}
+
+// True when every edge of `f` is degenerated, or has a line, circle or ellipse for its 3-D
+// curve and for its curve on `f`. A seam is checked once per side, on its own curve.
+bool analytic_edges(const TopoDS_Face& f) {
+  for (TopExp_Explorer ex(f, TopAbs_EDGE); ex.More(); ex.Next()) {
+    const TopoDS_Edge& e = TopoDS::Edge(ex.Current());
+    if (BRep_Tool::Degenerated(e)) {
+      continue;
+    }
+    if (!BRep_Tool::IsGeometric(e) || !is_conic_or_line(BRepAdaptor_Curve(e).GetType()) ||
+        !is_conic_or_line(BRepAdaptor_Curve2d(e, f).GetType())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// True when GeomConvert::CurveToBSplineCurve converts a curve of this type exactly: a line, a
+// conic, a Bezier or a B-spline curve (GeomConvert.cxx:163-357). An offset curve is
+// approximated to 1e-4 (GeomConvert_ApproxCurve), and any other type is refused.
+bool converts_exactly(GeomAbs_CurveType t) {
+  switch (t) {
+    case GeomAbs_Line:
+    case GeomAbs_Circle:
+    case GeomAbs_Ellipse:
+    case GeomAbs_Hyperbola:
+    case GeomAbs_Parabola:
+    case GeomAbs_BezierCurve:
+    case GeomAbs_BSplineCurve:
+      return true;
+    default:
+      return false;
+  }
+}
+
+FaceRule face_rule(const TopoDS_Face& f) {
+  const BRepAdaptor_Surface surface(f, /*R=*/false);
+  switch (surface.GetType()) {
+    case GeomAbs_Plane:
+    case GeomAbs_Cylinder:
+    case GeomAbs_Cone:
+    case GeomAbs_Sphere:
+    case GeomAbs_Torus:
+      return analytic_edges(f) ? FaceRule::kExact : FaceRule::kAdaptive;
+    case GeomAbs_SurfaceOfExtrusion:
+    case GeomAbs_SurfaceOfRevolution:
+      return converts_exactly(surface.BasisCurve()->GetType()) ? FaceRule::kConverted
+                                                                : FaceRule::kApproximated;
+    case GeomAbs_OffsetSurface:
+    case GeomAbs_OtherSurface:
+      return FaceRule::kApproximated;
+    default:
+      return FaceRule::kAdaptive;
+  }
+}
+
+// GeomConvert_ApproxSurface runs OCCT's AdvApp2Var, f2c code that keeps static state: a
+// cache of Hermite matrices rebuilt for each new interval (mmcmher_) and precision constants
+// (mmprcsn_, AdvApp2Var_MathBase.cxx:221-229). The measures run on worker threads, so the
+// approximations take turns; the integrations stay parallel.
+std::mutex& approximation_mutex() {
+  static std::mutex m;
+  return m;
+}
+
+// Swaps the surface of one face for another with the same parameters. The face's curves on
+// the surface are kept as they are, which is right only because the parameters are the same:
+// BRepBuilderAPI_NurbsConvert would fit them again instead.
+class SwapSurface final : public BRepTools_Modification {
+ public:
+  SwapSurface(const TopoDS_Face& face, const Handle(Geom_Surface)& surface)
+      : face_(face), surface_(surface) {}
+
+  bool NewSurface(const TopoDS_Face& F, Handle(Geom_Surface)& S, TopLoc_Location& L,
+                  double& Tol, bool& RevWires, bool& RevFace) override {
+    if (!F.IsSame(face_)) {
+      return false;
+    }
+    BRep_Tool::Surface(F, L);
+    S = surface_;
+    Tol = BRep_Tool::Tolerance(F);
+    RevWires = false;
+    RevFace = false;
+    return true;
+  }
+  bool NewCurve(const TopoDS_Edge&, Handle(Geom_Curve)&, TopLoc_Location&, double&) override {
+    return false;
+  }
+  bool NewPoint(const TopoDS_Vertex&, gp_Pnt&, double&) override { return false; }
+  bool NewCurve2d(const TopoDS_Edge& E, const TopoDS_Face& F, const TopoDS_Edge&,
+                  const TopoDS_Face&, Handle(Geom2d_Curve)& C, double& Tol) override {
+    double first = 0.0, last = 0.0;
+    C = BRep_Tool::CurveOnSurface(E, F, first, last);
+    Tol = BRep_Tool::Tolerance(E);
+    return !C.IsNull();
+  }
+  bool NewParameter(const TopoDS_Vertex&, const TopoDS_Edge&, double&, double&) override {
+    return false;
+  }
+  GeomAbs_Shape Continuity(const TopoDS_Edge& E, const TopoDS_Face& F1, const TopoDS_Face& F2,
+                           const TopoDS_Edge&, const TopoDS_Face&, const TopoDS_Face&) override {
+    return BRep_Tool::Continuity(E, F1, F2);
+  }
+
+ private:
+  TopoDS_Face face_;
+  Handle(Geom_Surface) surface_;
+};
+
+// The continuity GeomConvert asks of an approximation, read off the surface (as
+// GeomConvert::SurfaceToBSplineSurface does, GeomConvert_1.cxx:936-955).
+GeomAbs_Shape continuity_u(const Handle(Geom_Surface)& s) {
+  return s->IsCNu(2) ? GeomAbs_C2 : (s->IsCNu(1) ? GeomAbs_C1 : GeomAbs_C0);
+}
+GeomAbs_Shape continuity_v(const Handle(Geom_Surface)& s) {
+  return s->IsCNv(2) ? GeomAbs_C2 : (s->IsCNv(1) ? GeomAbs_C1 : GeomAbs_C0);
+}
+
+// A copy of `f` whose surface is a B-spline within `tol` (3-D) of its own, on the same
+// parameters, or a null face when OCCT returns no approximation. A surface without bounds
+// (the offset of an extrusion) is approximated over the face's parameter box, widened by a
+// hundredth of it on each side.
+TopoDS_Face approximated_copy(const TopoDS_Face& f, double tol) {
+  try {
+    TopLoc_Location location;
+    Handle(Geom_Surface) surface = BRep_Tool::Surface(f, location);
+    double su0 = 0.0, su1 = 0.0, sv0 = 0.0, sv1 = 0.0;
+    surface->Bounds(su0, su1, sv0, sv1);
+    const bool open_u = Precision::IsInfinite(su0) || Precision::IsInfinite(su1);
+    const bool open_v = Precision::IsInfinite(sv0) || Precision::IsInfinite(sv1);
+    if (open_u || open_v) {
+      double u0 = 0.0, u1 = 0.0, v0 = 0.0, v1 = 0.0;
+      BRepTools::UVBounds(f, u0, u1, v0, v1);
+      const double du = 0.01 * (u1 - u0), dv = 0.01 * (v1 - v0);
+      if (open_u && open_v) {
+        surface = new Geom_RectangularTrimmedSurface(surface, u0 - du, u1 + du, v0 - dv, v1 + dv);
+      } else if (open_u) {
+        surface = new Geom_RectangularTrimmedSurface(surface, u0 - du, u1 + du, /*UTrim=*/true);
+      } else {
+        surface = new Geom_RectangularTrimmedSurface(surface, v0 - dv, v1 + dv, /*UTrim=*/false);
+      }
+    }
+    Handle(Geom_BSplineSurface) bspline;
+    {
+      const std::lock_guard<std::mutex> lock(approximation_mutex());
+      GeomConvert_ApproxSurface approx(surface, tol, continuity_u(surface), continuity_v(surface),
+                                       /*MaxDegU=*/14, /*MaxDegV=*/14, /*MaxSegments=*/1000,
+                                       /*PrecisCode=*/1);
+      if (!approx.HasResult()) {
+        return TopoDS_Face();
+      }
+      bspline = approx.Surface();
+    }
+    BRepTools_Modifier modifier(f, new SwapSurface(f, bspline));
+    if (!modifier.IsDone()) {
+      return TopoDS_Face();
+    }
+    const TopoDS_Shape& copy = modifier.ModifiedShape(f);
+    if (copy.IsNull() || copy.ShapeType() != TopAbs_FACE) {
+      return TopoDS_Face();
+    }
+    return TopoDS::Face(copy.Oriented(f.Orientation()));
+  } catch (const Standard_Failure&) {
+    return TopoDS_Face();
+  }
+}
+
+// The diagonal of a face's box, the length its approximation tolerance scales with.
+double box_diagonal(const TopoDS_Shape& s) {
+  Bnd_Box box;
+  BRepBndLib::Add(s, box);
+  return box.IsVoid() ? 0.0 : std::sqrt(box.SquareExtent());
+}
+
+// The point BRepGProp integrates every face of `s` about: the mean of its vertices, or the
+// first node of a triangulation when it has none (roughBaryCenter, BRepGProp.cxx:84, a
+// function local to that file).
+gp_Pnt rough_bary_center(const TopoDS_Shape& s) {
+  gp_XYZ xyz(0.0, 0.0, 0.0);
+  int n = 0;
+  for (TopExp_Explorer ex(s, TopAbs_VERTEX); ex.More(); ex.Next(), ++n) {
+    xyz += BRep_Tool::Pnt(TopoDS::Vertex(ex.Current())).XYZ();
+  }
+  if (n > 0) {
+    return gp_Pnt(xyz / n);
+  }
+  for (TopExp_Explorer ex(s, TopAbs_FACE); ex.More(); ex.Next()) {
+    TopLoc_Location location;
+    const Handle(Poly_Triangulation)& tri =
+        BRep_Tool::Triangulation(TopoDS::Face(ex.Current()), location);
+    if (!tri.IsNull() && tri->NbNodes() > 0) {
+      xyz = tri->Node(1).XYZ();
+      if (!location.IsIdentity()) {
+        location.Transformation().Transforms(xyz);
+      }
+      break;
+    }
+  }
+  return gp_Pnt(xyz);
+}
+
+// The faces of `s` summed under the face rule, as BRepGProp sums them: volumePropertiesFaces
+// with BRepGProp_Vinert when `Integrator` is that, surfaceProperties with BRepGProp_Sinert
+// (BRepGProp.cxx:165-262, :298-410). A volume counts only the FORWARD and REVERSED faces.
+// A face without a surface is integrated on its triangulation, and skipped without one, as
+// there. Every call of an adaptive face is OCCT's own, so a shape whose faces are all
+// adaptive reads exactly what BRepGProp::VolumeProperties(s, p, precision) or
+// SurfaceProperties(s, p, precision) reads.
+template <class Integrator>
+Measure face_sum(const TopoDS_Shape& s, double precision,
+                 BRepGProp_MeshProps::BRepGProp_MeshObjType mesh_type, bool oriented_only) {
+  gp_Pnt origin(0.0, 0.0, 0.0);
+  origin.Transform(s.Location());
+  GProp_GProps props(origin);
+  const gp_Pnt about = rough_bary_center(s);
+  Integrator g;
+  g.SetLocation(about);
+  BRepGProp_MeshProps mesh(mesh_type);
+  mesh.SetLocation(about);
+  BRepGProp_Face bf;
+  BRepGProp_Domain bd;
+  Measure out;
+  // The summed approximation error of the approximated faces, absolute.
+  double approximation_error = 0.0;
+  int ordinal = 0;
+  for (TopExp_Explorer ex(s, TopAbs_FACE); ex.More(); ex.Next()) {
+    ++ordinal;
+    const TopoDS_Face& f = TopoDS::Face(ex.Current());
+    const TopAbs_Orientation orientation = f.Orientation();
+    if (oriented_only && orientation != TopAbs_FORWARD && orientation != TopAbs_REVERSED) {
+      continue;
+    }
+    TopLoc_Location location;
+    const bool no_surface = BRep_Tool::Surface(f, location).IsNull();
+    const Handle(Poly_Triangulation)& tri = BRep_Tool::Triangulation(f, location);
+    const bool no_mesh = tri.IsNull() || tri->NbNodes() == 0 || tri->NbTriangles() == 0;
+    if (no_surface) {
+      if (!no_mesh) {
+        mesh.Perform(tri, location, orientation);
+        props.Add(mesh);
+      }
+      continue;
+    }
+    switch (face_rule(f)) {
+      case FaceRule::kExact:
+        bf.Load(f);
+        if (f.NbChildren() == 0) {
+          g.Perform(bf);
+        } else {
+          bd.Init(f);
+          g.Perform(bf, bd);
+        }
+        break;
+      case FaceRule::kConverted: {
+        TopoDS_Shape copy;
+        try {
+          BRepBuilderAPI_NurbsConvert convert(f, /*Copy=*/true);
+          if (convert.IsDone()) {
+            copy = convert.Shape();
+          }
+        } catch (const Standard_Failure& e) {
+          out.failure = std::string("the B-spline conversion of its face ") +
+                        std::to_string(ordinal) + " threw: " + e.GetMessageString();
+          return out;
+        }
+        if (copy.IsNull() || copy.ShapeType() != TopAbs_FACE) {
+          out.failure = "the B-spline conversion of its face " + std::to_string(ordinal) +
+                        " returned no face";
+          return out;
+        }
+        const TopoDS_Face& converted = TopoDS::Face(copy);
+        bf.Load(converted);
+        bd.Init(converted);
+        g.Perform(bf, bd, precision);
+        out.error = std::max(out.error, g.GetEpsilon());
+        break;
+      }
+      case FaceRule::kApproximated: {
+        // Two copies, within tau and 10 tau of the surface: the finer one's measure, and the
+        // change between them as the approximation's error. tau is a hundredth of the
+        // precision times the face's size, so the copy adds little to the rule's own error.
+        const double tau = 0.01 * precision * std::max(box_diagonal(f), Precision::Confusion());
+        const TopoDS_Face fine = approximated_copy(f, tau);
+        const TopoDS_Face coarse = fine.IsNull() ? TopoDS_Face() : approximated_copy(f, 10.0 * tau);
+        if (fine.IsNull() || coarse.IsNull()) {
+          // No approximation: the face's own adaptive rule, with its whole measure counted
+          // as error, so the caller sees that it was not measured to the precision.
+          bf.Load(f);
+          if (f.NbChildren() != 0) {
+            bd.Init(f);
+          }
+          g.Perform(bf, bd, precision);
+          approximation_error += std::abs(g.Mass());
+          break;
+        }
+        bf.Load(coarse);
+        bd.Init(coarse);
+        g.Perform(bf, bd, precision);
+        const double coarse_mass = g.Mass();
+        bf.Load(fine);
+        bd.Init(fine);
+        g.Perform(bf, bd, precision);
+        out.error = std::max(out.error, g.GetEpsilon());
+        approximation_error += std::abs(g.Mass() - coarse_mass);
+        break;
+      }
+      case FaceRule::kAdaptive:
+        // OCCT's own calls, the domain included (BRepGProp.cxx:362-368).
+        bf.Load(f);
+        if (f.NbChildren() != 0) {
+          bd.Init(f);
+        }
+        g.Perform(bf, bd, precision);
+        out.error = std::max(out.error, g.GetEpsilon());
+        break;
+    }
+    props.Add(g);
+  }
+  out.mass = props.Mass();
+  out.centroid = props.CentreOfMass().XYZ();
+  if (approximation_error > 0.0) {
+    const double relative =
+        out.mass != 0.0 ? approximation_error / std::abs(out.mass) : approximation_error;
+    out.error = std::max(out.error, relative);
+  }
+  return out;
+}
+
 // A point's measure is 0 and its centre is itself. The bounding box is exact for a point,
 // and it is also the centre of a degenerate edge, which has no curve to integrate.
 Measure point_props(const TopoDS_Shape& s) {
@@ -838,37 +1195,62 @@ Measure adaptive_edge(const TopoDS_Edge& e, double precision, const KronrodRule&
   return out;
 }
 
-// One shape's properties integrated adaptively to `precision`, a relative error.
+// A measure that is not a finite number has failed, whatever the rule reported.
+Measure checked(Measure m) {
+  if (!m.failure.empty()) {
+    return m;
+  }
+  if (!std::isfinite(m.mass)) {
+    m.failure = "the rule returned the measure " + std::to_string(m.mass);
+  } else if (m.mass != 0.0 && !(std::isfinite(m.centroid.X()) &&
+                                std::isfinite(m.centroid.Y()) &&
+                                std::isfinite(m.centroid.Z()))) {
+    m.failure = "the rule returned a centroid that is not finite";
+  } else if (!std::isfinite(m.error)) {
+    m.failure = "the rule returned the error estimate " + std::to_string(m.error);
+  }
+  return m;
+}
+
+// One shape's properties integrated to `precision`, a relative error.
 //
-// A solid and a face go to GProp's adaptive rule, which refines each face until two steps
-// agree to `precision` relative and returns its estimate of the relative error reached over
-// the whole shape (BRepGProp.hxx). An edge goes to adaptive_edge above.
+// A solid and a face go to the face rule (measured_volume, measured_area). An edge goes to
+// adaptive_edge above.
 Measure measure_with(const TopoDS_Shape& s, double precision, const KronrodRule& rule) {
-  GProp_GProps props;
-  Measure out;
   switch (s.ShapeType()) {
     case TopAbs_SOLID:
-      out.error = BRepGProp::VolumeProperties(s, props, precision);
-      break;
+      return checked(measured_volume(s, precision));
     case TopAbs_FACE:
-      out.error = BRepGProp::SurfaceProperties(s, props, precision);
-      break;
+      return checked(measured_area(s, precision));
     case TopAbs_EDGE: {
       const TopoDS_Edge& e = TopoDS::Edge(s);
       if (BRep_Tool::Degenerated(e) || !BRep_Tool::IsGeometric(e)) {
         return point_props(s);
       }
-      return adaptive_edge(e, precision, rule);
+      return checked(adaptive_edge(e, precision, rule));
     }
     default:
       return point_props(s);
   }
-  out.mass = props.Mass();
-  out.centroid = props.CentreOfMass().XYZ();
-  return out;
 }
 
 }  // namespace
+
+Measure measured_volume(const TopoDS_Shape& s, double precision) {
+  return face_sum<BRepGProp_Vinert>(s, precision, BRepGProp_MeshProps::Vinert,
+                                    /*oriented_only=*/true);
+}
+
+Measure measured_area(const TopoDS_Shape& s, double precision) {
+  return face_sum<BRepGProp_Sinert>(s, precision, BRepGProp_MeshProps::Sinert,
+                                    /*oriented_only=*/false);
+}
+
+void require_measured(const Measure& m, const std::string& op, const std::string& entity) {
+  if (!m.failure.empty()) {
+    throw PysmeshError(op + ": " + entity + " cannot be measured: " + m.failure + ".");
+  }
+}
 
 Measure measure(const TopoDS_Shape& s, double precision) {
   static const KronrodRule rule;
