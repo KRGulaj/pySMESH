@@ -170,6 +170,12 @@ py::dict Session::entity_table(const std::string& kind) const {
     // The box of the geometry, not padded by the tolerance (reports D1, D2).
     boxes = shape_checks::exact_boxes(all);
   }
+  for (std::size_t k = 0; k < ids.size(); ++k) {
+    for (std::size_t j = first[k]; j < first[k + 1]; ++j) {
+      shape_checks::require_measured(measures[j], "Session.entity_table",
+                                     kind + " " + std::to_string(ids[k]));
+    }
+  }
 
   for (py::ssize_t i = 0; i < n; ++i) {
     const auto k = static_cast<std::size_t>(i);

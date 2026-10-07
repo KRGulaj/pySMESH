@@ -120,15 +120,25 @@ std::vector<Bnd_Box> boxes_of(const TopTools_IndexedMapOfShape& map) {
   return shape_checks::exact_boxes(shapes);
 }
 
-// The measures of every shape of one indexed map, in its order, with the GIL released.
-std::vector<shape_checks::Measure> measures_of(const TopTools_IndexedMapOfShape& map) {
+// The measures of every shape of one indexed map, in its order, with the GIL released. `op`
+// names the reader and `kind` the shapes ("face", "solid", "edge") in a failure.
+std::vector<shape_checks::Measure> measures_of(const TopTools_IndexedMapOfShape& map,
+                                               const std::string& op,
+                                               const std::string& kind) {
   std::vector<TopoDS_Shape> shapes;
   shapes.reserve(static_cast<std::size_t>(map.Extent()));
   for (int i = 1; i <= map.Extent(); ++i) {
     shapes.push_back(map.FindKey(i));
   }
-  py::gil_scoped_release release;
-  return shape_checks::measures(shapes, shape_checks::kDefaultMassPrecision);
+  std::vector<shape_checks::Measure> out;
+  {
+    py::gil_scoped_release release;
+    out = shape_checks::measures(shapes, shape_checks::kDefaultMassPrecision);
+  }
+  for (std::size_t i = 0; i < out.size(); ++i) {
+    shape_checks::require_measured(out[i], op, kind + " " + std::to_string(i + 1));
+  }
+  return out;
 }
 
 // ---- Shape -------------------------------------------------------------------------//
@@ -138,11 +148,11 @@ class Shape {
 
   std::shared_ptr<ShapeData> data() const { return data_; }
 
-  // Areas, volumes and lengths are integrated adaptively at the library's default
+  // Areas, volumes and lengths are measured by the library's measure rule at its default
   // precision, in parallel (shape_checks::measures). GProp's fixed rule read a lofted wing
   // 20 % low (report D3).
   std::vector<FaceInfo> faces() const {
-    const std::vector<shape_checks::Measure> m = measures_of(data_->faces);
+    const std::vector<shape_checks::Measure> m = measures_of(data_->faces, "Shape.faces", "face");
     const std::vector<Bnd_Box> boxes = boxes_of(data_->faces);
     std::vector<FaceInfo> out;
     const int n = data_->faces.Extent();
@@ -162,7 +172,8 @@ class Shape {
   }
 
   std::vector<SolidInfo> solids() const {
-    const std::vector<shape_checks::Measure> m = measures_of(data_->solids);
+    const std::vector<shape_checks::Measure> m =
+        measures_of(data_->solids, "Shape.solids", "solid");
     const std::vector<Bnd_Box> boxes = boxes_of(data_->solids);
     std::vector<SolidInfo> out;
     const int n = data_->solids.Extent();
@@ -177,7 +188,7 @@ class Shape {
   }
 
   std::vector<EdgeInfo> edges() const {
-    const std::vector<shape_checks::Measure> m = measures_of(data_->edges);
+    const std::vector<shape_checks::Measure> m = measures_of(data_->edges, "Shape.edges", "edge");
     const std::vector<Bnd_Box> boxes = boxes_of(data_->edges);
     std::vector<EdgeInfo> out;
     const int n = data_->edges.Extent();
@@ -339,8 +350,11 @@ Shape load_brep(const py::bytes& data, const std::string& inside_out) {
   try {
     BRepTools::Read(shape, stream, builder);
     if (!shape.IsNull()) {
-      wrong = shape_checks::inside_out_solids(shape);
+      wrong = shape_checks::inside_out_solids(shape, "load_brep");
     }
+  } catch (const PysmeshError&) {
+    // A solid the measure rule cannot measure is refused by name, not as a failed read.
+    throw;
   } catch (const std::exception& e) {
     throw PysmeshError(std::string("BREP read failed: ") + e.what());
   }

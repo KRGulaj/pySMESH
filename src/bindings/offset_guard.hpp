@@ -108,7 +108,11 @@ struct SolidVolumes {
   double least = 0.0;
 };
 
-SolidVolumes solid_volumes(const TopoDS_Shape& s);
+// Each solid is measured by the library's measure rule at its default precision
+// (shape_checks::measured_volume). A solid the rule cannot measure raises PysmeshError naming
+// `op` and `whose` solid it is ("the input", "the result").
+SolidVolumes solid_volumes(const TopoDS_Shape& s, const std::string& op,
+                           const std::string& whose);
 
 // What was observed, when the result of a hollowing is not a hollowed solid, or of a uniform
 // offset is not that body offset. Empty when it is.
@@ -116,12 +120,14 @@ SolidVolumes solid_volumes(const TopoDS_Shape& s);
 // `opened` names the faces the caller asked to turn into openings, and `rims` the faces the
 // algorithm's own history relates to them — the opening's edge left behind once the cavity
 // is cut. A rim is neither a face of the input nor a wall the offset built, and telling it
-// from a wall is what makes the third statement below able to fire at all.
+// from a wall is what makes the third statement below able to fire at all. `op` names the
+// operation in the refusal of a solid the measure rule cannot measure (solid_volumes).
 std::string not_a_thick_solid(const TopoDS_Shape& owner, const TopoDS_Shape& result,
-                              double thickness, const ShapeSet& opened, const ShapeSet& rims);
+                              double thickness, const ShapeSet& opened, const ShapeSet& rims,
+                              const std::string& op);
 
 std::string not_an_offset_body(const TopoDS_Shape& owner, const TopoDS_Shape& result,
-                               double distance);
+                               double distance, const std::string& op);
 
 }  // namespace offset_guard
 }  // namespace pysmesh

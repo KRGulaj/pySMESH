@@ -114,12 +114,13 @@ constexpr double kSignDeflection = 1e-3;
 // What a solid-making operation checks before it commits a solid: BRepCheck_Analyzer accepts
 // a solid whose shell bounds its complement, so it cannot be the check.
 //
-// The volume is integrated with GProp's adaptive rule, because the fixed rule can get its
-// sign wrong. It integrates each face about a point near the shape, so a face contributes up
-// to D x its area / 3, D the bounding-box diagonal, and the contributions cancel down to the
-// volume. A relative error e on them moves the volume by up to e x D x A / 3, while a sheet
-// of thickness t encloses t x A / 2, so the sign can go when t < 2 e D / 3. The fixed rule's
-// area error on one face of the production assembly was 26 %.
+// The volume is integrated with the measure rule (measured_volume), because GProp's fixed
+// rule can get its sign wrong on a free-form face. It integrates each face about a point near
+// the shape, so a face contributes up to D x its area / 3, D the bounding-box diagonal, and
+// the contributions cancel down to the volume. A relative error e on them moves the volume by
+// up to e x D x A / 3, while a sheet of thickness t encloses t x A / 2, so the sign can go
+// when t < 2 e D / 3. The fixed rule's area error on one face of the production assembly was
+// 26 %. The rule's exact faces add no error of their own, so e stays a bound.
 //
 // The integral is taken in two stages, because only the verdict against the tolerance
 // matters, and a tight precision costs: on the assembly's 436-face solid, 6.6 s at the
@@ -139,7 +140,10 @@ constexpr double kSignDeflection = 1e-3;
 // one, A_t its area. When V_t > (d + eps) x A_t the true volume is above eps x A_t, the
 // verdict is settled, and the integral is skipped; `exact` is then false. Otherwise the
 // integral runs as above, so every refusal reports the integrated volume.
-EnclosedVolume enclosed_volume(const TopoDS_Shape& solid, bool precise = false);
+//
+// A solid the measure rule cannot measure raises PysmeshError naming `op` and `entity`.
+EnclosedVolume enclosed_volume(const TopoDS_Shape& solid, const std::string& op,
+                               const std::string& entity, bool precise = false);
 
 // A solid of a shape whose matter is outside its boundary: the point at infinity classifies
 // inside it, and the volume it encloses is negative beyond the tolerance.
@@ -151,8 +155,9 @@ struct InsideOutSolid {
 // Every inside-out solid of `shape`. The classifier decides alone for a solid it finds
 // outside of the point at infinity, which is every solid of a valid model, so a valid model
 // pays one classification per solid. A solid it finds inside is integrated
-// (enclosed_volume), and counts only when the volume agrees.
-std::vector<InsideOutSolid> inside_out_solids(const TopoDS_Shape& shape);
+// (enclosed_volume), and counts only when the volume agrees. `op` names the operation in the
+// refusal of a solid the measure rule cannot measure.
+std::vector<InsideOutSolid> inside_out_solids(const TopoDS_Shape& shape, const std::string& op);
 
 // `shape` with each named solid replaced by a solid whose shells are reversed, so its matter
 // is inside. The faces are kept; only the solid and its shells are new.
@@ -202,15 +207,46 @@ bool reverse_inside_out(const std::string& op, const std::string& policy);
 // One shape's measure by its own kind (volume of a solid, area of a face, length of an edge,
 // 0 for a vertex), its centre of mass, and the relative error the rule reports reaching.
 //
-// A solid and a face go to GProp's adaptive rule, which refines each face until two steps
-// agree to `precision` relative and returns its estimate of the relative error reached
-// (BRepGProp.hxx). An edge goes to an adaptive Gauss-Kronrod rule along its curve, because
-// GProp has no adaptive rule for a curve. A vertex, and an edge with no curve, is a point.
+// A solid and a face go to the face rule below. An edge goes to an adaptive Gauss-Kronrod
+// rule along its curve, because GProp has no adaptive rule for a curve. A vertex, and an edge
+// with no curve, is a point.
+//
+// `failure` says why the rule could not measure the shape, and is empty when it could. A
+// failed measure carries no number: its caller raises (require_measured). The measures run
+// on worker threads, where an exception would lose its type, so the rule records the failure
+// instead of throwing it.
 struct Measure {
   double mass = 0.0;
   gp_XYZ centroid;
   double error = 0.0;
+  std::string failure;
 };
+
+// The face rule (brief amendment 1). A solid's volume and centroid are the sum of its faces'
+// contributions about one point, the mean of its vertices, as BRepGProp sums them
+// (volumePropertiesFaces and roughBaryCenter, BRepGProp.cxx:84, :298-410). A face's area and
+// centroid use the same choice. Each face is integrated by one of three rules:
+//
+//   * Exact. An analytic surface (plane, cylinder, cone, sphere, torus) whose every edge is
+//     degenerated, or has a line, circle or ellipse for its 3-D curve and a 2-D line, circle
+//     or ellipse for its curve on the face. GProp's fixed rule, with an error of 0: it reads
+//     the primitives and a plate with holes, a boss, a filleted pocket and filleted corners
+//     within 4e-16 of their closed forms. The 2-D condition narrows the class: an ellipse cut
+//     on a cylinder, or a tilted circle on a sphere, has a B-spline curve on the face, and on
+//     those the fixed rule read 1e-9 off.
+//   * Converted. A surface of extrusion or of revolution whose basis curve converts exactly to
+//     a B-spline: a line, a conic, a Bezier or a B-spline curve (GeomConvert::
+//     CurveToBSplineCurve). GProp's adaptive rule on a B-spline copy of the face
+//     (BRepBuilderAPI_NurbsConvert). OCCT's adaptive rule has no case for either surface: it
+//     takes one span of degree 2 and never refines along the basis curve, so a prism over a
+//     closed B-spline read 10 % off with an error estimate of 1e-17.
+//   * Adaptive. Every other face: GProp's adaptive rule, unchanged, to `precision`.
+//
+// `error` is the largest estimate over the adaptive and converted faces, 0 when there is none.
+Measure measured_volume(const TopoDS_Shape& s, double precision);
+
+// Raises PysmeshError "<op>: <entity> cannot be measured: <failure>." when `m` failed.
+void require_measured(const Measure& m, const std::string& op, const std::string& entity);
 
 // The default relative precision of every measure the library reports (report D3). GProp's
 // fixed rule read a wing lofted through one-edge sections 20 % low; at 1e-6 the adaptive

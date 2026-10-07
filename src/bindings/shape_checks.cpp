@@ -21,17 +21,25 @@
 #include <BOPAlgo_CheckerSI.hxx>
 #include <BOPDS_DS.hxx>
 #include <BOPDS_Pair.hxx>
+#include <Adaptor3d_Curve.hxx>
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Curve2d.hxx>
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
+#include <BRepBuilderAPI_NurbsConvert.hxx>
 #include <BRepCheck.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepCheck_Result.hxx>
 #include <BRepCheck_Status.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
+#include <BRepGProp_Domain.hxx>
+#include <BRepGProp_Face.hxx>
+#include <BRepGProp_MeshProps.hxx>
+#include <BRepGProp_Sinert.hxx>
+#include <BRepGProp_Vinert.hxx>
 #include <BRepLib_FindSurface.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
@@ -359,7 +367,8 @@ TessellatedVolume tessellated_volume(const TopoDS_Shape& solid, double deflectio
   return out;
 }
 
-EnclosedVolume enclosed_volume(const TopoDS_Shape& solid, bool precise) {
+EnclosedVolume enclosed_volume(const TopoDS_Shape& solid, const std::string& op,
+                               const std::string& entity, bool precise) {
   const double eps = Precision::Confusion();
   EnclosedVolume out;
   Bnd_Box box;
@@ -384,9 +393,10 @@ EnclosedVolume enclosed_volume(const TopoDS_Shape& solid, bool precise) {
   const double lever = diagonal * out.area / 3.0;
   const double tight = std::min(0.3 * eps / diagonal, kAdaptiveEpsCap);
   for (const double precision : {kAdaptiveEpsCap, tight}) {
-    GProp_GProps volume;
-    const double reached = BRepGProp::VolumeProperties(solid, volume, precision);
-    out.volume = volume.Mass();
+    const Measure volume = measured_volume(solid, precision);
+    require_measured(volume, op, entity);
+    const double reached = volume.error;
+    out.volume = volume.mass;
     if (std::abs(out.volume) > out.tolerance + std::max(precision, reached) * lever ||
         precision <= tight) {
       break;
@@ -396,7 +406,7 @@ EnclosedVolume enclosed_volume(const TopoDS_Shape& solid, bool precise) {
 }
 
 
-std::vector<InsideOutSolid> inside_out_solids(const TopoDS_Shape& shape) {
+std::vector<InsideOutSolid> inside_out_solids(const TopoDS_Shape& shape, const std::string& op) {
   std::vector<InsideOutSolid> out;
   const std::vector<TopoDS_Shape> solids = solids_of({shape});
   // One classification per solid, the solids side by side: each classifier reads its own
@@ -413,7 +423,8 @@ std::vector<InsideOutSolid> inside_out_solids(const TopoDS_Shape& shape) {
     if (states[i] != TopAbs_IN) {
       continue;
     }
-    const EnclosedVolume enclosed = enclosed_volume(solids[i]);
+    const EnclosedVolume enclosed =
+        enclosed_volume(solids[i], op, "solid " + std::to_string(i + 1));
     if (enclosed.volume < -enclosed.tolerance) {
       out.push_back({static_cast<int>(i) + 1, enclosed.volume});
     }
@@ -761,6 +772,189 @@ class KronrodRule {
   math_Vector gauss_w_;
 };
 
+// ---- the face rule (shape_checks.hpp, measured_volume) ----------------------------------- //
+
+// How one face is integrated.
+enum class FaceRule {
+  kExact,      // GProp's fixed rule, exact on this class
+  kConverted,  // GProp's adaptive rule on a B-spline copy of the face
+  kAdaptive,   // GProp's adaptive rule on the face itself
+};
+
+bool is_conic_or_line(GeomAbs_CurveType t) {
+  return t == GeomAbs_Line || t == GeomAbs_Circle || t == GeomAbs_Ellipse;
+}
+
+// True when every edge of `f` is degenerated, or has a line, circle or ellipse for its 3-D
+// curve and for its curve on `f`. A seam is checked once per side, on its own curve.
+bool analytic_edges(const TopoDS_Face& f) {
+  for (TopExp_Explorer ex(f, TopAbs_EDGE); ex.More(); ex.Next()) {
+    const TopoDS_Edge& e = TopoDS::Edge(ex.Current());
+    if (BRep_Tool::Degenerated(e)) {
+      continue;
+    }
+    if (!BRep_Tool::IsGeometric(e) || !is_conic_or_line(BRepAdaptor_Curve(e).GetType()) ||
+        !is_conic_or_line(BRepAdaptor_Curve2d(e, f).GetType())) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// True when GeomConvert::CurveToBSplineCurve converts a curve of this type exactly: a line, a
+// conic, a Bezier or a B-spline curve (GeomConvert.cxx:163-357). An offset curve is
+// approximated to 1e-4 (GeomConvert_ApproxCurve), and any other type is refused.
+bool converts_exactly(GeomAbs_CurveType t) {
+  switch (t) {
+    case GeomAbs_Line:
+    case GeomAbs_Circle:
+    case GeomAbs_Ellipse:
+    case GeomAbs_Hyperbola:
+    case GeomAbs_Parabola:
+    case GeomAbs_BezierCurve:
+    case GeomAbs_BSplineCurve:
+      return true;
+    default:
+      return false;
+  }
+}
+
+FaceRule face_rule(const TopoDS_Face& f) {
+  const BRepAdaptor_Surface surface(f, /*R=*/false);
+  switch (surface.GetType()) {
+    case GeomAbs_Plane:
+    case GeomAbs_Cylinder:
+    case GeomAbs_Cone:
+    case GeomAbs_Sphere:
+    case GeomAbs_Torus:
+      return analytic_edges(f) ? FaceRule::kExact : FaceRule::kAdaptive;
+    case GeomAbs_SurfaceOfExtrusion:
+    case GeomAbs_SurfaceOfRevolution:
+      return converts_exactly(surface.BasisCurve()->GetType()) ? FaceRule::kConverted
+                                                                : FaceRule::kAdaptive;
+    default:
+      return FaceRule::kAdaptive;
+  }
+}
+
+// The point BRepGProp integrates every face of `s` about: the mean of its vertices, or the
+// first node of a triangulation when it has none (roughBaryCenter, BRepGProp.cxx:84, a
+// function local to that file).
+gp_Pnt rough_bary_center(const TopoDS_Shape& s) {
+  gp_XYZ xyz(0.0, 0.0, 0.0);
+  int n = 0;
+  for (TopExp_Explorer ex(s, TopAbs_VERTEX); ex.More(); ex.Next(), ++n) {
+    xyz += BRep_Tool::Pnt(TopoDS::Vertex(ex.Current())).XYZ();
+  }
+  if (n > 0) {
+    return gp_Pnt(xyz / n);
+  }
+  for (TopExp_Explorer ex(s, TopAbs_FACE); ex.More(); ex.Next()) {
+    TopLoc_Location location;
+    const Handle(Poly_Triangulation)& tri =
+        BRep_Tool::Triangulation(TopoDS::Face(ex.Current()), location);
+    if (!tri.IsNull() && tri->NbNodes() > 0) {
+      xyz = tri->Node(1).XYZ();
+      if (!location.IsIdentity()) {
+        location.Transformation().Transforms(xyz);
+      }
+      break;
+    }
+  }
+  return gp_Pnt(xyz);
+}
+
+// The faces of `s` summed under the face rule, as BRepGProp sums them: volumePropertiesFaces
+// with BRepGProp_Vinert when `Integrator` is that, surfaceProperties with BRepGProp_Sinert
+// (BRepGProp.cxx:165-262, :298-410). A volume counts only the FORWARD and REVERSED faces.
+// A face without a surface is integrated on its triangulation, and skipped without one, as
+// there. Every call of an adaptive face is OCCT's own, so a shape whose faces are all
+// adaptive reads exactly what BRepGProp::VolumeProperties(s, p, precision) or
+// SurfaceProperties(s, p, precision) reads.
+template <class Integrator>
+Measure face_sum(const TopoDS_Shape& s, double precision,
+                 BRepGProp_MeshProps::BRepGProp_MeshObjType mesh_type, bool oriented_only) {
+  gp_Pnt origin(0.0, 0.0, 0.0);
+  origin.Transform(s.Location());
+  GProp_GProps props(origin);
+  const gp_Pnt about = rough_bary_center(s);
+  Integrator g;
+  g.SetLocation(about);
+  BRepGProp_MeshProps mesh(mesh_type);
+  mesh.SetLocation(about);
+  BRepGProp_Face bf;
+  BRepGProp_Domain bd;
+  Measure out;
+  int ordinal = 0;
+  for (TopExp_Explorer ex(s, TopAbs_FACE); ex.More(); ex.Next()) {
+    ++ordinal;
+    const TopoDS_Face& f = TopoDS::Face(ex.Current());
+    const TopAbs_Orientation orientation = f.Orientation();
+    if (oriented_only && orientation != TopAbs_FORWARD && orientation != TopAbs_REVERSED) {
+      continue;
+    }
+    TopLoc_Location location;
+    const bool no_surface = BRep_Tool::Surface(f, location).IsNull();
+    const Handle(Poly_Triangulation)& tri = BRep_Tool::Triangulation(f, location);
+    const bool no_mesh = tri.IsNull() || tri->NbNodes() == 0 || tri->NbTriangles() == 0;
+    if (no_surface) {
+      if (!no_mesh) {
+        mesh.Perform(tri, location, orientation);
+        props.Add(mesh);
+      }
+      continue;
+    }
+    switch (face_rule(f)) {
+      case FaceRule::kExact:
+        bf.Load(f);
+        if (f.NbChildren() == 0) {
+          g.Perform(bf);
+        } else {
+          bd.Init(f);
+          g.Perform(bf, bd);
+        }
+        break;
+      case FaceRule::kConverted: {
+        TopoDS_Shape copy;
+        try {
+          BRepBuilderAPI_NurbsConvert convert(f, /*Copy=*/true);
+          if (convert.IsDone()) {
+            copy = convert.Shape();
+          }
+        } catch (const Standard_Failure& e) {
+          out.failure = std::string("the B-spline conversion of its face ") +
+                        std::to_string(ordinal) + " threw: " + e.GetMessageString();
+          return out;
+        }
+        if (copy.IsNull() || copy.ShapeType() != TopAbs_FACE) {
+          out.failure = "the B-spline conversion of its face " + std::to_string(ordinal) +
+                        " returned no face";
+          return out;
+        }
+        const TopoDS_Face& converted = TopoDS::Face(copy);
+        bf.Load(converted);
+        bd.Init(converted);
+        g.Perform(bf, bd, precision);
+        out.error = std::max(out.error, g.GetEpsilon());
+        break;
+      }
+      case FaceRule::kAdaptive:
+        // OCCT's own calls, the domain included (BRepGProp.cxx:362-368).
+        bf.Load(f);
+        if (f.NbChildren() != 0) {
+          bd.Init(f);
+        }
+        g.Perform(bf, bd, precision);
+        out.error = std::max(out.error, g.GetEpsilon());
+        break;
+    }
+    props.Add(g);
+  }
+  out.mass = props.Mass();
+  out.centroid = props.CentreOfMass().XYZ();
+  return out;
+}
+
 // A point's measure is 0 and its centre is itself. The bounding box is exact for a point,
 // and it is also the centre of a degenerate edge, which has no curve to integrate.
 Measure point_props(const TopoDS_Shape& s) {
@@ -838,37 +1032,64 @@ Measure adaptive_edge(const TopoDS_Edge& e, double precision, const KronrodRule&
   return out;
 }
 
-// One shape's properties integrated adaptively to `precision`, a relative error.
+// A measure that is not a finite number has failed, whatever the rule reported.
+Measure checked(Measure m) {
+  if (!m.failure.empty()) {
+    return m;
+  }
+  if (!std::isfinite(m.mass)) {
+    m.failure = "the rule returned the measure " + std::to_string(m.mass);
+  } else if (m.mass != 0.0 && !(std::isfinite(m.centroid.X()) &&
+                                std::isfinite(m.centroid.Y()) &&
+                                std::isfinite(m.centroid.Z()))) {
+    m.failure = "the rule returned a centroid that is not finite";
+  } else if (!std::isfinite(m.error)) {
+    m.failure = "the rule returned the error estimate " + std::to_string(m.error);
+  }
+  return m;
+}
+
+// One shape's properties integrated to `precision`, a relative error.
 //
-// A solid and a face go to GProp's adaptive rule, which refines each face until two steps
-// agree to `precision` relative and returns its estimate of the relative error reached over
-// the whole shape (BRepGProp.hxx). An edge goes to adaptive_edge above.
+// A solid goes to the face rule (measured_volume) and a face to GProp's adaptive rule, which
+// refines it until two steps agree to `precision` relative and returns its estimate of the
+// relative error reached (BRepGProp.hxx). An edge goes to adaptive_edge above.
 Measure measure_with(const TopoDS_Shape& s, double precision, const KronrodRule& rule) {
-  GProp_GProps props;
-  Measure out;
   switch (s.ShapeType()) {
     case TopAbs_SOLID:
-      out.error = BRepGProp::VolumeProperties(s, props, precision);
-      break;
-    case TopAbs_FACE:
+      return checked(measured_volume(s, precision));
+    case TopAbs_FACE: {
+      GProp_GProps props;
+      Measure out;
       out.error = BRepGProp::SurfaceProperties(s, props, precision);
-      break;
+      out.mass = props.Mass();
+      out.centroid = props.CentreOfMass().XYZ();
+      return checked(out);
+    }
     case TopAbs_EDGE: {
       const TopoDS_Edge& e = TopoDS::Edge(s);
       if (BRep_Tool::Degenerated(e) || !BRep_Tool::IsGeometric(e)) {
         return point_props(s);
       }
-      return adaptive_edge(e, precision, rule);
+      return checked(adaptive_edge(e, precision, rule));
     }
     default:
       return point_props(s);
   }
-  out.mass = props.Mass();
-  out.centroid = props.CentreOfMass().XYZ();
-  return out;
 }
 
 }  // namespace
+
+Measure measured_volume(const TopoDS_Shape& s, double precision) {
+  return face_sum<BRepGProp_Vinert>(s, precision, BRepGProp_MeshProps::Vinert,
+                                    /*oriented_only=*/true);
+}
+
+void require_measured(const Measure& m, const std::string& op, const std::string& entity) {
+  if (!m.failure.empty()) {
+    throw PysmeshError(op + ": " + entity + " cannot be measured: " + m.failure + ".");
+  }
+}
 
 Measure measure(const TopoDS_Shape& s, double precision) {
   static const KronrodRule rule;
