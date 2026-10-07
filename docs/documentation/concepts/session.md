@@ -203,18 +203,22 @@ vertices) lists every live id of the sub-shape at ordinal `i`, label first. An i
 to every ordinal whose tuple lists it: those are exactly the sub-shapes it denotes, also
 where two ids share only part of their sub-shapes, as after a coplanar `fuse`.
 
-`write_step(unit=..., face_names=...)` writes the live shape to STEP with face names keyed
-by entity id, so the names survive the edits that move ordinals. The rules follow the three
-causes above:
+`write_step(unit=..., face_names=..., face_colors=...)` writes the live shape to STEP with
+face names and face colours keyed by entity id, so they survive the edits that move
+ordinals. Names and colours follow one set of rules, which follow the three causes above:
 
-- A split id names every piece it denotes.
-- A face that several ids denote takes the name when every named id among them gives the
-  same one. An unnamed id does not block the name of another id.
-- If the named ids of one face give different names, `write_step` raises. The message lists
-  each such face with its ids and their names.
+- A split id names (colours) every piece it denotes.
+- A face that several ids denote takes the name (the colour) when every id among them that
+  gives one gives the same one. An id that gives none does not block another id.
+- If the ids of one face give different names (colours), `write_step` raises. The message
+  lists each such face with its ids and their values.
 
-`read_step_xde` reads the names back on `face_labels`. `write_step` reads the ids of each
-face from the registry, which is the same relation `face_ids_of` reports.
+A colour is `(r, g, b)`, each component a finite number in `[0, 1]`. Any other colour is
+refused, with its face id. OCCT keeps a colour as three 32-bit floats, so 0.9 reads back as
+0.8999999761581421.
+
+`read_step_xde` reads the names and the colours back on `face_labels`. `write_step` reads
+the ids of each face from the registry, which is the same relation `face_ids_of` reports.
 
 ## Non-finite arguments
 

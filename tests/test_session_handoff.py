@@ -670,3 +670,149 @@ def test_write_step_refuses_a_name_for_an_id_that_is_not_a_live_face() -> None:
 
     with pytest.raises(PysmeshError, match=rf"\[{solid}\]"):
         s.write_step(unit="MM", face_names={EntityId(solid): "body"})
+
+
+# ------------------------------------ Colours keyed by session id (S1) --- #
+
+# Three faces of the 3 x 7 x 11 box, found by the plane they lie in (axis, coordinate),
+# each given a name and a colour. The oracle is geometric: read back, the face in that
+# plane carries that name and that colour, and no other face carries either.
+S1_FACES: dict[str, tuple[int, float, tuple[float, float, float]]] = {
+    "west": (0, 0.0, (1.0, 0.0, 0.0)),
+    "north": (1, BOX_DY, (0.0, 0.5, 1.0)),
+    "top": (2, BOX_DZ, (0.25, 0.75, 0.0)),
+}
+
+
+def _as_stored(color: tuple[float, float, float]) -> tuple[float, float, float]:
+    """A colour as OCCT keeps it: Quantity_Color holds three 32-bit floats."""
+    r, g, b = (float(np.float32(c)) for c in color)
+    return (r, g, b)
+
+
+def _face_in_plane(bbox: NDArray[np.float64], axis: int, at: float) -> bool:
+    """True if a box is flat in the plane where coordinate ``axis`` equals ``at``."""
+    return abs(bbox[axis] - at) < C4_TOL and abs(bbox[axis + 3] - at) < C4_TOL
+
+
+def _faces_at(s: Session, axis: int, at: float) -> list[EntityId]:
+    """The live faces in the plane where coordinate ``axis`` is ``at``."""
+    table = s.bounding_boxes(EntityKind.FACE)
+    return [
+        EntityId(int(i))
+        for i, b in zip(table.ids, table.bbox, strict=True)
+        if _face_in_plane(b, axis, at)
+    ]
+
+
+def _read_back(
+    data: bytes,
+) -> list[tuple[NDArray[np.float64], str, tuple[float, float, float] | None]]:
+    """Every face of an exported STEP file: its box, its name and its colour."""
+    imported = ps.read_step_xde(data)
+    labels = {lab.id: lab for lab in imported.face_labels}
+    out = []
+    for face in ps.load_brep(imported.brep).faces():
+        label = labels.get(face.id)
+        name = label.name if label is not None else ""
+        color = label.color if label is not None else None
+        out.append((np.asarray(face.bbox), name, color))
+    return out
+
+
+def test_write_step_gives_each_face_its_name_and_colour() -> None:
+    """Three faces of a box named and coloured: each reads back on its plane (S1)."""
+    s = Session()
+    s.add_box(BOX_DX, BOX_DY, BOX_DZ)
+    picked = {
+        name: _faces_at(s, axis, at)[0] for name, (axis, at, _) in S1_FACES.items()
+    }
+
+    data = s.write_step(
+        unit="MM",
+        face_names={face: name for name, face in picked.items()},
+        face_colors={face: S1_FACES[name][2] for name, face in picked.items()},
+    )
+
+    for bbox, name, color in _read_back(data):
+        owner = [
+            n for n, (axis, at, _) in S1_FACES.items() if _face_in_plane(bbox, axis, at)
+        ]
+        if owner:
+            assert name == owner[0], bbox
+            assert color == _as_stored(S1_FACES[owner[0]][2]), bbox
+        else:
+            assert (name, color) == ("", None), bbox
+
+
+def test_write_step_colours_every_piece_of_a_split_face() -> None:
+    """A cut splits the coloured top face in two: both pieces read back coloured."""
+    s = Session()
+    s.add_box(BOX_DX, BOX_DY, BOX_DZ)
+    (top,) = _faces_at(s, 2, BOX_DZ)
+    body = [EntityId(int(i)) for i in s.entities(EntityKind.SOLID)]
+    s.add_box(BOX_DX + 2.0, 1.0, 3.0, origin=(-1.0, 3.0, BOX_DZ - 2.0))
+    slot = [EntityId(int(i)) for i in s.entities(EntityKind.SOLID) if i not in body]
+    s.cut(body, slot)
+    color = (0.2, 0.4, 0.6)
+
+    data = s.write_step(unit="MM", face_names={}, face_colors={top: color})
+
+    pieces = [c for bbox, _, c in _read_back(data) if _face_in_plane(bbox, 2, BOX_DZ)]
+    assert len(pieces) == 2
+    assert all(c == _as_stored(color) for c in pieces)
+
+
+def test_write_step_colours_a_merged_face_when_its_ids_agree() -> None:
+    """Both operands' tops coloured alike: every top face reads back in it (S1)."""
+    s = _c2_session("fuse_coplanar")
+    color = (0.9, 0.1, 0.3)
+    tops = _faces_in_plane(s, 2.0)
+
+    data = s.write_step(
+        unit="MM", face_names={}, face_colors=dict.fromkeys(tops, color)
+    )
+
+    for bbox, _, read in _read_back(data):
+        if _in_plane(bbox, 2.0):
+            assert read == _as_stored(color), bbox
+        else:
+            assert read is None, bbox
+
+
+def test_write_step_refuses_a_merged_face_whose_ids_give_different_colours() -> None:
+    """Two colours on one merged face: refused, naming both ids and colours (S1)."""
+    s = _c2_session("fuse_coplanar")
+    tops = _faces_in_plane(s, 2.0)
+    colors = {i: (k / len(tops), 0.5, 0.5) for k, i in enumerate(tops)}
+
+    with pytest.raises(PysmeshError, match="colours differ") as caught:
+        s.write_step(unit="MM", face_names={}, face_colors=colors)
+
+    message = str(caught.value)
+    assert all(f"{i}: {colors[i]!r}" in message for i in tops)
+
+
+@pytest.mark.parametrize(
+    ("key", "color", "named"),
+    [
+        ("solid", (1.0, 0.0, 0.0), "not live faces"),
+        ("face", (1.5, 0.0, 0.0), "(1.5, 0.0, 0.0)"),
+        ("face", (float("nan"), 0.0, 0.0), "(nan, 0.0, 0.0)"),
+    ],
+    ids=["not_a_face", "above_one", "nan"],
+)
+def test_write_step_refuses_a_colour_it_cannot_write(
+    key: str, color: tuple[float, float, float], named: str
+) -> None:
+    """An id that is not a live face, a component 1.5, a NaN: refused by id (S1)."""
+    s = Session()
+    s.add_box(BOX_DX, BOX_DY, BOX_DZ)
+    kind = EntityKind.SOLID if key == "solid" else EntityKind.FACE
+    target = EntityId(int(s.entities(kind)[0]))
+
+    with pytest.raises(PysmeshError) as caught:
+        s.write_step(unit="MM", face_names={}, face_colors={target: color})
+
+    assert named in str(caught.value)
+    assert str(int(target)) in str(caught.value)
