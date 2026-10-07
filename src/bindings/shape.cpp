@@ -19,12 +19,10 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
-#include <BRepGProp.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
-#include <GProp_GProps.hxx>
 #include <GeomAbs_SurfaceType.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
@@ -291,17 +289,17 @@ class Shape {
     Array2d centroids = as_2d_f64(centroids_obj, "Shape.match_faces", "centroids", 3);
     const py::ssize_t q = centroids.shape(0);
 
-    // Precompute face centroids (OCCT calls stay under the GIL, ahead of the numeric loop).
+    // Precompute face centroids, ahead of the numeric loop, by the rule faces() and
+    // Session.mass_properties report them with, so a centroid read from either matches.
     const int nf = data_->faces.Extent();
+    const std::vector<shape_checks::Measure> m =
+        measures_of(data_->faces, "Shape.match_faces", "face");
     std::vector<double> fc(static_cast<std::size_t>(nf) * 3);
-    for (int i = 1; i <= nf; ++i) {
-      const TopoDS_Face& f = TopoDS::Face(data_->faces.FindKey(i));
-      GProp_GProps props;
-      BRepGProp::SurfaceProperties(f, props);
-      const gp_Pnt c = props.CentreOfMass();
-      fc[3 * (i - 1) + 0] = c.X();
-      fc[3 * (i - 1) + 1] = c.Y();
-      fc[3 * (i - 1) + 2] = c.Z();
+    for (int i = 0; i < nf; ++i) {
+      const gp_XYZ& c = m[static_cast<std::size_t>(i)].centroid;
+      fc[3 * i + 0] = c.X();
+      fc[3 * i + 1] = c.Y();
+      fc[3 * i + 2] = c.Z();
     }
 
     py::array_t<std::int32_t> out(q);

@@ -29,6 +29,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
+import pysmesh as ps
 from pysmesh import EntityId, EntityKind, Session
 
 # The profile: an ellipse of semi-axes A_AXIS and B_AXIS, sampled at SAMPLES points.
@@ -287,3 +288,19 @@ def test_a_cylinder_and_a_cone_side_area_equals_its_closed_form() -> None:
 
     for (name, area), measured in zip(expected.items(), table.measure, strict=True):
         assert float(measured) == pytest.approx(area, rel=1e-14), name
+
+
+def test_match_faces_finds_each_swept_face_by_the_centroid_faces_reports() -> None:
+    """Shape.match_faces and Shape.faces take their centroids from one rule.
+
+    The defect: match_faces took GProp's fixed rule and faces() its adaptive rule, so on
+    the prism's extruded side the two centroids lay 0.06 apart.
+    """
+    s, _, _ = _swept_side(revolve=False)
+    shape = ps.load_brep(s.brep())
+    faces = shape.faces()
+    centroids = np.array([f.centroid for f in faces], dtype=np.float64)
+
+    ids = shape.match_faces(centroids, tol=1e-9)
+
+    assert ids.tolist() == [f.id for f in faces]
