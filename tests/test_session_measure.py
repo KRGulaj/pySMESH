@@ -165,3 +165,125 @@ def test_a_revolved_spline_profile_volume_meets_pappus_within_ten_times_the_prec
     table = s.mass_properties([solid], precision=precision)
 
     assert float(table.measure[0]) == pytest.approx(volume, rel=bound)
+
+
+# ------------------------------------ The area of a free-form swept face (M2) --- #
+
+# The analytic sides of (c): radii, height and the cone's top radius.
+CYLINDER_R: float = 1.7
+CONE_R1: float = 2.3
+CONE_R2: float = 0.9
+SIDE_H: float = 3.1
+
+
+def _face_of_type(s: Session, name: str) -> EntityId:
+    """The single face of the session whose surface is of the named type."""
+    table = s.entity_types(EntityKind.FACE)
+    found = [EntityId(int(i)) for i, t in zip(table.ids, table.types) if t == name]
+    assert len(found) == 1, (name, list(table.types))
+    return found[0]
+
+
+def _edge_rule(s: Session, edge: EntityId) -> tuple[float, NDArray[np.float64]]:
+    """An edge's length and centroid by pySMESH's Gauss-Kronrod edge rule at 1e-12."""
+    table = s.mass_properties([edge], precision=1e-12)
+    return float(table.measure[0]), np.asarray(table.centroid[0], dtype=np.float64)
+
+
+def _swept_side(revolve: bool) -> tuple[Session, EntityId, EntityId]:
+    """The prism or the revolved solid of the profile, its swept face and the profile edge."""
+    s = Session()
+    edge, cap = _profile(s)
+    if revolve:
+        s.revolve([cap], (AXIS_X, 0.0, 0.0), (0.0, 1.0, 0.0))
+        return s, _face_of_type(s, "Revolution"), edge
+    s.extrude([cap], (0.0, 0.0, HEIGHT))
+    return s, _face_of_type(s, "Extrusion"), edge
+
+
+def _ring_weighted_axial(s: Session, edge: EntityId) -> float:
+    """The mean of the profile's y weighted by r ds, r its distance from the axis.
+
+    The centroid of a surface of revolution lies on the axis at this height (Pappus's
+    surface theorem weights each arc element by the ring it sweeps). Polygon sums over the
+    curve samples.
+    """
+    t0, t1 = s.edge_parameter_bounds([edge])[0]
+    points = s.curve_at(edge, np.linspace(t0, t1, SHOELACE_SAMPLES)).points
+    middle = 0.5 * (points[1:] + points[:-1])
+    ds = np.linalg.norm(np.diff(points, axis=0), axis=1)
+    ring = (middle[:, 0] - AXIS_X) * ds
+    return float((middle[:, 1] * ring).sum() / ring.sum())
+
+
+def test_a_spline_prism_side_area_equals_the_curve_length_times_the_height() -> None:
+    """The defect: 4.6e-4 high at the default, reported error 0, and no convergence."""
+    s, side, edge = _swept_side(revolve=False)
+    length, _ = _edge_rule(s, edge)
+
+    table = s.mass_properties([side])
+
+    assert float(table.measure[0]) == pytest.approx(length * HEIGHT, rel=1e-9)
+
+
+def test_a_spline_prism_side_centroid_lies_half_the_height_above_the_curve() -> None:
+    """The side's centroid is the curve's, raised by half the height (1e-9 of the height).
+
+    The defect put it 0.056 off the curve's centroid in x.
+    """
+    s, side, edge = _swept_side(revolve=False)
+    _, centroid = _edge_rule(s, edge)
+    expected = centroid + np.array([0.0, 0.0, 0.5 * HEIGHT])
+
+    table = s.mass_properties([side])
+
+    assert np.linalg.norm(table.centroid[0] - expected) <= 1e-9 * HEIGHT
+
+
+def test_a_revolved_spline_side_area_at_1e_9_meets_pappus_within_1e_8() -> None:
+    """Pappus: A = 2 pi r L, L the curve's length and r its centroid's distance from the axis.
+
+    The defect read 3.4e-8 high at 1e-9. At the default both rules are within 1e-6 (the
+    defect 8.5e-7, the B-spline copy 1.7e-7), and at 1e-8 the defect stays within ten times
+    the precision, so only 1e-9 tells them apart.
+    """
+    s, side, edge = _swept_side(revolve=True)
+    length, centroid = _edge_rule(s, edge)
+    expected = 2.0 * math.pi * (float(centroid[0]) - AXIS_X) * length
+
+    table = s.mass_properties([side], precision=1e-9)
+
+    assert float(table.measure[0]) == pytest.approx(expected, rel=1e-8)
+
+
+def test_a_revolved_spline_side_centroid_lies_on_the_axis_at_the_weighted_height() -> (
+    None
+):
+    """On the axis, at the profile's y weighted by r ds (1e-9 of the axis distance).
+
+    The defect put it 1.8e-4 off the axis.
+    """
+    s, side, edge = _swept_side(revolve=True)
+    expected = np.array([AXIS_X, _ring_weighted_axial(s, edge), 0.0])
+
+    table = s.mass_properties([side])
+
+    assert np.linalg.norm(table.centroid[0] - expected) <= 1e-9 * abs(AXIS_X)
+
+
+def test_a_cylinder_and_a_cone_side_area_equals_its_closed_form() -> None:
+    """Analytic sides keep the exact rule: 2 pi r h and pi (r1 + r2) s, within 1e-14."""
+    s = Session()
+    s.add_cylinder(CYLINDER_R, SIDE_H, (0.37, -2.9, 1.3), (0.3, -0.4, 0.866))
+    s.add_cone(CONE_R1, CONE_R2, SIDE_H, (5.0, 1.0, -2.0), (0.0, 0.6, 0.8))
+    slant = math.hypot(SIDE_H, CONE_R1 - CONE_R2)
+    expected = {
+        "Cylinder": 2.0 * math.pi * CYLINDER_R * SIDE_H,
+        "Cone": math.pi * (CONE_R1 + CONE_R2) * slant,
+    }
+    sides = {name: _face_of_type(s, name) for name in expected}
+
+    table = s.mass_properties(list(sides.values()))
+
+    for (name, area), measured in zip(expected.items(), table.measure, strict=True):
+        assert float(measured) == pytest.approx(area, rel=1e-14), name

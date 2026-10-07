@@ -1051,21 +1051,14 @@ Measure checked(Measure m) {
 
 // One shape's properties integrated to `precision`, a relative error.
 //
-// A solid goes to the face rule (measured_volume) and a face to GProp's adaptive rule, which
-// refines it until two steps agree to `precision` relative and returns its estimate of the
-// relative error reached (BRepGProp.hxx). An edge goes to adaptive_edge above.
+// A solid and a face go to the face rule (measured_volume, measured_area). An edge goes to
+// adaptive_edge above.
 Measure measure_with(const TopoDS_Shape& s, double precision, const KronrodRule& rule) {
   switch (s.ShapeType()) {
     case TopAbs_SOLID:
       return checked(measured_volume(s, precision));
-    case TopAbs_FACE: {
-      GProp_GProps props;
-      Measure out;
-      out.error = BRepGProp::SurfaceProperties(s, props, precision);
-      out.mass = props.Mass();
-      out.centroid = props.CentreOfMass().XYZ();
-      return checked(out);
-    }
+    case TopAbs_FACE:
+      return checked(measured_area(s, precision));
     case TopAbs_EDGE: {
       const TopoDS_Edge& e = TopoDS::Edge(s);
       if (BRep_Tool::Degenerated(e) || !BRep_Tool::IsGeometric(e)) {
@@ -1083,6 +1076,11 @@ Measure measure_with(const TopoDS_Shape& s, double precision, const KronrodRule&
 Measure measured_volume(const TopoDS_Shape& s, double precision) {
   return face_sum<BRepGProp_Vinert>(s, precision, BRepGProp_MeshProps::Vinert,
                                     /*oriented_only=*/true);
+}
+
+Measure measured_area(const TopoDS_Shape& s, double precision) {
+  return face_sum<BRepGProp_Sinert>(s, precision, BRepGProp_MeshProps::Sinert,
+                                    /*oriented_only=*/false);
 }
 
 void require_measured(const Measure& m, const std::string& op, const std::string& entity) {

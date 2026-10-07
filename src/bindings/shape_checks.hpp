@@ -245,6 +245,9 @@ struct Measure {
 // `error` is the largest estimate over the adaptive and converted faces, 0 when there is none.
 Measure measured_volume(const TopoDS_Shape& s, double precision);
 
+// The area of the faces of `s` and their centroid under the same face rule.
+Measure measured_area(const TopoDS_Shape& s, double precision);
+
 // Raises PysmeshError "<op>: <entity> cannot be measured: <failure>." when `m` failed.
 void require_measured(const Measure& m, const std::string& op, const std::string& entity);
 
