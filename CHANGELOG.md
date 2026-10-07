@@ -1,5 +1,48 @@
 # Changelog
 
+## 5.1.1
+
+5.1.1 fixes the volume and area measures, and adds face colours to `Session.write_step`. No
+public name is removed. Measures move on the faces listed below; every other result is
+unchanged.
+
+### Measures
+
+`mass_properties`, `entity_table`, `faces()`, `Shape.match_faces` and the volume checks of
+the sew, loft, import, defeature, hollow and offset operations measure each face by its type:
+
+- **Planes, cylinders, cones, spheres and tori bounded by lines, circles and ellipses:** OCCT's
+  fixed rule, which is exact on them, as in 4.x. 5.0.0 and 5.1.0 used an adaptive rule that
+  stopped about 1e-12 relative short. A difference of two volumes then lost 1e-11 to 1e-10.
+- **Extruded and revolved faces** over a line, a conic, a Bezier or a B-spline curve: the
+  adaptive rule on an exact B-spline copy of the face. OCCT's adaptive rule integrates these
+  faces as one low-order span and reports an error near zero. An extruded spline profile read
+  57.97, 71.80 or 61.48 (by precision) against a true 65.05. It now reads its true volume to
+  round-off.
+- **Offset faces:** the adaptive rule on a B-spline approximation of the surface within a
+  hundredth of the precision. The change against a ten-times coarser approximation is added to
+  `error`. 5.1.0 read them 0.7 % to 9 % off, with an error of 0. If OCCT gives no approximation,
+  the face keeps the adaptive rule and `error` reports about 1.
+- **Every other face** (B-spline and Bezier surfaces, analytic surfaces with a free-form
+  edge): unchanged.
+
+The `mass_properties` docstring states each class and its measured accuracy. A revolved
+free-form face costs more to measure (59 ms against 1.2 ms for one spline profile).
+
+### STEP export
+
+- `Session.write_step(..., face_colors=...)` writes face colours keyed by session id. It
+  follows the rules of `face_names`: a split id colours every piece, and one face denoted by
+  ids with different colours is refused. A colour that is not three finite numbers in [0, 1]
+  is refused with the face id.
+
+### Wheel
+
+| | 5.1.0 | 5.1.1 |
+|---|---|---|
+| Wheel (cp313) | 41 501 951 bytes (39.6 MiB) | 41 518 051 bytes (39.6 MiB) |
+| Bundled DLLs | 52 | 52 |
+
 ## 5.1.0
 
 5.1.0 adds NETGEN: free tetrahedra and triangles, a remesher for triangle surfaces, and
@@ -212,7 +255,7 @@ carries 4.0.0 and later.
 
 | Line | First release | What it added |
 |---|---|---|
-| 5.x | 5.0.0, 2026-10-05 | SALOME 9.16 and OCCT 8.0.1 built from source, the 4.2.2 defects fixed (5.0.0); NETGEN and complete boundary layers (5.1.0). |
+| 5.x | 5.0.0, 2026-10-05 | SALOME 9.16 and OCCT 8.0.1 built from source, the 4.2.2 defects fixed (5.0.0); NETGEN and complete boundary layers (5.1.0); exact measures and STEP colours (5.1.1). |
 | 4.x | 4.0.0, 2026-08-24 | VTK is bundled privately in the wheel, as OCCT and Boost already were. The host no longer needs VTK 9.6.2, and the import-time VTK check is gone. One wheel per interpreter, CPython 3.11 to 3.14. |
 | 3.x | 3.0.0, 2026-08-09 | `Mesher`: SMESH's full meshing pipeline. Algorithms and hypotheses assigned per sub-shape, mesh editing, search, quality controls and the medial axis. |
 | 2.x | 2.0.0, 2026-08-09 | `Session`: stateful OCCT CAD modelling with persistent entity ids. Primitives, booleans with history, fillets, chamfers, transforms, healing and tessellation of the live shape. 2.1 to 2.3 shipped beside 3.1 to 3.3, with the same CAD and IGES additions. |
