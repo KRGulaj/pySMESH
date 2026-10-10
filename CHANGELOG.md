@@ -1,5 +1,43 @@
 # Changelog
 
+## 5.1.2
+
+5.1.2 adds a wheel for CPython 3.15 and hardens the build's supply chain. The code and the
+results of 5.1.1 are unchanged.
+
+### CPython 3.15
+
+- One more wheel, `cp315-win_amd64`, built and tested like the other four. Its results equal
+  5.1.1's on CPython 3.13 bit for bit (the golden capture at rtol 0).
+- conda-forge has no VTK for CPython 3.15 yet. The 3.15 wheel takes the same VTK 9.6.2 from
+  a CPython 3.14 environment. `_core` links only VTK's C++ libraries, which load no Python
+  DLL. The wheel check now reads every bundled DLL's import table and fails on any Python
+  DLL other than the wheel's own.
+- The free-threaded build (`cp315t`) is not shipped.
+- On 3.15, `test_import_ignores_a_mismatched_host_vtk` skips: it needs VTK's Python module,
+  which does not exist for 3.15 yet. The no-VTK import check runs as on every wheel.
+
+### Build supply chain
+
+- Every GitHub Action is pinned to a commit SHA.
+- Boost is pinned to 1.90.0, the version every wheel already carried. Without VTK in its
+  environment, the 3.15 build would have taken 1.92.
+- The workflow token is read-only. Only the tag-only release job may write to the
+  repository, and only the two publish jobs may request a PyPI identity token.
+- CI installs no solved environment. Each build installs an explicit lockfile from
+  `ci/locks/`: every conda package by URL and sha256, checked before install.
+  `ci/lock_envs.py` regenerates the locks from `ci/environment.yml`.
+- The no-VTK check installs NumPy by version and sha256.
+
+### Wheel
+
+| | 5.1.1 | 5.1.2 |
+|---|---|---|
+| Wheels | cp311 to cp314 | cp311 to cp315 |
+| Wheel (cp313) | 41 518 051 bytes (39.6 MiB) | 41 518 324 bytes (39.6 MiB) |
+| Wheel (cp315) | none | 41 518 363 bytes (39.6 MiB) |
+| Bundled DLLs | 52 | 52 |
+
 ## 5.1.1
 
 5.1.1 fixes the volume and area measures, and adds face colours to `Session.write_step`. No
@@ -255,7 +293,7 @@ carries 4.0.0 and later.
 
 | Line | First release | What it added |
 |---|---|---|
-| 5.x | 5.0.0, 2026-10-05 | SALOME 9.16 and OCCT 8.0.1 built from source, the 4.2.2 defects fixed (5.0.0); NETGEN and complete boundary layers (5.1.0); exact measures and STEP colours (5.1.1). |
+| 5.x | 5.0.0, 2026-10-05 | SALOME 9.16 and OCCT 8.0.1 built from source, the 4.2.2 defects fixed (5.0.0); NETGEN and complete boundary layers (5.1.0); exact measures and STEP colours (5.1.1); CPython 3.15 and a locked build (5.1.2). |
 | 4.x | 4.0.0, 2026-08-24 | VTK is bundled privately in the wheel, as OCCT and Boost already were. The host no longer needs VTK 9.6.2, and the import-time VTK check is gone. One wheel per interpreter, CPython 3.11 to 3.14. |
 | 3.x | 3.0.0, 2026-08-09 | `Mesher`: SMESH's full meshing pipeline. Algorithms and hypotheses assigned per sub-shape, mesh editing, search, quality controls and the medial axis. |
 | 2.x | 2.0.0, 2026-08-09 | `Session`: stateful OCCT CAD modelling with persistent entity ids. Primitives, booleans with history, fillets, chamfers, transforms, healing and tessellation of the live shape. 2.1 to 2.3 shipped beside 3.1 to 3.3, with the same CAD and IGES additions. |
