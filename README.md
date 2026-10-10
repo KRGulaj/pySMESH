@@ -22,7 +22,7 @@ conformal mesh. See [Meshing capabilities](#meshing-capabilities).
 Meta:
 
 - **License:** LGPL-2.1-only (see [LICENSE](LICENSE), [NOTICE.md](NOTICE.md))
-- **Platform:** Windows x64, CPython 3.11 to 3.14
+- **Platform:** Windows x64, CPython 3.11 to 3.15
 - **Runtime dependencies:** NumPy. Nothing else. SMESH, NETGEN, OCCT, Boost and VTK all
   ship inside the wheel.
 
@@ -162,7 +162,7 @@ pip install pysmesh
 That is the whole procedure. The wheel is self-contained: SMESH, OCCT, Boost
 and VTK all ship inside it. NumPy is the only thing pip pulls in.
 
-**Platform:** Windows x64, CPython 3.11 to 3.14. There is one wheel per
+**Platform:** Windows x64, CPython 3.11 to 3.15. There is one wheel per
 interpreter and none for other platforms. Pip picks the right one, and
 refuses to install on anything unsupported rather than land something that
 cannot import.
@@ -504,9 +504,24 @@ carried forward from SMESH `V9_9_0`. `prepare.py` copies the compiled parts into
 `staged/` and applies `patches/`; every patch must apply exactly. PROVENANCE.md
 lists every source, commit and patch.
 
+The build environment is locked. `ci/environment.yml` is the spec, and
+`ci/locks/build-py<X.Y>-win-64.txt` is the exact environment CI installs for each
+CPython: every package by URL and sha256. Create yours from the same lock. After a
+change to `ci/environment.yml`, regenerate the locks with `ci/lock_envs.py` and
+commit them with it.
+
+conda-forge has no VTK for CPython 3.15 yet. The 3.15 lock therefore has no VTK,
+and the 3.15 build takes VTK from `ci/locks/vtk-win-64.txt`, the same VTK
+version in a CPython 3.14 environment. `_core` links only VTK's C++ libraries,
+which load no Python DLL, and `ci/check_wheel.py` checks that.
+
 ```bash
-conda env create -f ci/environment.yml
-conda activate <the env name in ci/environment.yml>
+conda create -n pysmesh-build --file ci/locks/build-py3.13-win-64.txt
+conda activate pysmesh-build
+# For CPython 3.15 only: a VTK env, then add
+#   -C cmake.define.VTK_DIR=<vtk-env>/Library/lib/cmake/vtk-9.6 to `pip wheel`, and
+#   --add-path <vtk-env>/Library/bin before the build env's path to `delvewheel repair`.
+# conda create -p <vtk-env> --file ci/locks/vtk-win-64.txt
 
 # From an MSVC x64 developer shell. <deps> is any directory outside the checkout.
 # A second run with the same inputs reuses the install.
