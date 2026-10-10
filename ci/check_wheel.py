@@ -20,6 +20,12 @@ support ``Py_LIMITED_API``, so the built extension is version-locked
 would install it on a later CPython and the import would fail. The tag must therefore name
 one interpreter version, not the stable ABI.
 
+It also reads the import tables. ``_core.pyd`` must import exactly the Python DLL of the
+wheel's own tag (``python315.dll`` for ``cp315``), and no bundled DLL may import a Python
+DLL at all. A leg whose CPython has no conda-forge VTK takes VTK from an env of another
+CPython (``VTK_SIDE_ENV`` in ``ci/lock_envs.py``). This is the check that the VTK it
+bundles is the plain C++ library and brings no second interpreter into the process.
+
 Usage:
     python ci/check_wheel.py <wheel-or-glob> [...]
 """
@@ -27,6 +33,8 @@ Usage:
 from __future__ import annotations
 
 import os
+import re
+import struct
 import sys
 import zipfile
 from glob import glob
@@ -67,6 +75,80 @@ _V2_MODELLING_TOOLKITS = (
 _STATIC_IN_CORE = ("netgen", "ngcore", "nglib", "zlib")
 
 
+def _imported_dlls(image: bytes) -> list[str]:
+    """Return the DLL names a PE32+ image imports, directly or delay-loaded, lower case."""
+
+    def u16(off: int) -> int:
+        return int(struct.unpack_from("<H", image, off)[0])
+
+    def u32(off: int) -> int:
+        return int(struct.unpack_from("<I", image, off)[0])
+
+    pe = u32(0x3C)
+    if image[pe : pe + 4] != b"PE\x00\x00":
+        raise ValueError("not a PE image")
+    n_sections, opt_size = u16(pe + 6), u16(pe + 20)
+    opt = pe + 24
+    if u16(opt) != 0x20B:
+        raise ValueError("not a PE32+ image")
+    # (RVA, size, file offset) of every section.
+    sections = [
+        (u32(s + 12), max(u32(s + 8), u32(s + 16)), u32(s + 20))
+        for s in (opt + opt_size + 40 * i for i in range(n_sections))
+    ]
+
+    def offset(rva: int) -> int:
+        for start, size, raw in sections:
+            if start <= rva < start + size:
+                return rva - start + raw
+        raise ValueError(f"RVA {rva:#x} is in no section")
+
+    def name_at(rva: int) -> str:
+        off = offset(rva)
+        return image[off : image.index(b"\x00", off)].decode("ascii").lower()
+
+    names: list[str] = []
+    # Data directory 1 is the import table (20-byte descriptors, the name RVA at +12);
+    # 13 is the delay-load table (32-byte descriptors, the name RVA at +4).
+    for index, stride, name_field in ((1, 20, 12), (13, 32, 4)):
+        rva = u32(opt + 112 + 8 * index)
+        if rva == 0:
+            continue
+        off = offset(rva)
+        while any(image[off : off + stride]):
+            names.append(name_at(u32(off + name_field)))
+            off += stride
+    return names
+
+
+_PYTHON_DLL = re.compile(r"python\d*t?\.dll")
+
+
+def _check_python_imports(wheel: str, zf: zipfile.ZipFile) -> list[str]:
+    """Return problems with the Python DLLs that ``_core`` and the bundled DLLs import."""
+    python_tag = os.path.basename(wheel).split("-")[-3]  # cp315
+    expected = "python" + python_tag[2:] + ".dll"
+    cores = [
+        n for n in zf.namelist() if re.search(r"/_core\.cp\d+t?-win_amd64\.pyd$", n)
+    ]
+    if len(cores) != 1:
+        return [f"expected one _core extension, found {cores}"]
+    problems: list[str] = []
+    core_python = [
+        d for d in _imported_dlls(zf.read(cores[0])) if _PYTHON_DLL.fullmatch(d)
+    ]
+    if core_python != [expected]:
+        problems.append(f"_core imports {core_python}, expected exactly ['{expected}']")
+    for name in zf.namelist():
+        if name.lower().endswith(".dll"):
+            hits = [
+                d for d in _imported_dlls(zf.read(name)) if _PYTHON_DLL.fullmatch(d)
+            ]
+            if hits:
+                problems.append(f"bundled {name.rsplit('/', 1)[-1]} imports {hits}")
+    return problems
+
+
 def _check_abi_tag(wheel: str) -> list[str]:
     """Return tag problems for ``wheel``; empty if the ABI tag is honest.
 
@@ -100,6 +182,7 @@ def _check_abi_tag(wheel: str) -> list[str]:
 def _check(wheel: str) -> None:
     tag_problems = _check_abi_tag(wheel)
     with zipfile.ZipFile(wheel) as zf:
+        tag_problems += _check_python_imports(wheel, zf)
         dll_names = [
             name.rsplit("/", 1)[-1].lower()
             for name in zf.namelist()
@@ -159,7 +242,7 @@ def _check(wheel: str) -> None:
     print(
         f"OK {wheel}: honest ABI tag, self-contained "
         f"(OCCT + Boost + {len(vtk_bundled)} VTK DLLs, {len(dll_names)} total, "
-        "no netgen DLL)"
+        "no netgen DLL, no Python DLL imported but the wheel's own)"
     )
 
 

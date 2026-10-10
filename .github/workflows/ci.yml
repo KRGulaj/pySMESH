@@ -1,6 +1,6 @@
 name: build-test-wheel
 
-# Builds one self-contained win_amd64 wheel per supported CPython (3.11 - 3.14), bundling
+# Builds one self-contained win_amd64 wheel per supported CPython (3.11 - 3.15), bundling
 # the whole native closure (OCCT + Boost + VTK), runs the test suite against each, and
 # uploads them. On a version tag the wheels are attached to a GitHub Release and published.
 # Boost and VTK come from the conda-forge build env. OCCT 8.0.1 does not: the `occt` job
@@ -9,6 +9,16 @@ name: build-test-wheel
 # One wheel per interpreter is required, not optional: pybind11 has no Py_LIMITED_API
 # support, so `_core` is version-locked (`_core.cp313-win_amd64.pyd`) and no abi3 wheel can
 # cover the range. ci/check_wheel.py fails the build if an abi3 tag ever reappears.
+#
+# Supply chain:
+# - Every third-party action is pinned to a full commit SHA (the tag it was is in the
+#   comment). A moved or re-pointed tag cannot change what runs here.
+# - No conda env is solved here. Each one installs an explicit lockfile from ci/locks/,
+#   every package by URL and sha256; micromamba aborts on a mismatch. ci/lock_envs.py
+#   regenerates the locks from ci/environment.yml.
+# - The no-VTK check installs NumPy with pip --require-hashes.
+# - The token is read-only by default. Only the release job (contents: write) and the two
+#   publish jobs (id-token: write) get more, and all three run on version tags only.
 on:
   push:
     branches: [main]
@@ -22,13 +32,13 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write # required for softprops/action-gh-release to create/attach to a Release
+  contents: read
 
 jobs:
   # ---------------------------------------------------------------------------------------
   # OCCT 8.0.1, built from the upstream tag by ci/build_occt.py (with patches/occt801/, only
   # the toolkits _core needs), once per input set. It does not depend on the Python version,
-  # so one job serves all four legs. The cache key is the script's input set: tag, commit,
+  # so one job serves all five legs. The cache key is the script's input set: tag, commit,
   # patches, CMake options and MSVC toolset. A hit restores the install; a miss builds and
   # saves it.
   # The same commands build it locally (README, "Build from source").
@@ -43,21 +53,21 @@ jobs:
       cache-key: ${{ steps.key.outputs.key }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up MSVC (v143, x64)
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           arch: x64
 
       - name: Create build env (cmake, ninja, git and python come from it)
-        uses: mamba-org/setup-micromamba@v2
+        uses: mamba-org/setup-micromamba@add3a49764cedee8ee24e82dfde87f5bc2914462 # v2.0.7
         with:
-          environment-file: ci/environment.yml
-          create-args: python=3.13
+          environment-file: ci/locks/build-py3.13-win-64.txt
+          environment-name: pysmesh-build
           cache-environment: true
           # The same env and key as the 3.13 build leg, so both share one cache entry.
-          cache-environment-key: env-py3.13-${{ hashFiles('ci/environment.yml') }}
+          cache-environment-key: env-py3.13-${{ hashFiles('ci/locks/build-py3.13-win-64.txt') }}
 
       - name: OCCT location and cache key (tag, commit, CMake options, MSVC toolset)
         id: key
@@ -67,7 +77,7 @@ jobs:
 
       - name: Restore OCCT
         id: cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ env.OCCT_ROOT }}/install
           key: ${{ steps.key.outputs.key }}
@@ -78,7 +88,7 @@ jobs:
 
       - name: Save OCCT
         if: steps.cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ env.OCCT_ROOT }}/install
           key: ${{ steps.key.outputs.key }}
@@ -90,42 +100,51 @@ jobs:
     needs: occt
     runs-on: windows-latest
     strategy:
-      # A failing leg must not cancel the others: when 3.14 breaks, the 3.11-3.13 results
+      # A failing leg must not cancel the others: when 3.15 breaks, the 3.11-3.14 results
       # are the diagnostic that says whether it is version-specific or a real regression.
       fail-fast: false
       matrix:
-        python: ["3.11", "3.12", "3.13", "3.14"]
+        python: ["3.11", "3.12", "3.13", "3.14", "3.15"]
     name: build (py${{ matrix.python }})
     defaults:
       run:
         shell: bash -el {0} # login shell so the micromamba env is active
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Set up MSVC (v143, x64)
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
         with:
           arch: x64
 
       - name: Create build env (conda-forge; vtk/boost are build-time only; no occt)
-        uses: mamba-org/setup-micromamba@v2
+        uses: mamba-org/setup-micromamba@add3a49764cedee8ee24e82dfde87f5bc2914462 # v2.0.7
         with:
-          environment-file: ci/environment.yml
-          # ci/environment.yml pins python=3.13 as the local-development default; this
-          # overrides it per matrix leg. conda-forge ships vtk 9.6.2 for py310-py314 on
-          # win-64, and Boost carries no Python variant, so every leg resolves.
-          create-args: python=${{ matrix.python }}
+          # One explicit lock per interpreter (ci/lock_envs.py): every package by URL and
+          # sha256, nothing solved here.
+          environment-file: ci/locks/build-py${{ matrix.python }}-win-64.txt
+          environment-name: pysmesh-build
           cache-environment: true
-          # Per-interpreter cache key. Without it the four legs would share one cache entry
-          # and thrash, each restoring an env built for a different Python.
-          cache-environment-key: env-py${{ matrix.python }}-${{ hashFiles('ci/environment.yml') }}
+          # Per-interpreter cache key. Without it the legs would share one cache entry and
+          # thrash, each restoring an env built for a different Python.
+          cache-environment-key: env-py${{ matrix.python }}-${{ hashFiles(format('ci/locks/build-py{0}-win-64.txt', matrix.python)) }}
+
+      - name: VTK side env (a CPython that conda-forge has no VTK build for yet)
+        # VTK_SIDE_ENV in ci/lock_envs.py. _core links only VTK's C++ libraries, which load
+        # no Python DLL, so the VTK of a py3.14 env serves a py3.15 build. ci/check_wheel.py
+        # asserts that no bundled DLL imports a Python DLL.
+        if: matrix.python == '3.15'
+        run: |
+          VTK_PREFIX="$(cygpath -m "$RUNNER_TEMP")/vtk-env"
+          "${MAMBA_EXE:-micromamba}" create -y -p "$VTK_PREFIX" -f ci/locks/vtk-win-64.txt
+          echo "VTK_PREFIX=$VTK_PREFIX" >> "$GITHUB_ENV"
 
       - name: OCCT location
         run: echo "OCCT_ROOT=$(cygpath -m "$RUNNER_TEMP")/occt-8.0.1" >> "$GITHUB_ENV"
 
       - name: Restore OCCT 8.0.1 (built by the occt job; a miss fails, it never rebuilds)
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ${{ env.OCCT_ROOT }}/install
           key: ${{ needs.occt.outputs.cache-key }}
@@ -157,8 +176,15 @@ jobs:
         # ngcore, nglib, zlib and NETGENPlugin build here too, as static parts of _core
         # (cmake/Netgen, cmake/NETGENPlugin), from the trees prepare.py staged.
         run: |
+          VTK_ARGS=()
+          if [ -n "${VTK_PREFIX:-}" ]; then
+            # VTK_DIR names the side env's VTK; the prefix path lets VTK's own config find
+            # the libraries it was built with (TBB, fmt, pugixml, ...) in the same env.
+            VTK_ARGS=(-C cmake.define.VTK_DIR="$VTK_PREFIX/Library/lib/cmake/vtk-9.6"
+                      -C cmake.define.CMAKE_PREFIX_PATH="$VTK_PREFIX/Library")
+          fi
           pip wheel . --no-build-isolation --no-deps -w dist \
-            -C cmake.define.PYSMESH_OCCT_ROOT="$OCCT_ROOT/install"
+            -C cmake.define.PYSMESH_OCCT_ROOT="$OCCT_ROOT/install" "${VTK_ARGS[@]}"
 
       - name: Bundle every native dependency (OCCT + Boost + VTK)
         # delvewheel vendors _core.pyd's whole DLL closure into the wheel and name-mangles
@@ -169,13 +195,16 @@ jobs:
         # components (CommonCore, CommonDataModel, FiltersVerdict), so the closure stays
         # small: no rendering, no IO, no Python wrappers. The OCCT DLLs come from the occt
         # job's build, so its bin directory is searched first; Boost and VTK come from the
-        # env's Library/bin.
+        # env's Library/bin. A leg with a VTK side env searches that env before the build
+        # env, so VTK and the libraries it loads come from the env it was built in.
         run: |
+          PATHS=(--add-path "$OCCT_ROOT/install/bin")
+          if [ -n "${VTK_PREFIX:-}" ]; then
+            PATHS+=(--add-path "$VTK_PREFIX/Library/bin")
+          fi
+          PATHS+=(--add-path "$CONDA_PREFIX/Library/bin")
           for whl in dist/*.whl; do
-            delvewheel repair \
-              --add-path "$OCCT_ROOT/install/bin" \
-              --add-path "$CONDA_PREFIX/Library/bin" \
-              -w dist/repaired "$whl"
+            delvewheel repair "${PATHS[@]}" -w dist/repaired "$whl"
           done
 
       - name: Assert the repaired wheel is self-contained (OCCT + Boost + VTK, no netgen DLL, honest ABI tag)
@@ -214,7 +243,8 @@ jobs:
         run: |
           python -m venv "$GITHUB_WORKSPACE/novtk-venv"
           VENV_PY="$GITHUB_WORKSPACE/novtk-venv/Scripts/python.exe"
-          "$VENV_PY" -m pip install --quiet numpy
+          # NumPy by version and sha256, per interpreter (ci/locks/novtk-requirements.txt).
+          "$VENV_PY" -m pip install --quiet --require-hashes -r ci/locks/novtk-requirements.txt
           "$VENV_PY" -m pip install --quiet --no-deps dist/repaired/*.whl
           "$VENV_PY" ci/assert_no_host_vtk.py
 
@@ -225,18 +255,33 @@ jobs:
         run: python ci/check_vtk_pin.py
 
       - name: Upload wheel artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           # Per-leg name: upload-artifact@v4 rejects duplicate names, so a single shared
           # name would fail the second leg to finish. The publish jobs glob these back.
           name: pysmesh-wheel-py${{ matrix.python }}
           path: dist/repaired/*.whl
 
-      - name: Attach wheel to GitHub Release (tags only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+  # ---------------------------------------------------------------------------------------
+  # The GitHub Release. The only job that may write to the repository, and only on a tag:
+  # the build legs run with a read-only token and hand their wheels over as artifacts.
+  # ---------------------------------------------------------------------------------------
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the Release and attach the wheels
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          files: dist/repaired/*.whl
+          pattern: pysmesh-wheel-py*
+          path: dist
+          merge-multiple: true
+      - name: Attach the wheels to the GitHub Release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: dist/*.whl
           # An rc tag must not present itself as the stable download. Without this the
           # release lands as "Latest" and a visitor grabs a pre-release by default.
           # Same `rc` convention the publish-pypi gate uses.
@@ -261,14 +306,14 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           # Collect every matrix leg's wheel into one dist/ before uploading, so the whole
           # interpreter range publishes as a single release.
           pattern: pysmesh-wheel-py*
           path: dist
           merge-multiple: true
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           repository-url: https://test.pypi.org/legacy/
           # TestPyPI accumulates rehearsal uploads; re-running a tag must not fail the job.
@@ -284,11 +329,11 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           # Collect every matrix leg's wheel into one dist/ before uploading, so the whole
           # interpreter range publishes as a single release.
           pattern: pysmesh-wheel-py*
           path: dist
           merge-multiple: true
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2

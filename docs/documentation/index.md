@@ -45,7 +45,7 @@ pip install pysmesh
 That is the whole procedure. The wheel is self-contained: SMESH, NETGEN, OCCT, Boost and
 VTK all ship inside it. NumPy is the only thing pip pulls in.
 
-pySMESH targets Windows x64, CPython 3.11 to 3.14. There is one wheel per interpreter and
+pySMESH targets Windows x64, CPython 3.11 to 3.15. There is one wheel per interpreter and
 none for other platforms. Pip picks the matching wheel and refuses to install on anything
 unsupported.
 

@@ -12,7 +12,7 @@ pip install pysmesh
 
 That is the whole procedure. The wheel is self-contained: SMESH, OCCT, Boost and VTK all
 ship inside it, name-mangled so they never collide with anything in your own environment.
-NumPy is the only package pip pulls in. pySMESH targets Windows x64, CPython 3.11 to 3.14.
+NumPy is the only package pip pulls in. pySMESH targets Windows x64, CPython 3.11 to 3.15.
 
 ## Step 1: build a shape
 

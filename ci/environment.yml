@@ -8,25 +8,32 @@ name: pysmesh-build
 # OCCT is NOT in this env, and must not be added. ci/build_occt.py builds OCCT 8.0.1 from
 # source, and CMakeLists.txt takes it only from that build (PYSMESH_OCCT_ROOT).
 #
+# This file is the SPEC. CI does not solve it: every leg installs the explicit lockfile
+# ci/locks/build-py<X.Y>-win-64.txt, each package by its URL and sha256. After any change
+# here, run ci/lock_envs.py and commit the regenerated ci/locks/ with it.
+#
 # =============================================================================
 channels:
   - conda-forge
   - nodefaults
 dependencies:
-  # A RANGE, not a pin, and deliberately so. CI builds one wheel per interpreter and passes
-  # `create-args: python=3.X` per matrix leg; an exact pin here would hand the solver two
-  # conflicting python specs and make every non-3.13 leg unsolvable. The range covers the
-  # supported set, so each leg's exact version narrows it instead of contradicting it.
-  # Keep these bounds in lockstep with `requires-python` and the matrix in ci.yml.
-  - python >=3.11,<3.15
+  # A RANGE, not a pin: ci/lock_envs.py solves one lock per interpreter, each with its own
+  # exact python. The range covers the supported set. Keep these bounds in lockstep with
+  # `requires-python`, the classifiers, PYTHONS in ci/lock_envs.py and the matrix in ci.yml.
+  - python >=3.11,<3.16
   # --- VTK: bundled privately into the wheel since 4.0.0, no longer a host coupling ---
   # Pinned so the headers compiled against and the DLLs delvewheel bundles come from one
   # environment. It is free to move on its own schedule now: bumping it changes only what
   # ships inside the wheel, and no consumer has to follow. ci/check_vtk_pin.py asserts this
   # pin matches the binary that was actually built.
+  # conda-forge has no VTK for py3.15 yet. That leg takes VTK from ci/locks/vtk-win-64.txt
+  # (VTK_SIDE_ENV in ci/lock_envs.py), the same version from a py3.14 env: _core links only
+  # VTK's C++ libraries, which load no Python DLL.
   - vtk=9.6.2
-  # --- Boost: dynamic, bundled into the wheel; free to resolve ---
-  - libboost-devel
+  # --- Boost: dynamic, bundled into the wheel ---
+  # Pinned so every leg ships the same Boost. VTK used to hold it at 1.90 in every leg; the
+  # py3.15 leg has no VTK in its env and resolved 1.92.
+  - libboost-devel=1.90.0
   # --- build toolchain ---
   - cmake>=3.27
   - ninja

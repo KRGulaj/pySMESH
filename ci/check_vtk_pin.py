@@ -45,9 +45,43 @@ def _build_info_pin() -> str | None:
     return m.group(1) if m else None
 
 
+def _check_locks(pin: str) -> None:
+    """Fail unless the locks carry the pinned VTK where the build takes it from.
+
+    A leg in ``VTK_SIDE_ENV`` (``ci/lock_envs.py``) builds against ``ci/locks/vtk-win-64.txt``
+    and its own lock must have no VTK; every other leg's lock must have the pinned VTK.
+    """
+    from lock_envs import PYTHONS, VTK_SIDE_ENV  # ci/ is the script directory
+
+    locks = _ROOT / "ci" / "locks"
+    wanted = re.compile(r"/vtk-base-" + re.escape(pin) + r"-[^/]*$", re.MULTILINE)
+    anyvtk = re.compile(r"/vtk-base-[0-9][^/]*$", re.MULTILINE)
+
+    def urls(name: str) -> str:
+        text = (locks / name).read_text(encoding="utf-8")
+        return "\n".join(ln.split("#", 1)[0] for ln in text.splitlines())
+
+    problems: list[str] = []
+    for py in PYTHONS:
+        lock = urls(f"build-py{py}-win-64.txt")
+        if py in VTK_SIDE_ENV:
+            if anyvtk.search(lock):
+                problems.append(
+                    f"build-py{py}: a VTK side-env leg, but its lock has VTK"
+                )
+        elif not wanted.search(lock):
+            problems.append(f"build-py{py}: no vtk-base {pin} in the lock")
+    if not wanted.search(urls("vtk-win-64.txt")):
+        problems.append(f"vtk-win-64: no vtk-base {pin} in the lock")
+    if problems:
+        raise SystemExit("VTK lock DRIFT: " + "; ".join(problems))
+    print(f"  every lock carries vtk-base {pin} where the build takes VTK from")
+
+
 def main() -> None:
     env = _env_pin()
     print(f"ci/environment.yml vtk pin: {env}")
+    _check_locks(env)
 
     build_info = _build_info_pin()
     if build_info is None:
