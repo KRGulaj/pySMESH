@@ -56,6 +56,8 @@ a change on either side has an obvious counterpart on the other:
 ``_transform``       the transforms, and copy
 ``_heal``            healing, sewing, defeaturing, imprinting and removal
 ``_glue``            gluing coincident sub-shapes with GEOM's gluer
+``_geomheal``        GEOM's healing operators: edge division, contour closing, hole
+                     filling, face suppression and the shape-process pipeline
 ``_locate``          locating entities with GEOM's classifiers: on a region, in
                      place of old sub-shapes, the same as another entity
 ``_offset``          hollowing a solid, and offsetting a body
@@ -77,6 +79,7 @@ from __future__ import annotations
 from ._boolean import _BooleanOps
 from ._check import _CheckOps
 from ._construct import _ConstructOps
+from ._geomheal import _GeomHealOps
 from ._glue import _GlueOps
 from ._handoff import _HandoffOps
 from ._heal import _HealOps
@@ -161,6 +164,7 @@ class Session(
     _BooleanOps,
     _CheckOps,
     _ConstructOps,
+    _GeomHealOps,
     _GlueOps,
     _HandoffOps,
     _HealOps,

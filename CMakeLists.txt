@@ -188,6 +188,7 @@ pybind11_add_module(_core
     src/bindings/session_locate.cpp
     src/bindings/session_select.cpp
     src/bindings/session_glue.cpp
+    src/bindings/session_geomheal.cpp
     src/bindings/session_tessellate.cpp
     src/bindings/session_handoff.cpp
     src/bindings/session_progress.cpp

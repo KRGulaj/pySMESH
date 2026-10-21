@@ -101,6 +101,28 @@ A piece is a solid in its own right, so it gets a name of its own that resolves 
 `RESOLVED`. Under `split` the pieces share the target's id instead, and a caller cannot
 address one of them without the stateless ordinals.
 
+### The sixth rule for edges: pieces of a divided edge
+
+`divide_edge` applies the sixth rule to edges. It is the only operation that does.
+
+- The divided **edge** loses its id. Each piece gets a new id with the role
+  `NameRole.GENERATED`, and `Session.origin` of each piece names the divided edge in its
+  `sources`.
+- Each **new vertex**, at a division point, gets a new id generated from the divided edge.
+- The **faces** that hold the edge keep their ids. They are rebuilt around the pieces, so
+  they are in `delta.modified`. Every other entity keeps the five rules.
+
+```python
+s = Session()
+s.add_box(3.0, 7.0, 11.0)
+edge = s.entities(EntityKind.EDGE)[0]
+
+delta = s.divide_edge(edge, [0.25, 0.5])
+
+s.is_alive(edge)        # False
+delta.created           # three pieces and two vertices, each generated from edge
+```
+
 A fillet is a concrete case of the first and fourth rules at once. Filleting an edge kills
 that edge's id and adds a new face (the fillet surface) plus new edges bounding it:
 

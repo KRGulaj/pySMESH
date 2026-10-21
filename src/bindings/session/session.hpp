@@ -45,6 +45,7 @@
 //                            place of old sub-shapes, the same as another entity;
 //   session_select.cpp     — the shape tests behind the selection filters;
 //   session_glue.cpp       — gluing coincident sub-shapes with GEOM's gluer;
+//   session_geomheal.cpp   — GEOM's healing operators (ShHealOper);
 //   session_tessellate.cpp — the render mesh, and the incremental delta over it;
 //   session_handoff.cpp    — the export to a mesher, and the id-to-ordinal bijection;
 //   session_progress.cpp   — the progress/cancellation driver (declared in progress.hpp,
@@ -291,15 +292,27 @@ struct SessionState {
 // decides whether the improvement was enough.
 enum class Validation : int { Strict = 0, Report = 1 };
 
-// What the id carry does with a SOLID id that an operation cut into several solids.
+// What the id carry does with an id of one kind that an operation cut into several shapes.
 //
 // KeepId is the rule of every operation that existed before split_by_faces: the id survives
-// on all the pieces and its name resolves as Ambiguous. NewPieceIds is the sixth rule, which
-// only split_by_faces, split_by_plane and keep_half_space select: the id dies, and each piece
-// gets a new id with the role Generated whose source is the cut solid. An id whose solid
-// stays one solid keeps it under both rules, and faces, edges and vertices follow KeepId
-// under both.
-enum class PieceRule : int { KeepId = 0, NewPieceIds = 1 };
+// on all the pieces and its name resolves as Ambiguous. NewPieceIds is the sixth rule: the
+// id dies, and each piece gets a new id with the role Generated whose source is the cut
+// entity. `kind` is the one kind the rule applies to. split_by_faces, split_by_plane and
+// keep_half_space select it for SOLID, divide_edge for EDGE. An id that stays one shape
+// keeps it under both rules, and every other kind follows KeepId under both.
+struct PieceRule {
+  enum class Mode : int { KeepId = 0, NewPieceIds = 1 };
+  Mode mode = Mode::KeepId;
+  TopAbs_ShapeEnum kind = TopAbs_SOLID;
+
+  // The five rules alone: every id survives on all its pieces.
+  static PieceRule keep_id() { return PieceRule{}; }
+
+  // The sixth rule for ids of `piece_kind`.
+  static PieceRule new_piece_ids(TopAbs_ShapeEnum piece_kind) {
+    return PieceRule{Mode::NewPieceIds, piece_kind};
+  }
+};
 
 // The step the splitting operations add to run_bop, between OCCT's checked answer and the
 // commit. `refine` receives the splitter's result and history, under the GIL, after every
@@ -817,8 +830,9 @@ class Session {
   // ---- splitting with the piece rule ----------------------------------------------- //
   //
   // Three splits that cut solids by faces or by a plane and give each piece its own id
-  // (PieceRule::NewPieceIds). Each runs BRepAlgoAPI_Splitter serially through run_bop, so it
-  // shares split's checks and messages, and none of them consumes its tools.
+  // (PieceRule::new_piece_ids(TopAbs_SOLID)). Each runs BRepAlgoAPI_Splitter serially
+  // through run_bop, so it shares split's checks and messages, and none of them consumes
+  // its tools.
 
   // Split the target solids by faces. A tool face is not consumed: its body stays in the
   // model untouched.
@@ -992,6 +1006,14 @@ class Session {
   py::dict glue(const std::vector<EntityId>& entity_ids, double tolerance,
                 const std::string& kind, bool keep_non_solids, const py::object& progress,
                 const py::object& cancel);
+
+  // ---- GEOM's healing operators (session_geomheal.cpp) -------------------------------- //
+
+  // GEOM's DivideEdge: ShHealOper_EdgeDivide divides the edge at the given fractions of its
+  // length or of its parameter range, in every face that holds it. The edge's id dies and
+  // each piece gets a new id generated from it (PieceRule for EDGE); the faces keep theirs.
+  py::dict divide_edge(EntityId edge_id, const std::vector<double>& positions,
+                       const std::string& by);
 
   // ---- snapshot / restore ----------------------------------------------------------- //
 
@@ -1460,7 +1482,8 @@ class Session {
   // or extends the model differ. `op` must already carry its arguments and tools.
   //
   // `pieces`, when given, is the splitting operations' step before the commit (PieceSplit),
-  // and the commit then applies PieceRule::NewPieceIds. Every other operation passes none.
+  // and the commit then applies PieceRule::new_piece_ids(TopAbs_SOLID). Every other operation
+  // passes none.
   py::dict run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
                    const std::vector<TopoDS_Shape>& consumed, bool additive, double fuzzy,
                    bool parallel, const ProgressHooks& hooks,
@@ -1686,7 +1709,7 @@ class Session {
                   const Handle(BRepTools_History) & history, const char* op_name,
                   const TopoDS_Shape& built, Validation mode = Validation::Strict,
                   const std::vector<std::string>& warnings = {},
-                  PieceRule pieces = PieceRule::KeepId);
+                  PieceRule pieces = PieceRule::keep_id());
 
   // The refusal of a result BRepCheck_Analyzer rejects (report A7): each status it reports,
   // on which sub-shape, and the live ids that sub-shape comes from through `hist`. The faces
@@ -1695,7 +1718,7 @@ class Session {
                                    const Handle(BRepTools_History) & hist) const;
 
   Delta carry_registry(const TopoDS_Shape& new_root, const Handle(BRepTools_History) & hist,
-                       std::int64_t op_index, PieceRule pieces = PieceRule::KeepId);
+                       std::int64_t op_index, PieceRule pieces = PieceRule::keep_id());
 
   // A rigid transform applied with Copy = false changes only a shape's Location: the TShape,
   // and with it every sub-shape identity, is preserved. Such an operation therefore needs no

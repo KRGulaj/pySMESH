@@ -76,6 +76,7 @@ other.
 | Transforms | `translate`, `rotate`, `mirror`, `scale`, `position_along_path`, `copy` |
 | Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove`, `limit_tolerance`, `change_orientation` |
 | Gluing | `glue` (coincident faces or edges, GEOM's gluer) |
+| GEOM healing operators | `divide_edge` |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
 | Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
@@ -141,6 +142,14 @@ vertices of the named bodies that coincide within `tolerance`. With `kind="edges
 one shape, as for a merge. Glue intersects nothing: two faces merge only when they coincide
 as a whole. `fragment` intersects the operands and splits faces that overlap in part. A
 glue that finds nothing coincident is refused, naming the bodies and the tolerance.
+
+### Dividing an edge
+
+`divide_edge(edge, positions, by="length")` is GEOM's `DivideEdge`. It divides an edge at
+fractions of its length, or of its parameter range with `by="parameter"`, in every face
+that holds it. The pieces get new ids generated from the edge, which dies: the sixth rule
+for edges, see [Entity IDs and ordinals](entity-ids.md#the-sixth-rule-for-edges-pieces-of-a-divided-edge).
+The faces keep their ids.
 
 ### Booleans: `fuzzy` and `parallel`
 

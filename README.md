@@ -304,6 +304,10 @@ of the named bodies within a tolerance, as GEOM's `MakeGlueFaces` does. Each
 glued shape keeps the ids of every shape glued into it. Unlike `fragment`, it
 splits nothing: faces that overlap only in part stay apart.
 
+`divide_edge` divides an edge at fractions of its length or parameter range,
+in every face that holds it, as GEOM's `DivideEdge` does. The edge's id dies
+and each piece gets a new id generated from it; the faces keep theirs.
+
 `make_filling` takes `support_faces`: the filled surface is tangent to each
 named face along its boundary edge, and those edges keep their ids.
 
