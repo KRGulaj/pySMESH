@@ -500,6 +500,33 @@ class Session:
         linear_tol: float,
         angular_tol_rad: float,
     ) -> dict[str, object]: ...
+    def glue(
+        self,
+        entity_ids: list[int],
+        tolerance: float,
+        kind: str,
+        keep_non_solids: bool,
+        progress: object,
+        cancel: object,
+    ) -> dict[str, object]: ...
+    def divide_edge(
+        self, edge_id: int, positions: list[float], by: str
+    ) -> dict[str, object]: ...
+    def close_contour(
+        self, edge_ids: list[int], common_vertex: bool
+    ) -> dict[str, object]: ...
+    def fill_holes(
+        self, entity_ids: list[int], edge_ids: list[int] | None
+    ) -> dict[str, object]: ...
+    def suppress_faces(self, face_ids: list[int]) -> dict[str, object]: ...
+    def shape_process(
+        self,
+        entity_ids: list[int],
+        operators: list[str],
+        parameters: dict[str, float | int | bool | str],
+        progress: object,
+        cancel: object,
+    ) -> dict[str, object]: ...
     def entity_types(self, kind: str) -> dict[str, object]: ...
     def surface_parameters(self, face_ids: list[int]) -> dict[str, object]: ...
     def bounding_boxes(self, kind: str) -> dict[str, object]: ...
@@ -534,6 +561,47 @@ class Session:
     def point_at_length(
         self, edge_id: int, length: float, from_start: bool
     ) -> dict[str, object]: ...
+    def entities_on(
+        self,
+        kind: str,
+        region: str,
+        values: list[float],
+        solid_id: int | None,
+        state: str,
+        tolerance: float | None,
+        progress: object,
+        cancel: object,
+    ) -> NDArray[np.int64]: ...
+    def in_place_brep(
+        self,
+        kind: str,
+        data: bytes,
+        ordinals: list[int],
+        progress: object,
+        cancel: object,
+    ) -> list[NDArray[np.int64]]: ...
+    def in_place_snapshot(
+        self,
+        kind: str,
+        mark: int,
+        ids: list[int],
+        progress: object,
+        cancel: object,
+    ) -> list[NDArray[np.int64]]: ...
+    def find_same(self, entity_id: int, within: list[int]) -> NDArray[np.int64]: ...
+    def filter_mask(
+        self,
+        kind: str,
+        filter: str,
+        entity_ids: list[int],
+        numbers: list[float],
+        flag: bool,
+        progress: object,
+        cancel: object,
+    ) -> NDArray[np.bool_]: ...
+    def size_measures(
+        self, kind: str, progress: object, cancel: object
+    ) -> NDArray[np.float64]: ...
     def check_boolean(
         self,
         operation: str,

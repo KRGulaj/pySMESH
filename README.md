@@ -263,6 +263,24 @@ Four construction queries give frames and points to build on: `face_frame`
 (the common line of two planar faces) and `point_at_length` (the point at a
 length along an edge).
 
+Three queries locate entities with GEOM's classifiers: `entities_on` (the
+ids on, in or out of a plane, cylinder, sphere, box or solid), `in_place` (the
+ids that now stand in place of old sub-shapes, named by handoff ordinals in
+BREP bytes or by ids of a snapshot) and `find_same` (the ids that GEOM's
+`GetSame` rule calls the same as one entity).
+
+`select(kind, rule)` returns the ids that pass every filter of a `Rule`.
+The sixteen filters follow SALOME Shaper's `FiltersPlugin` (sizes, horizontal
+and vertical faces, on a plane, line or geometry, relative to a solid, feature
+edges, continuous faces and more), each with `reverse`. `rule_to_dict` and
+`rule_from_dict` store a rule as a versioned JSON-compatible dict.
+
+```python
+from pysmesh import FaceSize, HorizontalFace, Rule
+
+flat_small = s.select(EntityKind.FACE, Rule((HorizontalFace(), FaceSize("lt", 2.0))))
+```
+
 Five checks read a model without changing it: `check_boolean` (OCCT's
 argument analyzer on a boolean's operands), `check_shape` (`BRepCheck_Analyzer`
 per body, one finding per invalid sub-shape), `small_edges`,
@@ -280,6 +298,33 @@ frame. Every id survives, as for `translate`.
 `fillet_2d` rounds corners of a free planar face with circle arcs. The face
 and its trimmed edges keep their ids; each arc is new, generated from the
 corner vertex it replaces.
+
+`glue` merges the coincident faces (or, with `kind="edges"`, only the edges)
+of the named bodies within a tolerance, as GEOM's `MakeGlueFaces` does. Each
+glued shape keeps the ids of every shape glued into it. Unlike `fragment`, it
+splits nothing: faces that overlap only in part stay apart.
+
+`divide_edge` divides an edge at fractions of its length or parameter range,
+in every face that holds it, as GEOM's `DivideEdge` does. The edge's id dies
+and each piece gets a new id generated from it; the faces keep theirs.
+
+`close_contour` closes one open wire, of a face or free, as GEOM's
+`CloseContour` does: by a new edge between the two ends, or by one common
+vertex whose tolerance covers the gap.
+
+`fill_holes` fills the free-boundary holes of shells and faces with faces on
+the holes' own edges, as GEOM's `FillHoles` does, so an open shell closes in
+one step. Each new face gets a new id generated from the edges of its hole.
+
+`suppress_faces` takes faces out of their shells and leaves the hole open, as
+GEOM's `SuppressFaces` does: a solid becomes an open shell. `defeature`, by
+contrast, extends the neighbouring faces over the removed feature and keeps a
+closed solid.
+
+`shape_process` runs a sequence of OCCT's ShapeProcess operators, as GEOM's
+`ShapeProcess` does, with every parameter given and no defaults. It reads no
+`CSF_ShHealing*` resource file, and every id is carried through the copy and
+through ShapeProcess's own history.
 
 `make_filling` takes `support_faces`: the filled surface is tangent to each
 named face along its boundary edge, and those edges keep their ids.

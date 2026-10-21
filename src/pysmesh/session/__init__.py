@@ -55,11 +55,17 @@ a change on either side has an obvious counterpart on the other:
 ``_boolean``         the boolean family, fillet and chamfer
 ``_transform``       the transforms, and copy
 ``_heal``            healing, sewing, defeaturing, imprinting and removal
+``_glue``            gluing coincident sub-shapes with GEOM's gluer
+``_geomheal``        GEOM's healing operators: edge division, contour closing, hole
+                     filling, face suppression and the shape-process pipeline
+``_locate``          locating entities with GEOM's classifiers: on a region, in
+                     place of old sub-shapes, the same as another entity
 ``_offset``          hollowing a solid, and offsetting a body
 ``_query``           the geometric query surface over the live shape
 ``_check``           the checks: boolean arguments, validity, short edges, closed
                      shells and tolerances
 ``_render``          the render mesh, and the incremental delta over it
+``_select``          rule-based selection: the filters, the rule and its stored form
 ``_handoff``         the export to a mesher, and its id-to-ordinal map
 ``_state``           snapshots, the id registry's public face, names and introspection
 ===================  =====================================================================
@@ -73,11 +79,40 @@ from __future__ import annotations
 from ._boolean import _BooleanOps
 from ._check import _CheckOps
 from ._construct import _ConstructOps
+from ._geomheal import ShapeProcessValue, _GeomHealOps
+from ._glue import _GlueOps
 from ._handoff import _HandoffOps
 from ._heal import _HealOps
+from ._locate import _LocateOps
 from ._offset import _OffsetOps
 from ._query import _QueryOps
 from ._render import _RenderOps
+from ._select import (
+    RULE_FORMAT,
+    BelongsTo,
+    ContinuousFaces,
+    EdgeSize,
+    ExternalFaces,
+    FaceSize,
+    FeatureEdges,
+    Filter,
+    HorizontalFace,
+    OnGeometry,
+    OnLine,
+    OnPlane,
+    OnPlaneSide,
+    OppositeToEdge,
+    RelativeToSolid,
+    Rule,
+    SizeComparator,
+    SolidLocation,
+    TopoConnectedFaces,
+    VerticalFace,
+    VolumeSize,
+    _SelectOps,
+    rule_from_dict,
+    rule_to_dict,
+)
 from ._state import _StateOps
 from ._transform import _TransformOps
 from ._types import (
@@ -85,10 +120,12 @@ from ._types import (
     AxisLine,
     BooleanCheckFinding,
     BoundsTable,
+    BoxRegion,
     CancelPredicate,
     CurvatureTable,
     CurveParameterTable,
     CurveSample,
+    CylinderRegion,
     EdgePoint,
     EntityDistance,
     EntityId,
@@ -102,14 +139,18 @@ from ._types import (
     Name,
     NameRole,
     Origin,
+    PlaneRegion,
     Points,
     ProgressCallback,
     Projection,
+    Region,
+    RegionState,
     RenderMesh,
     Resolution,
     ResolutionStatus,
     ShapeCheckFinding,
     SnapshotMark,
+    SphereRegion,
     SurfaceParameterTable,
     SurfaceSample,
     TangentFrameSample,
@@ -123,11 +164,15 @@ class Session(
     _BooleanOps,
     _CheckOps,
     _ConstructOps,
+    _GeomHealOps,
+    _GlueOps,
     _HandoffOps,
     _HealOps,
+    _LocateOps,
     _OffsetOps,
     _QueryOps,
     _RenderOps,
+    _SelectOps,
     _StateOps,
     _TransformOps,
 ):
@@ -168,38 +213,68 @@ class Session(
 __all__ = [
     "AdjacencyPairs",
     "AxisLine",
+    "BelongsTo",
     "BooleanCheckFinding",
     "BoundsTable",
+    "BoxRegion",
     "CancelPredicate",
+    "ContinuousFaces",
     "CurvatureTable",
     "CurveParameterTable",
     "CurveSample",
+    "CylinderRegion",
     "EdgePoint",
+    "EdgeSize",
     "EntityDistance",
     "EntityId",
     "EntityKind",
     "EntityTable",
+    "ExternalFaces",
     "FaceFrame",
+    "FaceSize",
+    "FeatureEdges",
+    "Filter",
     "GlueMode",
     "Handoff",
     "HistoryDelta",
+    "HorizontalFace",
     "MassTable",
     "Name",
     "NameRole",
+    "OnGeometry",
+    "OnLine",
+    "OnPlane",
+    "OnPlaneSide",
+    "OppositeToEdge",
     "Origin",
+    "PlaneRegion",
     "Points",
     "ProgressCallback",
     "Projection",
+    "RULE_FORMAT",
+    "Region",
+    "RegionState",
+    "RelativeToSolid",
     "RenderMesh",
     "Resolution",
     "ResolutionStatus",
+    "Rule",
     "Session",
     "ShapeCheckFinding",
+    "ShapeProcessValue",
+    "SizeComparator",
     "SnapshotMark",
+    "SolidLocation",
+    "SphereRegion",
     "SurfaceParameterTable",
     "SurfaceSample",
     "TangentFrameSample",
+    "TopoConnectedFaces",
     "TypeTable",
     "Vec3",
+    "VerticalFace",
+    "VolumeSize",
     "WireTable",
+    "rule_from_dict",
+    "rule_to_dict",
 ]

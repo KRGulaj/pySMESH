@@ -75,9 +75,13 @@ other.
 | Offsets | `make_thick_solid`, `offset`, `offset_wire` (a parallel planar wire) |
 | Transforms | `translate`, `rotate`, `mirror`, `scale`, `position_along_path`, `copy` |
 | Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove`, `limit_tolerance`, `change_orientation` |
+| Gluing | `glue` (coincident faces or edges, GEOM's gluer) |
+| GEOM healing operators | `divide_edge`, `close_contour`, `fill_holes`, `suppress_faces`, `shape_process` |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
 | Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
+| Locating entities | `entities_on`, `in_place`, `find_same` |
+| Selection rules | `select`, with a `Rule` of filters; `rule_to_dict`, `rule_from_dict` |
 | Checks | `check_boolean`, `check_shape`, `small_edges`, `is_closed_shell`, `tolerances` |
 | Handoff | `export_handoff`, `brep`, `write_step` |
 | Identity and introspection | `entities`, `entity_kind`, `is_alive`, `shape_count`, `name_of`, `origin`, `resolve`, `op_count`, `state_op_index`, `issued_id_count`, `entity_count` |
@@ -129,6 +133,83 @@ tangent, x along the normal. On a straight path the move is a translation, on a
 circular arc a rotation about the arc's axis. Every id survives, as for
 `translate`. A moved body that owns the path edge is refused, because the path
 would move with it.
+
+### Gluing
+
+`glue(entities, tolerance)` is GEOM's `MakeGlueFaces`: it merges the faces, edges and
+vertices of the named bodies that coincide within `tolerance`. With `kind="edges"` it is
+`MakeGlueEdges`, and only coincident edges merge. Every id of a glued group survives on its
+one shape, as for a merge. Glue intersects nothing: two faces merge only when they coincide
+as a whole. `fragment` intersects the operands and splits faces that overlap in part. A
+glue that finds nothing coincident is refused, naming the bodies and the tolerance.
+
+### Dividing an edge
+
+`divide_edge(edge, positions, by="length")` is GEOM's `DivideEdge`. It divides an edge at
+fractions of its length, or of its parameter range with `by="parameter"`, in every face
+that holds it. The pieces get new ids generated from the edge, which dies: the sixth rule
+for edges, see [Entity IDs and ordinals](entity-ids.md#the-sixth-rule-for-edges-pieces-of-a-divided-edge).
+The faces keep their ids.
+
+### Closing a contour
+
+`close_contour(edges, common_vertex=False)` is GEOM's `CloseContour`. The edges must be
+exactly one open wire: a wire of a face, or a free wire. A gap wider than 1 model unit is
+closed by a new straight edge, a narrower one by pulling the two end edges together. With
+`common_vertex=True` the two ends become one vertex whose tolerance covers the gap. A new
+edge gets a new id generated from the two edges it joins; every other id stays. A free
+wire comes out as one closed wire. Like `heal`, the operation reports the validity verdict
+instead of refusing an invalid result.
+
+### Filling holes
+
+`fill_holes(entities, edges=None)` is GEOM's `FillHoles`. It fills each free-boundary hole
+of the named shells and faces with a GeomPlate face built on the hole's own edges, and puts
+the face in the shell, so the shell closes. With `edges`, only the holes those edges bound
+are filled. Each new face gets a new id generated from the edges of its hole.
+
+When to use which:
+
+| Need | Use |
+|---|---|
+| Close an open shell in one step, the cap sharing the shell's edges | `fill_holes` |
+| An exact planar cap on a planar loop | `extract_edges` of the loop, then `make_face` |
+| A free filling surface on a non-planar loop, tangent to faces if asked | `extract_edges`, then `make_filling` |
+
+`make_face` and `make_filling` make a separate face on copies of the edges, so the body
+stays open until a `sew` joins the cap. The surface of `fill_holes` is a GeomPlate
+approximation within 1e-4, also for a planar hole: on a disk of radius 2 its area is
+12.56630 against the exact 12.56637.
+
+### Suppressing faces
+
+`suppress_faces(faces)` is GEOM's `SuppressFaces`. It takes the named faces out of their
+shells and closes nothing. The neighbouring faces keep their surfaces and boundaries. A
+shell with two or more faces left stays an open shell, with one face left it becomes that
+face, and with none it disappears. A solid whose shell the removal opens becomes an open
+shell body, and the solid's id dies.
+
+When to use which:
+
+| Operation | Neighbouring faces | Result type |
+|---|---|---|
+| `defeature` | extended over the removed feature until they meet | a closed solid (a filleted box becomes the sharp box) |
+| `suppress_faces` | unchanged; the hole stays open | an open shell, or a face |
+
+Use `defeature` to simplify a solid. Use `suppress_faces` to cut faces out of a shell,
+for example before `fill_holes` or a `sew` with other faces.
+
+### Shape processing
+
+`shape_process(entities, operators, parameters)` is GEOM's `ShapeProcess`: OCCT's
+ShapeProcess operators run in order on a copy of the bodies, through the steps of
+`ShHealOper_ShapeProcess::Perform`. `parameters` gives every parameter of every named
+operator; there are no defaults, and GEOM's `ShHealing` values, absolute lengths in model
+units, are a reference only. No `CSF_ShHealing*` resource file is read. Every id goes
+through the copy and through ShapeProcess's own history: a split face keeps its id on
+every piece. Each body is processed in its own frame and placed back. See
+[Shape processing](shape-process.md) for the operators and their parameters. It takes
+`progress` and `cancel`: a cancel stops between two operators, and inside FixShape.
 
 ### Booleans: `fuzzy` and `parallel`
 
@@ -222,6 +303,60 @@ normals. `point_at_length` is the point at a length along an edge, from either e
 Each refuses what has no answer, naming the entity and the value: a curved face for a
 frame, a parameter outside the face or at a singular point, two parallel planes, a
 length off the edge. None of them issues an id.
+
+## Locating entities
+
+Three queries run GEOM's classifiers on the live model. None of them issues an id or
+writes to a shape of the model.
+
+- `entities_on(kind, region, state)` lists the live ids of a kind that lie on, in or out
+  of a region: a `PlaneRegion`, a `CylinderRegion`, a `SphereRegion`, a `BoxRegion` or a
+  solid of the model. It is GEOM's `GetShapesOnPlane`, `GetShapesOnCylinder`,
+  `GetShapesOnSphere`, `GetShapesOnBox` and `GetShapesOnShape`, with GEOM's tolerances.
+  For a plane, "out" is the side the normal points to.
+- `in_place(kind, source, old)` lists the live ids that now stand in place of old
+  sub-shapes. `source` is BREP bytes with handoff ordinals in `old`, or a snapshot mark
+  with ids live in that snapshot. It is GEOM's `GetInPlace`. It finds a face that an
+  operation trimmed, split or merged into a larger one. An empty answer means the old
+  sub-shape is gone.
+- `find_same(entity, within)` lists the live ids that GEOM's `GetSame` rule calls the
+  same as one entity: coincident vertices, edges, faces or solids within 1e-7.
+
+```python
+from pysmesh import PlaneRegion
+
+below = s.entities_on(EntityKind.FACE, PlaneRegion((0, 0, 5), (0, 0, 1)), "in")
+
+handoff = s.export_handoff()
+mark = s.snapshot()
+s.fillet(edges, 0.5)
+now = s.in_place(EntityKind.FACE, mark, [face])            # by snapshot ids
+same = s.in_place(EntityKind.FACE, handoff.brep, [0, 1])   # by handoff ordinals
+```
+
+`entities_on` samples each face at the nodes of a triangulation of a private copy of
+the model, meshed as GEOM meshes it. Its answer does not depend on an earlier
+`tessellate`, and the model's faces keep the triangulation they had.
+
+`entities_on` and `in_place` take `progress` and `cancel`. On a whole model they can run
+for seconds: `entities_on` meshes its copy, and its finder classifies the sample points.
+A cancel stops the mesh, or the finder between two of its 32 runs. `in_place` stops
+between two old sub-shapes. `find_same` takes neither, because it compares a few shapes.
+
+## Selection rules
+
+`select(kind, rule)` returns the live ids of a kind that pass every filter of a `Rule`.
+The sixteen filters follow SALOME Shaper's `FiltersPlugin`: sizes, horizontal and vertical
+faces, entities on a plane, a line or a geometry, on one side of a plane, relative to a
+solid, belonging to entities, feature edges, continuous faces, opposite edges, external
+faces and topologically connected faces. Each filter has `reverse`. `rule_to_dict` and
+`rule_from_dict` give a rule a versioned stored form. See
+[Selection rules](selection-rules.md) for the filters and the format.
+
+`select` takes `progress` and `cancel`. Each filter of the rule is an equal share of the
+range. A cancel stops a size filter between two measured shapes, `FeatureEdges` between
+two edges, `RelativeToSolid` as it stops `entities_on`, and every filter between two
+tested ids.
 
 ## Checks
 

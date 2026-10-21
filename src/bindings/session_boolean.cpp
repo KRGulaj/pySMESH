@@ -296,7 +296,7 @@ py::dict Session::fragment(const std::vector<EntityId>& entity_ids, double fuzzy
 // All three run BRepAlgoAPI_Splitter through run_bop with parallel = false: a split must not
 // depend on the thread schedule (a fragment's parallel and serial results agree in measure,
 // but nothing promises the same sub-shape order). run_bop's PieceSplit step checks each target
-// against the answer and commits under PieceRule::NewPieceIds.
+// against the answer and commits under PieceRule::new_piece_ids(TopAbs_SOLID).
 
 namespace {
 
@@ -1069,7 +1069,7 @@ py::dict Session::run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
   if (pieces != nullptr) {
     const TopoDS_Shape kept = pieces->refine(result, hist);
     return commit(concat(survivors, kept), hist, op_name, kept, Validation::Strict,
-                  warning_list, PieceRule::NewPieceIds);
+                  warning_list, PieceRule::new_piece_ids(TopAbs_SOLID));
   }
   return commit(concat(survivors, result), hist, op_name, result, Validation::Strict,
                 warning_list);

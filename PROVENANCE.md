@@ -138,6 +138,34 @@ compile error. Compiled with `/showIncludes`, `GCS.cpp` reads every Eigen header
 `extern/eigen`; the build environment's own Eigen (under `Library/include/eigen3`) is on no
 include path.
 
+## Algorithm code copied from GEOM
+
+A few GEOM functions that pySMESH needs live in `GEOMImpl`, GEOM's driver layer, which is
+not vendored (it depends on OCAF documents and `GEOM_Function`). They are copied into
+pySMESH's own sources, unchanged but for the namespace they live in, with their origin and
+licence in a comment above them. All are from SALOME GEOM tag `V9_16_0`
+(`7d0a18e1554c25bca2c2d9882e0621ea3f7f9c81`), LGPL-2.1-or-later, used under LGPL-2.1.
+
+| Function | Upstream file | Local file | Used by |
+|---|---|---|---|
+| `MAX_TOLERANCE`, `isSameEdge`, `isSameFace`, `isSameSolid` | `src/GEOMImpl/GEOMImpl_IShapesOperations.cxx` | `src/bindings/session_locate.cpp` | `Session.find_same` (GEOM's `GetSameIDs` rule) |
+
+One function is adapted, not copied unchanged. `mesh_as_geom` in
+`src/bindings/session_locate.cpp` takes the steps of `GEOMAlgo_AlgoTools::MeshShape` and
+`GEOMAlgo_AlgoTools_CanBeMeshed`, from SALOME common_geometry_lib tag `V9_16_0`
+(`e7b5227096fef835a448004ee06cf5938850b1c4`, `src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx`,
+LGPL-2.1-or-later, used under LGPL-2.1), for the arguments `GEOMUtils::CheckTriangulation`
+gives it. Its one change is a progress range for the mesher, so that a cancel stops
+`Session.entities_on` in its mesh. The mesh parameters are the ones of GEOM's call.
+
+`Session.shape_process` (`src/bindings/session_geomheal.cpp`) takes the steps of
+`ShHealOper_ShapeProcess::Perform`, from the vendored GEOM tag `V9_16_0`
+(`src/ShHealOper/ShHealOper_ShapeProcess.cxx`), in its order, and keeps the
+`TNaming_CopyShape` copy map that `Perform` keeps local. It changes three things and none
+of the shape OCCT builds: the sequence reads no resource file (an empty resource name,
+every resource set by the caller), its history goes down to the vertices, and each body
+is processed without its placement and placed back.
+
 ## Small pieces borrowed from looooo/SMESH
 
 [looooo/SMESH](https://github.com/looooo/SMESH) is an actively maintained fork that keeps

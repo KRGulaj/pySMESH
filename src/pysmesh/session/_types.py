@@ -15,7 +15,7 @@ import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import IntEnum, StrEnum
-from typing import Final, NewType, TypeAlias, cast
+from typing import Final, Literal, NewType, TypeAlias, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -760,6 +760,81 @@ class EdgePoint:
 
     point: NDArray[np.float64]
     parameter: float
+
+
+# The state :meth:`Session.entities_on` asks for, as GEOM's ``GEOM.ST_*`` names it: on the
+# region's boundary, inside it, outside it, or on the boundary or one side of it.
+RegionState: TypeAlias = Literal["on", "in", "out", "on_in", "on_out"]
+
+
+@dataclass(frozen=True)
+class PlaneRegion:
+    """An infinite plane for :meth:`Session.entities_on`.
+
+    The plane is ``Geom_Plane(origin, normal)``, as GEOM's ``GetShapesOnPlane`` builds it
+    from its normal vector. **The side the normal points to is "out"**, the other side is
+    "in": GEOMAlgo classifies a point by the plane's signed distance ``n . (p - origin)``,
+    and a distance above the tolerance is OUT (``GEOMAlgo_SurfaceTools::GetState``).
+
+    Attributes:
+        origin: A point of the plane.
+        normal: The plane normal, any non-zero length. It points to the "out" side.
+    """
+
+    origin: Vec3
+    normal: Vec3
+
+
+@dataclass(frozen=True)
+class CylinderRegion:
+    """An infinite circular cylinder for :meth:`Session.entities_on`.
+
+    "in" is the space closer to the axis than ``radius``, "out" the space farther away.
+
+    Attributes:
+        origin: A point of the axis.
+        direction: The axis direction, any non-zero length.
+        radius: The radius, in model units (> 0).
+    """
+
+    origin: Vec3
+    direction: Vec3
+    radius: float
+
+
+@dataclass(frozen=True)
+class SphereRegion:
+    """A sphere for :meth:`Session.entities_on`.
+
+    "in" is the space closer to the centre than ``radius``, "out" the space farther away.
+
+    Attributes:
+        centre: The centre.
+        radius: The radius, in model units (> 0).
+    """
+
+    centre: Vec3
+    radius: float
+
+
+@dataclass(frozen=True)
+class BoxRegion:
+    """An axis-aligned box for :meth:`Session.entities_on`.
+
+    "in" is the open interior, "on" the six faces, "out" the space outside.
+
+    Attributes:
+        minimum: The minimum corner.
+        maximum: The maximum corner. Each component is above ``minimum``'s.
+    """
+
+    minimum: Vec3
+    maximum: Vec3
+
+
+# A region of :meth:`Session.entities_on`: one of the four shapes above, or the id of a live
+# solid of the model.
+Region: TypeAlias = "PlaneRegion | CylinderRegion | SphereRegion | BoxRegion | EntityId"
 
 
 @dataclass(frozen=True)

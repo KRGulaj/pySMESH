@@ -976,12 +976,12 @@ Delta Session::carry_registry(const TopoDS_Shape& new_root,
                                    return a.IsSame(b);
                                  });
 
-    // The sixth rule (PieceRule::NewPieceIds): a solid this operation cut into several
-    // solids loses its id, and pass 2 names each piece Generated from it. A solid id that
-    // already denoted several solids and that the operation left alone is not cut by it, so
-    // `same` keeps it under the five rules.
-    if (pieces == PieceRule::NewPieceIds && rec.kind == TopAbs_SOLID && live.size() > 1 &&
-        !same) {
+    // The sixth rule (PieceRule::Mode::NewPieceIds): an entity of the rule's kind that this
+    // operation cut into several shapes loses its id, and pass 2 names each piece Generated
+    // from it. An id that already denoted several shapes and that the operation left alone
+    // is not cut by it, so `same` keeps it under the five rules.
+    if (pieces.mode == PieceRule::Mode::NewPieceIds && rec.kind == pieces.kind &&
+        live.size() > 1 && !same) {
       for (const TopoDS_Shape& s : live) {
         generated_from[s].push_back(id);
       }

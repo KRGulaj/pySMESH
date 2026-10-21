@@ -62,7 +62,7 @@ py::dict Session::export_handoff(bool allow_aliases) const {
 
   for (TopAbs_ShapeEnum kind : kEntityKinds) {
     ShapeSet shapes;
-    TopExp::MapShapes(root, kind, shapes);
+    handoff_order(root, kind, shapes);
 
     KindManifest m;
     m.ids.reserve(static_cast<std::size_t>(shapes.Extent()));

@@ -153,6 +153,18 @@ void bind_session(py::module_& m) {
       .def("unify_same_domain", &Session::unify_same_domain, py::arg("entity_ids"),
            py::arg("unify_faces"), py::arg("unify_edges"), py::arg("concat_bsplines"),
            py::arg("linear_tol"), py::arg("angular_tol_rad"))
+      .def("glue", &Session::glue, py::arg("entity_ids"), py::arg("tolerance"),
+           py::arg("kind"), py::arg("keep_non_solids"), py::arg("progress"),
+           py::arg("cancel"))
+      .def("divide_edge", &Session::divide_edge, py::arg("edge_id"), py::arg("positions"),
+           py::arg("by"))
+      .def("close_contour", &Session::close_contour, py::arg("edge_ids"),
+           py::arg("common_vertex"))
+      .def("fill_holes", &Session::fill_holes, py::arg("entity_ids"), py::arg("edge_ids"))
+      .def("suppress_faces", &Session::suppress_faces, py::arg("face_ids"))
+      .def("shape_process", &Session::shape_process, py::arg("entity_ids"),
+           py::arg("operators"), py::arg("parameters"), py::arg("progress"),
+           py::arg("cancel"))
       .def("entity_types", &Session::entity_types, py::arg("kind"))
       .def("surface_parameters", &Session::surface_parameters, py::arg("face_ids"))
       .def("bounding_boxes", &Session::bounding_boxes, py::arg("kind"))
@@ -175,6 +187,19 @@ void bind_session(py::module_& m) {
       .def("face_face_axis", &Session::face_face_axis, py::arg("face_a"), py::arg("face_b"))
       .def("point_at_length", &Session::point_at_length, py::arg("edge_id"),
            py::arg("length"), py::arg("from_start"))
+      .def("entities_on", &Session::entities_on, py::arg("kind"), py::arg("region"),
+           py::arg("values"), py::arg("solid_id"), py::arg("state"), py::arg("tolerance"),
+           py::arg("progress"), py::arg("cancel"))
+      .def("in_place_brep", &Session::in_place_brep, py::arg("kind"), py::arg("data"),
+           py::arg("ordinals"), py::arg("progress"), py::arg("cancel"))
+      .def("in_place_snapshot", &Session::in_place_snapshot, py::arg("kind"), py::arg("mark"),
+           py::arg("ids"), py::arg("progress"), py::arg("cancel"))
+      .def("find_same", &Session::find_same, py::arg("entity_id"), py::arg("within"))
+      .def("filter_mask", &Session::filter_mask, py::arg("kind"), py::arg("filter"),
+           py::arg("entity_ids"), py::arg("numbers"), py::arg("flag"), py::arg("progress"),
+           py::arg("cancel"))
+      .def("size_measures", &Session::size_measures, py::arg("kind"), py::arg("progress"),
+           py::arg("cancel"))
       .def("check_boolean", &Session::check_boolean, py::arg("operation"),
            py::arg("arguments"), py::arg("tools"), py::arg("progress"), py::arg("cancel"))
       .def("check_shape", &Session::check_shape, py::arg("entity_ids"), py::arg("progress"),

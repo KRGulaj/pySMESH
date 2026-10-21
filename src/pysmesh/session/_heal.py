@@ -223,6 +223,12 @@ class _HealOps(_SessionBase):
         session's identity carried across it: merged entities keep **all** their ids, so
         several ids come to denote one shape and every stale reference still resolves.
 
+        **GEOM's UnionFaces.** GEOM's ``UnionFaces`` (V9_16_0, OCCT 7.5.3 and later) is this
+        operation with ``unify_edges=False`` and ``concat_bsplines=True``. GEOM passes one
+        number, ``aTol``, as the linear tolerance and as the angular tolerance in radians:
+        the largest tolerance of the faces of the shape, at least 1e-7. Pass it as
+        ``linear_tol`` and as ``angular_tol_deg=math.degrees(aTol)`` to get GEOM's result.
+
         Args:
             entities: Entities whose owning bodies are unified. ``None`` unifies the whole
                 model.
@@ -300,6 +306,12 @@ class _HealOps(_SessionBase):
         A face that only splits one surface with its neighbour is refused the same way. Such
         a split comes from an imprint or an import. Removing that face changes nothing, and
         :meth:`unify_same_domain` is the operation that merges it, keeping its id.
+
+        **defeature and suppress_faces.** defeature extends the neighbouring faces over the
+        removed feature until they meet, so a solid stays a closed solid.
+        :meth:`suppress_faces` only takes the faces out of their shell: the neighbours stay
+        as they are, and a solid becomes an open shell with a hole. Use defeature to
+        simplify a solid, and suppress_faces to cut faces out of a shell.
 
         Args:
             face_ids: Faces of the features to remove. At least one, all on one body.

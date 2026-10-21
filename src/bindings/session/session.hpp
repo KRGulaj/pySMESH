@@ -41,6 +41,11 @@
 //   session_query.cpp      — the geometric query surface over the live shape;
 //   session_check.cpp      — the checks: boolean arguments, validity, short edges, closed
 //                            shells and tolerances;
+//   session_locate.cpp     — locating entities with GEOM's classifiers: on a region, in
+//                            place of old sub-shapes, the same as another entity;
+//   session_select.cpp     — the shape tests behind the selection filters;
+//   session_glue.cpp       — gluing coincident sub-shapes with GEOM's gluer;
+//   session_geomheal.cpp   — GEOM's healing operators (ShHealOper);
 //   session_tessellate.cpp — the render mesh, and the incremental delta over it;
 //   session_handoff.cpp    — the export to a mesher, and the id-to-ordinal bijection;
 //   session_progress.cpp   — the progress/cancellation driver (declared in progress.hpp,
@@ -287,15 +292,27 @@ struct SessionState {
 // decides whether the improvement was enough.
 enum class Validation : int { Strict = 0, Report = 1 };
 
-// What the id carry does with a SOLID id that an operation cut into several solids.
+// What the id carry does with an id of one kind that an operation cut into several shapes.
 //
 // KeepId is the rule of every operation that existed before split_by_faces: the id survives
-// on all the pieces and its name resolves as Ambiguous. NewPieceIds is the sixth rule, which
-// only split_by_faces, split_by_plane and keep_half_space select: the id dies, and each piece
-// gets a new id with the role Generated whose source is the cut solid. An id whose solid
-// stays one solid keeps it under both rules, and faces, edges and vertices follow KeepId
-// under both.
-enum class PieceRule : int { KeepId = 0, NewPieceIds = 1 };
+// on all the pieces and its name resolves as Ambiguous. NewPieceIds is the sixth rule: the
+// id dies, and each piece gets a new id with the role Generated whose source is the cut
+// entity. `kind` is the one kind the rule applies to. split_by_faces, split_by_plane and
+// keep_half_space select it for SOLID, divide_edge for EDGE. An id that stays one shape
+// keeps it under both rules, and every other kind follows KeepId under both.
+struct PieceRule {
+  enum class Mode : int { KeepId = 0, NewPieceIds = 1 };
+  Mode mode = Mode::KeepId;
+  TopAbs_ShapeEnum kind = TopAbs_SOLID;
+
+  // The five rules alone: every id survives on all its pieces.
+  static PieceRule keep_id() { return PieceRule{}; }
+
+  // The sixth rule for ids of `piece_kind`.
+  static PieceRule new_piece_ids(TopAbs_ShapeEnum piece_kind) {
+    return PieceRule{Mode::NewPieceIds, piece_kind};
+  }
+};
 
 // The step the splitting operations add to run_bop, between OCCT's checked answer and the
 // commit. `refine` receives the splitter's result and history, under the GIL, after every
@@ -399,6 +416,15 @@ inline std::vector<TopoDS_Shape> root_bodies(const TopoDS_Shape& root) {
 // Every registered-kind sub-shape of `shape`, in a deterministic traversal order: solids,
 // then faces, then edges, then vertices, each in TopExp::MapShapes order. Determinism here
 // is load-bearing — it is what makes the ordinal in a name reproducible.
+// The per-kind traversal of the meshing handoff: the shape at 0-based ordinal i of `kind` is
+// the key at index i + 1 of `out`. export_handoff writes its id arrays in this order, and
+// in_place reads the ordinals of handed-off bytes in it, so the two cannot drift apart. A
+// reader of the BREP bytes reproduces it, because BRepTools::Read rebuilds the compound in
+// the order it was written.
+inline void handoff_order(const TopoDS_Shape& root, TopAbs_ShapeEnum kind, ShapeSet& out) {
+  TopExp::MapShapes(root, kind, out);
+}
+
 inline std::vector<TopoDS_Shape> registered_subshapes(const TopoDS_Shape& shape) {
   std::vector<TopoDS_Shape> out;
   if (shape.IsNull()) {
@@ -804,8 +830,9 @@ class Session {
   // ---- splitting with the piece rule ----------------------------------------------- //
   //
   // Three splits that cut solids by faces or by a plane and give each piece its own id
-  // (PieceRule::NewPieceIds). Each runs BRepAlgoAPI_Splitter serially through run_bop, so it
-  // shares split's checks and messages, and none of them consumes its tools.
+  // (PieceRule::new_piece_ids(TopAbs_SOLID)). Each runs BRepAlgoAPI_Splitter serially
+  // through run_bop, so it shares split's checks and messages, and none of them consumes
+  // its tools.
 
   // Split the target solids by faces. A tool face is not consumed: its body stays in the
   // model untouched.
@@ -971,6 +998,46 @@ class Session {
   py::dict unify_same_domain(const std::optional<std::vector<EntityId>>& entity_ids,
                              bool unify_faces, bool unify_edges, bool concat_bsplines,
                              double linear_tol, double angular_tol_rad);
+
+  // GEOM's MakeGlueFaces / MakeGlueEdges on the bodies owning the named entities:
+  // GEOMAlgo_Gluer2 merges their sub-shapes that coincide within `tolerance` ("faces"
+  // glues every detected group, "edges" only the groups of edges). Every id of a glued
+  // group survives on its one shape. Implemented in session_glue.cpp.
+  py::dict glue(const std::vector<EntityId>& entity_ids, double tolerance,
+                const std::string& kind, bool keep_non_solids, const py::object& progress,
+                const py::object& cancel);
+
+  // ---- GEOM's healing operators (session_geomheal.cpp) -------------------------------- //
+
+  // GEOM's DivideEdge: ShHealOper_EdgeDivide divides the edge at the given fractions of its
+  // length or of its parameter range, in every face that holds it. The edge's id dies and
+  // each piece gets a new id generated from it (PieceRule for EDGE); the faces keep theirs.
+  py::dict divide_edge(EntityId edge_id, const std::vector<double>& positions,
+                       const std::string& by);
+
+  // GEOM's CloseContour: ShHealOper_CloseContour closes the one open wire the named edges
+  // form, of a face or a free wire, by a new edge between its ends or, with common_vertex,
+  // by one vertex whose tolerance covers the gap. A new edge is generated from the edges
+  // whose ends it joins.
+  py::dict close_contour(const std::vector<EntityId>& edge_ids, bool common_vertex);
+
+  // GEOM's FillHoles: ShHealOper_FillHoles fills the free-boundary holes of the bodies of the
+  // named entities, or only those the named free edges bound, with GeomPlate faces sewn into
+  // the bodies' shells. Each new face is generated from the edges of its hole.
+  py::dict fill_holes(const std::vector<EntityId>& entity_ids,
+                      const std::optional<std::vector<EntityId>>& edge_ids);
+
+  // GEOM's SuppressFaces: ShHealOper_RemoveFace takes the named faces out of their shells
+  // and leaves the hole open; nothing is extended to close it.
+  py::dict suppress_faces(const std::vector<EntityId>& face_ids);
+
+  // GEOM's ShapeProcess: the steps of ShHealOper_ShapeProcess::Perform with the copy
+  // map kept, on the bodies of `entity_ids`. `operators` is the sequence; `parameters`
+  // maps "Operator.Name" to a value for every parameter the named operators read.
+  py::dict shape_process(const std::vector<EntityId>& entity_ids,
+                         const std::vector<std::string>& operators,
+                         const py::dict& parameters, const py::object& progress,
+                         const py::object& cancel);
 
   // ---- snapshot / restore ----------------------------------------------------------- //
 
@@ -1164,6 +1231,54 @@ class Session {
   // measured from the edge's first vertex in the orientation the root holds it in, or from
   // its last one.
   py::dict point_at_length(EntityId edge_id, double length, bool from_start) const;
+
+  // ---- locating entities -------------------------------------------------------------- //
+  //
+  // Read-only, like the queries above; implemented in session_locate.cpp. They run GEOM's
+  // classifiers on the live model: none issues an id, advances the operation counter or
+  // writes to a shape of the model.
+
+  // Live ids of `kind` whose shapes GEOMAlgo_FinderShapeOn2 puts in `state` ("on", "in",
+  // "out", "on_in", "on_out") against a region. `region` is "plane" (origin, normal),
+  // "cylinder" (axis origin, direction, radius), "sphere" (centre, radius) or "box" (min
+  // corner, max corner), with those numbers in `values`; or "solid", with `solid_id`.
+  // `tolerance` absent takes GEOM's value for the region, as GEOM's GetShapesOn* take it.
+  // `progress` and `cancel` drive the copy, the mesh and the finder (session/progress.hpp).
+  py::array_t<std::int64_t> entities_on(const std::string& kind, const std::string& region,
+                                        const std::vector<double>& values,
+                                        const std::optional<EntityId>& solid_id,
+                                        const std::string& state,
+                                        const std::optional<double>& tolerance,
+                                        const py::object& progress,
+                                        const py::object& cancel) const;
+
+  // GEOMAlgo_GetInPlace of the current model against old sub-shapes of `kind`: the shapes at
+  // the 0-based handoff ordinals of the BREP `data` (in_place_brep), or the shapes of ids live
+  // in the snapshot `mark` (in_place_snapshot). One ascending id array per entry.
+  py::list in_place_brep(const std::string& kind, const py::bytes& data,
+                         const std::vector<std::int64_t>& ordinals, const py::object& progress,
+                         const py::object& cancel) const;
+  py::list in_place_snapshot(const std::string& kind, std::int64_t mark,
+                             const std::vector<EntityId>& ids, const py::object& progress,
+                             const py::object& cancel) const;
+
+  // Live ids of the entity's kind, in the bodies owning `within`, that GEOM's GetSame rule
+  // (isSameEdge, isSameFace, isSameSolid, the vertex distance) calls the same as `entity_id`.
+  py::array_t<std::int64_t> find_same(EntityId entity_id,
+                                      const std::vector<EntityId>& within) const;
+
+  // One selection filter over every live id of `kind`, ascending: true where the filter
+  // holds for every shape the id denotes. `filter` is the name of one of the filters
+  // session_select.cpp implements; `entity_ids`, `numbers` and `flag` are its arguments.
+  py::array_t<bool> filter_mask(const std::string& kind, const std::string& filter,
+                                const std::vector<EntityId>& entity_ids,
+                                const std::vector<double>& numbers, bool flag,
+                                const py::object& progress, const py::object& cancel) const;
+
+  // The measure of every live id of `kind`, ascending, for the size filters: the sum over
+  // the shapes it denotes of the measure entity_table reports, one task per shape.
+  py::array_t<double> size_measures(const std::string& kind, const py::object& progress,
+                                    const py::object& cancel) const;
 
   // ---- checks ------------------------------------------------------------------------ //
   //
@@ -1400,7 +1515,8 @@ class Session {
   // or extends the model differ. `op` must already carry its arguments and tools.
   //
   // `pieces`, when given, is the splitting operations' step before the commit (PieceSplit),
-  // and the commit then applies PieceRule::NewPieceIds. Every other operation passes none.
+  // and the commit then applies PieceRule::new_piece_ids(TopAbs_SOLID). Every other operation
+  // passes none.
   py::dict run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
                    const std::vector<TopoDS_Shape>& consumed, bool additive, double fuzzy,
                    bool parallel, const ProgressHooks& hooks,
@@ -1524,6 +1640,14 @@ class Session {
 
   // ---- query helpers ---------------------------------------------------------------- //
 
+  // in_place's common half: GEOMAlgo_GetInPlace of the live model against each entry's old
+  // shapes, with the GIL released and the hooks polled; one ascending id array per entry.
+  // `entry` names entry i in a refusal.
+  py::list in_place_answer(const char* op, const std::string& kind,
+                           const std::vector<std::vector<TopoDS_Shape>>& whats,
+                           const ProgressHooks& hooks,
+                           const std::function<std::string(std::size_t)>& entry) const;
+
   // Live entity ids of one kind, ascending. The order every bulk query's rows are in.
   std::vector<EntityId> ids_of_kind(TopAbs_ShapeEnum kind) const;
 
@@ -1618,7 +1742,7 @@ class Session {
                   const Handle(BRepTools_History) & history, const char* op_name,
                   const TopoDS_Shape& built, Validation mode = Validation::Strict,
                   const std::vector<std::string>& warnings = {},
-                  PieceRule pieces = PieceRule::KeepId);
+                  PieceRule pieces = PieceRule::keep_id());
 
   // The refusal of a result BRepCheck_Analyzer rejects (report A7): each status it reports,
   // on which sub-shape, and the live ids that sub-shape comes from through `hist`. The faces
@@ -1627,7 +1751,7 @@ class Session {
                                    const Handle(BRepTools_History) & hist) const;
 
   Delta carry_registry(const TopoDS_Shape& new_root, const Handle(BRepTools_History) & hist,
-                       std::int64_t op_index, PieceRule pieces = PieceRule::KeepId);
+                       std::int64_t op_index, PieceRule pieces = PieceRule::keep_id());
 
   // A rigid transform applied with Copy = false changes only a shape's Location: the TShape,
   // and with it every sub-shape identity, is preserved. Such an operation therefore needs no

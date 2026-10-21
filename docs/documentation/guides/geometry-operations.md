@@ -187,6 +187,12 @@ result.face_map   # (n_faces_before,) int32, new id per old id, -1 if removed
 session's own entity identity across the merge instead of returning a raw id map. Use the
 stateless form here when there is no session in play.
 
+GEOM's `UnionFaces` (V9_16_0, OCCT 7.5.3 and later) is this operation with
+`unify_edges=False` and `concat_bsplines=True`. GEOM passes one number, `aTol`, as the
+linear tolerance and as the angular tolerance in radians: the largest tolerance of the faces
+of the shape, at least 1e-7. Set `linear_tol=aTol` and `angular_tol_deg=math.degrees(aTol)`
+to get GEOM's result.
+
 ## `Shape`: per-entity metadata
 
 `load_brep` returns a `Shape`, the read side every operation above keys its ids to:
