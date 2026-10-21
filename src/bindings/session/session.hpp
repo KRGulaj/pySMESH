@@ -458,6 +458,38 @@ inline void append_unique(std::vector<TopoDS_Shape>& dst, const TopoDS_Shape& s)
 Handle(BRepTools_History) kind_preserving(const Handle(BRepTools_History)& hist,
                                           const TopoDS_Shape& input);
 
+// The history of a sequence of steps, keyed by the sub-shapes of `input`: each sub-shape is
+// followed through the steps in order. A step's Modified images replace it, a shape a step
+// does not name stays itself, a removed one leaves, and the Generated images of a shape and
+// of its images are collected and followed too. Only images of the shape's own kind are
+// kept (the kind_preserving rule). Defined in session_blocks.cpp.
+//
+// BRepTools_History::Merge is not enough where a step leaves a shape as it is while it
+// modifies another shape into it (BRepBuilderAPI_MakeWire welding a vertex onto the wire's
+// vertex): Merge then drops what the next step does to the kept shape (OCCT 8.0.1,
+// BRepTools_History.cxx:283, the shape counts as propagated), and the kept shape's id dies.
+Handle(BRepTools_History) compose_histories(
+    const TopoDS_Shape& input, const std::vector<Handle(BRepTools_History)>& steps);
+
+// What compose_shape_process gives back.
+struct ShapeProcessRun {
+  TopoDS_Shape out;                 // the processed bodies; null when cancelled or alarmed
+  Handle(BRepTools_History) hist;   // input -> out; set when `done`
+  std::vector<std::string> alarms;  // the alarms an operator sent; `out` is null then
+  bool cancelled = false;           // the range was cancelled in the sequence
+  bool done = false;                // ShHealOper_ShapeProcess's isDone
+};
+
+// The steps of ShHealOper_ShapeProcess::Perform on `input` (a compound of bodies), with the
+// TNaming copy map kept so that the history reaches the input's sub-shapes: the sequence
+// `sequence_text` reads only the resources given ("Operator.Name" -> text), never a
+// resource file. Defined in session_geomheal.cpp; Session.shape_process and the block
+// operations' face healing (GEOM's MakeAnyFace) run it.
+ShapeProcessRun compose_shape_process(
+    const TopoDS_Shape& input, const std::string& sequence_text,
+    const std::vector<std::pair<std::string, std::string>>& resources,
+    const Message_ProgressRange& range);
+
 // GProp's adaptive rule cap, the enclosed volume and its sign check live in shape_checks,
 // which the stateless module shares.
 using shape_checks::kAdaptiveEpsCap;
@@ -1062,6 +1094,41 @@ class Session {
   // (GeomPlate, the driver's geometry code copied). Every id of the face is constructed.
   py::dict smoothing_surface(const PointArray& points, int max_points, int max_degree,
                              double max_distance);
+
+  // ---- GEOM's blocks (session_blocks.cpp) -------------------------------------------- //
+  //
+  // The quadrangle and hexahedron builders of GEOMImpl_BlockDriver and the block searches
+  // of GEOMImpl_IBlocksOperations, copied. The builders consume the bodies of their inputs
+  // (loose edges and wires, free vertices, free faces and shells), keep their ids on the
+  // result, and work on copies, because GEOM's code edits tolerances in place.
+
+  // GEOM's MakeQuad (4 edges) and MakeQuad2Edges (2 opposite edges).
+  py::dict make_quad(const std::vector<EntityId>& edge_ids);
+
+  // GEOM's MakeQuad4Vertices.
+  py::dict make_quad_from_vertices(const std::vector<EntityId>& vertex_ids);
+
+  // GEOM's MakeHexa (6 faces) and MakeHexa2Faces (2 opposite faces).
+  py::dict make_hexa(const std::vector<EntityId>& face_ids);
+
+  // GEOM's CheckCompoundOfBlocks on the bodies owning the entities, or on every body.
+  // `angular_tolerance` is GEOM's theToleranceC1: negative for no C1 test.
+  py::dict check_blocks(const std::optional<std::vector<EntityId>>& entity_ids,
+                        double angular_tolerance, const py::object& progress,
+                        const py::object& cancel) const;
+
+  // GEOM's Propagate, for the chain that holds the edge: its live ids, ascending.
+  py::array_t<std::int64_t> propagation_chain(EntityId edge_id) const;
+
+  // GEOM's GetOppositeFace, GetFaceByEdges and GetBlockNearPoint, each one id.
+  EntityId opposite_face(EntityId block_id, EntityId face_id) const;
+  EntityId face_by_edges(EntityId edge_a, EntityId edge_b) const;
+  EntityId find_block_near(double px, double py_, double pz) const;
+
+  // GEOM's MakeMultiTransformation1D and 2D by translation vectors: counts[k] blocks along
+  // vectors[k] (the original counted), glued (GEOMAlgo_Gluer2) at the block's tolerance.
+  py::dict multi_transform(EntityId block_id, const std::vector<std::array<double, 3>>& vectors,
+                           const std::vector<int>& counts);
 
   // ---- snapshot / restore ----------------------------------------------------------- //
 

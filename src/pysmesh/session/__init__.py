@@ -58,6 +58,8 @@ a change on either side has an obvious counterpart on the other:
 ``_glue``            gluing coincident sub-shapes with GEOM's gluer
 ``_geomalgo``        GEOM algorithms copied into pySMESH: the 1-D fillet and the
                      smoothing surface
+``_blocks``          GEOM's blocks: quadrangles, hexahedra, block checks, searches
+                     and arrays
 ``_geomheal``        GEOM's healing operators: edge division, contour closing, hole
                      filling, face suppression and the shape-process pipeline
 ``_locate``          locating entities with GEOM's classifiers: on a region, in
@@ -78,6 +80,7 @@ what they were, and callers import them from here.
 
 from __future__ import annotations
 
+from ._blocks import _BlockOps
 from ._boolean import _BooleanOps
 from ._check import _CheckOps
 from ._construct import _ConstructOps
@@ -121,6 +124,9 @@ from ._transform import _TransformOps
 from ._types import (
     AdjacencyPairs,
     AxisLine,
+    BlocksCheck,
+    BlocksErrorKind,
+    BlocksFinding,
     BooleanCheckFinding,
     BoundsTable,
     BoxRegion,
@@ -164,6 +170,7 @@ from ._types import (
 
 
 class Session(
+    _BlockOps,
     _BooleanOps,
     _CheckOps,
     _ConstructOps,
@@ -218,6 +225,9 @@ __all__ = [
     "AdjacencyPairs",
     "AxisLine",
     "BelongsTo",
+    "BlocksCheck",
+    "BlocksErrorKind",
+    "BlocksFinding",
     "BooleanCheckFinding",
     "BoundsTable",
     "BoxRegion",

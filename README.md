@@ -336,6 +336,13 @@ its corner is tried again with the wire's collinear edges joined.
 `MakeSmoothingSurface` does: a GeomPlate surface from the points' average
 plane, approximated by a B-spline.
 
+`make_quad`, `make_quad_from_vertices` and `make_hexa` build quadrangle faces
+and hexahedral blocks as GEOM's block operations do, and `multi_transform`
+copies a block along one or two vectors and glues the copies. `check_blocks`
+tells whether the bodies form a compound of glued blocks, and
+`propagation_chain` gives the chain of opposite edges a block mesher meshes
+with one number of segments.
+
 `make_filling` takes `support_faces`: the filled surface is tangent to each
 named face along its boundary edge, and those edges keep their ids.
 

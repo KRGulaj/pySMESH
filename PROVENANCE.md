@@ -153,6 +153,9 @@ licence in a comment above them. All are from SALOME GEOM tag `V9_16_0`
 | `MakeEdgeFromWire` (`GEOMImpl_ShapeDriver`), `AreEdgesC1` (`GEOMImpl_HealingDriver`) | `src/GEOMImpl/GEOMImpl_ShapeDriver.cxx`, `src/GEOMImpl/GEOMImpl_HealingDriver.cxx` | `src/bindings/geom_edge_from_wire.hpp`, `.cpp` | `Session.fillet_1d` (the joining of collinear edges) |
 | `anotherVertex`, `takePlane`, `addEdgeRelation` (`GEOMImpl_Fillet1dDriver`) | `src/GEOMImpl/GEOMImpl_Fillet1dDriver.cxx` | `src/bindings/session_geomalgo.cpp` | `Session.fillet_1d` |
 | `MakeSmoothingSurfaceUnClosed` (`AdvancedEngine_SmoothingSurfaceDriver`) | `src/AdvancedEngine/AdvancedEngine_SmoothingSurfaceDriver.cxx` | `src/bindings/session_geomalgo.cpp` | `Session.smoothing_surface` |
+| `GEOMImpl_Block6Explorer` (the whole class) | `src/GEOMImpl/GEOMImpl_Block6Explorer.hxx`, `.cxx` | `src/bindings/geom_block6.hpp`, `.cpp` | `Session.make_quad`, `make_quad_from_vertices`, `make_hexa`, `opposite_face`, the block searches |
+| The quad and hexa branches of `GEOMImpl_BlockDriver::Execute` (`BLOCK_FACE_FOUR_EDGES`, `BLOCK_FACE_TWO_EDGES`, `BLOCK_FACE_FOUR_PNT`, `BLOCK_SIX_FACES`, `BLOCK_TWO_FACES`) | `src/GEOMImpl/GEOMImpl_BlockDriver.cxx` | `src/bindings/session_blocks.cpp` | `Session.make_quad`, `make_quad_from_vertices`, `make_hexa` |
+| `IsQuadrangle`, `AddBlocksFrom`, `FindConnected`, `HasAnyConnection`, the steps of `CheckCompoundOfBlocks`, `Propagate`, `GetOppositeFace`, `GetFaceByEdges`, `GetBlockNearPoint` (`GEOMImpl_IBlocksOperations`) | `src/GEOMImpl/GEOMImpl_IBlocksOperations.cxx` | `src/bindings/session_blocks.cpp` | `Session.check_blocks`, `propagation_chain`, `opposite_face`, `face_by_edges`, `find_block_near` |
 
 Four of these carry OCCT 8.0.1 port changes and nothing else: an iterator header that
 OCCT 8.0.1 removed is replaced by the container header that keeps its typedef, and a
@@ -168,6 +171,19 @@ changes four things. Each step writes its history. The wire is a private copy, s
 `FuseCollinearEdges` makes no copy of its own. A corner where no arc fits ends the call
 with a refusal, where GEOM's last pass leaves the corner sharp. `GEOMUtils::FixShapeTolerance`
 is spelled out in its steps, so that the history of its `ShapeFix_Shape` is read.
+
+The block code changes only how the history is kept and how GEOM's driver reports a
+failure. The copied explorer records the edges and faces it makes, and its `MakeFace` and
+`MakeAnyFace` return the history of the face they build. `MakeAnyFace` heals an invalid
+face with GEOM's default `ShHealOper_ShapeProcess`, whose sequence and parameters GEOM
+reads from its `ShHealing` resource file; pySMESH runs the same steps
+(`compose_shape_process` in `src/bindings/session_geomheal.cpp`) with the values of that
+file at `V9_16_0` and the two overrides `MakeAnyFace` sets, and reads no file. GEOM's
+sewing of six faces (`ShHealOper_Sewing`) is asked to record edges and vertices too (its
+`SetHistoryLevel`), which changes no shape it builds. `GetBlockNearPoint` keeps its
+blocks in the order of the model rather than in a map keyed by shape address, so that a
+tie gives the same block in every run. `Propagate` starts at the named edge. The
+builders run on copies of their inputs, because GEOM's code edits tolerances in place.
 
 One function is adapted, not copied unchanged. `mesh_as_geom` in
 `src/bindings/session_locate.cpp` takes the steps of `GEOMAlgo_AlgoTools::MeshShape` and

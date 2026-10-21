@@ -192,6 +192,8 @@ pybind11_add_module(_core
     src/bindings/session_geomalgo.cpp
     src/bindings/geom_fillet1d.cpp
     src/bindings/geom_edge_from_wire.cpp
+    src/bindings/session_blocks.cpp
+    src/bindings/geom_block6.cpp
     src/bindings/session_tessellate.cpp
     src/bindings/session_handoff.cpp
     src/bindings/session_progress.cpp

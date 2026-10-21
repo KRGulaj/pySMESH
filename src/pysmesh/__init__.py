@@ -229,6 +229,9 @@ from .session import (
     AdjacencyPairs,
     AxisLine,
     BelongsTo,
+    BlocksCheck,
+    BlocksErrorKind,
+    BlocksFinding,
     BooleanCheckFinding,
     BoundsTable,
     BoxRegion,
@@ -313,6 +316,9 @@ __version__: Final[str] = _build_info.VERSION
 
 __all__ = [
     "AxisLine",
+    "BlocksCheck",
+    "BlocksErrorKind",
+    "BlocksFinding",
     "BooleanCheckFinding",
     "BoxRegion",
     "CylinderRegion",

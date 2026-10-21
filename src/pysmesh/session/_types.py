@@ -880,6 +880,60 @@ class ShapeCheckFinding:
     statuses: tuple[str, ...]
 
 
+class BlocksErrorKind(StrEnum):
+    """The kinds of finding of :meth:`Session.check_blocks`: GEOM's ``BCErrorType``.
+
+    Attributes:
+        NOT_BLOCK: A solid that is not a block (6 faces, each a quadrangle), or a body that
+            is not a solid, face or shell.
+        EXTRA_EDGE: A solid that could be a block once its seam or degenerated edges, or
+            its faces on one surface, were merged (``BlockFix_CheckTool``); see
+            :meth:`Session.remove_extra_edges`.
+        INVALID_CONNECTION: GEOM defines it for two blocks that touch other than by a whole
+            face or edge; GEOM's check (V9_16_0) never reports it, and neither does this
+            one.
+        NOT_CONNECTED: A block that no chain of blocks connects to the largest connected
+            set.
+        NOT_GLUED: Two blocks that touch along coincident faces that are not one face
+            (``GEOMAlgo_GlueAnalyser``); see :meth:`Session.glue`.
+    """
+
+    NOT_BLOCK = "NOT_BLOCK"
+    EXTRA_EDGE = "EXTRA_EDGE"
+    INVALID_CONNECTION = "INVALID_CONNECTION"
+    NOT_CONNECTED = "NOT_CONNECTED"
+    NOT_GLUED = "NOT_GLUED"
+
+
+@dataclass(frozen=True)
+class BlocksFinding:
+    """One finding of :meth:`Session.check_blocks`.
+
+    Attributes:
+        kind: The kind of error.
+        ids: (K,) int64, ascending — the ids of the bodies it names: the solids, or the
+            highest-dimension ids of a body that is not a solid (a wire's edges).
+    """
+
+    kind: BlocksErrorKind
+    ids: NDArray[np.int64]
+
+
+@dataclass(frozen=True)
+class BlocksCheck:
+    """The answer of :meth:`Session.check_blocks`.
+
+    Attributes:
+        is_compound_of_blocks: GEOM's verdict: every solid is a block, the blocks are
+            glued and connected, and there is at least one block.
+        findings: The errors, in GEOM's order: non-blocks, extra edges, the pairs not
+            glued, the blocks not connected.
+    """
+
+    is_compound_of_blocks: bool
+    findings: tuple[BlocksFinding, ...]
+
+
 @dataclass(frozen=True)
 class RenderMesh:
     """Triangles, edge polylines and vertex points of the live shape, from one call.
@@ -1159,6 +1213,21 @@ def _shape_check_findings(
             statuses=tuple(cast("list[str]", row["statuses"])),
         )
         for row in rows
+    )
+
+
+def _blocks_check(raw: dict[str, object]) -> BlocksCheck:
+    """Wrap a raw ``_core`` check_blocks dict in its frozen dataclass."""
+    rows = cast("list[dict[str, object]]", raw["findings"])
+    return BlocksCheck(
+        is_compound_of_blocks=cast("bool", raw["is_compound_of_blocks"]),
+        findings=tuple(
+            BlocksFinding(
+                kind=BlocksErrorKind(cast("str", row["kind"])),
+                ids=cast("NDArray[np.int64]", row["ids"]),
+            )
+            for row in rows
+        ),
     )
 
 

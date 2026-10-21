@@ -78,6 +78,7 @@ other.
 | Gluing | `glue` (coincident faces or edges, GEOM's gluer) |
 | GEOM healing operators | `divide_edge`, `close_contour`, `fill_holes`, `suppress_faces`, `shape_process` |
 | GEOM curves and surfaces | `fillet_1d` (corners of a planar wire), `smoothing_surface` (a face through a point cloud) |
+| Blocks | `make_quad`, `make_quad_from_vertices`, `make_hexa`, `multi_transform`; the queries `check_blocks`, `propagation_chain`, `opposite_face`, `face_by_edges`, `find_block_near` |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
 | Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
@@ -236,6 +237,32 @@ free face with constructed ids. The defaults are GEOM's (`max_points=2` Bezier p
 `max(1e-4, 10 * max_distance)` of the points, plus the plate's own error; points on a
 plane give that plane. Fewer than 3 points, points on one line and two points within
 1e-7 of each other are refused.
+
+### Blocks
+
+The block operations are GEOM's blocks: the quadrangle and hexahedron builders of
+`GEOMImpl_BlockDriver` and the searches of `GEOMImpl_IBlocksOperations`, copied into
+pySMESH. A block is a solid of 6 faces, each one wire of 4 edges; a compound of glued
+blocks is what a structured hexahedral mesher takes.
+
+- `make_quad(edges)` builds a face on 4 edges, or between 2 opposite edges (two straight
+  edges link their ends). `make_quad_from_vertices(vertices)` builds it on 4 corners. The
+  face is a plane where the boundary is planar, otherwise GEOM's filling surface.
+- `make_hexa(faces)` builds a solid on 6 faces, or between 2 opposite faces (GEOM's block
+  explorer builds the 4 sides).
+- `multi_transform(block, vectors, counts)` copies a body along 1 or 2 translation vectors
+  and glues the copies, as `glue` does.
+
+The builders consume the bodies of their inputs and keep the inputs' ids on the result:
+an edge of a quad, a face of a hexahedron. Ends or edges that the construction welds keep
+all their ids on the welded shape. The new face, solid, or linking edges are generated
+from the inputs.
+
+The queries change nothing. `check_blocks` is GEOM's `CheckCompoundOfBlocks`: a verdict
+and findings of the kinds `NOT_BLOCK`, `EXTRA_EDGE`, `NOT_GLUED` and `NOT_CONNECTED`, each
+with the ids of the bodies. `propagation_chain(edge)` gives the edges opposite to it
+through quadrangles, chain by chain: on a block mesh, the edges that take one number of
+segments. `opposite_face`, `face_by_edges` and `find_block_near` find one face or solid.
 
 ### Booleans: `fuzzy` and `parallel`
 
