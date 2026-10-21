@@ -577,7 +577,7 @@ py::dict Session::keep_half_space(const std::vector<EntityId>& targets, double o
 py::dict Session::fillet(const std::vector<EntityId>& edge_ids, double radius,
                   const std::optional<double>& radius_end, const py::object& progress,
                   const py::object& cancel) {
-  finite_arg("fillet", "radius", radius);
+  finite_arg("fillet", "radius", radius);
   if (radius_end.has_value()) {
     finite_arg("fillet", "radius_end", *radius_end);
   }
@@ -650,7 +650,7 @@ py::dict Session::chamfer(const std::vector<EntityId>& edge_ids, double distance
                    const std::optional<double>& distance_end,
                    const std::optional<EntityId>& face_id, const py::object& progress,
                    const py::object& cancel) {
-  finite_arg("chamfer", "distance", distance);
+  finite_arg("chamfer", "distance", distance);
   if (distance_end.has_value()) {
     finite_arg("chamfer", "distance_end", *distance_end);
   }
