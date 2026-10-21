@@ -78,7 +78,7 @@ other.
 | Gluing | `glue` (coincident faces or edges, GEOM's gluer) |
 | GEOM healing operators | `divide_edge`, `close_contour`, `fill_holes`, `suppress_faces`, `shape_process` |
 | GEOM curves and surfaces | `fillet_1d` (corners of a planar wire), `smoothing_surface` (a face through a point cloud) |
-| Blocks | `make_quad`, `make_quad_from_vertices`, `make_hexa`, `multi_transform`, `divided_disk`, `pipe_t_shape`; the queries `check_blocks`, `propagation_chain`, `opposite_face`, `face_by_edges`, `find_block_near` |
+| Blocks | `make_quad`, `make_quad_from_vertices`, `make_hexa`, `multi_transform`, `divided_disk`, `pipe_t_shape`, `remove_extra_edges`; the queries `check_blocks`, `propagation_chain`, `opposite_face`, `face_by_edges`, `find_block_near` |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
 | Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
@@ -273,6 +273,15 @@ and findings of the kinds `NOT_BLOCK`, `EXTRA_EDGE`, `NOT_GLUED` and `NOT_CONNEC
 with the ids of the bodies. `propagation_chain(edge)` gives the edges opposite to it
 through quadrangles, chain by chain: on a block mesh, the edges that take one number of
 segments. `opposite_face`, `face_by_edges` and `find_block_near` find one face or solid.
+
+`remove_extra_edges(entities, union_faces=False)` is GEOM's `RemoveExtraEdges`: the steps
+of `BlockFix_BlockFixAPI` copied into pySMESH, each with its history. It takes seam and
+degenerated edges off spheres and free-form faces, joins edges on one curve and, with
+`union_faces`, unites faces on one surface. A united face or edge keeps the ids of all
+that it unites; a removed edge or vertex dies. A result with the counts of the input is
+a refusal: nothing was removed. pySMESH adds one check that GEOM does not make: a
+sphere or cylinder face that GEOM puts on a turned surface must keep its area. On a
+quarter-ball wedge GEOM's rotation changes the face, and the call is refused.
 
 ### Booleans: `fuzzy` and `parallel`
 

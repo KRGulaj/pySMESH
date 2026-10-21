@@ -49,17 +49,14 @@
 
 namespace pysmesh {
 
-namespace geomcopy {
+namespace session {
 
-// GEOM's default ShHealOper_ShapeProcess, as GEOMImpl_Block6Explorer::MakeAnyFace runs it:
-// the sequence and parameters of GEOM's resource file resources/ShHealing (V9_16_0), with
-// FixFaceSize.Tolerance and DropSmallEdges.Tolerance3d set to 1e-05 as MakeAnyFace sets
-// them. Parameters the file does not name keep OCCT's own defaults there and here alike.
-// compose_shape_process reads no resource file, so a host's CSF_ShHealing* variables change
-// nothing.
-Standard_Boolean HealAsGeom(const TopoDS_Shape& theFace, TopoDS_Shape& theHealed,
-                            Handle(BRepTools_History)& theHistory) {
-  static const std::vector<std::pair<std::string, std::string>> kGeomShHealing = {
+std::vector<std::pair<std::string, std::string>> geom_shhealing_resources(
+    const std::string& face_size_tolerance, const std::string& small_edges_tolerance) {
+  // GEOM's resource file resources/ShHealing (V9_16_0), sequence ShapeProcess: the
+  // operators' parameters as the file sets them. Parameters the file does not name keep
+  // OCCT's own defaults there and here alike.
+  return {
       {"FixShape.Tolerance3d", "1.e-7"},
       {"FixShape.MaxTolerance3d", "1"},
       {"FixShape.MinTolerance3d", "1.e-7"},
@@ -99,11 +96,25 @@ Standard_Boolean HealAsGeom(const TopoDS_Shape& theFace, TopoDS_Shape& theHealed
       {"FixShape.FixIntersectingWiresMode", "-1"},
       {"FixShape.FixLoopWiresMode", "-1"},
       {"FixShape.CreateOpenSolidMode", "0"},
-      {"FixFaceSize.Tolerance", "1e-05"},
-      {"DropSmallEdges.Tolerance3d", "1e-05"},
+      {"FixFaceSize.Tolerance", face_size_tolerance},
+      {"DropSmallEdges.Tolerance3d", small_edges_tolerance},
       {"SameParameter.Force", "0"},
       {"SameParameter.Tolerance3d", "1.e-7"},
   };
+}
+
+}  // namespace session
+
+namespace geomcopy {
+
+// GEOM's default ShHealOper_ShapeProcess, as GEOMImpl_Block6Explorer::MakeAnyFace runs it:
+// the sequence and parameters of GEOM's resource file, with FixFaceSize.Tolerance and
+// DropSmallEdges.Tolerance3d set to 1e-05 as MakeAnyFace sets them. compose_shape_process
+// reads no resource file, so a host's CSF_ShHealing* variables change nothing.
+Standard_Boolean HealAsGeom(const TopoDS_Shape& theFace, TopoDS_Shape& theHealed,
+                            Handle(BRepTools_History)& theHistory) {
+  static const std::vector<std::pair<std::string, std::string>> kGeomShHealing =
+      session::geom_shhealing_resources("1e-05", "1e-05");
   TopoDS_Compound input;
   BRep_Builder builder;
   builder.MakeCompound(input);

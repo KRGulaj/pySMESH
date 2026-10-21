@@ -348,6 +348,11 @@ of two pipes cut into blocks, as GEOM's `MakeDividedDisk` and
 `MakePipeTShape` do. The T-shape comes with GEOM's named groups: the pipe
 ends, the edge chains and the inner and outer faces.
 
+`remove_extra_edges` takes seam and degenerated edges off and joins edges
+on one curve, as GEOM's `RemoveExtraEdges` does, with GEOM's BlockFix
+steps copied into pySMESH; `union_faces=True` also unites faces on one
+surface. Every id is carried through each step.
+
 `make_filling` takes `support_faces`: the filled surface is tangent to each
 named face along its boundary edge, and those edges keep their ids.
 

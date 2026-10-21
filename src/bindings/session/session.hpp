@@ -50,6 +50,8 @@
 //                            smoothing surface;
 //   session_blocks.cpp     — GEOM's blocks: quadrangles, hexahedra, block checks, searches
 //                            and arrays;
+//   session_blockfix.cpp   — GEOM's RemoveExtraEdges, with the BlockFix steps of
+//                            geom_blockfix.cpp;
 //   session_advanced.cpp   — GEOM's advanced shapes for block meshing: the divided disk and
 //                            the pipe T-shape;
 //   session_tessellate.cpp — the render mesh, and the incremental delta over it;
@@ -486,6 +488,13 @@ std::vector<std::vector<TopoDS_Shape>> propagation_chains(const TopoDS_Shape& sh
 // session_blocks.cpp.
 bool is_compound_of_blocks(const TopoDS_Shape& shape, double tolerance_c1,
                            std::string& failure);
+
+// The resources of GEOM's default ShHealOper_ShapeProcess: the sequence ShapeProcess of
+// GEOM's resource file resources/ShHealing (V9_16_0), with FixFaceSize.Tolerance and
+// DropSmallEdges.Tolerance3d as given (the file says 0.05; MakeAnyFace sets 1e-05).
+// Defined in session_blocks.cpp.
+std::vector<std::pair<std::string, std::string>> geom_shhealing_resources(
+    const std::string& face_size_tolerance, const std::string& small_edges_tolerance);
 
 // What compose_shape_process gives back.
 struct ShapeProcessRun {
@@ -1145,6 +1154,12 @@ class Session {
   // vectors[k] (the original counted), glued (GEOMAlgo_Gluer2) at the block's tolerance.
   py::dict multi_transform(EntityId block_id, const std::vector<std::array<double, 3>>& vectors,
                            const std::vector<int>& counts);
+
+  // GEOM's RemoveExtraEdges on the bodies owning the entities (session_blockfix.cpp): the
+  // BLOCK_REMOVE_EXTRA branch of GEOMImpl_BlockDriver with BlockFix_BlockFixAPI::Perform
+  // copied, each step's history composed. `union_faces` is geomBuilder's doUnionFaces.
+  py::dict remove_extra_edges(const std::vector<EntityId>& entity_ids, bool union_faces,
+                              const py::object& progress, const py::object& cancel);
 
   // ---- GEOM's advanced shapes for block meshing (session_advanced.cpp) --------------- //
 

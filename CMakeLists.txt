@@ -195,6 +195,8 @@ pybind11_add_module(_core
     src/bindings/session_blocks.cpp
     src/bindings/geom_block6.cpp
     src/bindings/session_advanced.cpp
+    src/bindings/geom_blockfix.cpp
+    src/bindings/session_blockfix.cpp
     src/bindings/session_tessellate.cpp
     src/bindings/session_handoff.cpp
     src/bindings/session_progress.cpp

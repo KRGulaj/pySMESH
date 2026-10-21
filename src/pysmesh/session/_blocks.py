@@ -349,6 +349,74 @@ class _BlockOps(_SessionBase):
             )
         )
 
+    def remove_extra_edges(
+        self,
+        entities: Sequence[EntityId],
+        *,
+        union_faces: bool = False,
+        progress: ProgressCallback | None = None,
+        cancel: CancelPredicate | None = None,
+    ) -> HistoryDelta:
+        """Remove seam, degenerated and extra edges, as GEOM's ``RemoveExtraEdges`` does.
+
+        GEOM's ``BLOCK_REMOVE_EXTRA`` branch of ``GEOMImpl_BlockDriver``, with
+        ``BlockFix_BlockFixAPI::Perform`` and its BlockFix steps copied into pySMESH, on
+        the bodies that own the entities, in this order:
+
+        1. A copy of the bodies (``TNaming_CopyShape``), then a second one
+           (``BRepBuilderAPI_Copy``) for the rotation.
+        2. ``RotateSphereSpace``: a spherical face that reaches a pole of its sphere is
+           put on the same sphere with its axis turned, so that no pole lies on the face
+           (``BlockFix_SphereSpaceModifier``). The turned copy is kept when it is valid.
+        3. ``RefillProblemFaces``: a free-form face with a degenerated edge at a singular
+           point of its surface is replaced by a filling face.
+        4. With ``union_faces`` only: the faces on one surface are united
+           (``ShapeUpgrade_UnifySameDomain``, faces only, B-splines joined, both
+           tolerances 1e-7).
+        5. The locations are removed (``ShapeUpgrade_RemoveLocations``).
+        6. The edges on one curve are united (``ShapeUpgrade_UnifySameDomain``, edges
+           only, B-splines joined, linear tolerance 1e-7, angular tolerance 1e-5).
+        7. ``FixRanges``: a cylindrical or spherical face whose U range leaves
+           ``[0, 2 pi]`` is put on its surface turned about the axis
+           (``BlockFix_PeriodicSurfaceModifier``).
+        8. A result that ``BRepCheck_Analyzer`` rejects is repaired by GEOM's default
+           ``ShapeProcess``: FixShape, FixFaceSize, DropSmallEdges and SameParameter with
+           the values of GEOM's resource file. No resource file is read.
+
+        ``union_faces`` is ``doUnionFaces`` of ``geomBuilder.RemoveExtraEdges``, with its
+        default: GEOM passes ``OptimumNbFaces`` 0 when it is true and -1 when it is false.
+        Without it, the faces of a box fused from two boxes stay split, and an edge
+        between them joins no other edge.
+
+        **Identity.** Each step writes its history, and every id is followed through the
+        steps in order. A united face or edge keeps the ids of every face or edge united
+        into it (the third rule). A removed edge or vertex dies. A rebuilt face, edge or
+        vertex keeps its id.
+
+        Args:
+            entities: Entities whose owning bodies are improved.
+            union_faces: Unite the faces on one surface too.
+            progress: Called with the fraction done, from 0 to 1.
+            cancel: Asked whether to stop; a cancel raises
+                :class:`~pysmesh.PysmeshCancelled` between two steps.
+
+        Returns:
+            The delta: united faces and edges in ``merged``, removed edges and vertices
+            in ``deleted``.
+
+        Raises:
+            PysmeshError: If ``entities`` is empty or an id is dead; if OCCT fails or the
+                repair reports a failure; or if the result has as many solids, faces,
+                edges and vertices as the bodies: nothing was removed or united, and
+                nothing is committed.
+            PysmeshCancelled: If ``cancel`` asked to stop. The session is unchanged.
+        """
+        return _delta(
+            self._s.remove_extra_edges(
+                _ids(entities), bool(union_faces), progress, cancel
+            )
+        )
+
     def divided_disk(
         self,
         radius: float,

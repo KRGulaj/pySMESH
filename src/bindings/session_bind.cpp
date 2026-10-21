@@ -182,6 +182,8 @@ void bind_session(py::module_& m) {
            py::arg("pz"))
       .def("multi_transform", &Session::multi_transform, py::arg("block_id"),
            py::arg("vectors"), py::arg("counts"))
+      .def("remove_extra_edges", &Session::remove_extra_edges, py::arg("entity_ids"),
+           py::arg("union_faces"), py::arg("progress"), py::arg("cancel"))
       .def("divided_disk", &Session::divided_disk, py::arg("radius"), py::arg("ratio"),
            py::arg("orientation"), py::arg("pattern"))
       .def("pipe_t_shape", &Session::pipe_t_shape, py::arg("r1"), py::arg("w1"),

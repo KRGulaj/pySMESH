@@ -159,6 +159,7 @@ licence in a comment above them. All are from SALOME GEOM tag `V9_16_0`
 | `MakeDiskSquare`, `MakeDiskHexagon`, `TransformShape`, `WPlaneTransform` (`AdvancedEngine_DividedDiskDriver`) | `src/AdvancedEngine/AdvancedEngine_DividedDiskDriver.cxx` | `src/bindings/session_advanced.cpp` | `Session.divided_disk` |
 | `MakePipeTShape`, `MakeQuarterPipeTShape` (`AdvancedEngine_PipeTShapeDriver`) | `src/AdvancedEngine/AdvancedEngine_PipeTShapeDriver.cxx` | `src/bindings/session_advanced.cpp` | `Session.pipe_t_shape` |
 | `MakeWireFromEdges` (`GEOMImpl_ShapeDriver`, its `GEOMImpl_WBM_FixTolerance` mode) | `src/GEOMImpl/GEOMImpl_ShapeDriver.cxx` | `src/bindings/session_advanced.cpp` | `Session.pipe_t_shape` |
+| The `BLOCK_REMOVE_EXTRA` branch of `GEOMImpl_BlockDriver::Execute` (its steps) | `src/GEOMImpl/GEOMImpl_BlockDriver.cxx` | `src/bindings/session_blockfix.cpp` | `Session.remove_extra_edges` |
 
 Four of these carry OCCT 8.0.1 port changes and nothing else: an iterator header that
 OCCT 8.0.1 removed is replaced by the container header that keeps its typedef, and a
@@ -200,6 +201,28 @@ the pipe-end faces in place of the common of the shape and its bounding box; pyS
 takes the shape's faces that lie on that box (`GEOMAlgo_FinderShapeOn2`), which are the
 same faces, sorted the same way. pySMESH also adds the faces on the outer cylinders by
 the rule of `MakeInternalGroup`, a group GEOM does not make.
+
+`Session.remove_extra_edges` also copies code of SALOME common_geometry_lib tag `V9_16_0`
+(`e7b5227096fef835a448004ee06cf5938850b1c4`, LGPL-2.1-or-later, used under LGPL-2.1),
+the vendored `extern/common_geometry_lib`:
+
+| Function | Upstream file | Local file |
+|---|---|---|
+| `ComputeMaxTolOfFace`, `FixResult`, `BlockFix::RotateSphereSpace`, `BlockFix::RefillProblemFaces`, `BlockFix::FixRanges` | `src/BlockFix/BlockFix.cxx` | `src/bindings/geom_blockfix.cpp` |
+| `BlockFix_BlockFixAPI::Perform` | `src/BlockFix/BlockFix_BlockFixAPI.cxx` | `src/bindings/geom_blockfix.cpp` |
+
+These functions keep each step's context, modifier and substitution local, so their
+history is out of reach; the copies write it. A script writes `geom_blockfix.cpp` from the
+vendored sources, and every change is marked `pySMESH:` in it. `Perform` becomes a function
+of its members, keeps only its OCCT 7.5.3 and later branches and the two face unification
+values `RemoveExtraEdges` passes (0 and -1), and stops after a cancel. Each step's history
+is kept, and `compose_histories` follows every input sub-shape through the steps in order.
+pySMESH adds one check: a sphere or cylinder face that `RotateSphereSpace` or `FixRanges`
+puts on a turned surface must keep its area within 1e-6 relative, where the turned shape is
+used. GEOM has no such check. On a quarter-ball wedge, its rotation gives a face 3.8e-4
+smaller whose mesh reaches 0.033 outside the wedge. The vendored classes
+`BlockFix_SphereSpaceModifier` and `BlockFix_PeriodicSurfaceModifier` are called as they
+are.
 
 One function is adapted, not copied unchanged. `mesh_as_geom` in
 `src/bindings/session_locate.cpp` takes the steps of `GEOMAlgo_AlgoTools::MeshShape` and
