@@ -227,14 +227,17 @@ from .offset import (
 )
 from .session import (
     AdjacencyPairs,
+    AxisLine,
     BoundsTable,
     CurvatureTable,
     CurveParameterTable,
     CurveSample,
+    EdgePoint,
     EntityDistance,
     EntityId,
     EntityKind,
     EntityTable,
+    FaceFrame,
     GlueMode,
     Handoff,
     HistoryDelta,
@@ -252,6 +255,7 @@ from .session import (
     SnapshotMark,
     SurfaceParameterTable,
     SurfaceSample,
+    TangentFrameSample,
     TypeTable,
     WireTable,
 )
@@ -283,6 +287,9 @@ from .viscous import (
 __version__: Final[str] = _build_info.VERSION
 
 __all__ = [
+    "AxisLine",
+    "EdgePoint",
+    "FaceFrame",
     "Fineness",
     "Netgen1D2D",
     "Netgen1D2D3D",
@@ -466,6 +473,7 @@ __all__ = [
     "SubShapeKind",
     "SurfaceParameterTable",
     "SurfaceSample",
+    "TangentFrameSample",
     "Taper",
     "TessellateParams",
     "TessellateResult",

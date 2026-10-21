@@ -156,6 +156,12 @@ void bind_session(py::module_& m) {
       .def("curvature", &Session::curvature, py::arg("face_ids"), py::arg("samples"))
       .def("project_on_face", &Session::project_on_face, py::arg("face_id"),
            py::arg("points"))
+      .def("face_frame", &Session::face_frame, py::arg("face_id"))
+      .def("tangent_frame", &Session::tangent_frame, py::arg("face_id"), py::arg("u"),
+           py::arg("v"))
+      .def("face_face_axis", &Session::face_face_axis, py::arg("face_a"), py::arg("face_b"))
+      .def("point_at_length", &Session::point_at_length, py::arg("edge_id"),
+           py::arg("length"), py::arg("from_start"))
       .def("entities_in_box", &Session::entities_in_box, py::arg("kind"), py::arg("xmin"),
            py::arg("ymin"), py::arg("zmin"), py::arg("xmax"), py::arg("ymax"),
            py::arg("zmax"), py::arg("strict"))

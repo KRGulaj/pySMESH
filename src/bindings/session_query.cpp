@@ -27,7 +27,9 @@
 
 #include <queue>
 
+#include <GCPnts_AbscissaPoint.hxx>
 #include <GeomAbs_Shape.hxx>
+#include <IntAna_QuadQuadGeo.hxx>
 #include <NCollection_Array1.hxx>
 #include <math.hxx>
 #include <math_Vector.hxx>
@@ -1002,6 +1004,252 @@ py::dict Session::project_on_face(EntityId face_id, const PointArray& points) co
   out["points"] = closest;
   out["uv"] = uv;
   out["distance"] = distance;
+  return out;
+}
+
+// ---- construction queries ----------------------------------------------------------- //
+
+namespace {
+
+// The relative tolerance point_at_length integrates an edge's length to.
+constexpr double kLengthRelTol = 1e-10;
+
+// A number as the construction queries print it in a refusal: six significant digits.
+std::string num_text(double v) {
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%.6g", v);
+  return buf;
+}
+
+py::array_t<double> vec3(const gp_XYZ& v) {
+  py::array_t<double> out(3);
+  double* p = out.mutable_data();
+  p[0] = v.X();
+  p[1] = v.Y();
+  p[2] = v.Z();
+  return out;
+}
+
+// The plane of a planar face, its outward normal (the plane's axis flipped on a REVERSED
+// face, by the rule of surface_at) and its area centroid. Any other surface is refused,
+// naming its type.
+struct PlanarFace {
+  gp_Pln plane;
+  gp_Dir normal;
+  gp_XYZ centroid;
+};
+
+PlanarFace planar_face(const char* op, EntityId id, const TopoDS_Face& face) {
+  const BRepAdaptor_Surface surf(face, false);
+  if (surf.GetType() != GeomAbs_Plane) {
+    throw PysmeshError(std::string("Session.") + op + ": face " + std::to_string(id) +
+                           " is a " + surface_type_name(surf.GetType()) +
+                           " face, not a planar one; it has no plane.",
+                       "", {static_cast<int>(id)});
+  }
+  PlanarFace out;
+  out.plane = surf.Plane();
+  out.normal = out.plane.Axis().Direction();
+  if (face.Orientation() == TopAbs_REVERSED) {
+    out.normal.Reverse();
+  }
+  const shape_checks::Measure m =
+      shape_checks::measured_area(face, shape_checks::kDefaultMassPrecision);
+  shape_checks::require_measured(m, std::string("Session.") + op,
+                                 "FACE " + std::to_string(id));
+  out.centroid = m.centroid;
+  return out;
+}
+
+}  // namespace
+
+py::dict Session::face_frame(EntityId face_id) const {
+  const PlanarFace pf = planar_face("face_frame", face_id, sole_face("face_frame", face_id));
+  // The plane's XDirection is orthogonal to its axis by construction; the projection only
+  // removes the round-off, so the three vectors returned are orthonormal to the last bit.
+  const gp_XYZ n = pf.normal.XYZ();
+  gp_XYZ x = pf.plane.Position().XDirection().XYZ();
+  x -= n * x.Dot(n);
+  x.Normalize();
+  py::dict out;
+  out["origin"] = vec3(pf.centroid);
+  out["normal"] = vec3(n);
+  out["x_direction"] = vec3(x);
+  return out;
+}
+
+py::dict Session::tangent_frame(EntityId face_id, const PointArray& u,
+                                const PointArray& v) const {
+  const TopoDS_Face face = sole_face("tangent_frame", face_id);
+  const std::vector<double> us = scalars_of("tangent_frame", "u", u);
+  const std::vector<double> vs = scalars_of("tangent_frame", "v", v);
+  if (us.size() != vs.size()) {
+    throw PysmeshError("Session.tangent_frame: " + std::to_string(us.size()) +
+                       " u values and " + std::to_string(vs.size()) +
+                       " v values; each point needs one of each.");
+  }
+  const auto n = static_cast<py::ssize_t>(us.size());
+  py::array_t<double> points({n, static_cast<py::ssize_t>(3)});
+  py::array_t<double> normals({n, static_cast<py::ssize_t>(3)});
+  py::array_t<double> tangents({n, static_cast<py::ssize_t>(3)});
+  double* pp = points.mutable_data();
+  double* np = normals.mutable_data();
+  double* tp = tangents.mutable_data();
+  const double sign = (face.Orientation() == TopAbs_REVERSED) ? -1.0 : 1.0;
+
+  // The first refused sample, as its index and the reason; -1 when there is none.
+  py::ssize_t bad = -1;
+  std::string reason;
+  double u0 = 0.0, u1 = 0.0, v0 = 0.0, v1 = 0.0;
+  {
+    py::gil_scoped_release release;
+    BRepAdaptor_Surface surf(face);
+    u0 = surf.FirstUParameter();
+    u1 = surf.LastUParameter();
+    v0 = surf.FirstVParameter();
+    v1 = surf.LastVParameter();
+    for (py::ssize_t i = 0; i < n && bad < 0; ++i) {
+      const double ui = us[static_cast<std::size_t>(i)];
+      const double vi = vs[static_cast<std::size_t>(i)];
+      if (ui < u0 || ui > u1 || vi < v0 || vi > v1) {
+        bad = i;
+        reason = "lies outside the face's parameter bounds";
+        break;
+      }
+      BRepLProp_SLProps props(surf, ui, vi, 1, kNullDerivative);
+      const gp_Vec du = props.D1U();
+      if (du.Magnitude() <= kNullDerivative) {
+        bad = i;
+        reason = "is a singular point of the surface: dS/du is the null vector there";
+        break;
+      }
+      if (!props.IsNormalDefined()) {
+        bad = i;
+        reason = "is a singular point of the surface: it has no normal there";
+        break;
+      }
+      const gp_Pnt p = props.Value();
+      const gp_Dir nd = props.Normal();
+      const gp_Dir td(du);
+      pp[3 * i + 0] = p.X();
+      pp[3 * i + 1] = p.Y();
+      pp[3 * i + 2] = p.Z();
+      np[3 * i + 0] = sign * nd.X();
+      np[3 * i + 1] = sign * nd.Y();
+      np[3 * i + 2] = sign * nd.Z();
+      tp[3 * i + 0] = td.X();
+      tp[3 * i + 1] = td.Y();
+      tp[3 * i + 2] = td.Z();
+    }
+  }
+  if (bad >= 0) {
+    const auto k = static_cast<std::size_t>(bad);
+    throw PysmeshError("Session.tangent_frame: face " + std::to_string(face_id) +
+                           ": (u, v) = (" + num_text(us[k]) + ", " + num_text(vs[k]) + ") " +
+                           reason + ".",
+                       "Point " + std::to_string(bad) + " of " + std::to_string(n) +
+                           ". The face's parameter bounds are u in [" + num_text(u0) + ", " +
+                           num_text(u1) + "], v in [" + num_text(v0) + ", " + num_text(v1) +
+                           "].",
+                       {static_cast<int>(face_id)});
+  }
+  py::dict out;
+  out["points"] = points;
+  out["normals"] = normals;
+  out["tangents"] = tangents;
+  return out;
+}
+
+py::dict Session::face_face_axis(EntityId face_a, EntityId face_b) const {
+  const ShapeSet& faces = root_faces();
+  const PlanarFace a =
+      planar_face("face_face_axis", face_a, sole_face("face_face_axis", face_a, faces));
+  const PlanarFace b =
+      planar_face("face_face_axis", face_b, sole_face("face_face_axis", face_b, faces));
+  // The angle between the two planes, 0 for parallel normals and for opposite ones.
+  const double between = a.normal.Angle(b.normal);
+  const double angle = std::min(between, M_PI - between);
+  if (angle < Precision::Angular()) {
+    throw PysmeshError("Session.face_face_axis: faces " + std::to_string(face_a) + " and " +
+                           std::to_string(face_b) + " lie in parallel planes (angle " +
+                           num_text(angle) + " rad between them); the planes have no common "
+                           "line.",
+                       "", {static_cast<int>(face_a), static_cast<int>(face_b)});
+  }
+  const gp_Pln pa(gp_Pnt(a.centroid), a.normal);
+  const gp_Pln pb(gp_Pnt(b.centroid), b.normal);
+  IntAna_QuadQuadGeo inter(pa, pb, Precision::Angular(), Precision::Confusion());
+  if (!inter.IsDone() || inter.TypeInter() != IntAna_Line || inter.NbSolutions() != 1) {
+    throw PysmeshError("Session.face_face_axis: OCCT found no common line of the planes of "
+                       "faces " +
+                           std::to_string(face_a) + " and " + std::to_string(face_b) +
+                           " (angle " + num_text(angle) + " rad between them).",
+                       "", {static_cast<int>(face_a), static_cast<int>(face_b)});
+  }
+  const gp_Lin line = inter.Line(1);
+  const gp_XYZ mid = 0.5 * (a.centroid + b.centroid);
+  const gp_XYZ d = line.Direction().XYZ();
+  const gp_XYZ origin = line.Location().XYZ();
+  const gp_XYZ point = origin + d * (mid - origin).Dot(d);
+  py::dict out;
+  out["point"] = vec3(point);
+  out["direction"] = vec3(d);
+  return out;
+}
+
+py::dict Session::point_at_length(EntityId edge_id, double length, bool from_start) const {
+  finite_arg("point_at_length", "length", length);
+  const TopoDS_Edge edge = sole_edge("point_at_length", edge_id);
+  double total = 0.0;
+  double parameter = 0.0;
+  gp_Pnt point;
+  bool done = false;
+  // A length up to Precision::Confusion() (1e-7, OCCT's length tolerance) past the edge's
+  // length is its end: the edge's length is itself integrated to that order, so a caller who
+  // measured it another way can name the end without being refused for the rounding.
+  const double slack = Precision::Confusion();
+  {
+    py::gil_scoped_release release;
+    const BRepAdaptor_Curve curve(edge);
+    // GCPnts_AbscissaPoint without a tolerance integrates with one fixed Gauss rule, which
+    // reads a cubic B-spline about 1e-3 off. With one, math_GaussSingleIntegration halves
+    // its intervals until two estimates agree within that absolute tolerance (at most 13
+    // times), so the tolerance is set to 1e-10 of a first estimate of the length.
+    const double tol = std::max(kLengthRelTol * GCPnts_AbscissaPoint::Length(curve),
+                                std::numeric_limits<double>::min());
+    total = GCPnts_AbscissaPoint::Length(curve, tol);
+    // The edge's first vertex in the orientation the root holds it in is at the curve's
+    // first parameter on a FORWARD edge and at its last one on a REVERSED edge.
+    const bool forward = edge.Orientation() != TopAbs_REVERSED;
+    const bool at_first_parameter = forward == from_start;
+    const double start = at_first_parameter ? curve.FirstParameter() : curve.LastParameter();
+    if (length >= 0.0 && length <= total + slack) {
+      // Along increasing parameter from the first parameter, along decreasing from the last.
+      const double along = std::min(length, total);
+      const GCPnts_AbscissaPoint ap(tol, curve, at_first_parameter ? along : -along, start);
+      if (ap.IsDone()) {
+        parameter = ap.Parameter();
+        point = curve.Value(parameter);
+        done = true;
+      }
+    }
+  }
+  if (length < 0.0 || length > total + slack) {
+    throw PysmeshError("Session.point_at_length: length " + num_text(length) +
+                           " is outside edge " + std::to_string(edge_id) +
+                           ", whose length is " + num_text(total) + ".",
+                       "A length runs from 0 to the edge's length.",
+                       {static_cast<int>(edge_id)});
+  }
+  if (!done) {
+    throw PysmeshError("Session.point_at_length: OCCT found no point at length " +
+                           num_text(length) + " along edge " + std::to_string(edge_id) +
+                           " (length " + num_text(total) + ").",
+                       "GCPnts_AbscissaPoint::IsDone() is false.", {static_cast<int>(edge_id)});
+  }
+  py::dict out;
+  out["point"] = vec3(point.XYZ());
+  out["parameter"] = parameter;
   return out;
 }
 

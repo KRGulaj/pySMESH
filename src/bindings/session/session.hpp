@@ -1096,6 +1096,30 @@ class Session {
   // Closest point on a face's underlying surface to each of the given points.
   py::dict project_on_face(EntityId face_id, const PointArray& points) const;
 
+  // ---- construction queries ----------------------------------------------------------- //
+  //
+  // Frames, axes and points to build new geometry on. Each takes the face or edge as the live
+  // root holds it, so a normal is the outward one, by the rule of surface_at.
+
+  // A planar face's frame: its area centroid, its outward normal, and its plane's XDirection
+  // made orthogonal to that normal. Any other surface type is refused, naming it.
+  py::dict face_frame(EntityId face_id) const;
+
+  // Points, outward normals and unit dS/du tangents of a face at parameter pairs (u[i], v[i]).
+  // A parameter outside the face's bounds, or a point where dS/du or the normal is the null
+  // vector, is refused with the face id and the (u, v).
+  py::dict tangent_frame(EntityId face_id, const PointArray& u, const PointArray& v) const;
+
+  // The common line of two planar faces' planes (IntAna_QuadQuadGeo), each plane built on
+  // its face's outward normal, so the direction is n_a x n_b. The point is the projection
+  // onto the line of the midpoint of the two area centroids. Parallel planes are refused.
+  py::dict face_face_axis(EntityId face_a, EntityId face_b) const;
+
+  // The point at `length` along an edge (GCPnts_AbscissaPoint) and its curve parameter,
+  // measured from the edge's first vertex in the orientation the root holds it in, or from
+  // its last one.
+  py::dict point_at_length(EntityId edge_id, double length, bool from_start) const;
+
   // Live entities of one kind whose bounding box meets the given box. `strict` asks for
   // containment (the entity's box inside the query box) rather than overlap.
   py::array_t<std::int64_t> entities_in_box(const std::string& kind, double xmin, double ymin,

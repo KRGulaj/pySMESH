@@ -257,6 +257,12 @@ s.split_by_plane([box], origin=(1.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0))
 left, right = s.entities(EntityKind.SOLID)     # two new ids; box is dead
 ```
 
+Four construction queries give frames and points to build on: `face_frame`
+(a planar face's centroid, outward normal and x-direction), `tangent_frame`
+(point, outward normal and unit `dS/du` at each `(u, v)`), `face_face_axis`
+(the common line of two planar faces) and `point_at_length` (the point at a
+length along an edge).
+
 Two queries answer the questions a feature filter asks. `surface_parameters`
 reads a face's analytic parameters off its surface: a radius, a cone's
 taper, a torus's two radii. `face_wires` splits a face's boundary into its

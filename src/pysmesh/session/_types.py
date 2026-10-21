@@ -691,6 +691,78 @@ class EntityDistance:
 
 
 @dataclass(frozen=True)
+class FaceFrame:
+    """The frame of one planar face: a place to build new geometry on it.
+
+    The three vectors are orthonormal: ``x_direction`` is the plane's own first direction,
+    the one its ``u`` parameter runs along, with any round-off off the normal projected
+    out.
+
+    Attributes:
+        origin: (3,) float64 — the face's area centroid, by the rule of
+            :meth:`Session.mass_properties`.
+        normal: (3,) float64 — the unit normal pointing **out of** the body, by the rule
+            of :meth:`Session.surface_at`: the plane's axis, reversed on a reversed face.
+        x_direction: (3,) float64 — the plane's ``XDirection``, unit, orthogonal to
+            ``normal``. It is the surface's own and is not reversed with the normal, so
+            on a reversed face ``normal`` x ``x_direction`` is minus the plane's
+            ``YDirection``.
+    """
+
+    origin: NDArray[np.float64]
+    normal: NDArray[np.float64]
+    x_direction: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class TangentFrameSample:
+    """Points, outward normals and ``u`` tangents of one face at parameter pairs.
+
+    Row ``i`` is the sample at ``(u[i], v[i])``. Every row is defined: a parameter where
+    the frame does not exist is refused, not reported as a gap.
+
+    Attributes:
+        points: (N, 3) float64 — the surface point.
+        normals: (N, 3) float64 — the unit normal pointing **out of** the body, by the rule
+            of :meth:`Session.surface_at`.
+        tangents: (N, 3) float64 — the unit vector along ``dS/du``, the surface's first
+            derivative in ``u``. It is the surface's own and is not reversed on a reversed
+            face.
+    """
+
+    points: NDArray[np.float64]
+    normals: NDArray[np.float64]
+    tangents: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class AxisLine:
+    """A line in model space, as a point on it and a unit direction.
+
+    Attributes:
+        point: (3,) float64 — a point of the line.
+        direction: (3,) float64 — the unit direction.
+    """
+
+    point: NDArray[np.float64]
+    direction: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class EdgePoint:
+    """A point on one edge and the curve parameter it lies at.
+
+    Attributes:
+        point: (3,) float64 — the point.
+        parameter: The parameter of the edge's curve at the point, in the range that
+            :meth:`Session.edge_parameter_bounds` reports.
+    """
+
+    point: NDArray[np.float64]
+    parameter: float
+
+
+@dataclass(frozen=True)
 class RenderMesh:
     """Triangles, edge polylines and vertex points of the live shape, from one call.
 
@@ -907,6 +979,40 @@ def _curve_sample(raw: dict[str, object]) -> CurveSample:
         points=cast("NDArray[np.float64]", raw["points"]),
         tangents=cast("NDArray[np.float64]", raw["tangents"]),
         defined=cast("NDArray[np.bool_]", raw["defined"]),
+    )
+
+
+def _face_frame(raw: dict[str, object]) -> FaceFrame:
+    """Wrap a raw ``_core`` face-frame dict in its frozen dataclass."""
+    return FaceFrame(
+        origin=cast("NDArray[np.float64]", raw["origin"]),
+        normal=cast("NDArray[np.float64]", raw["normal"]),
+        x_direction=cast("NDArray[np.float64]", raw["x_direction"]),
+    )
+
+
+def _tangent_frame_sample(raw: dict[str, object]) -> TangentFrameSample:
+    """Wrap a raw ``_core`` tangent-frame dict in its frozen dataclass."""
+    return TangentFrameSample(
+        points=cast("NDArray[np.float64]", raw["points"]),
+        normals=cast("NDArray[np.float64]", raw["normals"]),
+        tangents=cast("NDArray[np.float64]", raw["tangents"]),
+    )
+
+
+def _axis_line(raw: dict[str, object]) -> AxisLine:
+    """Wrap a raw ``_core`` axis dict in its frozen dataclass."""
+    return AxisLine(
+        point=cast("NDArray[np.float64]", raw["point"]),
+        direction=cast("NDArray[np.float64]", raw["direction"]),
+    )
+
+
+def _edge_point(raw: dict[str, object]) -> EdgePoint:
+    """Wrap a raw ``_core`` edge-point dict in its frozen dataclass."""
+    return EdgePoint(
+        point=cast("NDArray[np.float64]", raw["point"]),
+        parameter=cast("float", raw["parameter"]),
     )
 
 

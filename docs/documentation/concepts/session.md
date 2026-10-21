@@ -77,6 +77,7 @@ other.
 | Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove` |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
+| Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
 | Handoff | `export_handoff`, `brep`, `write_step` |
 | Identity and introspection | `entities`, `entity_kind`, `is_alive`, `shape_count`, `name_of`, `origin`, `resolve`, `op_count`, `state_op_index`, `issued_id_count`, `entity_count` |
 
@@ -177,6 +178,17 @@ direction = sample.tangents[sample.defined]
 # The clearance between two entities, with the witness point on each.
 gap = s.distance(faces[0], faces[2])       # gap.distance, gap.point_a, gap.point_b
 ```
+
+## Construction queries
+
+Four queries give a place to build new geometry on. `face_frame` is a planar face's
+centroid, outward normal and in-plane x-direction. `tangent_frame` is the point, the
+outward normal and the unit `dS/du` of a face at each `(u, v)`. `face_face_axis` is the
+common line of two planar faces' planes, along the cross product of their outward
+normals. `point_at_length` is the point at a length along an edge, from either end.
+Each refuses what has no answer, naming the entity and the value: a curved face for a
+frame, a parameter outside the face or at a singular point, two parallel planes, a
+length off the edge. None of them issues an id.
 
 ## Reaching a mesher
 
