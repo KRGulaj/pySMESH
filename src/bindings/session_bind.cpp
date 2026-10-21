@@ -94,6 +94,15 @@ void bind_session(py::module_& m) {
       .def("fragment", &Session::fragment, py::arg("entity_ids"), py::arg("fuzzy"),
            py::arg("parallel"), py::arg("progress"),
            py::arg("cancel"))
+      .def("split_by_faces", &Session::split_by_faces, py::arg("targets"), py::arg("tools"),
+           py::arg("fuzzy"), py::arg("progress"), py::arg("cancel"))
+      .def("split_by_plane", &Session::split_by_plane, py::arg("targets"), py::arg("ox"),
+           py::arg("oy"), py::arg("oz"), py::arg("nx"), py::arg("ny"), py::arg("nz"),
+           py::arg("fuzzy"), py::arg("progress"), py::arg("cancel"))
+      .def("keep_half_space", &Session::keep_half_space, py::arg("targets"), py::arg("ox"),
+           py::arg("oy"), py::arg("oz"), py::arg("nx"), py::arg("ny"), py::arg("nz"),
+           py::arg("keep_positive"), py::arg("fuzzy"), py::arg("progress"),
+           py::arg("cancel"))
       .def("fillet", &Session::fillet, py::arg("edge_ids"), py::arg("radius"),
            py::arg("radius_end"), py::arg("progress"),
            py::arg("cancel"))

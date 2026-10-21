@@ -70,6 +70,7 @@ other.
 | Curve and surface construction | `add_line`, `add_arc`, `add_circle`, `add_ellipse`, `add_polyline`, `add_spline`, `add_bspline`, `add_helix`, `add_rectangle`, `make_wire`, `extract_edges`, `make_face`, `make_filling` |
 | Sweeps | `extrude`, `revolve`, `pipe`, `pipe_shell`, `thru_sections` |
 | Booleans with history | `fuse`, `cut`, `common`, `section`, `split`, `fragment` |
+| Splits with piece ids | `split_by_faces`, `split_by_plane`, `keep_half_space` |
 | Fillet and chamfer | `fillet`, `chamfer` |
 | Offsets | `make_thick_solid`, `offset` |
 | Transforms | `translate`, `rotate`, `mirror`, `scale`, `copy` |
@@ -83,6 +84,17 @@ Every mutating operation returns a `HistoryDelta`: which ids it created, deleted
 split and merged, plus the `BRepCheck_Analyzer` verdict on the shape it built. See
 [Entity IDs and ordinals](entity-ids.md#identity-rules-across-an-edit) for what each of
 those five arrays means.
+
+### Splits with piece ids
+
+`split_by_faces`, `split_by_plane` and `keep_half_space` cut solids by faces or by a
+plane, and give each piece of a cut solid its own id: the sixth rule of
+[Entity IDs and ordinals](entity-ids.md#the-sixth-rule-pieces-of-a-cut-solid). The tool
+faces of `split_by_faces` stay in the model; the plane of the other two is a planar face
+that the operation builds and does not add to the model. A target that the plane does
+not cross is refused, with its range of signed distances from the plane. The three run
+their boolean on one thread, so they take no `parallel` argument, and two runs on equal
+input give equal bytes and equal ids.
 
 ### Booleans: `fuzzy` and `parallel`
 

@@ -320,6 +320,41 @@ class Session:
         progress: object,
         cancel: object,
     ) -> dict[str, object]: ...
+    def split_by_faces(
+        self,
+        targets: list[int],
+        tools: list[int],
+        fuzzy: float,
+        progress: object,
+        cancel: object,
+    ) -> dict[str, object]: ...
+    def split_by_plane(
+        self,
+        targets: list[int],
+        ox: float,
+        oy: float,
+        oz: float,
+        nx: float,
+        ny: float,
+        nz: float,
+        fuzzy: float,
+        progress: object,
+        cancel: object,
+    ) -> dict[str, object]: ...
+    def keep_half_space(
+        self,
+        targets: list[int],
+        ox: float,
+        oy: float,
+        oz: float,
+        nx: float,
+        ny: float,
+        nz: float,
+        keep_positive: bool,
+        fuzzy: float,
+        progress: object,
+        cancel: object,
+    ) -> dict[str, object]: ...
     def fillet(
         self,
         edge_ids: list[int],

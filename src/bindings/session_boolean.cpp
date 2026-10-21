@@ -5,8 +5,9 @@
 // pySMESH binding — Session: the boolean family, fillet and chamfer.
 //
 // Every BRepAlgoAPI_BuilderAlgo descendant shares its arguments, options, history and error
-// channels, so one driver (run_bop) serves all six booleans; only the operand assignment and
-// whether the operation replaces or extends the model differ.
+// channels, so one driver (run_bop) serves all six booleans and the three splits that give
+// each piece its own id; only the operand assignment and whether the operation replaces or
+// extends the model differ.
 //
 // Fillet and chamfer sit here rather than with construction because they are the same kind
 // of operation: a local rework of an existing body, driven by named edges, whose history is
@@ -15,6 +16,8 @@
 // See session/session.hpp for the split.
 
 #include "session/session.hpp"
+
+#include <ElSLib.hxx>
 
 #include "shape_checks.hpp"
 
@@ -136,6 +139,52 @@ std::pair<std::string, std::string> leaky_solid_refusal(const std::string& op,
   return {message, details};
 }
 
+// A number as the refusal texts of the splitting operations print it: six significant
+// digits, no trailing zeros.
+std::string num_text(double v) {
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%.6g", v);
+  return buf;
+}
+
+// "solid 4", or "solids 4, 7 and 9", for a refusal text.
+std::string ids_text(const char* kind, const char* kinds, const std::vector<EntityId>& ids) {
+  std::string out = ids.size() == 1 ? kind : kinds;
+  for (std::size_t i = 0; i < ids.size(); ++i) {
+    out += (i == 0 ? " " : (i + 1 == ids.size() ? " and " : ", ")) + std::to_string(ids[i]);
+  }
+  return out;
+}
+
+// The lowest and the highest signed distance (p - origin) . normal over the material of a
+// shape, read as the z range of its exact box in the plane's own frame, where the plane is
+// z = 0 and the normal is +z. For analytic geometry the box is the geometry's own; a
+// B-spline adds at most 1e-7 (shape_checks::exact_box).
+std::pair<double, double> signed_range(const TopoDS_Shape& s, const gp_Ax3& plane) {
+  gp_Trsf to_plane;
+  to_plane.SetTransformation(plane);
+  const Bnd_Box box = shape_checks::exact_box(s.Moved(TopLoc_Location(to_plane)));
+  double x0, y0, z0, x1, y1, z1;
+  box.Get(x0, y0, z0, x1, y1, z1);
+  return {z0, z1};
+}
+
+// The solids of the splitter's result that a target solid became: its Modified images that
+// are solids of the result, or the solid itself when the splitter left it whole.
+std::vector<TopoDS_Shape> pieces_of(const TopoDS_Shape& solid, const ShapeSet& result_solids,
+                                    const Handle(BRepTools_History)& hist) {
+  std::vector<TopoDS_Shape> out;
+  for (const TopoDS_Shape& m : hist->Modified(solid)) {
+    if (m.ShapeType() == TopAbs_SOLID && result_solids.Contains(m)) {
+      append_unique(out, m);
+    }
+  }
+  if (out.empty() && result_solids.Contains(solid)) {
+    out.push_back(solid);
+  }
+  return out;
+}
+
 // The non-empty lines of OCCT's warning dump.
 std::vector<std::string> warning_lines(const std::string& dump) {
   std::vector<std::string> out;
@@ -239,6 +288,288 @@ py::dict Session::fragment(const std::vector<EntityId>& entity_ids, double fuzzy
                  parallel, hooks_of("fragment", progress, cancel));
 }
 
+// ---- splitting with the piece rule ------------------------------------------------- //
+//
+// All three run BRepAlgoAPI_Splitter through run_bop with parallel = false: a split must not
+// depend on the thread schedule (a fragment's parallel and serial results agree in measure,
+// but nothing promises the same sub-shape order). run_bop's PieceSplit step checks each target
+// against the answer and commits under PieceRule::NewPieceIds.
+
+namespace {
+
+// The plane of a plane operation, refusing a zero normal with its value.
+gp_Ax3 plane_of(const char* op, double ox, double oy, double oz, double nx, double ny,
+                double nz) {
+  finite_arg(op, "origin", ox, oy, oz);
+  finite_arg(op, "normal", nx, ny, nz);
+  if (!(gp_Vec(nx, ny, nz).Magnitude() > 0.0)) {
+    throw PysmeshError(std::string("Session.") + op + ": the plane normal (" + num_text(nx) +
+                       ", " + num_text(ny) + ", " + num_text(nz) +
+                       ") has zero length, so it defines no plane.");
+  }
+  return gp_Ax3(gp_Pnt(ox, oy, oz), gp_Dir(nx, ny, nz));
+}
+
+}  // namespace
+
+py::dict Session::split_by_faces(const std::vector<EntityId>& targets,
+                                 const std::vector<EntityId>& tools, double fuzzy,
+                                 const py::object& progress, const py::object& cancel) {
+  OpGuard guard(in_op_);
+  if (targets.empty()) {
+    throw PysmeshError("Session.split_by_faces: no target solid is named; nothing to split.");
+  }
+  if (tools.empty()) {
+    throw PysmeshError(
+        "Session.split_by_faces: no tool face is named; nothing to split with.");
+  }
+  require_fuzzy("split_by_faces", fuzzy);
+  const NCollection_List<TopoDS_Shape> arguments =
+      solids_of("split_by_faces", "targets", targets);
+  const std::vector<TopoDS_Shape> consumed = bodies_of(targets, {});
+
+  // The tool faces, every shape of each id. A face of a target's own body is refused: it
+  // lies on the boundary it would cut, so it divides nothing and makes the boolean's input
+  // self-interfering.
+  const ShapeKeyed<TopoDS_Shape> owners = body_of_subshape();
+  NCollection_List<TopoDS_Shape> faces;
+  for (EntityId id : tools) {
+    const EntityRecord& rec = require_alive("split_by_faces", id);
+    if (rec.kind != TopAbs_FACE) {
+      throw PysmeshError("Session.split_by_faces: tool " + std::to_string(id) + " is a " +
+                             kind_name(rec.kind) + ", not a FACE.",
+                         "", ids_as_int({id}));
+    }
+    for (const TopoDS_Shape& f : rec.shapes) {
+      const auto owner = owners.find(f);
+      for (const TopoDS_Shape& body : consumed) {
+        if (owner != owners.end() && owner->second.IsSame(body)) {
+          throw PysmeshError("Session.split_by_faces: face " + std::to_string(id) +
+                                 " is a face of a target solid's own body; a solid is not "
+                                 "split by its own boundary.",
+                             "", ids_as_int({id}));
+        }
+      }
+      faces.Append(f);
+    }
+  }
+
+  BRepAlgoAPI_Splitter op;
+  op.SetArguments(arguments);
+  op.SetTools(faces);
+  PieceSplit pieces;
+  pieces.refine = [&](const TopoDS_Shape& result, const Handle(BRepTools_History)& hist) {
+    ShapeSet result_solids;
+    TopExp::MapShapes(result, TopAbs_SOLID, result_solids);
+    bool any_cut = false;
+    for (EntityId id : targets) {
+      std::size_t count = 0;
+      for (const TopoDS_Shape& s : state_.registry->alive.at(id).shapes) {
+        count += pieces_of(s, result_solids, hist).size();
+      }
+      any_cut = any_cut || count > 1;
+    }
+    if (!any_cut) {
+      throw PysmeshError("Session.split_by_faces: " + ids_text("face", "faces", tools) +
+                             " divide none of the " + ids_text("solid", "solids", targets) +
+                             "; nothing to split.",
+                         "Each tool face either misses every target solid or meets one "
+                         "without cutting it through.",
+                         ids_as_int(tools));
+    }
+    return result;
+  };
+  return run_bop("split_by_faces", op, consumed, /*additive=*/false, fuzzy,
+                 /*parallel=*/false, hooks_of("split_by_faces", progress, cancel), &pieces);
+}
+
+TopoDS_Face Session::plane_tool(const char* op, const std::vector<EntityId>& targets,
+                                const gp_Ax3& plane, double fuzzy, int drop_side) const {
+  Bnd_Box all;
+  std::string refusals;
+  std::vector<EntityId> offending;
+  for (EntityId id : targets) {
+    const EntityRecord& rec = state_.registry->alive.at(id);
+    double lo = std::numeric_limits<double>::infinity();
+    double hi = -std::numeric_limits<double>::infinity();
+    for (const TopoDS_Shape& s : rec.shapes) {
+      const std::pair<double, double> range = signed_range(s, plane);
+      lo = std::min(lo, range.first);
+      hi = std::max(hi, range.second);
+      all.Add(shape_checks::exact_box(s));
+    }
+    // A solid that only touches the plane, within its own tolerance plus fuzzy, lies on one
+    // side of it: the splitter would leave it whole.
+    const double tol =
+        std::max(shape_checks::max_tolerance(rec.shapes), Precision::Confusion()) + fuzzy;
+    const std::string range = " (signed distance " + num_text(lo) + " to " + num_text(hi) + ")";
+    std::string reason;
+    if (drop_side == 0) {
+      if (lo >= -tol || hi <= tol) {
+        reason = "lies entirely on one side of the plane" + range + "; nothing to split";
+      }
+    } else {
+      const bool all_dropped = drop_side < 0 ? hi <= tol : lo >= -tol;
+      const bool all_kept = drop_side < 0 ? lo >= -tol : hi <= tol;
+      if (all_dropped) {
+        reason = "lies entirely on the side of the plane that is removed" + range +
+                 "; nothing would be kept";
+      } else if (all_kept) {
+        reason = "lies entirely on the side of the plane that is kept" + range +
+                 "; nothing to remove";
+      }
+    }
+    if (!reason.empty()) {
+      refusals += (refusals.empty() ? "" : "; ") + std::string("solid ") +
+                  std::to_string(id) + " " + reason;
+      offending.push_back(id);
+    }
+  }
+  if (!offending.empty()) {
+    throw PysmeshError(std::string("Session.") + op + ": " + refusals + ".",
+                       "Signed distances are measured from the plane along its normal.",
+                       ids_as_int(offending));
+  }
+  // A square on the plane, centred on the projection of the targets' box centre, with a
+  // half-side equal to the box diagonal. Every point of the box projects to within half a
+  // diagonal of that centre, so the face covers the targets' cross-section twice over.
+  double x0, y0, z0, x1, y1, z1;
+  all.Get(x0, y0, z0, x1, y1, z1);
+  const gp_Pnt centre(0.5 * (x0 + x1), 0.5 * (y0 + y1), 0.5 * (z0 + z1));
+  const double half = gp_Pnt(x0, y0, z0).Distance(gp_Pnt(x1, y1, z1));
+  const gp_Pln pln(plane);
+  double u = 0.0;
+  double v = 0.0;
+  ElSLib::Parameters(pln, centre, u, v);
+  BRepBuilderAPI_MakeFace mk(pln, u - half, u + half, v - half, v + half);
+  if (!mk.IsDone()) {
+    throw PysmeshError(std::string("Session.") + op +
+                       ": OCCT could not build the planar tool face (half-side " +
+                       num_text(half) + ").");
+  }
+  return mk.Face();
+}
+
+py::dict Session::split_by_plane(const std::vector<EntityId>& targets, double ox, double oy,
+                                 double oz, double nx, double ny, double nz, double fuzzy,
+                                 const py::object& progress, const py::object& cancel) {
+  const gp_Ax3 plane = plane_of("split_by_plane", ox, oy, oz, nx, ny, nz);
+  OpGuard guard(in_op_);
+  if (targets.empty()) {
+    throw PysmeshError("Session.split_by_plane: no target solid is named; nothing to split.");
+  }
+  require_fuzzy("split_by_plane", fuzzy);
+  const NCollection_List<TopoDS_Shape> arguments =
+      solids_of("split_by_plane", "targets", targets);
+  NCollection_List<TopoDS_Shape> tool;
+  tool.Append(plane_tool("split_by_plane", targets, plane, fuzzy, /*drop_side=*/0));
+
+  BRepAlgoAPI_Splitter op;
+  op.SetArguments(arguments);
+  op.SetTools(tool);
+  PieceSplit pieces;
+  pieces.refine = [&](const TopoDS_Shape& result, const Handle(BRepTools_History)& hist) {
+    ShapeSet result_solids;
+    TopExp::MapShapes(result, TopAbs_SOLID, result_solids);
+    std::vector<EntityId> whole;
+    for (EntityId id : targets) {
+      std::size_t count = 0;
+      for (const TopoDS_Shape& s : state_.registry->alive.at(id).shapes) {
+        count += pieces_of(s, result_solids, hist).size();
+      }
+      if (count < 2) {
+        whole.push_back(id);
+      }
+    }
+    if (!whole.empty()) {
+      throw PysmeshError("Session.split_by_plane: OCCT left " +
+                             ids_text("solid", "solids", whole) +
+                             " in one piece, although the plane crosses it; nothing is "
+                             "committed.",
+                         "", ids_as_int(whole));
+    }
+    return result;
+  };
+  return run_bop("split_by_plane", op, bodies_of(targets, {}), /*additive=*/false, fuzzy,
+                 /*parallel=*/false, hooks_of("split_by_plane", progress, cancel), &pieces);
+}
+
+py::dict Session::keep_half_space(const std::vector<EntityId>& targets, double ox, double oy,
+                                  double oz, double nx, double ny, double nz,
+                                  bool keep_positive, double fuzzy,
+                                  const py::object& progress, const py::object& cancel) {
+  const gp_Ax3 plane = plane_of("keep_half_space", ox, oy, oz, nx, ny, nz);
+  OpGuard guard(in_op_);
+  if (targets.empty()) {
+    throw PysmeshError(
+        "Session.keep_half_space: no target solid is named; nothing to trim.");
+  }
+  require_fuzzy("keep_half_space", fuzzy);
+  const NCollection_List<TopoDS_Shape> arguments =
+      solids_of("keep_half_space", "targets", targets);
+  const int drop_side = keep_positive ? -1 : 1;
+  NCollection_List<TopoDS_Shape> tool;
+  tool.Append(plane_tool("keep_half_space", targets, plane, fuzzy, drop_side));
+
+  BRepAlgoAPI_Splitter op;
+  op.SetArguments(arguments);
+  op.SetTools(tool);
+  PieceSplit pieces;
+  pieces.refine = [&](const TopoDS_Shape& result, const Handle(BRepTools_History)& hist) {
+    ShapeSet result_solids;
+    TopExp::MapShapes(result, TopAbs_SOLID, result_solids);
+    // Each piece lies on one side of the plane, so the middle of its signed-distance range
+    // has the sign of that side.
+    ShapeSet dropped;
+    try {
+      for (int i = 1; i <= result_solids.Extent(); ++i) {
+        const std::pair<double, double> range = signed_range(result_solids(i), plane);
+        const double middle = 0.5 * (range.first + range.second);
+        if ((middle > 0.0 ? 1 : -1) == drop_side) {
+          dropped.Add(result_solids(i));
+        }
+      }
+    } catch (const std::exception& e) {
+      throw PysmeshError(std::string("Session.keep_half_space: measuring the pieces failed: ") +
+                         e.what());
+    }
+    std::vector<EntityId> unsplit;
+    for (EntityId id : targets) {
+      std::size_t kept = 0;
+      std::size_t removed = 0;
+      for (const TopoDS_Shape& s : state_.registry->alive.at(id).shapes) {
+        for (const TopoDS_Shape& p : pieces_of(s, result_solids, hist)) {
+          ++(dropped.Contains(p) ? removed : kept);
+        }
+      }
+      if (kept == 0 || removed == 0) {
+        unsplit.push_back(id);
+      }
+    }
+    if (!unsplit.empty()) {
+      throw PysmeshError("Session.keep_half_space: OCCT did not divide " +
+                             ids_text("solid", "solids", unsplit) +
+                             " at the plane, although the plane crosses it; nothing is "
+                             "committed.",
+                         "", ids_as_int(unsplit));
+    }
+    // The pieces kept, in the order of the splitter's result.
+    std::vector<TopoDS_Shape> leaves;
+    explode_into(result, leaves);
+    TopoDS_Compound kept;
+    BRep_Builder builder;
+    builder.MakeCompound(kept);
+    for (const TopoDS_Shape& leaf : leaves) {
+      if (!dropped.Contains(leaf)) {
+        builder.Add(kept, leaf);
+      }
+    }
+    return TopoDS_Shape(kept);
+  };
+  return run_bop("keep_half_space", op, bodies_of(targets, {}), /*additive=*/false, fuzzy,
+                 /*parallel=*/false, hooks_of("keep_half_space", progress, cancel), &pieces);
+}
+
 // ---- fillet and chamfer ----------------------------------------------------------- //
 
 // radius_end, when given, makes the radius evolve linearly along each named edge from
@@ -246,7 +577,7 @@ py::dict Session::fragment(const std::vector<EntityId>& entity_ids, double fuzzy
 py::dict Session::fillet(const std::vector<EntityId>& edge_ids, double radius,
                   const std::optional<double>& radius_end, const py::object& progress,
                   const py::object& cancel) {
-  finite_arg("fillet", "radius", radius);
+  finite_arg("fillet", "radius", radius);
   if (radius_end.has_value()) {
     finite_arg("fillet", "radius_end", *radius_end);
   }
@@ -319,7 +650,7 @@ py::dict Session::chamfer(const std::vector<EntityId>& edge_ids, double distance
                    const std::optional<double>& distance_end,
                    const std::optional<EntityId>& face_id, const py::object& progress,
                    const py::object& cancel) {
-  finite_arg("chamfer", "distance", distance);
+  finite_arg("chamfer", "distance", distance);
   if (distance_end.has_value()) {
     finite_arg("chamfer", "distance_end", *distance_end);
   }
@@ -454,7 +785,7 @@ std::vector<TopoDS_Shape> Session::bodies_of(const std::vector<EntityId>& a,
 // or extends the model differ. `op` must already carry its arguments and tools.
 py::dict Session::run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
                    const std::vector<TopoDS_Shape>& consumed, bool additive, double fuzzy,
-                   bool parallel, const ProgressHooks& hooks) {
+                   bool parallel, const ProgressHooks& hooks, const PieceSplit* pieces) {
   // Bodies the boolean does not consume pass straight through and keep their identity.
   const std::vector<TopoDS_Shape> survivors =
       additive ? root_bodies(state_.root) : bodies_excluding(consumed);
@@ -542,6 +873,11 @@ py::dict Session::run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
   }
   if (!leak.first.empty()) {
     throw PysmeshError(leak.first, leak.second, {});
+  }
+  if (pieces != nullptr) {
+    const TopoDS_Shape kept = pieces->refine(result, hist);
+    return commit(concat(survivors, kept), hist, op_name, kept, Validation::Strict,
+                  warning_list, PieceRule::NewPieceIds);
   }
   return commit(concat(survivors, result), hist, op_name, result, Validation::Strict,
                 warning_list);

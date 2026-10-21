@@ -12,6 +12,7 @@ across per-area translation units; see the package docstring for the whole surfa
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Literal
 
 from .._core import PysmeshError
 from ._base import _SessionBase
@@ -21,6 +22,7 @@ from ._types import (
     HistoryDelta,
     ProgressCallback,
     ResolutionStatus,
+    Vec3,
     _DEFAULT_FUZZY,
     _delta,
     _ids,
@@ -275,6 +277,177 @@ class _BooleanOps(_SessionBase):
         """
         return _delta(
             self._s.fragment(_ids(entities), fuzzy, parallel, progress, cancel)
+        )
+
+    def split_by_faces(
+        self,
+        targets: Sequence[EntityId],
+        tools: Sequence[EntityId],
+        *,
+        fuzzy: float = _DEFAULT_FUZZY,
+        progress: ProgressCallback | None = None,
+        cancel: CancelPredicate | None = None,
+    ) -> HistoryDelta:
+        """Split the target solids by faces, giving each piece of a cut solid a new id.
+
+        The piece rule (the sixth rule of entity ids): a target solid that the faces cut
+        into two or more solids loses its id, and each piece gets a new id with the role
+        :attr:`NameRole.GENERATED`, whose :meth:`origin` names the target. A target solid
+        that stays one solid keeps its id. Faces, edges and vertices keep the rules of
+        :meth:`split`: a face cut in two keeps its id on both pieces and resolves as
+        :attr:`ResolutionStatus.AMBIGUOUS`, and a new cut face gets a new id.
+
+        The tool faces are not consumed: their bodies stay in the model, unchanged. The
+        boolean runs on one thread, so two runs on equal input give equal results. The
+        result is checked as :meth:`split` checks its own.
+
+        Args:
+            targets: Solid entity ids to split. At least one.
+            tools: Face entity ids to split with: one face, or several, which may form a
+                shell. At least one. None of them may belong to a target's own body.
+            fuzzy: Additional tolerance for the boolean, in model units.
+            progress: Called with the fraction done — a float in ``[0, 1]``, strictly
+                increasing — while the operation runs. ``None`` reports nothing.
+            cancel: Called with no arguments; return ``True`` to stop the operation.
+                It then raises :class:`PysmeshCancelled`, and the session is left
+                exactly as it was.
+
+        Returns:
+            The delta. Each cut target is in ``deleted``, and its pieces are in
+            ``created``.
+
+        Raises:
+            PysmeshError: If no target or no tool is named, if an id is dead, if a target
+                is not a solid or a tool is not a face, if a tool face belongs to a
+                target's body, if ``fuzzy`` is negative, if OCCT reports the boolean as
+                failed or returns no solid, or if the faces divide none of the targets.
+                The message names the operation and the offending ids. No partial result
+                is ever returned.
+        """
+        return _delta(
+            self._s.split_by_faces(_ids(targets), _ids(tools), fuzzy, progress, cancel)
+        )
+
+    def split_by_plane(
+        self,
+        targets: Sequence[EntityId],
+        origin: Vec3,
+        normal: Vec3,
+        *,
+        fuzzy: float = _DEFAULT_FUZZY,
+        progress: ProgressCallback | None = None,
+        cancel: CancelPredicate | None = None,
+    ) -> HistoryDelta:
+        """Split the target solids by a plane, giving each piece of a cut solid a new id.
+
+        The plane passes through ``origin`` with normal ``normal``. The cutting tool is a
+        square face on that plane, centred on the projection of the targets' bounding-box
+        centre, with a half-side equal to the box diagonal: it covers the targets'
+        cross-section twice over. Piece ids follow the piece rule of
+        :meth:`split_by_faces`. The boolean runs on one thread.
+
+        Args:
+            targets: Solid entity ids to split. At least one, and the plane must cross
+                every one of them.
+            origin: A point of the plane.
+            normal: The plane normal. Any non-zero length.
+            fuzzy: Additional tolerance for the boolean, in model units.
+            progress: Called with the fraction done — a float in ``[0, 1]``, strictly
+                increasing — while the operation runs. ``None`` reports nothing.
+            cancel: Called with no arguments; return ``True`` to stop the operation.
+                It then raises :class:`PysmeshCancelled`, and the session is left
+                exactly as it was.
+
+        Returns:
+            The delta. Each target is in ``deleted``, and its pieces are in ``created``.
+
+        Raises:
+            PysmeshError: If no target is named, if an id is dead or not a solid, if the
+                normal has zero length or a coordinate is not finite, if ``fuzzy`` is
+                negative, if a target lies entirely on one side of the plane (the message
+                gives its range of signed distances from the plane; a solid that only
+                touches the plane, within its tolerance plus ``fuzzy``, counts as one
+                side), or if OCCT fails or leaves a crossed target whole.
+        """
+        ox, oy, oz = origin
+        nx, ny, nz = normal
+        return _delta(
+            self._s.split_by_plane(
+                _ids(targets), ox, oy, oz, nx, ny, nz, fuzzy, progress, cancel
+            )
+        )
+
+    def keep_half_space(
+        self,
+        targets: Sequence[EntityId],
+        origin: Vec3,
+        normal: Vec3,
+        keep: Literal["positive", "negative"],
+        *,
+        fuzzy: float = _DEFAULT_FUZZY,
+        progress: ProgressCallback | None = None,
+        cancel: CancelPredicate | None = None,
+    ) -> HistoryDelta:
+        """Keep the material of the target solids on one side of a plane.
+
+        ``"positive"`` keeps the points ``p`` with ``(p - origin) . normal >= 0``,
+        ``"negative"`` the points with ``(p - origin) . normal <= 0``; the target material
+        on the other side is removed. The operation splits the targets as
+        :meth:`split_by_plane` does, then removes every piece on the other side. A target
+        whose kept material is one solid keeps its id; one whose kept material is two or
+        more solids (a non-convex target) loses its id, and each kept piece gets a new
+        :attr:`NameRole.GENERATED` id whose origin names it. Faces wholly on the removed
+        side die with their piece.
+
+        Args:
+            targets: Solid entity ids to trim. At least one, and the plane must cross
+                every one of them.
+            origin: A point of the plane.
+            normal: The plane normal. Any non-zero length.
+            keep: Which side to keep: ``"positive"`` (the side the normal points to) or
+                ``"negative"``.
+            fuzzy: Additional tolerance for the boolean, in model units.
+            progress: Called with the fraction done — a float in ``[0, 1]``, strictly
+                increasing — while the operation runs. ``None`` reports nothing.
+            cancel: Called with no arguments; return ``True`` to stop the operation.
+                It then raises :class:`PysmeshCancelled`, and the session is left
+                exactly as it was.
+
+        Returns:
+            The delta. A trimmed target that stays one solid is in ``modified``; one that
+            leaves several pieces is in ``deleted``, with its kept pieces in
+            ``created``.
+
+        Raises:
+            PysmeshError: If ``keep`` is neither ``"positive"`` nor ``"negative"``, if no
+                target is named, if an id is dead or not a solid, if the normal has zero
+                length or a coordinate is not finite, if ``fuzzy`` is negative, if a
+                target lies entirely on the removed side (nothing would be kept) or
+                entirely on the kept side (nothing to remove) — the message gives its
+                range of signed distances — or if OCCT fails or leaves a crossed target
+                whole.
+        """
+        if keep not in ("positive", "negative"):
+            raise PysmeshError(
+                "Session.keep_half_space: the side to keep is "
+                f"{keep!r}; it is 'positive' or 'negative'."
+            )
+        ox, oy, oz = origin
+        nx, ny, nz = normal
+        return _delta(
+            self._s.keep_half_space(
+                _ids(targets),
+                ox,
+                oy,
+                oz,
+                nx,
+                ny,
+                nz,
+                keep == "positive",
+                fuzzy,
+                progress,
+                cancel,
+            )
         )
 
     def fillet(

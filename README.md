@@ -245,6 +245,18 @@ with history, fillet and chamfer, transforms, healing, defeaturing,
 imprinting, tessellation, and geometric queries. See
 `src/pysmesh/session/__init__.py` for the full API.
 
+Three splits give each piece of a cut solid its own id. `split_by_faces` cuts
+solids by faces, `split_by_plane` by a plane, and `keep_half_space` keeps the
+material on one side of a plane. A solid cut into two or more pieces loses its
+id, and each piece gets a new id generated from it; faces, edges and vertices
+keep the rules of every other operation.
+
+```python
+box = s.entities(EntityKind.SOLID)[0]
+s.split_by_plane([box], origin=(1.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0))
+left, right = s.entities(EntityKind.SOLID)     # two new ids; box is dead
+```
+
 Two queries answer the questions a feature filter asks. `surface_parameters`
 reads a face's analytic parameters off its surface: a radius, a cone's
 taper, a torus's two radii. `face_wires` splits a face's boundary into its

@@ -285,6 +285,25 @@ struct SessionState {
 // decides whether the improvement was enough.
 enum class Validation : int { Strict = 0, Report = 1 };
 
+// What the id carry does with a SOLID id that an operation cut into several solids.
+//
+// KeepId is the rule of every operation that existed before split_by_faces: the id survives
+// on all the pieces and its name resolves as Ambiguous. NewPieceIds is the sixth rule, which
+// only split_by_faces, split_by_plane and keep_half_space select: the id dies, and each piece
+// gets a new id with the role Generated whose source is the cut solid. An id whose solid
+// stays one solid keeps it under both rules, and faces, edges and vertices follow KeepId
+// under both.
+enum class PieceRule : int { KeepId = 0, NewPieceIds = 1 };
+
+// The step the splitting operations add to run_bop, between OCCT's checked answer and the
+// commit. `refine` receives the splitter's result and history, under the GIL, after every
+// check of run_bop has passed. It returns the shape to commit: the result itself, or a
+// compound of the pieces it keeps. It raises PysmeshError to refuse, and the session is then
+// unchanged.
+struct PieceSplit {
+  std::function<TopoDS_Shape(const TopoDS_Shape&, const Handle(BRepTools_History)&)> refine;
+};
+
 // What one face contributed to the previous render mesh: which triangulation it carried and
 // where that triangulation sat.
 //
@@ -764,6 +783,32 @@ class Session {
   // pieces. This is the operation a conformal multi-body CFD domain is built with.
   py::dict fragment(const std::vector<EntityId>& entity_ids, double fuzzy, bool parallel,
                     const py::object& progress, const py::object& cancel);
+
+  // ---- splitting with the piece rule ----------------------------------------------- //
+  //
+  // Three splits that cut solids by faces or by a plane and give each piece its own id
+  // (PieceRule::NewPieceIds). Each runs BRepAlgoAPI_Splitter serially through run_bop, so it
+  // shares split's checks and messages, and none of them consumes its tools.
+
+  // Split the target solids by faces. A tool face is not consumed: its body stays in the
+  // model untouched.
+  py::dict split_by_faces(const std::vector<EntityId>& targets,
+                          const std::vector<EntityId>& tools, double fuzzy,
+                          const py::object& progress, const py::object& cancel);
+
+  // Split the target solids by the plane through `origin` with normal `normal`. The tool is a
+  // square planar face on that plane, built to cover the targets' bounding box twice over.
+  py::dict split_by_plane(const std::vector<EntityId>& targets, double ox, double oy,
+                          double oz, double nx, double ny, double nz, double fuzzy,
+                          const py::object& progress, const py::object& cancel);
+
+  // Keep the material of the target solids on one side of the plane through `origin` with
+  // normal `normal`: the side the normal points to when keep_positive, the other one
+  // otherwise. A split by the plane, then a removal of the pieces on the other side.
+  py::dict keep_half_space(const std::vector<EntityId>& targets, double ox, double oy,
+                           double oz, double nx, double ny, double nz, bool keep_positive,
+                           double fuzzy, const py::object& progress,
+                           const py::object& cancel);
 
   // ---- fillet and chamfer ----------------------------------------------------------- //
 
@@ -1245,9 +1290,19 @@ class Session {
   // the arguments, options, history and error channels, so only the operand assignment (on
   // the concrete type, because SetTools is not virtual) and whether the operation replaces
   // or extends the model differ. `op` must already carry its arguments and tools.
+  //
+  // `pieces`, when given, is the splitting operations' step before the commit (PieceSplit),
+  // and the commit then applies PieceRule::NewPieceIds. Every other operation passes none.
   py::dict run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
                    const std::vector<TopoDS_Shape>& consumed, bool additive, double fuzzy,
-                   bool parallel, const ProgressHooks& hooks);
+                   bool parallel, const ProgressHooks& hooks,
+                   const PieceSplit* pieces = nullptr);
+
+  // The plane operations' common part: refuse a target that the plane does not cross, by
+  // the signed distances of its material, then build the bounded tool face. `drop_side` is
+  // 0 for split_by_plane; for keep_half_space it is the sign of the side that is removed.
+  TopoDS_Face plane_tool(const char* op, const std::vector<EntityId>& targets,
+                         const gp_Ax3& plane, double fuzzy, int drop_side) const;
 
   // The edges of every contour OCCT could not build a fillet on. This is the diagnostic
   // that turns "the fillet failed" into "the fillet failed on these edges"; when the
@@ -1450,7 +1505,8 @@ class Session {
   py::dict commit(const std::vector<TopoDS_Shape>& bodies,
                   const Handle(BRepTools_History) & history, const char* op_name,
                   const TopoDS_Shape& built, Validation mode = Validation::Strict,
-                  const std::vector<std::string>& warnings = {});
+                  const std::vector<std::string>& warnings = {},
+                  PieceRule pieces = PieceRule::KeepId);
 
   // The refusal of a result BRepCheck_Analyzer rejects (report A7): each status it reports,
   // on which sub-shape, and the live ids that sub-shape comes from through `hist`. The faces
@@ -1459,7 +1515,7 @@ class Session {
                                    const Handle(BRepTools_History) & hist) const;
 
   Delta carry_registry(const TopoDS_Shape& new_root, const Handle(BRepTools_History) & hist,
-                       std::int64_t op_index);
+                       std::int64_t op_index, PieceRule pieces = PieceRule::KeepId);
 
   // A rigid transform applied with Copy = false changes only a shape's Location: the TShape,
   // and with it every sub-shape identity, is preserved. Such an operation therefore needs no
