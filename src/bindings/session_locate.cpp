@@ -25,7 +25,7 @@
 
 #include "session/session.hpp"
 
-#include <GEOMAlgo_AlgoTools.hxx>
+#include <GEOMAlgo_Clsf.hxx>
 #include <GEOMAlgo_ClsfBox.hxx>
 #include <GEOMAlgo_ClsfSolid.hxx>
 #include <GEOMAlgo_ClsfSurf.hxx>
@@ -36,7 +36,9 @@
 #include <Geom_CylindricalSurface.hxx>
 #include <Geom_Plane.hxx>
 #include <Geom_SphericalSurface.hxx>
+#include <IntTools_Context.hxx>
 #include <Message_ProgressScope.hxx>
+#include <Prs3d.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopTools_MapOfOrientedShape.hxx>
 #include <TopTools_MapOfShape.hxx>
@@ -310,9 +312,26 @@ constexpr double kGeomBoxTolerance = 1.0e-4;
 
 // GEOMUtils::CheckTriangulation's mesh, which GEOM builds before every non-vertex search:
 // GEOMAlgo_AlgoTools::MeshShape with the default deflection 0.001, relative to the shape's
-// box, and the angle 0.349066 rad.
+// box, and the angle 0.349066 rad. mesh_as_geom below takes the same steps.
 constexpr double kGeomMeshDeflection = 0.001;
 constexpr double kGeomMeshAngle = 0.349066;
+
+// The shares of entities_on's progress range: the copy, the mesh and the finder. They are
+// the split measured on a FACE search of a model of 117 solids and 5606 faces: copy 0.17 s,
+// mesh 1.5 s, finder 0.7 s.
+constexpr double kCopyShare = 1.0;
+constexpr double kMeshShare = 6.0;
+constexpr double kFindShare = 3.0;
+
+// The finder runs on this many chunks of the sub-shapes of the searched kind, in TopExp
+// order, so that a cancel stops it between two chunks: a FACE search of the same model
+// against a solid region, state "out", spends 12 s in the finder. GEOMAlgo_FinderShapeOn2
+// decides each sub-shape from its own vertices, edges and inner points (ProcessVertices to
+// ProcessSolids), so the chunks give the answer of one run over the whole copy. Each chunk
+// gets a fresh classifier, as a run does: GEOMAlgo_ClsfSolid::CheckData builds its
+// BRepClass3d_SolidClassifier in every Perform, so the count bounds that cost. All chunks
+// share one IntTools_Context.
+constexpr int kFinderChunks = 32;
 
 GEOMAlgo_State state_of(const std::string& state) {
   if (state == "on") return GEOMAlgo_ST_ON;
@@ -353,6 +372,60 @@ std::optional<double> max_vertex_tolerance(const TopoDS_Shape& shape) {
     }
   }
   return out;
+}
+
+// The steps of GEOMAlgo_AlgoTools::MeshShape, with GEOMAlgo_AlgoTools_CanBeMeshed, for the
+// arguments GEOMUtils::CheckTriangulation gives it: the deflection 0.001 relative to the
+// shape's box, the angle 0.349066 rad, theForced false, doPostCheck false. Adapted from
+// SALOME common_geometry_lib, tag V9_16_0 (e7b5227096fef835a448004ee06cf5938850b1c4),
+// src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx. Copyright (C) 2007-2026 CEA, EDF, OPEN CASCADE;
+// Copyright (C) 2003-2007 OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN, CEDRAT, EDF R&D, LEG,
+// PRINCIPIA R&D, BUREAU VERITAS. GNU Lesser General Public License version 2.1 or later;
+// used here under LGPL-2.1. Recorded in PROVENANCE.md.
+//
+// One change: the mesher gets a progress range, so a cancel stops it. GEOM constructs
+// BRepMesh_IncrementalMesh(shape, deflection, false, angle), which meshes at once and takes
+// no range. The four parameters set here are the ones that constructor sets, and the rest
+// keep their defaults in both. Returns false where MeshShape does: the shape has no face and
+// no edge, or its box is void.
+bool mesh_as_geom(const TopoDS_Shape& shape, const Message_ProgressRange& range) {
+  // GEOMAlgo_AlgoTools_CanBeMeshed with theCheckMesh true.
+  bool meshed = true;
+  TopLoc_Location location;
+  TopExp_Explorer ex(shape, TopAbs_FACE);
+  if (ex.More()) {
+    for (; ex.More() && meshed; ex.Next()) {
+      meshed = !BRep_Tool::Triangulation(TopoDS::Face(ex.Current()), location).IsNull();
+    }
+  } else {
+    ex.Init(shape, TopAbs_EDGE);
+    if (!ex.More()) {
+      return false;
+    }
+    for (; ex.More() && meshed; ex.Next()) {
+      meshed = !BRep_Tool::Polygon3D(TopoDS::Edge(ex.Current()), location).IsNull();
+    }
+  }
+  if (meshed) {
+    return true;
+  }
+  Bnd_Box box;
+  BRepBndLib::Add(shape, box);
+  if (box.IsVoid()) {
+    return false;
+  }
+  const double deflection =
+      Prs3d::GetDeflection(box, kGeomMeshDeflection, kGeomMeshDeflection);
+  BRepTools::Clean(shape);
+  BRepMesh_IncrementalMesh mesher;
+  mesher.SetShape(shape);
+  IMeshTools_Parameters& params = mesher.ChangeParameters();
+  params.Deflection = deflection;
+  params.Angle = kGeomMeshAngle;
+  params.Relative = false;
+  params.InParallel = false;
+  mesher.Perform(range);
+  return true;
 }
 
 // ---- in_place --------------------------------------------------------------------------- //
@@ -403,10 +476,13 @@ py::array_t<std::int64_t> Session::entities_on(const std::string& kind,
                                                const std::vector<double>& values,
                                                const std::optional<EntityId>& solid_id,
                                                const std::string& state,
-                                               const std::optional<double>& tolerance) const {
+                                               const std::optional<double>& tolerance,
+                                               const py::object& progress,
+                                               const py::object& cancel) const {
   const char* op = "entities_on";
   const TopAbs_ShapeEnum k = kind_from_name(kind);
   const GEOMAlgo_State wanted = state_of(state);
+  const ProgressHooks hooks = hooks_of(op, progress, cancel);
   require_finite(std::string("Session.") + op, "the region", values.data(), values.size(), 1);
   if (tolerance.has_value()) {
     finite_arg(op, "tolerance", *tolerance);
@@ -519,11 +595,15 @@ py::array_t<std::int64_t> Session::entities_on(const std::string& kind,
                                            kGeomBoxTolerance);
   }
 
+  ProgressDriver driver(op, hooks);
   ShapeSet found;
   int error = 0;
+  bool unmeshed = false;
   {
     py::gil_scoped_release release;
     try {
+      Message_ProgressScope scope(driver.range(), "entities_on",
+                                  kCopyShare + kMeshShare + kFindShare);
       // A copy with its own geometry and no triangulation, so that meshing it writes nothing
       // into the model and the sample points do not depend on an earlier tessellate().
       BRepBuilderAPI_Copy copier(root, /*copyGeom=*/true, /*copyMesh=*/false);
@@ -534,50 +614,84 @@ py::array_t<std::int64_t> Session::entities_on(const std::string& kind,
       for (int i = 1; i <= originals.Extent(); ++i) {
         original_of.emplace(copier.ModifiedShape(originals.FindKey(i)), originals.FindKey(i));
       }
+      scope.Next(kCopyShare);
       if (k != TopAbs_VERTEX) {
-        GEOMAlgo_AlgoTools::MeshShape(copy, kGeomMeshDeflection, /*theForced=*/false,
-                                      kGeomMeshAngle, /*isRelative=*/true,
-                                      /*doPostCheck=*/true);
-      }
-
-      GEOMAlgo_FinderShapeOn2 finder;
-      if (!surface.IsNull()) {
-        Handle(GEOMAlgo_ClsfSurf) clsf = new GEOMAlgo_ClsfSurf;
-        clsf->SetSurface(surface);
-        finder.SetClsf(clsf);
-        // GEOM's getShapesOnSurfaceIDs: at least 3 inner points on a face that has none of
-        // its own, at most 100 per edge or face.
-        finder.SetNbPntsMin(3);
-        finder.SetNbPntsMax(100);
-      } else if (!box.IsNull()) {
-        Handle(GEOMAlgo_ClsfBox) clsf = new GEOMAlgo_ClsfBox;
-        clsf->SetBox(box);
-        finder.SetClsf(clsf);
+        unmeshed = !mesh_as_geom(copy, scope.Next(kMeshShare));
       } else {
-        Handle(GEOMAlgo_ClsfSolid) clsf = new GEOMAlgo_ClsfSolid;
-        clsf->SetShape(copier.ModifiedShape(region_solid));
-        finder.SetClsf(clsf);
+        scope.Next(kMeshShare);
       }
-      finder.SetShape(copy);
-      finder.SetTolerance(tol);
-      finder.SetShapeType(k);
-      finder.SetState(wanted);
-      finder.Perform();
-      error = finder.ErrorStatus();
-      if (error == 0) {
-        for (const TopoDS_Shape& s : finder.Shapes()) {
-          const auto it = original_of.find(s);
-          if (it == original_of.end()) {
-            error = -1;
-            break;
+      Message_ProgressRange find_range = scope.Next(kFindShare);
+      // A cancelled mesh leaves faces without sample points: the finder does not run then.
+      if (!unmeshed && scope.More()) {
+        Handle(GEOMAlgo_Clsf) clsf;
+        if (!surface.IsNull()) {
+          Handle(GEOMAlgo_ClsfSurf) on_surface = new GEOMAlgo_ClsfSurf;
+          on_surface->SetSurface(surface);
+          clsf = on_surface;
+        } else if (!box.IsNull()) {
+          Handle(GEOMAlgo_ClsfBox) in_box = new GEOMAlgo_ClsfBox;
+          in_box->SetBox(box);
+          clsf = in_box;
+        } else {
+          Handle(GEOMAlgo_ClsfSolid) in_solid = new GEOMAlgo_ClsfSolid;
+          in_solid->SetShape(copier.ModifiedShape(region_solid));
+          clsf = in_solid;
+        }
+        const Handle(IntTools_Context) context = new IntTools_Context;
+        ShapeSet subs;
+        TopExp::MapShapes(copy, k, subs);
+        const int size = (subs.Extent() + kFinderChunks - 1) / kFinderChunks;
+        const int chunks = size == 0 ? 0 : (subs.Extent() + size - 1) / size;
+        Message_ProgressScope finding(find_range, "entities_on",
+                                      static_cast<double>(std::max(chunks, 1)));
+        BRep_Builder builder;
+        for (int c = 0; c < chunks && error == 0 && finding.More(); ++c, finding.Next()) {
+          TopoDS_Compound part;
+          builder.MakeCompound(part);
+          const int last = std::min(subs.Extent(), (c + 1) * size);
+          for (int i = c * size + 1; i <= last; ++i) {
+            builder.Add(part, subs.FindKey(i));
           }
-          found.Add(it->second);
+          GEOMAlgo_FinderShapeOn2 finder;
+          finder.SetContext(context);
+          finder.SetClsf(clsf);
+          if (!surface.IsNull()) {
+            // GEOM's getShapesOnSurfaceIDs: at least 3 inner points on a face that has none
+            // of its own, at most 100 per edge or face.
+            finder.SetNbPntsMin(3);
+            finder.SetNbPntsMax(100);
+          }
+          finder.SetShape(part);
+          finder.SetTolerance(tol);
+          finder.SetShapeType(k);
+          finder.SetState(wanted);
+          finder.Perform();
+          error = finder.ErrorStatus();
+          if (error == 0) {
+            for (const TopoDS_Shape& s : finder.Shapes()) {
+              const auto it = original_of.find(s);
+              if (it == original_of.end()) {
+                error = -1;
+                break;
+              }
+              found.Add(it->second);
+            }
+          }
         }
       }
     } catch (const std::exception& e) {
       py::gil_scoped_acquire acquire;
       throw PysmeshError(std::string("Session.entities_on: OCCT threw: ") + e.what());
     }
+  }
+  driver.finish();
+  if (driver.cancelled()) {
+    ProgressDriver::raise_cancelled(op);
+  }
+  if (unmeshed) {
+    throw PysmeshError("Session.entities_on: the model has no face and no edge to mesh, or "
+                       "its box is void, so GEOM's triangulation of it fails (GEOM: \"Cannot "
+                       "build triangulation on the shape\").");
   }
   if (error == -1) {
     throw PysmeshError("Session.entities_on: the finder returned a sub-shape that is not "

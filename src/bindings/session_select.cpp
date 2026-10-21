@@ -5,8 +5,9 @@
 // pySMESH binding — Session: the shape tests behind the selection filters.
 //
 // Session.select (src/pysmesh/session/_select.py) combines filters whose behaviour follows
-// the filters of SALOME Shaper's FiltersPlugin. Four of them need nothing beyond the
-// session's vectorised queries and are evaluated in Python. The twelve here need OCCT
+// the filters of SALOME Shaper's FiltersPlugin. Four of them are composed in Python: the
+// three size filters compare the measures of size_measures, below, and RelativeToSolid is
+// entities_on with the solid as the region. The twelve here need OCCT
 // predicates those queries do not carry: the planarity test of GeomLib_IsPlanarSurface, the
 // same-geometry tests, the order of a wire's edges, the orientation of a face, and the G1
 // test of two faces at an edge's middle. Each is written here against OCCT, after the
@@ -49,6 +50,7 @@
 #include <BRepTopAdaptor_TopolTool.hxx>
 #include <GeomAdaptor_Surface.hxx>
 #include <LocalAnalysis_SurfaceContinuity.hxx>
+#include <OSD_Parallel.hxx>
 #include <ShapeAnalysis_Surface.hxx>
 #include <Standard_Failure.hxx>
 
@@ -461,8 +463,11 @@ std::string filter_text(const std::string& filter) { return "the filter " + filt
 
 py::array_t<bool> Session::filter_mask(const std::string& kind, const std::string& filter,
                                        const std::vector<EntityId>& entity_ids,
-                                       const std::vector<double>& numbers, bool flag) const {
+                                       const std::vector<double>& numbers, bool flag,
+                                       const py::object& progress,
+                                       const py::object& cancel) const {
   const char* op = "select";
+  const ProgressHooks hooks = hooks_of(op, progress, cancel);
   const TopAbs_ShapeEnum k = kind_from_name(kind);
   const TopoDS_Shape root = state_.root;
   const std::vector<EntityId> ids = ids_of_kind(k);
@@ -553,6 +558,13 @@ py::array_t<bool> Session::filter_mask(const std::string& kind, const std::strin
     throw PysmeshError("Session.select: " + filter_text(filter) + " names no entity.");
   }
 
+  // One progress range for the filter, in two steps: the branch below prepares the filter's
+  // set or test, then every live id is tested. FeatureEdges, the one long preparation,
+  // takes one step per edge of the model.
+  ProgressDriver driver(op, hooks);
+  Message_ProgressScope scope(driver.range(), "select", 2.0);
+  Message_ProgressRange prepare = scope.Next();
+
   // The per-shape test of the filter. Each branch prepares what the test needs first.
   std::function<bool(const TopoDS_Shape&)> test;
   ShapeSet accepted;  // for the filters that compute their set up front
@@ -599,7 +611,9 @@ py::array_t<bool> Session::filter_mask(const std::string& kind, const std::strin
     py::gil_scoped_release release;
     {
       const Ancestors edge_faces = faces_by(root, TopAbs_EDGE);
-      for (int i = 1; i <= edge_faces.Extent(); ++i) {
+      Message_ProgressScope edges(prepare, "FeatureEdges",
+                                  static_cast<double>(std::max(edge_faces.Extent(), 1)));
+      for (int i = 1; i <= edge_faces.Extent() && edges.More(); ++i, edges.Next()) {
         const TopoDS_Edge& edge = TopoDS::Edge(edge_faces.FindKey(i));
         std::vector<TopoDS_Face> faces;
         for (const TopoDS_Shape& f : edge_faces.FindFromIndex(i)) {
@@ -816,17 +830,91 @@ py::array_t<bool> Session::filter_mask(const std::string& kind, const std::strin
   } else {
     throw PysmeshError("Session.select: '" + filter + "' is not a filter of this module.");
   }
+  prepare.Close();
+
+  // The test of every live id, with the GIL released so that the poller can report. The
+  // registry is held here: a published registry is never written.
+  const RegistryPtr registry = state_.registry;
+  std::vector<char> passed(ids.size(), 0);
+  {
+    py::gil_scoped_release release;
+    Message_ProgressScope each(scope.Next(), "select",
+                               static_cast<double>(std::max<std::size_t>(ids.size(), 1)));
+    for (std::size_t i = 0; i < ids.size() && each.More(); ++i, each.Next()) {
+      const EntityRecord& rec = registry->alive.at(ids[i]);
+      bool all = true;
+      for (const TopoDS_Shape& s : rec.shapes) {
+        const TopoDS_Shape shape = in_root(candidates, s);
+        all = all && (test ? test(shape) : accepted.Contains(shape));
+      }
+      passed[i] = all ? 1 : 0;
+    }
+  }
+  scope.Close();
+  driver.finish();
+  if (driver.cancelled()) {
+    ProgressDriver::raise_cancelled(op);
+  }
 
   py::array_t<bool> out(static_cast<py::ssize_t>(ids.size()));
   bool* mask = out.mutable_data();
   for (std::size_t i = 0; i < ids.size(); ++i) {
+    mask[i] = passed[i] != 0;
+  }
+  return out;
+}
+
+py::array_t<double> Session::size_measures(const std::string& kind, const py::object& progress,
+                                           const py::object& cancel) const {
+  const char* op = "select";
+  const ProgressHooks hooks = hooks_of(op, progress, cancel);
+  const std::vector<EntityId> ids = ids_of_kind(kind_from_name(kind));
+  std::vector<TopoDS_Shape> all;
+  std::vector<std::size_t> first(ids.size() + 1, 0);
+  for (std::size_t i = 0; i < ids.size(); ++i) {
     const EntityRecord& rec = state_.registry->alive.at(ids[i]);
-    bool all = true;
-    for (const TopoDS_Shape& s : rec.shapes) {
-      const TopoDS_Shape shape = in_root(candidates, s);
-      all = all && (test ? test(shape) : accepted.Contains(shape));
+    first[i] = all.size();
+    all.insert(all.end(), rec.shapes.begin(), rec.shapes.end());
+  }
+  first[ids.size()] = all.size();
+
+  // Each shape is measured on its own, as shape_checks::measures measures it for
+  // entity_table, so the values are entity_table's. The ranges are taken in order before
+  // the parallel loop, OCCT's pattern for a progress range in a parallel loop: a scope is
+  // not thread-safe, the indicator is.
+  ProgressDriver driver(op, hooks);
+  std::vector<shape_checks::Measure> measures(all.size());
+  {
+    py::gil_scoped_release release;
+    Message_ProgressScope scope(driver.range(), "select",
+                                static_cast<double>(std::max<std::size_t>(all.size(), 1)));
+    std::vector<Message_ProgressRange> ranges;
+    ranges.reserve(all.size());
+    for (std::size_t j = 0; j < all.size(); ++j) {
+      ranges.push_back(scope.Next());
     }
-    mask[i] = all;
+    OSD_Parallel::For(0, static_cast<int>(all.size()), [&](const int j) {
+      const auto at = static_cast<std::size_t>(j);
+      Message_ProgressScope one(ranges[at], nullptr, 1.0);
+      if (one.More()) {
+        measures[at] = shape_checks::measure(all[at], shape_checks::kDefaultMassPrecision);
+      }
+    });
+  }
+  driver.finish();
+  if (driver.cancelled()) {
+    ProgressDriver::raise_cancelled(op);
+  }
+
+  py::array_t<double> out(static_cast<py::ssize_t>(ids.size()));
+  double* total = out.mutable_data();
+  for (std::size_t i = 0; i < ids.size(); ++i) {
+    total[i] = 0.0;
+    for (std::size_t j = first[i]; j < first[i + 1]; ++j) {
+      shape_checks::require_measured(measures[j], "Session.select",
+                                     kind + " " + std::to_string(ids[i]));
+      total[i] += measures[j].mass;
+    }
   }
   return out;
 }

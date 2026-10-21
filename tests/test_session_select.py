@@ -23,6 +23,7 @@ measure at least 1 away from every threshold, so the tests do not depend on roun
 
 from __future__ import annotations
 
+import itertools
 import json
 import math
 from collections.abc import Callable
@@ -524,6 +525,90 @@ def test_select_issues_nothing_and_changes_nothing() -> None:
         ps.RelativeToSolid(EntityId(int(s.entities(EntityKind.SOLID)[0])), "on"),
     )
 
+    assert state(s) == before
+
+
+# ---- progress and cancel ------------------------------------------------------------- #
+
+
+def _box_with_inner_and_far_boxes() -> tuple[Session, EntityId, list[int]]:
+    """The box, a unit box inside it and one far from it; the box's id; the unit faces."""
+    s = box_session()
+    solid = EntityId(int(s.entities(EntityKind.SOLID)[0]))
+    s.add_box(1.0, 1.0, 1.0, origin=(1.0, 1.0, 1.0))
+    s.add_box(1.0, 1.0, 1.0, origin=(20.0, 1.0, 1.0))
+    inner = where(s, EntityKind.FACE, lambda c: np.all((c >= 1.0) & (c <= 2.0), axis=1))
+    far = where(s, EntityKind.FACE, lambda c: c[:, 0] > 10.0)
+    return s, solid, sorted(inner + far)
+
+
+def test_select_reports_progress_over_every_filter_to_the_end() -> None:
+    """A size filter, RelativeToSolid ("not_on" makes two finder calls), a native filter.
+
+    The unit faces (area 1 < 2) are not on the box, and every face is external: the
+    answer is the twelve unit faces.
+    """
+    s, solid, unit_faces = _box_with_inner_and_far_boxes()
+    rule = ps.Rule(
+        (
+            ps.FaceSize("lt", 2.0),
+            ps.RelativeToSolid(solid, "not_on"),
+            ps.ExternalFaces(),
+        )
+    )
+    seen: list[float] = []
+    before = state(s)
+
+    found = s.select(EntityKind.FACE, rule, progress=seen.append)
+
+    assert [int(i) for i in found] == unit_faces
+    assert len(seen) >= 3
+    assert all(b > a for a, b in itertools.pairwise(seen))
+    assert 0.0 <= seen[0]
+    assert seen[-1] == 1.0
+    assert state(s) == before
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda solid: ps.FaceSize("gt", 1.0),
+        lambda solid: ps.RelativeToSolid(solid, "in"),
+        lambda solid: ps.HorizontalFace(),
+    ],
+    ids=["size", "relative_to_solid", "native"],
+)
+def test_a_cancelled_select_raises_and_leaves_the_session_as_it_was(
+    make: Callable[[EntityId], object],
+) -> None:
+    s, solid, _ = _box_with_inner_and_far_boxes()
+    rule = ps.Rule((make(solid),))  # type: ignore[arg-type]
+    before = state(s)
+
+    with pytest.raises(ps.PysmeshCancelled):
+        s.select(EntityKind.FACE, rule, cancel=lambda: True)
+
+    assert state(s) == before
+
+
+def test_a_cancel_after_the_first_filter_stops_select() -> None:
+    s = box_session()
+    asked: list[int] = []
+
+    def cancel() -> bool:
+        asked.append(1)
+        return len(asked) > 1
+
+    before = state(s)
+
+    with pytest.raises(ps.PysmeshCancelled):
+        s.select(
+            EntityKind.FACE,
+            ps.Rule((ps.HorizontalFace(), ps.FaceSize("gt", 1.0))),
+            cancel=cancel,
+        )
+
+    assert len(asked) >= 2
     assert state(s) == before
 
 

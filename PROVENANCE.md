@@ -150,6 +150,14 @@ licence in a comment above them. All are from SALOME GEOM tag `V9_16_0`
 |---|---|---|---|
 | `MAX_TOLERANCE`, `isSameEdge`, `isSameFace`, `isSameSolid` | `src/GEOMImpl/GEOMImpl_IShapesOperations.cxx` | `src/bindings/session_locate.cpp` | `Session.find_same` (GEOM's `GetSameIDs` rule) |
 
+One function is adapted, not copied unchanged. `mesh_as_geom` in
+`src/bindings/session_locate.cpp` takes the steps of `GEOMAlgo_AlgoTools::MeshShape` and
+`GEOMAlgo_AlgoTools_CanBeMeshed`, from SALOME common_geometry_lib tag `V9_16_0`
+(`e7b5227096fef835a448004ee06cf5938850b1c4`, `src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx`,
+LGPL-2.1-or-later, used under LGPL-2.1), for the arguments `GEOMUtils::CheckTriangulation`
+gives it. Its one change is a progress range for the mesher, so that a cancel stops
+`Session.entities_on` in its mesh. The mesh parameters are the ones of GEOM's call.
+
 ## Small pieces borrowed from looooo/SMESH
 
 [looooo/SMESH](https://github.com/looooo/SMESH) is an actively maintained fork that keeps

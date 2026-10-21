@@ -16,11 +16,12 @@ the whole it denotes: a size filter compares the total measure, as
 :meth:`Session.mass_properties` reports it, and every other filter must hold for each of
 its shapes.
 
-**Where each filter is evaluated.** The three size filters and :class:`RelativeToSolid` run
-here over the vectorised queries (:meth:`Session.entity_table`,
-:meth:`Session.entities_on`). The twelve others need OCCT tests those queries do not carry
-(planarity by ``GeomLib_IsPlanarSurface``, same-geometry tests, wire order, a face's
-orientation, the G1 test at an edge's middle) and run in the native session.
+**Where each filter is evaluated.** The three size filters compare, here, the measures
+the native session integrates as :meth:`Session.entity_table` does, and
+:class:`RelativeToSolid` is :meth:`Session.entities_on`. The twelve others need OCCT tests
+those queries do not carry (planarity by ``GeomLib_IsPlanarSurface``, same-geometry tests,
+wire order, a face's orientation, the G1 test at an edge's middle) and run in the native
+session.
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ from numpy.typing import NDArray
 
 from .._core import PysmeshError
 from ._base import _SessionBase
-from ._types import EntityId, EntityKind
+from ._types import CancelPredicate, EntityId, EntityKind, ProgressCallback
 
 if TYPE_CHECKING:
     from _typeshed import DataclassInstance
@@ -551,12 +552,52 @@ def _size_mask(
     return (measure > value + eps) & (measure < value_max - eps)
 
 
+class _Shares:
+    """Maps the progress of each native call onto its share of one select call.
+
+    Each filter of the rule is an equal share of ``[0, 1]``, and a filter that makes
+    several native calls splits its share equally among them. The caller sees one strictly
+    increasing sequence that ends at 1.0.
+    """
+
+    __slots__ = ("_count", "_last", "_report")
+
+    def __init__(self, report: ProgressCallback | None, count: int) -> None:
+        """Shares of ``report`` for ``count`` filters."""
+        self._report = report
+        self._count = count
+        self._last = -1.0
+
+    def __call__(
+        self, index: int, part: int = 0, parts: int = 1
+    ) -> ProgressCallback | None:
+        """The callback of native call ``part`` of ``parts`` of filter ``index``."""
+        report = self._report
+        if report is None:
+            return None
+
+        def forward(fraction: float) -> None:
+            value = (index + (part + fraction) / parts) / self._count
+            if value > self._last:
+                self._last = value
+                report(value)
+
+        return forward
+
+
 class _SelectOps(_SessionBase):
     """Rule-based selection."""
 
     __slots__ = ()
 
-    def select(self, kind: EntityKind, rule: Rule) -> NDArray[np.int64]:
+    def select(
+        self,
+        kind: EntityKind,
+        rule: Rule,
+        *,
+        progress: ProgressCallback | None = None,
+        cancel: CancelPredicate | None = None,
+    ) -> NDArray[np.int64]:
         """The live ids of one kind that pass every filter of a rule.
 
         The filters follow SALOME Shaper's ``FiltersPlugin`` and combine with AND, each
@@ -566,9 +607,19 @@ class _SelectOps(_SessionBase):
         measure, and every other filter must hold for each shape. The query issues no id
         and changes nothing.
 
+        **Progress.** Each filter of the rule is an equal share of the range. On a large
+        model the size filters, :class:`RelativeToSolid` and :class:`FeatureEdges` take
+        the most time. A cancel stops a size filter between two measured shapes,
+        :class:`FeatureEdges` between two edges, :class:`RelativeToSolid` in its mesh, and
+        every filter between two tested ids.
+
         Args:
             kind: The entity kind to select.
             rule: The rule. Each of its filters must apply to ``kind``.
+            progress: Called with the fraction done — a float in ``[0, 1]``, strictly
+                increasing — while the query runs. ``None`` reports nothing.
+            cancel: Called with no arguments; return ``True`` to stop the query. It then
+                raises :class:`PysmeshCancelled`. The query changes nothing either way.
 
         Returns:
             (N,) int64 — the live ids of ``kind`` that pass, ascending. Empty when none
@@ -581,6 +632,7 @@ class _SelectOps(_SessionBase):
                 face that is not planar or an edge that is not straight where the filter
                 needs one; if a field is of the wrong type, an angle or a size is below
                 zero, or a between comparison has ``value`` above ``value_max``.
+            PysmeshCancelled: If ``cancel`` returned True.
         """
         if not isinstance(rule, Rule):
             raise PysmeshError(
@@ -621,9 +673,16 @@ class _SelectOps(_SessionBase):
                     )
         ids = self._s.entities(str(kind), False)
         keep = np.ones(len(ids), dtype=np.bool_)
-        for name, fields in checked:
-            mask = self._filter_mask(kind, name, fields, ids)
+        shares = _Shares(progress, len(checked))
+        for index, (name, fields) in enumerate(checked):
+            mask = self._filter_mask(kind, name, fields, ids, shares, index, cancel)
             keep &= ~mask if fields["reverse"] else mask
+        closing = shares(len(checked) - 1)
+        if closing is not None:
+            # OCCT's indicator sums the steps of a native call, so its last position can
+            # fall short of 1.0 by rounding (1 - 3e-16 measured on a size filter). The rule
+            # is complete: report its end, once.
+            closing(1.0)
         return ids[keep]
 
     def _require_alive(self, name: str, entity: int) -> None:
@@ -646,11 +705,13 @@ class _SelectOps(_SessionBase):
         name: str,
         fields: Mapping[str, object],
         ids: NDArray[np.int64],
+        shares: _Shares,
+        index: int,
+        cancel: CancelPredicate | None,
     ) -> NDArray[np.bool_]:
         """One checked filter over every live id of ``kind``, aligned with ``ids``."""
         if name in ("EdgeSize", "FaceSize", "VolumeSize"):
-            table = self._s.entity_table(str(kind))
-            measure = cast("NDArray[np.float64]", table["measure"])
+            measure = self._s.size_measures(str(kind), shares(index), cancel)
             return _size_mask(
                 measure,
                 cast("str", fields["comparator"]),
@@ -668,8 +729,11 @@ class _SelectOps(_SessionBase):
                 "not_in": ("on_out",),
             }[cast("str", fields["location"])]
             mask = np.zeros(len(ids), dtype=np.bool_)
-            for state in states:
-                found = self._s.entities_on(str(kind), "solid", [], solid, state, None)
+            for part, state in enumerate(states):
+                report = shares(index, part, len(states))
+                found = self._s.entities_on(
+                    str(kind), "solid", [], solid, state, None, report, cancel
+                )
                 mask |= np.isin(ids, found)
             return mask
         entity_ids: list[int] = []
@@ -683,7 +747,9 @@ class _SelectOps(_SessionBase):
             [float(cast("float", fields["angle_deg"]))] if "angle_deg" in fields else []
         )
         flag = bool(fields.get("propagation", False))
-        return self._s.filter_mask(str(kind), name, entity_ids, numbers, flag)
+        return self._s.filter_mask(
+            str(kind), name, entity_ids, numbers, flag, shares(index), cancel
+        )
 
 
 def rule_to_dict(rule: Rule) -> dict[str, object]:

@@ -185,14 +185,18 @@ void bind_session(py::module_& m) {
       .def("point_at_length", &Session::point_at_length, py::arg("edge_id"),
            py::arg("length"), py::arg("from_start"))
       .def("entities_on", &Session::entities_on, py::arg("kind"), py::arg("region"),
-           py::arg("values"), py::arg("solid_id"), py::arg("state"), py::arg("tolerance"))
+           py::arg("values"), py::arg("solid_id"), py::arg("state"), py::arg("tolerance"),
+           py::arg("progress"), py::arg("cancel"))
       .def("in_place_brep", &Session::in_place_brep, py::arg("kind"), py::arg("data"),
            py::arg("ordinals"), py::arg("progress"), py::arg("cancel"))
       .def("in_place_snapshot", &Session::in_place_snapshot, py::arg("kind"), py::arg("mark"),
            py::arg("ids"), py::arg("progress"), py::arg("cancel"))
       .def("find_same", &Session::find_same, py::arg("entity_id"), py::arg("within"))
       .def("filter_mask", &Session::filter_mask, py::arg("kind"), py::arg("filter"),
-           py::arg("entity_ids"), py::arg("numbers"), py::arg("flag"))
+           py::arg("entity_ids"), py::arg("numbers"), py::arg("flag"), py::arg("progress"),
+           py::arg("cancel"))
+      .def("size_measures", &Session::size_measures, py::arg("kind"), py::arg("progress"),
+           py::arg("cancel"))
       .def("check_boolean", &Session::check_boolean, py::arg("operation"),
            py::arg("arguments"), py::arg("tools"), py::arg("progress"), py::arg("cancel"))
       .def("check_shape", &Session::check_shape, py::arg("entity_ids"), py::arg("progress"),

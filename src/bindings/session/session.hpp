@@ -1235,11 +1235,14 @@ class Session {
   // "cylinder" (axis origin, direction, radius), "sphere" (centre, radius) or "box" (min
   // corner, max corner), with those numbers in `values`; or "solid", with `solid_id`.
   // `tolerance` absent takes GEOM's value for the region, as GEOM's GetShapesOn* take it.
+  // `progress` and `cancel` drive the copy, the mesh and the finder (session/progress.hpp).
   py::array_t<std::int64_t> entities_on(const std::string& kind, const std::string& region,
                                         const std::vector<double>& values,
                                         const std::optional<EntityId>& solid_id,
                                         const std::string& state,
-                                        const std::optional<double>& tolerance) const;
+                                        const std::optional<double>& tolerance,
+                                        const py::object& progress,
+                                        const py::object& cancel) const;
 
   // GEOMAlgo_GetInPlace of the current model against old sub-shapes of `kind`: the shapes at
   // the 0-based handoff ordinals of the BREP `data` (in_place_brep), or the shapes of ids live
@@ -1261,7 +1264,13 @@ class Session {
   // session_select.cpp implements; `entity_ids`, `numbers` and `flag` are its arguments.
   py::array_t<bool> filter_mask(const std::string& kind, const std::string& filter,
                                 const std::vector<EntityId>& entity_ids,
-                                const std::vector<double>& numbers, bool flag) const;
+                                const std::vector<double>& numbers, bool flag,
+                                const py::object& progress, const py::object& cancel) const;
+
+  // The measure of every live id of `kind`, ascending, for the size filters: the sum over
+  // the shapes it denotes of the measure entity_table reports, one task per shape.
+  py::array_t<double> size_measures(const std::string& kind, const py::object& progress,
+                                    const py::object& cancel) const;
 
   // ---- checks ------------------------------------------------------------------------ //
   //

@@ -326,6 +326,11 @@ same = s.in_place(EntityKind.FACE, handoff.brep, [0, 1])   # by handoff ordinals
 the model, meshed as GEOM meshes it. Its answer does not depend on an earlier
 `tessellate`, and the model's faces keep the triangulation they had.
 
+`entities_on` and `in_place` take `progress` and `cancel`. On a whole model they can run
+for seconds: `entities_on` meshes its copy, and its finder classifies the sample points.
+A cancel stops the mesh, or the finder between two of its 32 runs. `in_place` stops
+between two old sub-shapes. `find_same` takes neither, because it compares a few shapes.
+
 ## Selection rules
 
 `select(kind, rule)` returns the live ids of a kind that pass every filter of a `Rule`.
@@ -335,6 +340,11 @@ solid, belonging to entities, feature edges, continuous faces, opposite edges, e
 faces and topologically connected faces. Each filter has `reverse`. `rule_to_dict` and
 `rule_from_dict` give a rule a versioned stored form. See
 [Selection rules](selection-rules.md) for the filters and the format.
+
+`select` takes `progress` and `cancel`. Each filter of the rule is an equal share of the
+range. A cancel stops a size filter between two measured shapes, `FeatureEdges` between
+two edges, `RelativeToSolid` as it stops `entities_on`, and every filter between two
+tested ids.
 
 ## Checks
 

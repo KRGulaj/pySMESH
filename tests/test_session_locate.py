@@ -34,6 +34,7 @@ a closed form needs unit boxes.
 
 from __future__ import annotations
 
+import itertools
 import math
 
 import numpy as np
@@ -414,6 +415,71 @@ def test_entities_on_a_solid_region_finds_the_faces_inside_and_on_it() -> None:
     assert list(on) == outer_faces
     assert list(inside) == inner_faces
     assert list(out) == far_faces
+    assert state(s) == before
+
+
+def test_entities_on_more_faces_than_finder_runs_gives_each_face_its_state() -> None:
+    """The finder runs on 32 consecutive parts of the faces; 78 faces make 3 per part.
+
+    Twelve boxes 3 x 7 x 11 at ``x = 0, 5, ..., 55`` and a region box ``[-1, 29] x [-1, 8]
+    x [-1, 12]`` that holds the first six. A face is out of the plane ``z = 5.5`` when its
+    lowest point is above it; the first six boxes' faces are in the region, the last six
+    boxes' faces out of it, and the region's own faces on it.
+    """
+    s = Session()
+    faces_of: list[list[int]] = []
+    for i in range(12):
+        known = {int(f) for f in s.entities(EntityKind.FACE)}
+        s.add_box(BOX_A, BOX_B, BOX_C, origin=(5.0 * i, 0.0, 0.0))
+        faces_of.append(sorted({int(f) for f in s.entities(EntityKind.FACE)} - known))
+    known = {int(f) for f in s.entities(EntityKind.FACE)}
+    s.add_box(30.0, BOX_B + 2.0, BOX_C + 2.0, origin=(-1.0, -1.0, -1.0))
+    region = EntityId(int(s.entities(EntityKind.SOLID)[-1]))
+    region_faces = sorted({int(f) for f in s.entities(EntityKind.FACE)} - known)
+    table = s.entity_table(EntityKind.FACE)
+    plane = PlaneRegion((0.0, 0.0, 5.5), (0.0, 0.0, 1.0))
+    before = state(s)
+
+    above = s.entities_on(EntityKind.FACE, plane, "out")
+    inside = s.entities_on(EntityKind.FACE, region, "in")
+    out = s.entities_on(EntityKind.FACE, region, "out")
+    on = s.entities_on(EntityKind.FACE, region, "on")
+
+    assert len(table.ids) == 78
+    assert list(above) == [int(i) for i in table.ids[table.bbox[:, 2] > 5.5]]
+    assert list(inside) == sorted(f for faces in faces_of[:6] for f in faces)
+    assert list(out) == sorted(f for faces in faces_of[6:] for f in faces)
+    assert list(on) == region_faces
+    assert state(s) == before
+
+
+def test_entities_on_reports_progress_to_the_end_and_issues_nothing() -> None:
+    s = box_session()
+    plane = PlaneRegion((0.0, 0.0, 5.5), (0.0, 0.0, 1.0))
+    seen: list[float] = []
+    before = state(s)
+
+    found = s.entities_on(EntityKind.FACE, plane, "in", progress=seen.append)
+
+    assert list(found) == list(s.entities_on(EntityKind.FACE, plane, "in"))
+    assert seen
+    assert all(b > a for a, b in itertools.pairwise(seen))
+    assert 0.0 <= seen[0]
+    assert seen[-1] == 1.0
+    assert state(s) == before
+
+
+def test_a_cancelled_entities_on_raises_and_leaves_the_session_as_it_was() -> None:
+    s = box_session()
+    solid = EntityId(int(s.entities(EntityKind.SOLID)[0]))
+    plane = PlaneRegion((0.0, 0.0, 0.0), (0.0, 0.0, 1.0))
+    before = state(s)
+
+    with pytest.raises(PysmeshCancelled):
+        s.entities_on(EntityKind.FACE, plane, "on", cancel=lambda: True)
+    with pytest.raises(PysmeshCancelled):
+        s.entities_on(EntityKind.VERTEX, solid, "on", cancel=lambda: True)
+
     assert state(s) == before
 
 

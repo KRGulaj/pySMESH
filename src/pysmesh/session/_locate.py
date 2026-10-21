@@ -79,6 +79,8 @@ class _LocateOps(_SessionBase):
         state: RegionState,
         *,
         tolerance: float | None = None,
+        progress: ProgressCallback | None = None,
+        cancel: CancelPredicate | None = None,
     ) -> NDArray[np.int64]:
         """Live entities of one kind that lie on, inside or outside a region.
 
@@ -105,6 +107,13 @@ class _LocateOps(_SessionBase):
         **Split ids.** An id is in the state when every shape it denotes is: a split
         solid with pieces on both sides of a plane is neither "in" nor "out".
 
+        **Progress.** The query copies the model, meshes the copy and runs the finder.
+        ``progress`` gives the three 10 %, 60 % and 30 % of the range. A cancel stops the
+        mesh, and stops the finder between two of its 32 runs: the finder runs on 32
+        consecutive parts of the entities of ``kind``, which gives the answer of one run
+        because the finder decides each entity from its own boundary and inner points.
+        The copy runs to its end once started.
+
         Args:
             kind: The entity kind to search.
             region: A :class:`PlaneRegion`, :class:`CylinderRegion`, :class:`SphereRegion`
@@ -118,6 +127,10 @@ class _LocateOps(_SessionBase):
                 vertex tolerance of the model for a plane, a cylinder or a sphere; 1e-4
                 for a box; the largest vertex tolerance bounded to ``[1e-7, 1e-4]`` for a
                 solid.
+            progress: Called with the fraction done — a float in ``[0, 1]``, strictly
+                increasing — while the query runs. ``None`` reports nothing.
+            cancel: Called with no arguments; return ``True`` to stop the query. It then
+                raises :class:`PysmeshCancelled`. The query changes nothing either way.
 
         Returns:
             (N,) int64 — the live ids of ``kind`` in the state, ascending. Empty when none
@@ -128,11 +141,15 @@ class _LocateOps(_SessionBase):
                 direction, a radius that is not above zero, or a box extent that is not
                 above zero; if the solid id is dead, is not a solid or was split; if
                 ``state`` is not one of the five; if ``tolerance`` is not finite or not
-                above zero; or if GEOMAlgo reports a failure (its code and meaning are in
-                the message).
+                above zero; if the model has no face and no edge to mesh, or a void box
+                (GEOM's "Cannot build triangulation on the shape"); or if GEOMAlgo
+                reports a failure (its code and meaning are in the message).
+            PysmeshCancelled: If ``cancel`` returned True.
         """
         name, values, solid = _region_values(region)
-        return self._s.entities_on(str(kind), name, values, solid, state, tolerance)
+        return self._s.entities_on(
+            str(kind), name, values, solid, state, tolerance, progress, cancel
+        )
 
     def in_place(
         self,

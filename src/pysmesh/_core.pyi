@@ -561,6 +561,8 @@ class Session:
         solid_id: int | None,
         state: str,
         tolerance: float | None,
+        progress: object,
+        cancel: object,
     ) -> NDArray[np.int64]: ...
     def in_place_brep(
         self,
@@ -586,7 +588,12 @@ class Session:
         entity_ids: list[int],
         numbers: list[float],
         flag: bool,
+        progress: object,
+        cancel: object,
     ) -> NDArray[np.bool_]: ...
+    def size_measures(
+        self, kind: str, progress: object, cancel: object
+    ) -> NDArray[np.float64]: ...
     def check_boolean(
         self,
         operation: str,
