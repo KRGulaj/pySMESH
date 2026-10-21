@@ -79,6 +79,7 @@ other.
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
 | Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
 | Locating entities | `entities_on`, `in_place`, `find_same` |
+| Selection rules | `select`, with a `Rule` of filters; `rule_to_dict`, `rule_from_dict` |
 | Checks | `check_boolean`, `check_shape`, `small_edges`, `is_closed_shell`, `tolerances` |
 | Handoff | `export_handoff`, `brep`, `write_step` |
 | Identity and introspection | `entities`, `entity_kind`, `is_alive`, `shape_count`, `name_of`, `origin`, `resolve`, `op_count`, `state_op_index`, `issued_id_count`, `entity_count` |
@@ -257,6 +258,16 @@ same = s.in_place(EntityKind.FACE, handoff.brep, [0, 1])   # by handoff ordinals
 `entities_on` samples each face at the nodes of a triangulation of a private copy of
 the model, meshed as GEOM meshes it. Its answer does not depend on an earlier
 `tessellate`, and the model's faces keep the triangulation they had.
+
+## Selection rules
+
+`select(kind, rule)` returns the live ids of a kind that pass every filter of a `Rule`.
+The sixteen filters follow SALOME Shaper's `FiltersPlugin`: sizes, horizontal and vertical
+faces, entities on a plane, a line or a geometry, on one side of a plane, relative to a
+solid, belonging to entities, feature edges, continuous faces, opposite edges, external
+faces and topologically connected faces. Each filter has `reverse`. `rule_to_dict` and
+`rule_from_dict` give a rule a versioned stored form. See
+[Selection rules](selection-rules.md) for the filters and the format.
 
 ## Checks
 

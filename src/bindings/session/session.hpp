@@ -43,6 +43,7 @@
 //                            shells and tolerances;
 //   session_locate.cpp     — locating entities with GEOM's classifiers: on a region, in
 //                            place of old sub-shapes, the same as another entity;
+//   session_select.cpp     — the shape tests behind the selection filters;
 //   session_tessellate.cpp — the render mesh, and the incremental delta over it;
 //   session_handoff.cpp    — the export to a mesher, and the id-to-ordinal bijection;
 //   session_progress.cpp   — the progress/cancellation driver (declared in progress.hpp,
@@ -1207,6 +1208,13 @@ class Session {
   // (isSameEdge, isSameFace, isSameSolid, the vertex distance) calls the same as `entity_id`.
   py::array_t<std::int64_t> find_same(EntityId entity_id,
                                       const std::vector<EntityId>& within) const;
+
+  // One selection filter over every live id of `kind`, ascending: true where the filter
+  // holds for every shape the id denotes. `filter` is the name of one of the filters
+  // session_select.cpp implements; `entity_ids`, `numbers` and `flag` are its arguments.
+  py::array_t<bool> filter_mask(const std::string& kind, const std::string& filter,
+                                const std::vector<EntityId>& entity_ids,
+                                const std::vector<double>& numbers, bool flag) const;
 
   // ---- checks ------------------------------------------------------------------------ //
   //

@@ -182,6 +182,8 @@ void bind_session(py::module_& m) {
       .def("in_place_snapshot", &Session::in_place_snapshot, py::arg("kind"), py::arg("mark"),
            py::arg("ids"), py::arg("progress"), py::arg("cancel"))
       .def("find_same", &Session::find_same, py::arg("entity_id"), py::arg("within"))
+      .def("filter_mask", &Session::filter_mask, py::arg("kind"), py::arg("filter"),
+           py::arg("entity_ids"), py::arg("numbers"), py::arg("flag"))
       .def("check_boolean", &Session::check_boolean, py::arg("operation"),
            py::arg("arguments"), py::arg("tools"), py::arg("progress"), py::arg("cancel"))
       .def("check_shape", &Session::check_shape, py::arg("entity_ids"), py::arg("progress"),

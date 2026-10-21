@@ -560,6 +560,14 @@ class Session:
         cancel: object,
     ) -> list[NDArray[np.int64]]: ...
     def find_same(self, entity_id: int, within: list[int]) -> NDArray[np.int64]: ...
+    def filter_mask(
+        self,
+        kind: str,
+        filter: str,
+        entity_ids: list[int],
+        numbers: list[float],
+        flag: bool,
+    ) -> NDArray[np.bool_]: ...
     def check_boolean(
         self,
         operation: str,

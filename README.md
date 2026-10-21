@@ -269,6 +269,18 @@ ids that now stand in place of old sub-shapes, named by handoff ordinals in
 BREP bytes or by ids of a snapshot) and `find_same` (the ids that GEOM's
 `GetSame` rule calls the same as one entity).
 
+`select(kind, rule)` returns the ids that pass every filter of a `Rule`.
+The sixteen filters follow SALOME Shaper's `FiltersPlugin` (sizes, horizontal
+and vertical faces, on a plane, line or geometry, relative to a solid, feature
+edges, continuous faces and more), each with `reverse`. `rule_to_dict` and
+`rule_from_dict` store a rule as a versioned JSON-compatible dict.
+
+```python
+from pysmesh import FaceSize, HorizontalFace, Rule
+
+flat_small = s.select(EntityKind.FACE, Rule((HorizontalFace(), FaceSize("lt", 2.0))))
+```
+
 Five checks read a model without changing it: `check_boolean` (OCCT's
 argument analyzer on a boolean's operands), `check_shape` (`BRepCheck_Analyzer`
 per body, one finding per invalid sub-shape), `small_edges`,
