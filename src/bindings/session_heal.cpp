@@ -542,7 +542,9 @@ py::dict Session::unify_same_domain(const std::optional<std::vector<EntityId>>& 
                 [unify_faces, unify_edges, concat_bsplines, linear_tol, angular_tol_rad](
                     const TopoDS_Shape& input, const Message_ProgressRange&,
                     TopoDS_Shape& out, Handle(BRepTools_History) & hist) {
-                  ShapeUpgrade_UnifySameDomain unify(input, unify_faces, unify_edges,
+                  // OCCT's argument order is (shape, UnifyEdges, UnifyFaces,
+                  // ConcatBSplines), as in the stateless unify.cpp.
+                  ShapeUpgrade_UnifySameDomain unify(input, unify_edges, unify_faces,
                                                      concat_bsplines);
                   unify.SetLinearTolerance(linear_tol);
                   unify.SetAngularTolerance(angular_tol_rad);
