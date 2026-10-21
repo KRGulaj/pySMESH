@@ -78,7 +78,7 @@ other.
 | Gluing | `glue` (coincident faces or edges, GEOM's gluer) |
 | GEOM healing operators | `divide_edge`, `close_contour`, `fill_holes`, `suppress_faces`, `shape_process` |
 | GEOM curves and surfaces | `fillet_1d` (corners of a planar wire), `smoothing_surface` (a face through a point cloud) |
-| Blocks | `make_quad`, `make_quad_from_vertices`, `make_hexa`, `multi_transform`; the queries `check_blocks`, `propagation_chain`, `opposite_face`, `face_by_edges`, `find_block_near` |
+| Blocks | `make_quad`, `make_quad_from_vertices`, `make_hexa`, `multi_transform`, `divided_disk`, `pipe_t_shape`; the queries `check_blocks`, `propagation_chain`, `opposite_face`, `face_by_edges`, `find_block_near` |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
 | Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
@@ -252,8 +252,18 @@ blocks is what a structured hexahedral mesher takes.
   explorer builds the 4 sides).
 - `multi_transform(block, vectors, counts)` copies a body along 1 or 2 translation vectors
   and glues the copies, as `glue` does.
+- `divided_disk(radius, ratio)` adds a disk of quadrangles, GEOM's `MakeDividedDisk`: an
+  inner square (5 faces) or hexagon (18 faces) and the faces between it and the circle.
+  A sweep of it gives a pipe of blocks.
+- `pipe_t_shape(...)` adds GEOM's `MakePipeTShape`: a main pipe along x from
+  `-main_half_length` to `main_half_length` and a branch along z from the main axis to
+  `branch_half_length`, cut into blocks (16, or 12 when the outer radii are equal).
+  Its result holds GEOM's named groups: the three pipe-end faces, the edge chains, and
+  the faces on the inner and the outer cylinders.
 
-The builders consume the bodies of their inputs and keep the inputs' ids on the result:
+`divided_disk` and `pipe_t_shape` take numbers only: every id of their result is
+constructed. The other builders consume the bodies of their inputs and keep the inputs'
+ids on the result:
 an edge of a quad, a face of a hexahedron. Ends or edges that the construction welds keep
 all their ids on the welded shape. The new face, solid, or linking edges are generated
 from the inputs.

@@ -48,6 +48,10 @@
 //   session_geomheal.cpp   — GEOM's healing operators (ShHealOper);
 //   session_geomalgo.cpp   — GEOM's algorithms copied into pySMESH: the 1-D fillet and the
 //                            smoothing surface;
+//   session_blocks.cpp     — GEOM's blocks: quadrangles, hexahedra, block checks, searches
+//                            and arrays;
+//   session_advanced.cpp   — GEOM's advanced shapes for block meshing: the divided disk and
+//                            the pipe T-shape;
 //   session_tessellate.cpp — the render mesh, and the incremental delta over it;
 //   session_handoff.cpp    — the export to a mesher, and the id-to-ordinal bijection;
 //   session_progress.cpp   — the progress/cancellation driver (declared in progress.hpp,
@@ -470,6 +474,18 @@ Handle(BRepTools_History) kind_preserving(const Handle(BRepTools_History)& hist,
 // BRepTools_History.cxx:283, the shape counts as propagated), and the kept shape's id dies.
 Handle(BRepTools_History) compose_histories(
     const TopoDS_Shape& input, const std::vector<Handle(BRepTools_History)>& steps);
+
+// GEOM's Propagate (GEOMImpl_IBlocksOperations): the chains of opposite edges through the
+// quadrangles of `shape`, each sorted and in GEOM's order; with `start`, only its chain.
+// Defined in session_blocks.cpp.
+std::vector<std::vector<TopoDS_Shape>> propagation_chains(const TopoDS_Shape& shape,
+                                                          const TopoDS_Shape& start);
+
+// GEOM's CheckCompoundOfBlocks verdict on `shape` (GEOM's theToleranceC1 for the C1 test,
+// negative for none); `failure` receives the glue analyser's failure. Defined in
+// session_blocks.cpp.
+bool is_compound_of_blocks(const TopoDS_Shape& shape, double tolerance_c1,
+                           std::string& failure);
 
 // What compose_shape_process gives back.
 struct ShapeProcessRun {
@@ -1129,6 +1145,24 @@ class Session {
   // vectors[k] (the original counted), glued (GEOMAlgo_Gluer2) at the block's tolerance.
   py::dict multi_transform(EntityId block_id, const std::vector<std::array<double, 3>>& vectors,
                            const std::vector<int>& counts);
+
+  // ---- GEOM's advanced shapes for block meshing (session_advanced.cpp) --------------- //
+
+  // GEOM's MakeDividedDisk: a disk of `radius` in the plane `orientation` ("xy", "yz",
+  // "zx"), split into quadrangles around an inner square or hexagon whose corners lie at
+  // `ratio` percent of the radius (AdvancedEngine_DividedDiskDriver, copied). One new shell
+  // body; every id constructed.
+  py::dict divided_disk(double radius, double ratio, const std::string& orientation,
+                        const std::string& pattern);
+
+  // GEOM's MakePipeTShape for the wall only (no thickness reduction, chamfer or fillet): the
+  // main pipe along x from -l1 to l1, the branch along z from the main axis to l2, inner
+  // radii r1 and r2 and wall thicknesses w1 and w2. With `partition`, GEOM's block
+  // partition (the quarter split, mirrored and glued). The method of AdvancedEngine's
+  // operations, ported to OCCT calls. Returns {"delta", "groups"}: GEOM's named groups,
+  // each {"name", "kind", "ids"}.
+  py::dict pipe_t_shape(double r1, double w1, double l1, double r2, double w2, double l2,
+                        bool partition);
 
   // ---- snapshot / restore ----------------------------------------------------------- //
 

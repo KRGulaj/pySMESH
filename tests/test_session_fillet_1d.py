@@ -23,6 +23,7 @@ import math
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 import pysmesh as ps
 from pysmesh import EntityId, EntityKind, NameRole, Session
@@ -86,11 +87,13 @@ def arcs_of(s: Session) -> list[EntityId]:
 
 
 def arc_centroid(
-    centre: np.ndarray, towards: np.ndarray, r: float, half: float
-) -> np.ndarray:
+    centre: NDArray[np.float64], towards: NDArray[np.float64], r: float, half: float
+) -> NDArray[np.float64]:
     """The centroid of an arc of half-angle `half` whose bisector points to `towards`."""
     direction = (towards - centre) / np.linalg.norm(towards - centre)
-    return centre + direction * (r * math.sin(half) / half)
+    return np.asarray(
+        centre + direction * (r * math.sin(half) / half), dtype=np.float64
+    )
 
 
 @pytest.mark.parametrize("theta_deg", [60.0, 90.0, 135.0])

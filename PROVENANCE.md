@@ -149,13 +149,16 @@ licence in a comment above them. All are from SALOME GEOM tag `V9_16_0`
 | Function | Upstream file | Local file | Used by |
 |---|---|---|---|
 | `MAX_TOLERANCE`, `isSameEdge`, `isSameFace`, `isSameSolid` | `src/GEOMImpl/GEOMImpl_IShapesOperations.cxx` | `src/bindings/session_locate.cpp` | `Session.find_same` (GEOM's `GetSameIDs` rule) |
-| `GEOMImpl_Fillet1d`, `GEOMImpl_Fillet1dPoint` (the whole class) | `src/GEOMImpl/GEOMImpl_Fillet1d.hxx`, `.cxx` | `src/bindings/geom_fillet1d.hpp`, `.cpp` | `Session.fillet_1d` |
-| `MakeEdgeFromWire` (`GEOMImpl_ShapeDriver`), `AreEdgesC1` (`GEOMImpl_HealingDriver`) | `src/GEOMImpl/GEOMImpl_ShapeDriver.cxx`, `src/GEOMImpl/GEOMImpl_HealingDriver.cxx` | `src/bindings/geom_edge_from_wire.hpp`, `.cpp` | `Session.fillet_1d` (the joining of collinear edges) |
+| `GEOMImpl_Fillet1d`, `GEOMImpl_Fillet1dPoint` (the whole class) | `src/GEOMImpl/GEOMImpl_Fillet1d.hxx`, `.cxx` | `src/bindings/geom_fillet1d.hpp`, `.cpp` (four upstream to-do comments removed, their facts kept as plain comments) | `Session.fillet_1d` |
+| `MakeEdgeFromWire` (`GEOMImpl_ShapeDriver`), `AreEdgesC1` (`GEOMImpl_HealingDriver`) | `src/GEOMImpl/GEOMImpl_ShapeDriver.cxx`, `src/GEOMImpl/GEOMImpl_HealingDriver.cxx` | `src/bindings/geom_edge_from_wire.hpp`, `.cpp` (two upstream to-do comments removed, their facts kept as plain comments) | `Session.fillet_1d` (the joining of collinear edges) |
 | `anotherVertex`, `takePlane`, `addEdgeRelation` (`GEOMImpl_Fillet1dDriver`) | `src/GEOMImpl/GEOMImpl_Fillet1dDriver.cxx` | `src/bindings/session_geomalgo.cpp` | `Session.fillet_1d` |
 | `MakeSmoothingSurfaceUnClosed` (`AdvancedEngine_SmoothingSurfaceDriver`) | `src/AdvancedEngine/AdvancedEngine_SmoothingSurfaceDriver.cxx` | `src/bindings/session_geomalgo.cpp` | `Session.smoothing_surface` |
 | `GEOMImpl_Block6Explorer` (the whole class) | `src/GEOMImpl/GEOMImpl_Block6Explorer.hxx`, `.cxx` | `src/bindings/geom_block6.hpp`, `.cpp` | `Session.make_quad`, `make_quad_from_vertices`, `make_hexa`, `opposite_face`, the block searches |
 | The quad and hexa branches of `GEOMImpl_BlockDriver::Execute` (`BLOCK_FACE_FOUR_EDGES`, `BLOCK_FACE_TWO_EDGES`, `BLOCK_FACE_FOUR_PNT`, `BLOCK_SIX_FACES`, `BLOCK_TWO_FACES`) | `src/GEOMImpl/GEOMImpl_BlockDriver.cxx` | `src/bindings/session_blocks.cpp` | `Session.make_quad`, `make_quad_from_vertices`, `make_hexa` |
 | `IsQuadrangle`, `AddBlocksFrom`, `FindConnected`, `HasAnyConnection`, the steps of `CheckCompoundOfBlocks`, `Propagate`, `GetOppositeFace`, `GetFaceByEdges`, `GetBlockNearPoint` (`GEOMImpl_IBlocksOperations`) | `src/GEOMImpl/GEOMImpl_IBlocksOperations.cxx` | `src/bindings/session_blocks.cpp` | `Session.check_blocks`, `propagation_chain`, `opposite_face`, `face_by_edges`, `find_block_near` |
+| `MakeDiskSquare`, `MakeDiskHexagon`, `TransformShape`, `WPlaneTransform` (`AdvancedEngine_DividedDiskDriver`) | `src/AdvancedEngine/AdvancedEngine_DividedDiskDriver.cxx` | `src/bindings/session_advanced.cpp` | `Session.divided_disk` |
+| `MakePipeTShape`, `MakeQuarterPipeTShape` (`AdvancedEngine_PipeTShapeDriver`) | `src/AdvancedEngine/AdvancedEngine_PipeTShapeDriver.cxx` | `src/bindings/session_advanced.cpp` | `Session.pipe_t_shape` |
+| `MakeWireFromEdges` (`GEOMImpl_ShapeDriver`, its `GEOMImpl_WBM_FixTolerance` mode) | `src/GEOMImpl/GEOMImpl_ShapeDriver.cxx` | `src/bindings/session_advanced.cpp` | `Session.pipe_t_shape` |
 
 Four of these carry OCCT 8.0.1 port changes and nothing else: an iterator header that
 OCCT 8.0.1 removed is replaced by the container header that keeps its typedef, and a
@@ -184,6 +187,19 @@ sewing of six faces (`ShHealOper_Sewing`) is asked to record edges and vertices 
 blocks in the order of the model rather than in a map keyed by shape address, so that a
 tie gives the same block in every run. `Propagate` starts at the named edge. The
 builders run on copies of their inputs, because GEOM's code edits tolerances in place.
+
+`Session.pipe_t_shape` (`src/bindings/session_advanced.cpp`) ports the method of
+`AdvancedEngine_IOperations::MakePipeTShape` for the wall (no thickness reduction,
+chamfer or fillet). GEOM builds it from GEOM operation calls on GEOM objects:
+`MakePipeTShapePartition`, `MakePipeTShapeMirrorAndGlue`, `MakeGroups` and
+`MakeInternalGroup`. pySMESH makes the OCCT and GEOM-algorithm calls that those
+operations make, in GEOM's order, with GEOM's tolerances and argument checks; no GEOM
+operation code is copied for them. Two things differ. The partition's
+`GEOMAlgo_Splitter` runs serially, so that every run gives the same result. GEOM finds
+the pipe-end faces in place of the common of the shape and its bounding box; pySMESH
+takes the shape's faces that lie on that box (`GEOMAlgo_FinderShapeOn2`), which are the
+same faces, sorted the same way. pySMESH also adds the faces on the outer cylinders by
+the rule of `MakeInternalGroup`, a group GEOM does not make.
 
 One function is adapted, not copied unchanged. `mesh_as_geom` in
 `src/bindings/session_locate.cpp` takes the steps of `GEOMAlgo_AlgoTools::MeshShape` and

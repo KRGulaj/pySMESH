@@ -343,6 +343,11 @@ tells whether the bodies form a compound of glued blocks, and
 `propagation_chain` gives the chain of opposite edges a block mesher meshes
 with one number of segments.
 
+`divided_disk` adds a disk cut into quadrangles, and `pipe_t_shape` adds a T
+of two pipes cut into blocks, as GEOM's `MakeDividedDisk` and
+`MakePipeTShape` do. The T-shape comes with GEOM's named groups: the pipe
+ends, the edge chains and the inner and outer faces.
+
 `make_filling` takes `support_faces`: the filled surface is tangent to each
 named face along its boundary edge, and those edges keep their ids.
 

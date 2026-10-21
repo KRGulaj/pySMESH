@@ -920,6 +920,40 @@ class BlocksFinding:
 
 
 @dataclass(frozen=True)
+class PipeTShapeGroup:
+    """One named group of :meth:`Session.pipe_t_shape`'s result.
+
+    Attributes:
+        name: GEOM's name of the group: ``"JUNCTION_FACE_1"``, ``"JUNCTION_FACE_2"``,
+            ``"JUNCTION_FACE_3"`` (the pipe ends), ``"THICKNESS"``,
+            ``"CIRCULAR_QUARTER_PIPE"``, ``"HALF_LENGTH_MAIN_PIPE"``,
+            ``"HALF_LENGTH_INCIDENT_PIPE"``, ``"FLANGE"`` (chains of edges a block mesher
+            gives one number of segments), ``"INTERNAL_FACES"``; and
+            ``"EXTERNAL_FACES"``, which GEOM does not name.
+        kind: ``FACE`` or ``EDGE``.
+        ids: The ids of the group's faces or edges, ascending, each once.
+    """
+
+    name: str
+    kind: EntityKind
+    ids: tuple[EntityId, ...]
+
+
+@dataclass(frozen=True)
+class PipeTShape:
+    """The answer of :meth:`Session.pipe_t_shape`.
+
+    Attributes:
+        delta: The delta of the operation: every id of the T-shape in ``created``.
+        groups: GEOM's named groups, in GEOM's order (the junction faces, the edge chains,
+            the internal faces), then the external faces.
+    """
+
+    delta: HistoryDelta
+    groups: tuple[PipeTShapeGroup, ...]
+
+
+@dataclass(frozen=True)
 class BlocksCheck:
     """The answer of :meth:`Session.check_blocks`.
 
@@ -1225,6 +1259,24 @@ def _blocks_check(raw: dict[str, object]) -> BlocksCheck:
             BlocksFinding(
                 kind=BlocksErrorKind(cast("str", row["kind"])),
                 ids=cast("NDArray[np.int64]", row["ids"]),
+            )
+            for row in rows
+        ),
+    )
+
+
+def _pipe_t_shape(raw: dict[str, object]) -> PipeTShape:
+    """Wrap a raw ``_core`` pipe_t_shape dict in its frozen dataclass."""
+    rows = cast("list[dict[str, object]]", raw["groups"])
+    return PipeTShape(
+        delta=_delta(cast("dict[str, object]", raw["delta"])),
+        groups=tuple(
+            PipeTShapeGroup(
+                name=cast("str", row["name"]),
+                kind=EntityKind(cast("str", row["kind"])),
+                ids=tuple(
+                    EntityId(int(i)) for i in cast("NDArray[np.int64]", row["ids"])
+                ),
             )
             for row in rows
         ),

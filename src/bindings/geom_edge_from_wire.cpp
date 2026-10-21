@@ -13,7 +13,8 @@
 // MakeEdgeFromWire hands back the history of the ShapeFix_Shape it runs on the wire
 // (theFixHistory), read from the fixer's own context after Perform, so a caller can carry
 // ids across it; and its one Standard_Failure::Raise, gone in OCCT 8.0.1, is a throw of the
-// same exception with the same text.
+// same exception with the same text. Two upstream to-do comments on CurType are removed;
+// each keeps its fact as a plain comment.
 
 #include "geom_edge_from_wire.hpp"
 
@@ -75,7 +76,7 @@ TopoDS_Edge MakeEdgeFromWire(const TopoDS_Shape& aWire,
     TColStd_SequenceOfReal FparSeq;
     TColStd_SequenceOfReal LparSeq;
     TColStd_SequenceOfReal TolSeq;
-    GeomAbs_CurveType CurType = GeomAbs_OtherCurve; // todo: refactor: CurType must be explicitly initialized to avoid warning (see below)
+    GeomAbs_CurveType CurType = GeomAbs_OtherCurve; // CurType is initialized explicitly to avoid a warning (see below)
     TopoDS_Vertex FirstVertex, LastVertex;
     Standard_Real aPntShiftDist = 0.;
 
@@ -107,7 +108,7 @@ TopoDS_Edge MakeEdgeFromWire(const TopoDS_Shape& aWire,
         LocSeq.Append(aLocShape);
         FparSeq.Append(fpar);
         LparSeq.Append(lpar);
-        CurType = aType;                     // todo: refactor: CurType must be explicitly initialized to avoid warning (see above)
+        CurType = aType;                     // CurType is initialized explicitly to avoid a warning (see above)
         FirstVertex = wexp.CurrentVertex();
       }
       else

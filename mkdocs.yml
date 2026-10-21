@@ -91,6 +91,7 @@ nav:
       - Geometry operations: guides/geometry-operations.md
       - Mesh editing: guides/mesh-editing.md
       - Free meshing with NETGEN: guides/netgen.md
+      - Block decomposition: guides/block-decomposition.md
   - Benchmarks:
       - Tessellation against gmsh: benchmarks/gmsh-vs-pysmesh.md
   - API Reference:

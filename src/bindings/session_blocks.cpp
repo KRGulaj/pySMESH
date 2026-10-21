@@ -38,9 +38,11 @@
 #include <GEOMAlgo_ListOfCoupleOfShapes.hxx>
 #include <Geom_Line.hxx>
 #include <Message_ProgressScope.hxx>
+#include <GEOMUtils.hxx>
 #include <ShHealOper_Sewing.hxx>
 #include <TColStd_Array2OfInteger.hxx>
 #include <TColStd_MapOfInteger.hxx>
+#include <TopTools_DataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopTools_MapOfShape.hxx>
@@ -1168,7 +1170,186 @@ struct BCError {
   std::vector<TopoDS_Shape> incriminated;
 };
 
+// GEOMImpl_IBlocksOperations::CheckCompoundOfBlocks, copied. pySMESH: the children of the
+// compound are checked one by one (AddBlocksFrom recurses into the compound in the same
+// order), so that progress and cancel come between them when `steps` is given (one step
+// per child, and two more); the errors keep their shapes, which the session names by id;
+// and the failure of the glue analyser is a failure text.
+Standard_Boolean CheckCompoundOfBlocks(const TopoDS_Shape& aBlockOrComp,
+                                       const Standard_Real theToleranceC1,
+                                       std::vector<BCError>& theErrors, std::string& failure,
+                                       Message_ProgressScope* steps)
+{
+  Standard_Boolean isCompOfBlocks = Standard_True;
+  // 1. Separate blocks from non-blocks
+  TopTools_ListOfShape NOT; // Not blocks
+  TopTools_ListOfShape EXT; // Hexahedral solids, having degenerated and/or seam edges
+  TopTools_ListOfShape BLO; // All blocks from the given compound
+  TopTools_ListOfShape NOQ; // All non-quadrangular faces
+  for (TopoDS_Iterator anIt (aBlockOrComp);
+       anIt.More() && (steps == nullptr || steps->More()); anIt.Next()) {
+    AddBlocksFrom(anIt.Value(), BLO, NOT, EXT, NOQ, theToleranceC1);
+    if (steps != nullptr) steps->Next();
+  }
+
+  // Report non-blocks
+  if (NOT.Extent() > 0) {
+    isCompOfBlocks = Standard_False;
+    BCError anErr;
+    anErr.error = NOT_BLOCK;
+    TopTools_ListIteratorOfListOfShape it (NOT);
+    for (; it.More(); it.Next()) {
+      anErr.incriminated.push_back(it.Value());
+    }
+    theErrors.push_back(anErr);
+  }
+
+  // Report solids, having degenerated and/or seam edges
+  if (EXT.Extent() > 0) {
+    isCompOfBlocks = Standard_False;
+    BCError anErr;
+    anErr.error = EXTRA_EDGE;
+    TopTools_ListIteratorOfListOfShape it (EXT);
+    for (; it.More(); it.Next()) {
+      anErr.incriminated.push_back(it.Value());
+    }
+    theErrors.push_back(anErr);
+  }
+
+  Standard_Integer nbBlocks = BLO.Extent();
+  if (nbBlocks == 0) {
+    isCompOfBlocks = Standard_False;
+  }
+  if (nbBlocks > 1 && (steps == nullptr || steps->More())) {
+    // Prepare data for 2. and 3.
+    TColStd_Array2OfInteger aRelations (1, nbBlocks, 1, nbBlocks);
+    aRelations.Init(REL_NOT_CONNECTED);
+
+    TopTools_IndexedMapOfShape mapBlocks;
+
+    BRep_Builder BB;
+    TopoDS_Compound aComp;
+    BB.MakeCompound(aComp);
+
+    TopTools_ListIteratorOfListOfShape BLOit (BLO);
+    for (; BLOit.More(); BLOit.Next()) {
+      mapBlocks.Add(BLOit.Value());
+      BB.Add(aComp, BLOit.Value());
+    }
+
+    // 2. Find glued blocks (having shared faces)
+    TopTools_IndexedDataMapOfShapeListOfShape mapFaceBlocks;
+    GEOMImpl_Block6Explorer::MapShapesAndAncestors
+      (aComp, TopAbs_FACE, TopAbs_SOLID, mapFaceBlocks);
+
+    Standard_Integer prevInd = 0, curInd = 0;
+    Standard_Integer ind = 1, nbFaces = mapFaceBlocks.Extent();
+    for (; ind <= nbFaces; ind++) {
+      const TopTools_ListOfShape& aGluedBlocks = mapFaceBlocks.FindFromIndex(ind);
+      if (aGluedBlocks.Extent() > 1) { // Shared face found
+        TopTools_ListIteratorOfListOfShape aGluedBlocksIt (aGluedBlocks);
+        TopoDS_Shape prevBlock, curBlock;
+        for (; aGluedBlocksIt.More(); aGluedBlocksIt.Next()) {
+          curBlock = aGluedBlocksIt.Value();
+          if (!prevBlock.IsNull()) {
+            prevInd = mapBlocks.FindIndex(prevBlock);
+            curInd  = mapBlocks.FindIndex(curBlock);
+            aRelations.SetValue(prevInd, curInd, REL_OK);
+            aRelations.SetValue(curInd, prevInd, REL_OK);
+          }
+          prevBlock = curBlock;
+        }
+      }
+    }
+
+    // 3. Find not glued blocks
+    GEOMAlgo_GlueAnalyser aGD;
+
+    aGD.SetShape(aComp);
+    aGD.SetTolerance(Precision::Confusion());
+    aGD.SetCheckGeometry(Standard_True);
+    aGD.Perform();
+    if (steps != nullptr) steps->Next();
+
+    Standard_Integer iErr;
+    iErr = aGD.ErrorStatus();
+    if (iErr) {
+      failure = "GEOMAlgo_GlueAnalyser failed with code " + std::to_string(iErr);
+    }
+
+    // Report not glued blocks
+    if (failure.empty() && aGD.HasSolidsToGlue()) {
+      isCompOfBlocks = Standard_False;
+      Standard_Integer aSx1Ind, aSx2Ind;
+
+      const GEOMAlgo_ListOfCoupleOfShapes& aLCS = aGD.SolidsToGlue();
+      GEOMAlgo_ListIteratorOfListOfCoupleOfShapes aItCS (aLCS);
+      for (; aItCS.More(); aItCS.Next()) {
+        const GEOMAlgo_CoupleOfShapes& aCS = aItCS.Value();
+        const TopoDS_Shape& aSx1 = aCS.Shape1();
+        const TopoDS_Shape& aSx2 = aCS.Shape2();
+
+        aSx1Ind = mapBlocks.FindIndex(aSx1);
+        aSx2Ind = mapBlocks.FindIndex(aSx2);
+        aRelations.SetValue(aSx1Ind, aSx2Ind, NOT_GLUED);
+        aRelations.SetValue(aSx2Ind, aSx1Ind, NOT_GLUED);
+
+        BCError anErr;
+        anErr.error = NOT_GLUED;
+        anErr.incriminated.push_back(aSx1);
+        anErr.incriminated.push_back(aSx2);
+        theErrors.push_back(anErr);
+      }
+    }
+
+    if (failure.empty()) {
+      // 4. Find largest set of connected (good connection or not glued) blocks
+      Standard_Integer ibl = 1;
+      TColStd_MapOfInteger aProcessedMap;
+      TColStd_MapOfInteger aLargestSet;
+      TColStd_MapOfInteger aCurrentSet;
+      for (ibl = 1; ibl <= nbBlocks; ibl++) {
+        if (!aProcessedMap.Contains(ibl)) {
+          aCurrentSet.Clear();
+          FindConnected(ibl, aRelations, aProcessedMap, aCurrentSet);
+          if (aCurrentSet.Extent() > aLargestSet.Extent()) {
+            aLargestSet = aCurrentSet;
+          }
+        }
+      }
+
+      // 5. Report all blocks, isolated from <aLargestSet>
+      BCError anErr;
+      anErr.error = NOT_CONNECTED;
+      Standard_Boolean hasIsolated = Standard_False;
+      for (ibl = 1; ibl <= nbBlocks; ibl++) {
+        if (!aLargestSet.Contains(ibl)) {
+          aProcessedMap.Clear();
+          if (!HasAnyConnection(ibl, aLargestSet, aRelations, aProcessedMap)) {
+            // report connection absence
+            hasIsolated = Standard_True;
+            anErr.incriminated.push_back(mapBlocks.FindKey(ibl));
+          }
+        }
+      }
+      if (hasIsolated) {
+        isCompOfBlocks = Standard_False;
+        theErrors.push_back(anErr);
+      }
+    }
+    if (steps != nullptr) steps->Next();
+  }
+  return isCompOfBlocks;
+}
+
 }  // namespace
+
+bool is_compound_of_blocks(const TopoDS_Shape& shape, double tolerance_c1,
+                           std::string& failure) {
+  std::vector<BCError> errors;
+  return CheckCompoundOfBlocks(shape, tolerance_c1, errors, failure, nullptr) &&
+         failure.empty();
+}
 
 py::dict Session::check_blocks(const std::optional<std::vector<EntityId>>& entity_ids,
                                double angular_tolerance, const py::object& progress,
@@ -1197,170 +1378,10 @@ py::dict Session::check_blocks(const std::optional<std::vector<EntityId>>& entit
   {
     py::gil_scoped_release release;
     try {
-      // GEOMImpl_IBlocksOperations::CheckCompoundOfBlocks, copied. pySMESH: the bodies are
-      // checked one by one (AddBlocksFrom recurses into the compound in the same order), so
-      // that progress and cancel come between them; the errors keep their shapes, which
-      // the session names by id; and the failure of the glue analyser is a failure text.
       Message_ProgressScope steps(driver.range(), "check_blocks",
                                   static_cast<double>(bodies.size()) + 2.0);
-
-      // 1. Separate blocks from non-blocks
-      TopTools_ListOfShape NOT; // Not blocks
-      TopTools_ListOfShape EXT; // Hexahedral solids, having degenerated and/or seam edges
-      TopTools_ListOfShape BLO; // All blocks from the given compound
-      TopTools_ListOfShape NOQ; // All non-quadrangular faces
-      for (TopoDS_Iterator anIt (aBlockOrComp); anIt.More() && steps.More(); anIt.Next()) {
-        AddBlocksFrom(anIt.Value(), BLO, NOT, EXT, NOQ, theToleranceC1);
-        steps.Next();
-      }
-
-      // Report non-blocks
-      if (NOT.Extent() > 0) {
-        isCompOfBlocks = Standard_False;
-        BCError anErr;
-        anErr.error = NOT_BLOCK;
-        TopTools_ListIteratorOfListOfShape it (NOT);
-        for (; it.More(); it.Next()) {
-          anErr.incriminated.push_back(it.Value());
-        }
-        theErrors.push_back(anErr);
-      }
-
-      // Report solids, having degenerated and/or seam edges
-      if (EXT.Extent() > 0) {
-        isCompOfBlocks = Standard_False;
-        BCError anErr;
-        anErr.error = EXTRA_EDGE;
-        TopTools_ListIteratorOfListOfShape it (EXT);
-        for (; it.More(); it.Next()) {
-          anErr.incriminated.push_back(it.Value());
-        }
-        theErrors.push_back(anErr);
-      }
-
-      Standard_Integer nbBlocks = BLO.Extent();
-      if (nbBlocks == 0) {
-        isCompOfBlocks = Standard_False;
-      }
-      if (nbBlocks > 1 && steps.More()) {
-        // Prepare data for 2. and 3.
-        TColStd_Array2OfInteger aRelations (1, nbBlocks, 1, nbBlocks);
-        aRelations.Init(REL_NOT_CONNECTED);
-
-        TopTools_IndexedMapOfShape mapBlocks;
-
-        BRep_Builder BB;
-        TopoDS_Compound aComp;
-        BB.MakeCompound(aComp);
-
-        TopTools_ListIteratorOfListOfShape BLOit (BLO);
-        for (; BLOit.More(); BLOit.Next()) {
-          mapBlocks.Add(BLOit.Value());
-          BB.Add(aComp, BLOit.Value());
-        }
-
-        // 2. Find glued blocks (having shared faces)
-        TopTools_IndexedDataMapOfShapeListOfShape mapFaceBlocks;
-        GEOMImpl_Block6Explorer::MapShapesAndAncestors
-          (aComp, TopAbs_FACE, TopAbs_SOLID, mapFaceBlocks);
-
-        Standard_Integer prevInd = 0, curInd = 0;
-        Standard_Integer ind = 1, nbFaces = mapFaceBlocks.Extent();
-        for (; ind <= nbFaces; ind++) {
-          const TopTools_ListOfShape& aGluedBlocks = mapFaceBlocks.FindFromIndex(ind);
-          if (aGluedBlocks.Extent() > 1) { // Shared face found
-            TopTools_ListIteratorOfListOfShape aGluedBlocksIt (aGluedBlocks);
-            TopoDS_Shape prevBlock, curBlock;
-            for (; aGluedBlocksIt.More(); aGluedBlocksIt.Next()) {
-              curBlock = aGluedBlocksIt.Value();
-              if (!prevBlock.IsNull()) {
-                prevInd = mapBlocks.FindIndex(prevBlock);
-                curInd  = mapBlocks.FindIndex(curBlock);
-                aRelations.SetValue(prevInd, curInd, REL_OK);
-                aRelations.SetValue(curInd, prevInd, REL_OK);
-              }
-              prevBlock = curBlock;
-            }
-          }
-        }
-
-        // 3. Find not glued blocks
-        GEOMAlgo_GlueAnalyser aGD;
-
-        aGD.SetShape(aComp);
-        aGD.SetTolerance(Precision::Confusion());
-        aGD.SetCheckGeometry(Standard_True);
-        aGD.Perform();
-        steps.Next();
-
-        Standard_Integer iErr;
-        iErr = aGD.ErrorStatus();
-        if (iErr) {
-          failure = "GEOMAlgo_GlueAnalyser failed with code " + std::to_string(iErr);
-        }
-
-        // Report not glued blocks
-        if (failure.empty() && aGD.HasSolidsToGlue()) {
-          isCompOfBlocks = Standard_False;
-          Standard_Integer aSx1Ind, aSx2Ind;
-
-          const GEOMAlgo_ListOfCoupleOfShapes& aLCS = aGD.SolidsToGlue();
-          GEOMAlgo_ListIteratorOfListOfCoupleOfShapes aItCS (aLCS);
-          for (; aItCS.More(); aItCS.Next()) {
-            const GEOMAlgo_CoupleOfShapes& aCS = aItCS.Value();
-            const TopoDS_Shape& aSx1 = aCS.Shape1();
-            const TopoDS_Shape& aSx2 = aCS.Shape2();
-
-            aSx1Ind = mapBlocks.FindIndex(aSx1);
-            aSx2Ind = mapBlocks.FindIndex(aSx2);
-            aRelations.SetValue(aSx1Ind, aSx2Ind, NOT_GLUED);
-            aRelations.SetValue(aSx2Ind, aSx1Ind, NOT_GLUED);
-
-            BCError anErr;
-            anErr.error = NOT_GLUED;
-            anErr.incriminated.push_back(aSx1);
-            anErr.incriminated.push_back(aSx2);
-            theErrors.push_back(anErr);
-          }
-        }
-
-        if (failure.empty()) {
-          // 4. Find largest set of connected (good connection or not glued) blocks
-          Standard_Integer ibl = 1;
-          TColStd_MapOfInteger aProcessedMap;
-          TColStd_MapOfInteger aLargestSet;
-          TColStd_MapOfInteger aCurrentSet;
-          for (ibl = 1; ibl <= nbBlocks; ibl++) {
-            if (!aProcessedMap.Contains(ibl)) {
-              aCurrentSet.Clear();
-              FindConnected(ibl, aRelations, aProcessedMap, aCurrentSet);
-              if (aCurrentSet.Extent() > aLargestSet.Extent()) {
-                aLargestSet = aCurrentSet;
-              }
-            }
-          }
-
-          // 5. Report all blocks, isolated from <aLargestSet>
-          BCError anErr;
-          anErr.error = NOT_CONNECTED;
-          Standard_Boolean hasIsolated = Standard_False;
-          for (ibl = 1; ibl <= nbBlocks; ibl++) {
-            if (!aLargestSet.Contains(ibl)) {
-              aProcessedMap.Clear();
-              if (!HasAnyConnection(ibl, aLargestSet, aRelations, aProcessedMap)) {
-                // report connection absence
-                hasIsolated = Standard_True;
-                anErr.incriminated.push_back(mapBlocks.FindKey(ibl));
-              }
-            }
-          }
-          if (hasIsolated) {
-            isCompOfBlocks = Standard_False;
-            theErrors.push_back(anErr);
-          }
-        }
-        steps.Next();
-      }
+      isCompOfBlocks =
+          CheckCompoundOfBlocks(aBlockOrComp, theToleranceC1, theErrors, failure, &steps);
     } catch (const std::exception& e) {
       failure = failure_text(e);
     }
@@ -1395,80 +1416,118 @@ py::dict Session::check_blocks(const std::optional<std::vector<EntityId>>& entit
 
 // ---- propagation_chain -------------------------------------------------------------- //
 
+std::vector<std::vector<TopoDS_Shape>> propagation_chains(const TopoDS_Shape& aShape,
+                                                          const TopoDS_Shape& theStart) {
+  // GEOMImpl_IBlocksOperations::Propagate, copied: from each edge not yet in a chain, the
+  // edge's wires are walked pass by pass; a wire of exactly 4 edges holding an edge of the
+  // chain adds its opposite edge. Each chain is sorted (GEOMUtils::SortShapes), and the
+  // chains are sorted by their first edges. pySMESH: with `theStart`, only the chain that
+  // holds it is built; the chains are returned rather than stored as GEOM groups.
+  TopTools_IndexedDataMapOfShapeListOfShape MEW;
+  GEOMImpl_Block6Explorer::MapShapesAndAncestors
+    (aShape, TopAbs_EDGE, TopAbs_WIRE, MEW);
+  Standard_Integer ie, nbEdges = MEW.Extent();
+
+  TopTools_MapOfShape mapAcceptedEdges;
+
+  // Sort shapes in current chain (Mantis issue 21053)
+  TopTools_DataMapOfShapeListOfShape aMapChains;
+  TopTools_ListOfShape aFirstInChains;
+
+  for (ie = 1; ie <= nbEdges; ie++) {
+    TopoDS_Shape curE = MEW.FindKey(ie);
+    if (!theStart.IsNull()) {
+      if (ie > 1) break;
+      curE = MEW.FindKey(MEW.FindIndex(theStart));
+    }
+
+    if (mapAcceptedEdges.Contains(curE)) continue;
+
+    // Build the chain
+    TopTools_ListOfShape currentChain;
+    TopTools_ListOfShape listPrevEdges;
+
+    currentChain.Append(curE);
+    listPrevEdges.Append(curE);
+    mapAcceptedEdges.Add(curE);
+
+    // Collect all edges pass by pass
+    while (listPrevEdges.Extent() > 0) {
+      // List of edges, added to chain on this cycle pass
+      TopTools_ListOfShape listCurEdges;
+
+      // Find the next portion of edges
+      TopTools_ListIteratorOfListOfShape itE (listPrevEdges);
+      for (; itE.More(); itE.Next()) {
+        TopoDS_Shape anE = itE.Value();
+
+        // Iterate on faces, having edge <anE>
+        TopTools_ListIteratorOfListOfShape itW (MEW.FindFromKey(anE));
+        for (; itW.More(); itW.Next()) {
+          TopoDS_Shape aW = itW.Value();
+          TopoDS_Shape anOppE;
+
+          BRepTools_WireExplorer aWE (TopoDS::Wire(aW));
+          Standard_Integer nb = 1, found = 0;
+          TopTools_Array1OfShape anEdges (1,4);
+          for (; aWE.More(); aWE.Next(), nb++) {
+            if (nb > 4) {
+              found = 0;
+              break;
+            }
+            anEdges(nb) = aWE.Current();
+            if (anEdges(nb).IsSame(anE)) found = nb;
+          }
+
+          if (nb == 5 && found > 0) {
+            // Quadrangle face found, get an opposite edge
+            Standard_Integer opp = found + 2;
+            if (opp > 4) opp -= 4;
+            anOppE = anEdges(opp);
+
+            if (!mapAcceptedEdges.Contains(anOppE)) {
+              // Add found edge to the chain
+              currentChain.Append(anOppE);
+              listCurEdges.Append(anOppE);
+              mapAcceptedEdges.Add(anOppE);
+            }
+          } // if (nb == 5 && found > 0)
+        } // for (; itF.More(); itF.Next())
+      } // for (; itE.More(); itE.Next())
+
+      listPrevEdges = listCurEdges;
+    } // while (listPrevEdges.Extent() > 0)
+
+    // Sort shapes in current chain (Mantis issue 21053)
+    GEOMUtils::SortShapes(currentChain, Standard_False);
+    aFirstInChains.Append(currentChain.First());
+    aMapChains.Bind(currentChain.First(), currentChain);
+  }
+
+  // Sort chains (Mantis issue 21053)
+  GEOMUtils::SortShapes(aFirstInChains, Standard_False);
+
+  std::vector<std::vector<TopoDS_Shape>> out;
+  TopTools_ListIteratorOfListOfShape aChainsIt (aFirstInChains);
+  for (; aChainsIt.More(); aChainsIt.Next()) {
+    std::vector<TopoDS_Shape> chain;
+    for (const TopoDS_Shape& anEdge : aMapChains.Find(aChainsIt.Value())) {
+      chain.push_back(anEdge);
+    }
+    out.push_back(std::move(chain));
+  }
+  return out;
+}
+
 py::array_t<std::int64_t> Session::propagation_chain(EntityId edge_id) const {
   const char* op = "propagation_chain";
   const TopoDS_Edge edge = sole_edge(op, edge_id);
-  // GEOMImpl_IBlocksOperations::Propagate, copied for the one chain that holds the edge:
-  // the edge's wires are walked pass by pass; a wire of exactly 4 edges holding an edge of
-  // the chain adds its opposite edge. pySMESH: the chain starts at the named edge rather
-  // than at each edge of the shape in turn, and each edge is given by its label (the lowest
-  // live id that denotes it), sorted, instead of GEOM's sorted sub-shapes
-  // (GEOMUtils::SortShapes).
-  TopTools_IndexedDataMapOfShapeListOfShape MEW;
-  GEOMImpl_Block6Explorer::MapShapesAndAncestors
-    (state_.root, TopAbs_EDGE, TopAbs_WIRE, MEW);
-
-  TopTools_MapOfShape mapAcceptedEdges;
-  TopoDS_Shape curE = MEW.FindKey(MEW.FindIndex(edge));
-
-  // Build the chain
-  TopTools_ListOfShape currentChain;
-  TopTools_ListOfShape listPrevEdges;
-
-  currentChain.Append(curE);
-  listPrevEdges.Append(curE);
-  mapAcceptedEdges.Add(curE);
-
-  // Collect all edges pass by pass
-  while (listPrevEdges.Extent() > 0) {
-    // List of edges, added to chain on this cycle pass
-    TopTools_ListOfShape listCurEdges;
-
-    // Find the next portion of edges
-    TopTools_ListIteratorOfListOfShape itE (listPrevEdges);
-    for (; itE.More(); itE.Next()) {
-      TopoDS_Shape anE = itE.Value();
-
-      // Iterate on faces, having edge <anE>
-      TopTools_ListIteratorOfListOfShape itW (MEW.FindFromKey(anE));
-      for (; itW.More(); itW.Next()) {
-        TopoDS_Shape aW = itW.Value();
-        TopoDS_Shape anOppE;
-
-        BRepTools_WireExplorer aWE (TopoDS::Wire(aW));
-        Standard_Integer nb = 1, found = 0;
-        TopTools_Array1OfShape anEdges (1,4);
-        for (; aWE.More(); aWE.Next(), nb++) {
-          if (nb > 4) {
-            found = 0;
-            break;
-          }
-          anEdges(nb) = aWE.Current();
-          if (anEdges(nb).IsSame(anE)) found = nb;
-        }
-
-        if (nb == 5 && found > 0) {
-          // Quadrangle face found, get an opposite edge
-          Standard_Integer opp = found + 2;
-          if (opp > 4) opp -= 4;
-          anOppE = anEdges(opp);
-
-          if (!mapAcceptedEdges.Contains(anOppE)) {
-            // Add found edge to the chain
-            currentChain.Append(anOppE);
-            listCurEdges.Append(anOppE);
-            mapAcceptedEdges.Add(anOppE);
-          }
-        } // if (nb == 5 && found > 0)
-      } // for (; itF.More(); itF.Next())
-    } // for (; itE.More(); itE.Next())
-
-    listPrevEdges = listCurEdges;
-  } // while (listPrevEdges.Extent() > 0)
-
+  // The chain that holds the edge, each edge by its label (the lowest live id that denotes
+  // it), sorted.
+  const std::vector<std::vector<TopoDS_Shape>> chains = propagation_chains(state_.root, edge);
   std::vector<EntityId> ids;
-  for (TopTools_ListIteratorOfListOfShape it (currentChain); it.More(); it.Next()) {
-    ids.push_back(label_of(op, it.Value()));
+  for (const TopoDS_Shape& anEdge : chains.front()) {
+    ids.push_back(label_of(op, anEdge));
   }
   std::sort(ids.begin(), ids.end());
   ids.erase(std::unique(ids.begin(), ids.end()), ids.end());

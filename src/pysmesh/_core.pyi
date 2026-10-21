@@ -561,6 +561,19 @@ class Session:
         vectors: list[tuple[float, float, float]],
         counts: list[int],
     ) -> dict[str, object]: ...
+    def divided_disk(
+        self, radius: float, ratio: float, orientation: str, pattern: str
+    ) -> dict[str, object]: ...
+    def pipe_t_shape(
+        self,
+        r1: float,
+        w1: float,
+        l1: float,
+        r2: float,
+        w2: float,
+        l2: float,
+        partition: bool,
+    ) -> dict[str, object]: ...
     def entity_types(self, kind: str) -> dict[str, object]: ...
     def surface_parameters(self, face_ids: list[int]) -> dict[str, object]: ...
     def bounding_boxes(self, kind: str) -> dict[str, object]: ...

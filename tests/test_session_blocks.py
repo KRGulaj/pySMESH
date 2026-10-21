@@ -275,7 +275,7 @@ def six_faces_of_a_box(s: Session) -> list[EntityId]:
         [(0.0, 0.0, 0.0), (0.0, 3.0, 0.0), (0.0, 3.0, 4.0), (0.0, 0.0, 4.0)],
         [(2.0, 0.0, 0.0), (2.0, 3.0, 0.0), (2.0, 3.0, 4.0), (2.0, 0.0, 4.0)],
     ):
-        faces.append(quad_on_lines(s, quad))  # type: ignore[arg-type]
+        faces.append(quad_on_lines(s, quad))
     return faces
 
 

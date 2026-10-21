@@ -182,6 +182,10 @@ void bind_session(py::module_& m) {
            py::arg("pz"))
       .def("multi_transform", &Session::multi_transform, py::arg("block_id"),
            py::arg("vectors"), py::arg("counts"))
+      .def("divided_disk", &Session::divided_disk, py::arg("radius"), py::arg("ratio"),
+           py::arg("orientation"), py::arg("pattern"))
+      .def("pipe_t_shape", &Session::pipe_t_shape, py::arg("r1"), py::arg("w1"),
+           py::arg("l1"), py::arg("r2"), py::arg("w2"), py::arg("l2"), py::arg("partition"))
       .def("entity_types", &Session::entity_types, py::arg("kind"))
       .def("surface_parameters", &Session::surface_parameters, py::arg("face_ids"))
       .def("bounding_boxes", &Session::bounding_boxes, py::arg("kind"))

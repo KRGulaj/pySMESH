@@ -12,6 +12,7 @@ across per-area translation units; see the package docstring for the whole surfa
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Literal
 
 import numpy as np
 from numpy.typing import NDArray
@@ -23,11 +24,13 @@ from ._types import (
     CancelPredicate,
     EntityId,
     HistoryDelta,
+    PipeTShape,
     ProgressCallback,
     Vec3,
     _blocks_check,
     _delta,
     _ids,
+    _pipe_t_shape,
 )
 
 
@@ -343,5 +346,122 @@ class _BlockOps(_SessionBase):
         return _delta(
             self._s.multi_transform(
                 int(block), _vectors(where, vectors), _counts(where, counts)
+            )
+        )
+
+    def divided_disk(
+        self,
+        radius: float,
+        ratio: float,
+        *,
+        orientation: Literal["xy", "yz", "zx"] = "xy",
+        pattern: Literal["square", "hexagon"] = "square",
+    ) -> HistoryDelta:
+        """Add a disk divided into quadrangles, for a block mesh of a pipe's cross-section.
+
+        GEOM's ``MakeDividedDisk``: the geometry code of
+        ``AdvancedEngine_DividedDiskDriver``, copied into pySMESH. The disk is centred at
+        the origin in the plane ``orientation`` (GEOM's 1 = OXY, 2 = OYZ, 3 = OZX; the
+        plane's normal is z, x and y). Its faces are planar quadrangles:
+
+        * ``"square"``: an inner square whose corners lie on the plane's axes at
+          ``a = ratio / 100 * radius`` from the centre (a square of side ``a sqrt(2)``
+          turned by 45 degrees), and 4 faces between it and the circle; 5 faces.
+        * ``"hexagon"``: an inner regular hexagon whose corners lie at ``a`` from the
+          centre, cut into 6 quadrangles at the centre, and 12 faces between it and the
+          circle; 18 faces.
+
+        ``ratio`` is GEOM's ``theRatio``, the distance of the inner block's corners from
+        the centre in percent of the radius (GEOM's builder passes 67). The result is one
+        shell body; every id is ``CONSTRUCTED``. Sweep it (:meth:`extrude`) to get a
+        pipe of hexahedral blocks.
+
+        Args:
+            radius: The disk's radius, above 1e-7.
+            ratio: Strictly between 0 and 100.
+            orientation: The plane of the disk.
+            pattern: The division pattern.
+
+        Returns:
+            The delta: the shell's faces, edges and vertices in ``created``.
+
+        Raises:
+            PysmeshError: If ``radius`` is not above 1e-7, ``ratio`` is not strictly
+                between 0 and 100, a value is not finite, or ``orientation`` or
+                ``pattern`` is not one of the names above.
+        """
+        return _delta(
+            self._s.divided_disk(float(radius), float(ratio), orientation, pattern)
+        )
+
+    def pipe_t_shape(
+        self,
+        main_radius: float,
+        main_thickness: float,
+        main_half_length: float,
+        branch_radius: float,
+        branch_thickness: float,
+        branch_half_length: float,
+        *,
+        partition: bool = True,
+    ) -> PipeTShape:
+        """Add the wall of a T junction of two pipes, divided into blocks for a hex mesh.
+
+        GEOM's ``MakePipeTShape`` for the wall only: no thickness reduction, chamfer or
+        fillet (GEOM's ``theRL`` ... ``theLthinI`` all 0). The method of GEOM's advanced
+        operations is ported to OCCT calls, step by step.
+
+        **Placement, as GEOM's.** The main pipe runs along x from ``-main_half_length``
+        to ``+main_half_length``; the branch runs along +z from the main pipe's axis
+        (``z = 0``) to ``z = branch_half_length``: that is the branch's whole length from
+        the axis, which GEOM calls its half length. The radii are the inner radii; each
+        wall is ``thickness`` thick.
+
+        **partition** (GEOM's ``theHexMesh``, default true). The quarter ``x <= 0, y <= 0``
+        is cut by the plane ``z = 0``, by the plane through the y axis towards
+        ``(R1+W1, 0, (L1 + R2+W2) / 2)`` (when the outer radii differ), and by the face
+        across the wall where the pipes meet; GEOM checks the quarter is a compound of
+        blocks; it is mirrored in ``x = 0`` and ``y = 0`` and the four quarters' faces are
+        glued. Without it the wall is one solid.
+
+        **Groups.** GEOM's named groups, in GEOM's order: with ``partition``, the three
+        pipe ends (``JUNCTION_FACE_1`` .. ``3``, GEOM's sorting of the end faces) and the
+        edge chains GEOM names (``THICKNESS``, ``CIRCULAR_QUARTER_PIPE`` (twice),
+        ``HALF_LENGTH_MAIN_PIPE``, ``HALF_LENGTH_INCIDENT_PIPE``, ``FLANGE``); then
+        ``INTERNAL_FACES``, the faces on the two inner cylinders. pySMESH adds
+        ``EXTERNAL_FACES``, the faces on the two outer cylinders by the same rule; GEOM
+        names no such group.
+
+        Every id is ``CONSTRUCTED``; the result is one body per block (one solid without
+        ``partition``).
+
+        Args:
+            main_radius: Inner radius ``R1`` of the main pipe.
+            main_thickness: Wall thickness ``W1`` of the main pipe.
+            main_half_length: Half length ``L1`` of the main pipe.
+            branch_radius: Inner radius ``R2`` of the branch, at most ``R1``.
+            branch_thickness: Wall thickness ``W2`` of the branch, with
+                ``R2 + W2 <= R1 + W1``; equal outer radii need equal inner radii.
+            branch_half_length: Length ``L2`` of the branch from the main axis, above
+                ``R1 + W1``; ``R2 + W2`` must stay below ``L1``.
+            partition: Divide the wall into blocks.
+
+        Returns:
+            The delta and the named groups.
+
+        Raises:
+            PysmeshError: If a value is not above 1e-7 or not finite; if the dimensions
+                break one of GEOM's rules above (the message gives all six values); or if
+                a step of GEOM's construction fails (the message gives GEOM's reason).
+        """
+        return _pipe_t_shape(
+            self._s.pipe_t_shape(
+                float(main_radius),
+                float(main_thickness),
+                float(main_half_length),
+                float(branch_radius),
+                float(branch_thickness),
+                float(branch_half_length),
+                bool(partition),
             )
         )
