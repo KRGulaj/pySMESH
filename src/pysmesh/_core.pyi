@@ -527,6 +527,20 @@ class Session:
         progress: object,
         cancel: object,
     ) -> dict[str, object]: ...
+    def fillet_1d(
+        self,
+        edge_ids: list[int],
+        vertex_ids: list[int],
+        radius: float,
+        ignore_secant_vertices: bool,
+    ) -> dict[str, object]: ...
+    def smoothing_surface(
+        self,
+        points: NDArray[np.float64],
+        max_points: int,
+        max_degree: int,
+        max_distance: float,
+    ) -> dict[str, object]: ...
     def entity_types(self, kind: str) -> dict[str, object]: ...
     def surface_parameters(self, face_ids: list[int]) -> dict[str, object]: ...
     def bounding_boxes(self, kind: str) -> dict[str, object]: ...

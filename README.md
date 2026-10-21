@@ -326,6 +326,16 @@ closed solid.
 `CSF_ShHealing*` resource file, and every id is carried through the copy and
 through ShapeProcess's own history.
 
+`fillet_1d` rounds the corners of a free planar wire with circle arcs, as
+GEOM's `MakeFillet1D` does, with GEOM's algorithm copied into pySMESH. The
+trimmed edges keep their ids; each arc is new, generated from the corner
+vertex it replaces. By GEOM's default, an arc too large for the edges next to
+its corner is tried again with the wire's collinear edges joined.
+
+`smoothing_surface` adds a free face through a cloud of points, as GEOM's
+`MakeSmoothingSurface` does: a GeomPlate surface from the points' average
+plane, approximated by a B-spline.
+
 `make_filling` takes `support_faces`: the filled surface is tangent to each
 named face along its boundary edge, and those edges keep their ids.
 

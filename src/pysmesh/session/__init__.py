@@ -56,6 +56,8 @@ a change on either side has an obvious counterpart on the other:
 ``_transform``       the transforms, and copy
 ``_heal``            healing, sewing, defeaturing, imprinting and removal
 ``_glue``            gluing coincident sub-shapes with GEOM's gluer
+``_geomalgo``        GEOM algorithms copied into pySMESH: the 1-D fillet and the
+                     smoothing surface
 ``_geomheal``        GEOM's healing operators: edge division, contour closing, hole
                      filling, face suppression and the shape-process pipeline
 ``_locate``          locating entities with GEOM's classifiers: on a region, in
@@ -79,6 +81,7 @@ from __future__ import annotations
 from ._boolean import _BooleanOps
 from ._check import _CheckOps
 from ._construct import _ConstructOps
+from ._geomalgo import _GeomAlgoOps
 from ._geomheal import ShapeProcessValue, _GeomHealOps
 from ._glue import _GlueOps
 from ._handoff import _HandoffOps
@@ -164,6 +167,7 @@ class Session(
     _BooleanOps,
     _CheckOps,
     _ConstructOps,
+    _GeomAlgoOps,
     _GeomHealOps,
     _GlueOps,
     _HandoffOps,

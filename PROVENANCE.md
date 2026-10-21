@@ -149,6 +149,25 @@ licence in a comment above them. All are from SALOME GEOM tag `V9_16_0`
 | Function | Upstream file | Local file | Used by |
 |---|---|---|---|
 | `MAX_TOLERANCE`, `isSameEdge`, `isSameFace`, `isSameSolid` | `src/GEOMImpl/GEOMImpl_IShapesOperations.cxx` | `src/bindings/session_locate.cpp` | `Session.find_same` (GEOM's `GetSameIDs` rule) |
+| `GEOMImpl_Fillet1d`, `GEOMImpl_Fillet1dPoint` (the whole class) | `src/GEOMImpl/GEOMImpl_Fillet1d.hxx`, `.cxx` | `src/bindings/geom_fillet1d.hpp`, `.cpp` | `Session.fillet_1d` |
+| `MakeEdgeFromWire` (`GEOMImpl_ShapeDriver`), `AreEdgesC1` (`GEOMImpl_HealingDriver`) | `src/GEOMImpl/GEOMImpl_ShapeDriver.cxx`, `src/GEOMImpl/GEOMImpl_HealingDriver.cxx` | `src/bindings/geom_edge_from_wire.hpp`, `.cpp` | `Session.fillet_1d` (the joining of collinear edges) |
+| `anotherVertex`, `takePlane`, `addEdgeRelation` (`GEOMImpl_Fillet1dDriver`) | `src/GEOMImpl/GEOMImpl_Fillet1dDriver.cxx` | `src/bindings/session_geomalgo.cpp` | `Session.fillet_1d` |
+| `MakeSmoothingSurfaceUnClosed` (`AdvancedEngine_SmoothingSurfaceDriver`) | `src/AdvancedEngine/AdvancedEngine_SmoothingSurfaceDriver.cxx` | `src/bindings/session_geomalgo.cpp` | `Session.smoothing_surface` |
+
+Four of these carry OCCT 8.0.1 port changes and nothing else: an iterator header that
+OCCT 8.0.1 removed is replaced by the container header that keeps its typedef, and a
+`Standard_Failure::Raise`, which OCCT 8.0.1 removed, is a `throw` of the same exception
+with the same text. `MakeEdgeFromWire` also hands back the history of the `ShapeFix_Shape`
+it runs, read from the fixer's own context; `MakeSmoothingSurfaceUnClosed` keeps only its
+OCCT 7.7 and later adaptor branch.
+
+`Session.fillet_1d` (`src/bindings/session_geomalgo.cpp`) also takes the driver logic of
+`GEOMImpl_Fillet1dDriver::Execute` and `MakeFillet`, and of
+`GEOMImpl_HealingDriver::FuseCollinearEdges` as the driver calls it, in their order. It
+changes four things. Each step writes its history. The wire is a private copy, so
+`FuseCollinearEdges` makes no copy of its own. A corner where no arc fits ends the call
+with a refusal, where GEOM's last pass leaves the corner sharp. `GEOMUtils::FixShapeTolerance`
+is spelled out in its steps, so that the history of its `ShapeFix_Shape` is read.
 
 One function is adapted, not copied unchanged. `mesh_as_geom` in
 `src/bindings/session_locate.cpp` takes the steps of `GEOMAlgo_AlgoTools::MeshShape` and

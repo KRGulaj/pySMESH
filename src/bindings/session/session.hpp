@@ -46,6 +46,8 @@
 //   session_select.cpp     — the shape tests behind the selection filters;
 //   session_glue.cpp       — gluing coincident sub-shapes with GEOM's gluer;
 //   session_geomheal.cpp   — GEOM's healing operators (ShHealOper);
+//   session_geomalgo.cpp   — GEOM's algorithms copied into pySMESH: the 1-D fillet and the
+//                            smoothing surface;
 //   session_tessellate.cpp — the render mesh, and the incremental delta over it;
 //   session_handoff.cpp    — the export to a mesher, and the id-to-ordinal bijection;
 //   session_progress.cpp   — the progress/cancellation driver (declared in progress.hpp,
@@ -448,6 +450,13 @@ inline void append_unique(std::vector<TopoDS_Shape>& dst, const TopoDS_Shape& s)
   }
   dst.push_back(s);
 }
+
+// The history `hist` of an operation on `input`, keeping only the images of the kind of the
+// shape they are images of: an id never changes kind. BRepTools_ReShape::History explodes a
+// replacing wire or shell into its edges or faces. Defined in session_geomheal.cpp; every
+// operation that composes a history from ShapeFix or ShHealOper contexts filters it so.
+Handle(BRepTools_History) kind_preserving(const Handle(BRepTools_History)& hist,
+                                          const TopoDS_Shape& input);
 
 // GProp's adaptive rule cap, the enclosed volume and its sign check live in shape_checks,
 // which the stateless module shares.
@@ -1038,6 +1047,21 @@ class Session {
                          const std::vector<std::string>& operators,
                          const py::dict& parameters, const py::object& progress,
                          const py::object& cancel);
+
+  // ---- GEOM's algorithms, copied (session_geomalgo.cpp) ------------------------------ //
+
+  // GEOM's MakeFillet1D: the corners of one planar wire body rounded by arcs of `radius`
+  // (GEOMImpl_Fillet1d and the driver's logic, copied). The wire body is replaced: its
+  // edges keep their ids, each arc and its two new vertices are generated from the corner
+  // vertex, which dies. An empty vertex list names every corner.
+  py::dict fillet_1d(const std::vector<EntityId>& edge_ids,
+                     const std::vector<EntityId>& vertex_ids, double radius,
+                     bool ignore_secant_vertices);
+
+  // AdvancedEngine's MakeSmoothingSurface: one new free face that approximates the points
+  // (GeomPlate, the driver's geometry code copied). Every id of the face is constructed.
+  py::dict smoothing_surface(const PointArray& points, int max_points, int max_degree,
+                             double max_distance);
 
   // ---- snapshot / restore ----------------------------------------------------------- //
 

@@ -77,6 +77,7 @@ other.
 | Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove`, `limit_tolerance`, `change_orientation` |
 | Gluing | `glue` (coincident faces or edges, GEOM's gluer) |
 | GEOM healing operators | `divide_edge`, `close_contour`, `fill_holes`, `suppress_faces`, `shape_process` |
+| GEOM curves and surfaces | `fillet_1d` (corners of a planar wire), `smoothing_surface` (a face through a point cloud) |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
 | Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
@@ -210,6 +211,31 @@ through the copy and through ShapeProcess's own history: a split face keeps its 
 every piece. Each body is processed in its own frame and placed back. See
 [Shape processing](shape-process.md) for the operators and their parameters. It takes
 `progress` and `cancel`: a cancel stops between two operators, and inside FixShape.
+
+### Rounding the corners of a wire
+
+`fillet_1d(edges, vertices, radius)` is GEOM's `MakeFillet1D`, with GEOM's algorithm
+copied into pySMESH. `edges` are every edge of one free planar wire, open or closed;
+`vertices` are its corners to round, and an empty list rounds every corner. A corner is a
+vertex between two edges that neither lie on one line through it nor continue each other
+with a common tangent. Lines, arcs and other planar curves are accepted. The wire is
+replaced by the rounded wire: the trimmed edges keep their ids, and each arc and its two
+end vertices get new ids generated from the corner vertex, which dies. With
+`ignore_secant_vertices=True` (GEOM's default), an arc too large for the edges next to its
+corner is tried again with the collinear and tangent edges of the wire joined; the joined
+edges keep all their ids on one edge. A corner where no arc fits is refused, naming the
+vertex: GEOM leaves such a corner sharp. `fillet_2d` rounds the corners of a planar face
+instead.
+
+### A surface through a point cloud
+
+`smoothing_surface(points)` is GEOM's `MakeSmoothingSurface`: a GeomPlate surface through
+the points, starting from their average plane and approximated by a B-spline, as one new
+free face with constructed ids. The defaults are GEOM's (`max_points=2` Bezier pieces,
+`max_degree=8`, `max_distance=0` for GEOM's computed tolerance). The face passes within
+`max(1e-4, 10 * max_distance)` of the points, plus the plate's own error; points on a
+plane give that plane. Fewer than 3 points, points on one line and two points within
+1e-7 of each other are refused.
 
 ### Booleans: `fuzzy` and `parallel`
 

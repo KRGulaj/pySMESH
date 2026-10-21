@@ -165,6 +165,10 @@ void bind_session(py::module_& m) {
       .def("shape_process", &Session::shape_process, py::arg("entity_ids"),
            py::arg("operators"), py::arg("parameters"), py::arg("progress"),
            py::arg("cancel"))
+      .def("fillet_1d", &Session::fillet_1d, py::arg("edge_ids"), py::arg("vertex_ids"),
+           py::arg("radius"), py::arg("ignore_secant_vertices"))
+      .def("smoothing_surface", &Session::smoothing_surface, py::arg("points"),
+           py::arg("max_points"), py::arg("max_degree"), py::arg("max_distance"))
       .def("entity_types", &Session::entity_types, py::arg("kind"))
       .def("surface_parameters", &Session::surface_parameters, py::arg("face_ids"))
       .def("bounding_boxes", &Session::bounding_boxes, py::arg("kind"))

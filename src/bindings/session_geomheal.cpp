@@ -61,6 +61,8 @@ std::string id_list(const std::vector<EntityId>& ids) {
   return out;
 }
 
+}  // namespace
+
 // The history `hist` of an operation on `input`, keeping only the images of the kind of
 // the shape they are images of.
 //
@@ -95,6 +97,8 @@ Handle(BRepTools_History) kind_preserving(const Handle(BRepTools_History)& hist,
   }
   return out;
 }
+
+namespace {
 
 // The bodies of the root that hold `sub`, and the others.
 std::pair<std::vector<TopoDS_Shape>, std::vector<TopoDS_Shape>> split_bodies(
