@@ -393,3 +393,60 @@ class _HealOps(_SessionBase):
                 body of the model.
         """
         return _delta(self._s.remove(_ids(entities)))
+
+    def limit_tolerance(
+        self, entities: Sequence[EntityId], tolerance: float
+    ) -> HistoryDelta:
+        """Lower every tolerance above a limit, in the bodies owning the named entities.
+
+        OCCT's ``ShapeFix_ShapeTolerance::LimitTolerance`` sets each vertex, edge and face
+        tolerance above ``tolerance`` to ``tolerance``, and leaves the others as they are.
+        It runs on a copy of the bodies, so a retained snapshot keeps its own tolerances.
+        The topology does not change and every id survives; the session checks that the
+        copy maps each sub-shape to exactly one, and refuses otherwise.
+
+        As in :meth:`heal`, the result is committed whatever ``BRepCheck_Analyzer`` says
+        of it, and :attr:`HistoryDelta.valid` carries the verdict: a tolerance lowered
+        below the gaps it covered can leave a shape invalid, and that is the answer to
+        act on. :meth:`tolerances` reads the new values.
+
+        Args:
+            entities: Entities whose owning bodies are limited. At least one.
+            tolerance: The largest tolerance to keep, in model units: at least ``1e-7``,
+                OCCT's smallest length (``Precision::Confusion``).
+
+        Returns:
+            The delta: ``created`` and ``deleted`` are empty, every id of the bodies is in
+            ``modified`` (each now denotes the copy), and ``valid`` is the verdict.
+
+        Raises:
+            PysmeshError: If no entity is named, if an id is dead, if the bodies share
+                sub-shapes with bodies left out, if ``tolerance`` is not finite or below
+                ``1e-7``, or if no tolerance in the bodies is above ``tolerance`` (the
+                message gives the largest one).
+        """
+        return _delta(self._s.limit_tolerance(_ids(entities), tolerance))
+
+    def change_orientation(self, faces: Sequence[EntityId]) -> HistoryDelta:
+        """Reverse the named faces: free faces, or faces of a shell that bounds no solid.
+
+        Each face is replaced by itself with the opposite orientation, so its outward
+        normal (:meth:`surface_at`) points the other way. Its geometry and its sub-shapes
+        do not change, so every id survives: a reversed face is the same entity. Each
+        named face is reversed on its own: name every face of a shell to turn the shell
+        round, or some of them to bring faces with mixed normals into line.
+        ``BRepCheck_Analyzer`` does not check the orientation of an open shell, so a shell
+        whose faces disagree is accepted; :meth:`is_closed_shell` says whether a closed
+        one is consistently oriented.
+
+        Args:
+            faces: Face entity ids, each denoting one face. At least one.
+
+        Returns:
+            The delta: no id is created, deleted or modified.
+
+        Raises:
+            PysmeshError: If no face is named, if an id is dead, is not a face or was split,
+                or if a face bounds a solid (the message names the face and the solid).
+        """
+        return _delta(self._s.change_orientation(_ids(faces)))

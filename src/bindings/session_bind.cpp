@@ -137,6 +137,9 @@ void bind_session(py::module_& m) {
            py::arg("fuzzy"), py::arg("parallel"), py::arg("glue"), py::arg("progress"),
            py::arg("cancel"))
       .def("remove", &Session::remove, py::arg("entity_ids"))
+      .def("limit_tolerance", &Session::limit_tolerance, py::arg("entity_ids"),
+           py::arg("tolerance"))
+      .def("change_orientation", &Session::change_orientation, py::arg("face_ids"))
       .def("unify_same_domain", &Session::unify_same_domain, py::arg("entity_ids"),
            py::arg("unify_faces"), py::arg("unify_edges"), py::arg("concat_bsplines"),
            py::arg("linear_tol"), py::arg("angular_tol_rad"))

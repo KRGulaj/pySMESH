@@ -922,6 +922,17 @@ class Session {
   // that shape is still in the model.
   py::dict remove(const std::vector<EntityId>& entity_ids);
 
+  // Lower every tolerance above `tolerance` in the bodies owning the named entities to it
+  // (ShapeFix_ShapeTolerance::LimitTolerance), on a copy of the bodies, so a retained state
+  // keeps its own tolerances. The topology does not change and every id survives, which is
+  // asserted. Reports the validity verdict as heal does, and refuses when no tolerance was
+  // above the limit.
+  py::dict limit_tolerance(const std::vector<EntityId>& entity_ids, double tolerance);
+
+  // Reverse the named faces: free faces, or faces of a shell that bounds no solid. A face of
+  // a solid is refused. Only orientations change, so every id survives.
+  py::dict change_orientation(const std::vector<EntityId>& face_ids);
+
   // Merge faces and edges that lie on one underlying surface or curve. This is the
   // duplicate-removal pass after a boolean, and the stateless API's unify_same_domain with
   // the session's identity carried across it.
