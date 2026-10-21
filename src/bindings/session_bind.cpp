@@ -63,10 +63,14 @@ void bind_session(py::module_& m) {
       .def("make_wire", &Session::make_wire, py::arg("edge_ids"))
       .def("extract_edges", &Session::extract_edges, py::arg("edge_ids"))
       .def("make_face", &Session::make_face, py::arg("edge_ids"))
-      .def("make_filling", &Session::make_filling, py::arg("edge_ids"), py::arg("progress"),
-           py::arg("cancel"))
+      .def("make_filling", &Session::make_filling, py::arg("edge_ids"),
+           py::arg("support_faces"), py::arg("progress"), py::arg("cancel"))
+      .def("extend_face", &Session::extend_face, py::arg("face_id"), py::arg("u_min"),
+           py::arg("u_max"), py::arg("v_min"), py::arg("v_max"))
+      .def("extend_edge", &Session::extend_edge, py::arg("edge_id"), py::arg("length"),
+           py::arg("at_end"))
       .def("extrude", &Session::extrude, py::arg("entity_ids"), py::arg("vx"), py::arg("vy"),
-           py::arg("vz"))
+           py::arg("vz"), py::arg("draft_angle"), py::arg("symmetric"))
       .def("revolve", &Session::revolve, py::arg("entity_ids"), py::arg("ox"), py::arg("oy"),
            py::arg("oz"), py::arg("ax"), py::arg("ay"), py::arg("az"), py::arg("angle_rad"))
       .def("pipe", &Session::pipe, py::arg("spine_ids"), py::arg("profile_ids"),
@@ -94,16 +98,29 @@ void bind_session(py::module_& m) {
       .def("fragment", &Session::fragment, py::arg("entity_ids"), py::arg("fuzzy"),
            py::arg("parallel"), py::arg("progress"),
            py::arg("cancel"))
+      .def("split_by_faces", &Session::split_by_faces, py::arg("targets"), py::arg("tools"),
+           py::arg("fuzzy"), py::arg("progress"), py::arg("cancel"))
+      .def("split_by_plane", &Session::split_by_plane, py::arg("targets"), py::arg("ox"),
+           py::arg("oy"), py::arg("oz"), py::arg("nx"), py::arg("ny"), py::arg("nz"),
+           py::arg("fuzzy"), py::arg("progress"), py::arg("cancel"))
+      .def("keep_half_space", &Session::keep_half_space, py::arg("targets"), py::arg("ox"),
+           py::arg("oy"), py::arg("oz"), py::arg("nx"), py::arg("ny"), py::arg("nz"),
+           py::arg("keep_positive"), py::arg("fuzzy"), py::arg("progress"),
+           py::arg("cancel"))
       .def("fillet", &Session::fillet, py::arg("edge_ids"), py::arg("radius"),
            py::arg("radius_end"), py::arg("progress"),
            py::arg("cancel"))
       .def("chamfer", &Session::chamfer, py::arg("edge_ids"), py::arg("distance"),
            py::arg("distance_end"), py::arg("face_id"), py::arg("progress"),
            py::arg("cancel"))
+      .def("fillet_2d", &Session::fillet_2d, py::arg("face_id"), py::arg("vertex_ids"),
+           py::arg("radius"))
       .def("make_thick_solid", &Session::make_thick_solid, py::arg("face_ids"),
            py::arg("thickness"), py::arg("tol"), py::arg("progress"), py::arg("cancel"))
       .def("offset", &Session::offset, py::arg("entity_ids"), py::arg("distance"),
            py::arg("tol"), py::arg("progress"), py::arg("cancel"))
+      .def("offset_wire", &Session::offset_wire, py::arg("edge_ids"), py::arg("distance"),
+           py::arg("intersection"))
       .def("translate", &Session::translate, py::arg("dx"), py::arg("dy"), py::arg("dz"),
            py::arg("entity_ids"))
       .def("rotate", &Session::rotate, py::arg("ox"), py::arg("oy"), py::arg("oz"),
@@ -113,6 +130,8 @@ void bind_session(py::module_& m) {
            py::arg("nx"), py::arg("ny"), py::arg("nz"), py::arg("entity_ids"))
       .def("scale", &Session::scale, py::arg("sx"), py::arg("sy"), py::arg("sz"),
            py::arg("cx"), py::arg("cy"), py::arg("cz"), py::arg("entity_ids"))
+      .def("position_along_path", &Session::position_along_path, py::arg("path_edge"),
+           py::arg("distance"), py::arg("entity_ids"), py::arg("reverse"))
       .def("copy", &Session::copy, py::arg("entity_ids"))
       .def("heal", &Session::heal, py::arg("entity_ids"), py::arg("precision"),
            py::arg("min_tolerance"), py::arg("max_tolerance"), py::arg("progress"),
@@ -128,6 +147,9 @@ void bind_session(py::module_& m) {
            py::arg("fuzzy"), py::arg("parallel"), py::arg("glue"), py::arg("progress"),
            py::arg("cancel"))
       .def("remove", &Session::remove, py::arg("entity_ids"))
+      .def("limit_tolerance", &Session::limit_tolerance, py::arg("entity_ids"),
+           py::arg("tolerance"))
+      .def("change_orientation", &Session::change_orientation, py::arg("face_ids"))
       .def("unify_same_domain", &Session::unify_same_domain, py::arg("entity_ids"),
            py::arg("unify_faces"), py::arg("unify_edges"), py::arg("concat_bsplines"),
            py::arg("linear_tol"), py::arg("angular_tol_rad"))
@@ -147,6 +169,19 @@ void bind_session(py::module_& m) {
       .def("curvature", &Session::curvature, py::arg("face_ids"), py::arg("samples"))
       .def("project_on_face", &Session::project_on_face, py::arg("face_id"),
            py::arg("points"))
+      .def("face_frame", &Session::face_frame, py::arg("face_id"))
+      .def("tangent_frame", &Session::tangent_frame, py::arg("face_id"), py::arg("u"),
+           py::arg("v"))
+      .def("face_face_axis", &Session::face_face_axis, py::arg("face_a"), py::arg("face_b"))
+      .def("point_at_length", &Session::point_at_length, py::arg("edge_id"),
+           py::arg("length"), py::arg("from_start"))
+      .def("check_boolean", &Session::check_boolean, py::arg("operation"),
+           py::arg("arguments"), py::arg("tools"), py::arg("progress"), py::arg("cancel"))
+      .def("check_shape", &Session::check_shape, py::arg("entity_ids"), py::arg("progress"),
+           py::arg("cancel"))
+      .def("small_edges", &Session::small_edges, py::arg("threshold"))
+      .def("is_closed_shell", &Session::is_closed_shell, py::arg("entity_ids"))
+      .def("tolerances", &Session::tolerances, py::arg("entity_ids"))
       .def("entities_in_box", &Session::entities_in_box, py::arg("kind"), py::arg("xmin"),
            py::arg("ymin"), py::arg("zmin"), py::arg("xmax"), py::arg("ymax"),
            py::arg("zmax"), py::arg("strict"))

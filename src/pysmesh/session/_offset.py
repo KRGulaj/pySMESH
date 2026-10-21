@@ -12,7 +12,9 @@ across per-area translation units; see the package docstring for the whole surfa
 from __future__ import annotations
 
 from collections.abc import Sequence
+from typing import Literal
 
+from .._core import PysmeshError
 from ._base import _SessionBase
 from ._types import (
     CancelPredicate,
@@ -218,4 +220,52 @@ class _OffsetOps(_SessionBase):
         """
         return _delta(
             self._s.offset(_ids(entities), distance, tol, progress, cancel)
+        )
+
+    def offset_wire(
+        self,
+        edges: Sequence[EntityId],
+        distance: float,
+        *,
+        join: Literal["arc", "intersection"] = "arc",
+    ) -> HistoryDelta:
+        """Add a new free wire parallel to a planar wire, at a signed distance.
+
+        The named edges form one connected planar wire. OCCT's
+        ``BRepOffsetAPI_MakeOffset`` builds the parallel wire in the wire's plane. A
+        positive ``distance`` moves it away from the region the wire bounds, and a
+        negative one into that region. An open wire bounds the region it encloses with the
+        chord from its last vertex to its first, so the side does not depend on the
+        direction the wire runs in. Where the offset moves away from a corner, ``"arc"``
+        joins the two offset edges with a circle arc about the corner, and
+        ``"intersection"`` extends them until they meet. An open wire's offset ends level
+        with its end vertices.
+
+        The input edges stay as they are. Each new edge is generated from the input edge
+        it runs along, and an arc from the corner vertex it rounds; each new vertex from
+        the source of an edge it bounds.
+
+        Args:
+            edges: Edges forming one connected planar wire, open or closed.
+            distance: The signed offset, non-zero.
+            join: ``"arc"`` or ``"intersection"``.
+
+        Returns:
+            The delta; only ``created`` is filled.
+
+        Raises:
+            PysmeshError: If ``join`` is neither ``"arc"`` nor ``"intersection"``, on a
+                zero or non-finite ``distance``, if an id is dead or not an edge, if the
+                edges do not form one connected wire, if they lie on one straight line or
+                not in one plane, if an open wire and its chord enclose no area (no side
+                is the outside), or if OCCT builds no offset or several wires (an inward
+                offset past the middle of the region). Each message names the edges.
+        """
+        if join not in ("arc", "intersection"):
+            raise PysmeshError(
+                f"Session.offset_wire: the join is {join!r}; it is 'arc' or "
+                "'intersection'."
+            )
+        return _delta(
+            self._s.offset_wire(_ids(edges), distance, join == "intersection")
         )

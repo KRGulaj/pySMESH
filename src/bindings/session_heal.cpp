@@ -32,6 +32,8 @@
 #include <BOPTools_AlgoTools3D.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <IntTools_Context.hxx>
+#include <ShapeAnalysis_ShapeTolerance.hxx>
+#include <ShapeFix_ShapeTolerance.hxx>
 
 namespace pysmesh {
 namespace session {
@@ -1228,6 +1230,140 @@ py::dict Session::imprint(const std::vector<EntityId>& targets,
   // a tool the caller still holds ids for must not vanish as a side effect.
   return run_bop("imprint", op, target_bodies, /*additive=*/false, fuzzy, parallel,
                  hooks_of("imprint", progress, cancel));
+}
+
+// ---- tolerance and orientation ------------------------------------------------------ //
+
+py::dict Session::limit_tolerance(const std::vector<EntityId>& entity_ids, double tolerance) {
+  finite_arg("limit_tolerance", "tolerance", tolerance);
+  OpGuard guard(in_op_);
+  if (entity_ids.empty()) {
+    throw PysmeshError("Session.limit_tolerance: no entity is named; there is no body to "
+                       "limit.");
+  }
+  if (!(tolerance >= Precision::Confusion())) {
+    char text[32];
+    std::snprintf(text, sizeof(text), "%.6g", tolerance);
+    throw PysmeshError(std::string("Session.limit_tolerance: the tolerance ") + text +
+                       " is below 1e-07, OCCT's smallest length (Precision::Confusion); no "
+                       "sub-shape can hold it.");
+  }
+  const std::vector<TopoDS_Shape> scope = scoped_bodies(entity_ids, "limit_tolerance");
+  const std::vector<TopoDS_Shape> untouched = bodies_excluding(scope);
+  const TopoDS_Shape input = make_root(scope);
+
+  TopoDS_Shape copy;
+  Handle(BRepTools_History) hist;
+  double largest = 0.0;
+  bool changed = false;
+  bool one_to_one = true;
+  {
+    py::gil_scoped_release release;
+    try {
+      // ShapeFix_ShapeTolerance writes into the TShapes it is given, and an earlier state may
+      // share those. A copy with new TShapes and shared geometry takes the change instead,
+      // and its history carries every id onto it.
+      BRepBuilderAPI_Copy copier(input, /*copyGeom=*/false, /*copyMesh=*/false);
+      copy = copier.Shape();
+      hist = history_of(input, copier);
+      largest = ShapeAnalysis_ShapeTolerance().Tolerance(copy, /*mode=*/1);
+      changed = ShapeFix_ShapeTolerance().LimitTolerance(copy, 0.0, tolerance);
+      // The topology must not change: each registered sub-shape has exactly one image, and
+      // the copy has as many of them as the input.
+      const std::vector<TopoDS_Shape> before = registered_subshapes(input);
+      one_to_one = before.size() == registered_subshapes(copy).size();
+      for (std::size_t i = 0; i < before.size() && one_to_one; ++i) {
+        one_to_one = copier.Modified(before[i]).Extent() == 1;
+      }
+    } catch (const std::exception& e) {
+      py::gil_scoped_acquire acquire;
+      throw PysmeshError(std::string("Session.limit_tolerance: OCCT threw: ") + e.what());
+    }
+  }
+  if (!one_to_one) {
+    throw PysmeshError("Session.limit_tolerance: the copy of the bodies does not map one "
+                       "sub-shape to one; nothing is committed. This is a bug, not a caller "
+                       "error.");
+  }
+  if (!changed) {
+    char text[64];
+    std::snprintf(text, sizeof(text), "%.6g (the largest is %.6g)", tolerance, largest);
+    throw PysmeshError(std::string("Session.limit_tolerance: no tolerance in the bodies of "
+                                   "the named entities is above ") +
+                           text + "; nothing to limit.",
+                       "", ids_as_int(entity_ids));
+  }
+  return commit(concat(untouched, copy), hist, "limit_tolerance", copy, Validation::Report);
+}
+
+py::dict Session::change_orientation(const std::vector<EntityId>& face_ids) {
+  OpGuard guard(in_op_);
+  if (face_ids.empty()) {
+    throw PysmeshError("Session.change_orientation: no face is named; there is nothing to "
+                       "reverse.");
+  }
+  const std::vector<TopoDS_Shape> faces = faces_of("change_orientation", face_ids);
+  const ShapeKeyed<TopoDS_Shape> owners = body_of_subshape();
+  std::vector<TopoDS_Shape> bodies;
+  for (std::size_t i = 0; i < faces.size(); ++i) {
+    const TopoDS_Shape& body = sole_owner_body(owners, {faces[i]});
+    // A face of a solid bounds its material: reversed, the solid would be inside out.
+    for (TopExp_Explorer solid(body, TopAbs_SOLID); solid.More(); solid.Next()) {
+      for (TopExp_Explorer f(solid.Current(), TopAbs_FACE); f.More(); f.Next()) {
+        if (f.Current().IsSame(faces[i])) {
+          const auto ids = state_.registry->by_shape.find(solid.Current());
+          const std::string solid_id = ids == state_.registry->by_shape.end()
+                                           ? std::string("of the model")
+                                           : std::to_string(ids->second.front());
+          throw PysmeshError("Session.change_orientation: face " +
+                                 std::to_string(face_ids[i]) + " bounds solid " + solid_id +
+                                 "; reversed, it would turn the solid inside out.",
+                             "", {static_cast<int>(face_ids[i])});
+        }
+      }
+    }
+    append_unique(bodies, body);
+  }
+  // Each face is replaced by itself reversed. Its TShape does not change, so neither does any
+  // id: a registry keyed by IsSame ignores orientation. BRepTools_ReShape cannot do this: it
+  // drops a replacement that IsSame the shape it replaces and rebuilds from the original
+  // (BRepTools_ReShape::applyImpl), so a free face is reversed as a whole and a shell is
+  // rebuilt here, with its own location, orientation and closed flag, from its faces as it
+  // holds them, the named ones reversed. The new shell carries no id.
+  const auto named = [&faces](const TopoDS_Shape& f) {
+    for (const TopoDS_Shape& n : faces) {
+      if (n.IsSame(f)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  std::vector<TopoDS_Shape> rebuilt;
+  BRep_Builder builder;
+  for (const TopoDS_Shape& body : bodies) {
+    if (body.ShapeType() == TopAbs_FACE) {
+      rebuilt.push_back(body.Reversed());
+      continue;
+    }
+    if (body.ShapeType() != TopAbs_SHELL) {
+      throw PysmeshError("Session.change_orientation: a named face belongs to a " +
+                         std::string(TopAbs::ShapeTypeToString(body.ShapeType())) +
+                         " body, which is neither a free face nor a shell.");
+    }
+    TopoDS_Shell shell;
+    builder.MakeShell(shell);
+    for (TopoDS_Iterator it(body, /*cumOri=*/false, /*cumLoc=*/false); it.More(); it.Next()) {
+      builder.Add(shell, named(it.Value()) ? it.Value().Reversed() : it.Value());
+    }
+    shell.Closed(body.Closed());
+    shell.Location(body.Location());
+    shell.Orientation(body.Orientation());
+    rebuilt.push_back(shell);
+  }
+  const std::vector<TopoDS_Shape> survivors = bodies_excluding(bodies);
+  const TopoDS_Shape built = make_root(rebuilt);
+  return commit(concat(survivors, built), Handle(BRepTools_History)(), "change_orientation",
+                built);
 }
 
 // ---- removal ------------------------------------------------------------------------- //

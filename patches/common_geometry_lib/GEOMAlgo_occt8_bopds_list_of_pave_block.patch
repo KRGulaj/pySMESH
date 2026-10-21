@@ -1,0 +1,29 @@
+pySMESH: OCCT 8.0 removed BOPDS_ListOfPaveBlock; name the NCollection list of pave blocks that it stood for.
+
+GEOMAlgo_WireSolid.cxx includes BOPDS_ListOfPaveBlock.hxx and binds the result of
+BOPDS_DS::PaveBlocks to a BOPDS_ListOfPaveBlock reference. OCCT 8.0.1 has neither the header
+nor the typedef: BOPDS_DS::PaveBlocks returns NCollection_List<occ::handle<BOPDS_PaveBlock>>,
+the type that the typedef named. The include goes (the file includes BOPDS_PaveBlock.hxx
+already) and the reference names the list type. No compiled code changes.
+
+diff --git a/src/GEOMAlgo/GEOMAlgo_WireSolid.cxx b/src/GEOMAlgo/GEOMAlgo_WireSolid.cxx
+index d873c9b..174e529 100644
+--- a/src/GEOMAlgo/GEOMAlgo_WireSolid.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_WireSolid.cxx
+@@ -35,7 +35,6 @@
+ 
+ #include <BOPDS_DS.hxx>
+ #include <BOPDS_IndexRange.hxx>
+-#include <BOPDS_ListOfPaveBlock.hxx>
+ #include <BOPDS_PaveBlock.hxx>
+ #include <TopoDS_Solid.hxx>
+ #include <IntTools_Context.hxx>
+@@ -167,7 +166,7 @@ void GEOMAlgo_WireSolid::BuildResult()
+     //
+     aState=TopAbs_UNKNOWN;
+     //
+-    const BOPDS_ListOfPaveBlock& aLPB=pDS->PaveBlocks(i);
++    const NCollection_List<Handle(BOPDS_PaveBlock)>& aLPB=pDS->PaveBlocks(i);
+     aNbPB=aLPB.Extent();
+     if (!aNbPB) {
+       aState=BOPTools_AlgoTools::ComputeStateByOnePoint(aE, aSolid, aTol, aCtx);

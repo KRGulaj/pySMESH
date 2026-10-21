@@ -245,6 +245,49 @@ with history, fillet and chamfer, transforms, healing, defeaturing,
 imprinting, tessellation, and geometric queries. See
 `src/pysmesh/session/__init__.py` for the full API.
 
+Three splits give each piece of a cut solid its own id. `split_by_faces` cuts
+solids by faces, `split_by_plane` by a plane, and `keep_half_space` keeps the
+material on one side of a plane. A solid cut into two or more pieces loses its
+id, and each piece gets a new id generated from it; faces, edges and vertices
+keep the rules of every other operation.
+
+```python
+box = s.entities(EntityKind.SOLID)[0]
+s.split_by_plane([box], origin=(1.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0))
+left, right = s.entities(EntityKind.SOLID)     # two new ids; box is dead
+```
+
+Four construction queries give frames and points to build on: `face_frame`
+(a planar face's centroid, outward normal and x-direction), `tangent_frame`
+(point, outward normal and unit `dS/du` at each `(u, v)`), `face_face_axis`
+(the common line of two planar faces) and `point_at_length` (the point at a
+length along an edge).
+
+Five checks read a model without changing it: `check_boolean` (OCCT's
+argument analyzer on a boolean's operands), `check_shape` (`BRepCheck_Analyzer`
+per body, one finding per invalid sub-shape), `small_edges`,
+`is_closed_shell` and `tolerances`.
+
+`extrude` takes two keyword options. `draft_angle` leans the walls of a
+planar face's sweep by an angle in radians: a positive angle narrows the
+solid, a negative one widens it. `symmetric=True` runs the sweep from
+`-vector` to `+vector`.
+
+`position_along_path` moves bodies rigidly along a path edge, from the
+path's start to a fraction of its length, in the curve's corrected Frenet
+frame. Every id survives, as for `translate`.
+
+`fillet_2d` rounds corners of a free planar face with circle arcs. The face
+and its trimmed edges keep their ids; each arc is new, generated from the
+corner vertex it replaces.
+
+`make_filling` takes `support_faces`: the filled surface is tangent to each
+named face along its boundary edge, and those edges keep their ids.
+
+`offset_wire` adds a new wire parallel to a planar wire, with arc or
+intersection joins. A positive distance moves away from the region the
+wire bounds; an open wire bounds it with the chord between its ends.
+
 Two queries answer the questions a feature filter asks. `surface_parameters`
 reads a face's analytic parameters off its surface: a radius, a cone's
 taper, a torus's two radii. `face_wires` splits a face's boundary into its

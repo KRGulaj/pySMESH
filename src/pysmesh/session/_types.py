@@ -691,6 +691,121 @@ class EntityDistance:
 
 
 @dataclass(frozen=True)
+class FaceFrame:
+    """The frame of one planar face: a place to build new geometry on it.
+
+    The three vectors are orthonormal: ``x_direction`` is the plane's own first direction,
+    the one its ``u`` parameter runs along, with any round-off off the normal projected
+    out.
+
+    Attributes:
+        origin: (3,) float64 — the face's area centroid, by the rule of
+            :meth:`Session.mass_properties`.
+        normal: (3,) float64 — the unit normal pointing **out of** the body, by the rule
+            of :meth:`Session.surface_at`: the plane's axis, reversed on a reversed face.
+        x_direction: (3,) float64 — the plane's ``XDirection``, unit, orthogonal to
+            ``normal``. It is the surface's own and is not reversed with the normal, so
+            on a reversed face ``normal`` x ``x_direction`` is minus the plane's
+            ``YDirection``.
+    """
+
+    origin: NDArray[np.float64]
+    normal: NDArray[np.float64]
+    x_direction: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class TangentFrameSample:
+    """Points, outward normals and ``u`` tangents of one face at parameter pairs.
+
+    Row ``i`` is the sample at ``(u[i], v[i])``. Every row is defined: a parameter where
+    the frame does not exist is refused, not reported as a gap.
+
+    Attributes:
+        points: (N, 3) float64 — the surface point.
+        normals: (N, 3) float64 — the unit normal pointing **out of** the body, by the rule
+            of :meth:`Session.surface_at`.
+        tangents: (N, 3) float64 — the unit vector along ``dS/du``, the surface's first
+            derivative in ``u``. It is the surface's own and is not reversed on a reversed
+            face.
+    """
+
+    points: NDArray[np.float64]
+    normals: NDArray[np.float64]
+    tangents: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class AxisLine:
+    """A line in model space, as a point on it and a unit direction.
+
+    Attributes:
+        point: (3,) float64 — a point of the line.
+        direction: (3,) float64 — the unit direction.
+    """
+
+    point: NDArray[np.float64]
+    direction: NDArray[np.float64]
+
+
+@dataclass(frozen=True)
+class EdgePoint:
+    """A point on one edge and the curve parameter it lies at.
+
+    Attributes:
+        point: (3,) float64 — the point.
+        parameter: The parameter of the edge's curve at the point, in the range that
+            :meth:`Session.edge_parameter_bounds` reports.
+    """
+
+    point: NDArray[np.float64]
+    parameter: float
+
+
+@dataclass(frozen=True)
+class BooleanCheckFinding:
+    """One finding of :meth:`Session.check_boolean`.
+
+    Attributes:
+        check: The name of the OCCT check that failed, the ``BOPAlgo_CheckStatus``
+            enumerator: ``"BOPAlgo_BadType"``, ``"BOPAlgo_SelfIntersect"``,
+            ``"BOPAlgo_TooSmallEdge"``, ``"BOPAlgo_NonRecoverableFace"``,
+            ``"BOPAlgo_IncompatibilityOfVertex"``, ``"BOPAlgo_IncompatibilityOfEdge"``,
+            ``"BOPAlgo_IncompatibilityOfFace"``, ``"BOPAlgo_OperationAborted"``,
+            ``"BOPAlgo_GeomAbs_C0"``, ``"BOPAlgo_InvalidCurveOnSurface"``,
+            ``"BOPAlgo_NotValid"`` or ``"BOPAlgo_CheckUnknown"``.
+        argument_ids: (K,) int64, ascending — the ids of the arguments' shapes the finding
+            names. A shell or a wire is named by the ids of its faces or edges. When OCCT
+            names the whole operand, these are its ids.
+        tool_ids: (K,) int64, ascending — the same on the tools' side. Empty when the
+            finding is about the arguments only.
+    """
+
+    check: str
+    argument_ids: NDArray[np.int64]
+    tool_ids: NDArray[np.int64]
+
+
+@dataclass(frozen=True)
+class ShapeCheckFinding:
+    """One invalid sub-shape that :meth:`Session.check_shape` found.
+
+    Attributes:
+        entity_id: The id that names the sub-shape: its own (the lowest when several ids
+            denote it); for a shell, which has no id, the solid that holds it; for a wire,
+            the face that holds it, or the first of its edges for a wire with no face.
+        kind: The sub-shape's kind: ``"SOLID"``, ``"SHELL"``, ``"FACE"``, ``"WIRE"``,
+            ``"EDGE"`` or ``"VERTEX"``.
+        statuses: The ``BRepCheck_Status`` names ``BRepCheck_Analyzer`` gives it, each once,
+            for example ``("BRepCheck_NotClosed",)``.
+    """
+
+    entity_id: EntityId
+    kind: str
+    statuses: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class RenderMesh:
     """Triangles, edge polylines and vertex points of the live shape, from one call.
 
@@ -907,6 +1022,68 @@ def _curve_sample(raw: dict[str, object]) -> CurveSample:
         points=cast("NDArray[np.float64]", raw["points"]),
         tangents=cast("NDArray[np.float64]", raw["tangents"]),
         defined=cast("NDArray[np.bool_]", raw["defined"]),
+    )
+
+
+def _face_frame(raw: dict[str, object]) -> FaceFrame:
+    """Wrap a raw ``_core`` face-frame dict in its frozen dataclass."""
+    return FaceFrame(
+        origin=cast("NDArray[np.float64]", raw["origin"]),
+        normal=cast("NDArray[np.float64]", raw["normal"]),
+        x_direction=cast("NDArray[np.float64]", raw["x_direction"]),
+    )
+
+
+def _tangent_frame_sample(raw: dict[str, object]) -> TangentFrameSample:
+    """Wrap a raw ``_core`` tangent-frame dict in its frozen dataclass."""
+    return TangentFrameSample(
+        points=cast("NDArray[np.float64]", raw["points"]),
+        normals=cast("NDArray[np.float64]", raw["normals"]),
+        tangents=cast("NDArray[np.float64]", raw["tangents"]),
+    )
+
+
+def _axis_line(raw: dict[str, object]) -> AxisLine:
+    """Wrap a raw ``_core`` axis dict in its frozen dataclass."""
+    return AxisLine(
+        point=cast("NDArray[np.float64]", raw["point"]),
+        direction=cast("NDArray[np.float64]", raw["direction"]),
+    )
+
+
+def _edge_point(raw: dict[str, object]) -> EdgePoint:
+    """Wrap a raw ``_core`` edge-point dict in its frozen dataclass."""
+    return EdgePoint(
+        point=cast("NDArray[np.float64]", raw["point"]),
+        parameter=cast("float", raw["parameter"]),
+    )
+
+
+def _boolean_check_findings(
+    rows: list[dict[str, object]],
+) -> tuple[BooleanCheckFinding, ...]:
+    """Wrap the raw ``_core`` boolean-check rows in their frozen dataclasses."""
+    return tuple(
+        BooleanCheckFinding(
+            check=cast("str", row["check"]),
+            argument_ids=cast("NDArray[np.int64]", row["argument_ids"]),
+            tool_ids=cast("NDArray[np.int64]", row["tool_ids"]),
+        )
+        for row in rows
+    )
+
+
+def _shape_check_findings(
+    rows: list[dict[str, object]],
+) -> tuple[ShapeCheckFinding, ...]:
+    """Wrap the raw ``_core`` shape-check rows in their frozen dataclasses."""
+    return tuple(
+        ShapeCheckFinding(
+            entity_id=EntityId(cast("int", row["entity_id"])),
+            kind=cast("str", row["kind"]),
+            statuses=tuple(cast("list[str]", row["statuses"])),
+        )
+        for row in rows
     )
 
 

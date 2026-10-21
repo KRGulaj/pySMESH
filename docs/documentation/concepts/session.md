@@ -67,15 +67,18 @@ other.
 | Family | Covers |
 |---|---|
 | Primitives | `add_box`, `add_cylinder`, `add_cone`, `add_sphere`, `add_torus`, `add_wedge`, `add_vertex` |
-| Curve and surface construction | `add_line`, `add_arc`, `add_circle`, `add_ellipse`, `add_polyline`, `add_spline`, `add_bspline`, `add_helix`, `add_rectangle`, `make_wire`, `extract_edges`, `make_face`, `make_filling` |
+| Curve and surface construction | `add_line`, `add_arc`, `add_circle`, `add_ellipse`, `add_polyline`, `add_spline`, `add_bspline`, `add_helix`, `add_rectangle`, `make_wire`, `extract_edges`, `make_face`, `make_filling`, `extend_face`, `extend_edge` |
 | Sweeps | `extrude`, `revolve`, `pipe`, `pipe_shell`, `thru_sections` |
 | Booleans with history | `fuse`, `cut`, `common`, `section`, `split`, `fragment` |
-| Fillet and chamfer | `fillet`, `chamfer` |
-| Offsets | `make_thick_solid`, `offset` |
-| Transforms | `translate`, `rotate`, `mirror`, `scale`, `copy` |
-| Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove` |
+| Splits with piece ids | `split_by_faces`, `split_by_plane`, `keep_half_space` |
+| Fillet and chamfer | `fillet`, `chamfer`, `fillet_2d` (corners of a free planar face) |
+| Offsets | `make_thick_solid`, `offset`, `offset_wire` (a parallel planar wire) |
+| Transforms | `translate`, `rotate`, `mirror`, `scale`, `position_along_path`, `copy` |
+| Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove`, `limit_tolerance`, `change_orientation` |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
+| Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
+| Checks | `check_boolean`, `check_shape`, `small_edges`, `is_closed_shell`, `tolerances` |
 | Handoff | `export_handoff`, `brep`, `write_step` |
 | Identity and introspection | `entities`, `entity_kind`, `is_alive`, `shape_count`, `name_of`, `origin`, `resolve`, `op_count`, `state_op_index`, `issued_id_count`, `entity_count` |
 
@@ -83,6 +86,49 @@ Every mutating operation returns a `HistoryDelta`: which ids it created, deleted
 split and merged, plus the `BRepCheck_Analyzer` verdict on the shape it built. See
 [Entity IDs and ordinals](entity-ids.md#identity-rules-across-an-edit) for what each of
 those five arrays means.
+
+### Splits with piece ids
+
+`split_by_faces`, `split_by_plane` and `keep_half_space` cut solids by faces or by a
+plane, and give each piece of a cut solid its own id: the sixth rule of
+[Entity IDs and ordinals](entity-ids.md#the-sixth-rule-pieces-of-a-cut-solid). The tool
+faces of `split_by_faces` stay in the model; the plane of the other two is a planar face
+that the operation builds and does not add to the model. A target that the plane does
+not cross is refused, with its range of signed distances from the plane. The three run
+their boolean on one thread, so they take no `parallel` argument, and two runs on equal
+input give equal bytes and equal ids.
+
+### Drafted and symmetric extrusion
+
+`extrude` takes two keyword options. With `symmetric=True` the sweep runs from
+`-vector` to `+vector`. With `draft_angle` the walls lean by that angle, in radians:
+a positive angle narrows the solid along the sweep, a negative one widens it. A draft
+applies to one planar face swept along its normal. OCCT's evolved sweep builds the
+drafted solid with exact planes and cones. Its offset rounds a corner with a cylinder
+or cone face where the offset moves away from the corner. A narrowing draft whose walls
+meet before the end of the sweep is refused, with the height where they meet. With
+neither option, `extrude` is the plain sweep, unchanged.
+
+### Filling tangent to faces
+
+`make_filling` takes `support_faces`, a mapping from boundary edges to faces
+that contain them. The surface is tangent to each support face along its edge
+(G1), as in GEOM's `MakeFaceWithConstraints`. A supported edge belongs to its
+face's body, so it is not consumed and keeps its id. The boundary edges must
+meet at shared vertices: edges of two bodies that only touch at coincident
+vertices are refused, because OCCT leaves that boundary open. With no
+`support_faces`, `make_filling` is unchanged.
+
+### Moving along a path
+
+`position_along_path` moves the bodies of the named entities rigidly along a
+path edge. It takes the path's frame at its start onto its frame at a fraction of
+the path's length, measured by arc length. The frame is OCCT's corrected Frenet
+frame, as GEOM's `PositionAlongPath` uses it: origin on the curve, z along the
+tangent, x along the normal. On a straight path the move is a translation, on a
+circular arc a rotation about the arc's axis. Every id survives, as for
+`translate`. A moved body that owns the path edge is refused, because the path
+would move with it.
 
 ### Booleans: `fuzzy` and `parallel`
 
@@ -165,6 +211,30 @@ direction = sample.tangents[sample.defined]
 # The clearance between two entities, with the witness point on each.
 gap = s.distance(faces[0], faces[2])       # gap.distance, gap.point_a, gap.point_b
 ```
+
+## Construction queries
+
+Four queries give a place to build new geometry on. `face_frame` is a planar face's
+centroid, outward normal and in-plane x-direction. `tangent_frame` is the point, the
+outward normal and the unit `dS/du` of a face at each `(u, v)`. `face_face_axis` is the
+common line of two planar faces' planes, along the cross product of their outward
+normals. `point_at_length` is the point at a length along an edge, from either end.
+Each refuses what has no answer, naming the entity and the value: a curved face for a
+frame, a parameter outside the face or at a singular point, two parallel planes, a
+length off the edge. None of them issues an id.
+
+## Checks
+
+Five read-only checks say whether a model is fit for the next operation.
+`check_boolean` runs OCCT's `BOPAlgo_ArgumentAnalyzer` on a boolean's arguments and
+tools with every check it offers, and returns one finding per problem: the OCCT check
+that failed and the ids on each side. `check_shape` runs `BRepCheck_Analyzer` on the
+bodies and returns one finding per invalid sub-shape, with its id, its kind and its
+`BRepCheck_Status` names. Both take `progress` and `cancel`; `check_shape` checks one
+body at a time, because OCCT gives its analyzer no progress range. `small_edges` lists
+the edges shorter than a length, `is_closed_shell` says per entity whether its body is
+bounded by closed, consistently oriented shells, and `tolerances` gives the stored
+tolerance of each face, edge or vertex. An empty finding list means no problem.
 
 ## Reaching a mesher
 

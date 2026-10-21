@@ -11,7 +11,7 @@ across per-area translation units; see the package docstring for the whole surfa
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Literal
 
 from .._core import PysmeshError
@@ -577,6 +577,7 @@ class _ConstructOps(_SessionBase):
         self,
         edge_ids: Sequence[EntityId],
         *,
+        support_faces: Mapping[EntityId, EntityId] | None = None,
         progress: ProgressCallback | None = None,
         cancel: CancelPredicate | None = None,
     ) -> HistoryDelta:
@@ -585,8 +586,17 @@ class _ConstructOps(_SessionBase):
         The surface is an approximation, so the resulting face's edges are new geometry and
         the boundary edges' ids die.
 
+        ``support_faces`` maps boundary edges to adjacent faces, as GEOM's
+        ``MakeFaceWithConstraints`` takes them: the surface passes through each such edge
+        and is tangent to its face along it (OCCT's ``GeomAbs_G1``, to the 0.01 rad that
+        ``BRepOffsetAPI_MakeFilling`` holds by default). A supported edge is an edge of its
+        face, so it is not consumed: it keeps its id, and its face's body stays as it is.
+        The other edges are consumed as before. With ``None`` or an empty mapping, the
+        filling is the plain one, unchanged.
+
         Args:
             edge_ids: Edges bounding the surface.
+            support_faces: Boundary edge id -> id of a face that contains that edge.
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the operation runs. ``None`` reports nothing.
             cancel: Called with no arguments; return ``True`` to stop the operation.
@@ -597,14 +607,104 @@ class _ConstructOps(_SessionBase):
             The delta for this operation.
 
         Raises:
-            PysmeshError: If an id is dead or is not an edge, if an edge belongs to a solid
-                or a face, or if OCCT cannot fill the boundary.
+            PysmeshError: If an id is dead or is not an edge, if an edge without a support
+                belongs to a solid or a face, if a ``support_faces`` key is not one of
+                ``edge_ids`` (the message lists them), if a support is not a face or does
+                not contain its edge, or if OCCT cannot fill the boundary.
         """
-        return _delta(self._s.make_filling(_ids(edge_ids), progress, cancel))
+        supports = (
+            None
+            if support_faces is None
+            else {int(e): int(f) for e, f in support_faces.items()}
+        )
+        return _delta(self._s.make_filling(_ids(edge_ids), supports, progress, cancel))
+
+    def extend_face(
+        self,
+        face: EntityId,
+        *,
+        u_min: float = 0.0,
+        u_max: float = 0.0,
+        v_min: float = 0.0,
+        v_max: float = 0.0,
+    ) -> HistoryDelta:
+        """Add a new free face: a face's surface extended beyond its sides.
+
+        The face's surface, trimmed to the face's parameter range, is extended on each
+        side with a non-zero length by OCCT's ``GeomLib::ExtendSurfByLength``, with
+        tangent (C1, so G1) continuity, and a new face is built on the whole extended
+        surface. Each length is the chord length of the extension on that side, in model
+        units: ``u_min`` and ``u_max`` extend the face before its first and after its last
+        ``u`` parameter (the ``u`` of :meth:`face_parameter_bounds`), ``v_min`` and
+        ``v_max`` the same in ``v``. The new surface is a B-spline; on a plane, or along
+        the straight direction of a cylinder, the extension is exact.
+
+        The source face stays. The new face, its edges and its vertices get new ids with
+        the role :attr:`NameRole.GENERATED`, whose origin is the source face. The new face
+        has the source's orientation, so its outward normal agrees with the source's.
+
+        Args:
+            face: A face entity id denoting exactly one face.
+            u_min: Extension before the first ``u`` parameter, in model units (>= 0).
+            u_max: Extension after the last ``u`` parameter (>= 0).
+            v_min: Extension before the first ``v`` parameter (>= 0).
+            v_max: Extension after the last ``v`` parameter (>= 0).
+
+        Returns:
+            The delta; ``created`` holds the new face and its sub-shapes.
+
+        Raises:
+            PysmeshError: If the id is dead, is not a face, or was split; if a length is
+                not finite or negative, or every length is 0; if the face lies on an
+                unbounded surface with no boundary (an infinite plane; the message names
+                the surface type); if the face covers the whole period of its surface in
+                a direction it is asked to extend in (a full cylinder in ``u``); or if
+                OCCT cannot extend it.
+        """
+        return _delta(self._s.extend_face(int(face), u_min, u_max, v_min, v_max))
+
+    def extend_edge(
+        self, edge: EntityId, length: float, *, at_end: bool = True
+    ) -> HistoryDelta:
+        """Add a new free edge: an edge's curve extended beyond one of its ends.
+
+        The edge's curve is extended at its end (``at_end``) or at its start to the point
+        ``length`` beyond it along the tangent there, by OCCT's
+        ``GeomLib::ExtendCurveToPoint``, with tangent (C1, so G1) continuity, and a new
+        edge is built on the whole extended curve. End and start follow the edge's
+        orientation as the model holds it, as in :meth:`point_at_length`. The new curve
+        is a B-spline; its original part is the source curve, and the added part ends
+        exactly at the target point.
+
+        The source edge stays. The new edge and its vertices get new ids with the role
+        :attr:`NameRole.GENERATED`, whose origin is the source edge.
+
+        Args:
+            edge: An edge entity id denoting exactly one edge.
+            length: Distance from the end to the target point along the tangent, in
+                model units (> 0).
+            at_end: Extend after the last vertex; False extends before the first.
+
+        Returns:
+            The delta; ``created`` holds the new edge and its vertices.
+
+        Raises:
+            PysmeshError: If the id is dead, is not an edge, or was split; if ``length``
+                is not finite or not positive; if the edge is degenerated or closed (a
+                whole circle has no free end); or if OCCT cannot extend it.
+        """
+        return _delta(self._s.extend_edge(int(edge), length, at_end))
 
     # ---- sweeps ----------------------------------------------------------------------- #
 
-    def extrude(self, entities: Sequence[EntityId], vector: Vec3) -> HistoryDelta:
+    def extrude(
+        self,
+        entities: Sequence[EntityId],
+        vector: Vec3,
+        *,
+        draft_angle: float = 0.0,
+        symmetric: bool = False,
+    ) -> HistoryDelta:
         """Sweep a profile linearly, consuming it.
 
         A sweep raises the profile's dimension: an edge becomes a face, a wire a shell, a
@@ -612,20 +712,51 @@ class _ConstructOps(_SessionBase):
         through, and each wall the sweep generates is named against the profile edge it
         came from.
 
+        With ``symmetric`` the sweep runs from ``-vector`` to ``+vector``, a total length of
+        twice ``vector``, as GEOM's ``MakePrismVecH2Ways``: the profile is moved by
+        ``-vector`` and swept by ``2 * vector``, so its ids carry onto the moved profile,
+        which is the start of the solid.
+
+        With a ``draft_angle`` the walls lean by that angle off the sweep direction: a
+        positive angle narrows the solid along the sweep (the far face is the profile
+        offset inward by ``|vector| tan(draft_angle)``), a negative one widens it. A draft
+        applies to a planar face profile swept along its normal, either way. OCCT's evolved
+        sweep (``BRepOffsetAPI_MakeEvolved``) builds it, the engine of OCCT's own drafted
+        prisms: a straight profile edge gives a planar wall and an arc a conical one, so
+        the geometry is exact. It offsets the profile with arc joins, the only kind it
+        implements: where the offset moves away from a corner, at a convex corner when the
+        solid widens or a reflex one (a hole's corner) when it narrows, the corner becomes
+        a cylinder or cone face. The profile face, its edges and its vertices carry their
+        ids onto the start of the solid; each wall and each edge of the far face is
+        generated from its profile edge, and the far face from the profile face.
+
+        With neither, the sweep is the plain one, unchanged.
+
         Args:
             entities: Entities identifying the profile. They must all belong to one body,
                 which is the body swept.
             vector: The extrusion vector; must be non-zero.
+            draft_angle: The draft, in radians, with ``|draft_angle| < pi / 2``. 0 sweeps
+                without one.
+            symmetric: Sweep from ``-vector`` to ``+vector``.
 
         Returns:
             The delta for this operation.
 
         Raises:
             PysmeshError: On a zero vector, a dead id, entities spanning two bodies, a
-                profile body that is a solid or a compound, or a sweep OCCT cannot build.
+                profile body that is a solid or a compound, or a sweep OCCT cannot build;
+                with a draft angle, also on an angle that is not finite or not inside
+                ``(-pi/2, pi/2)``, a profile that is not one planar face (the message names
+                its kind or surface type), a vector more than ``1e-9`` rad off the
+                face's normal (the message gives the angle), a narrowing draft whose
+                walls meet before the sweep's end (the message gives where they meet and
+                the sweep length), or a drafted solid that intersects itself.
         """
         vx, vy, vz = vector
-        return _delta(self._s.extrude(_ids(entities), vx, vy, vz))
+        return _delta(
+            self._s.extrude(_ids(entities), vx, vy, vz, draft_angle, symmetric)
+        )
 
     def revolve(
         self,
@@ -723,7 +854,9 @@ class _ConstructOps(_SessionBase):
                 names the faces and where.
         """
         return _delta(
-            self._s.pipe_shell(_ids(spine), _ids(profile), frenet, solid, progress, cancel)
+            self._s.pipe_shell(
+                _ids(spine), _ids(profile), frenet, solid, progress, cancel
+            )
         )
 
     def thru_sections(

@@ -1,0 +1,85 @@
+pySMESH: OCCT 8.0 removed the iterator headers of the TopTools, TColStd, Message and ShapeExtend containers; include the container header instead.
+
+GEOM V9_16_0 ShHealOper includes five iterator headers that OCCT 8.0.0 removed, for example
+TopTools_ListIteratorOfListOfShape.hxx and Message_ListIteratorOfListOfMsg.hxx. In OCCT 8.0.1
+the header of each container still declares the iterator typedef as a deprecated alias of the
+NCollection iterator. Each include names that container header instead. No compiled code
+changes. The same port as patches/common_geometry_lib/GEOMAlgo_BlockFix_occt8_iterator_headers.patch.
+
+diff --git a/src/ShHealOper/ShHealOper_CloseContour.cxx b/src/ShHealOper/ShHealOper_CloseContour.cxx
+index b987e0a..6548859 100644
+--- a/src/ShHealOper/ShHealOper_CloseContour.cxx
++++ b/src/ShHealOper/ShHealOper_CloseContour.cxx
+@@ -35,11 +35,11 @@
+ #include <TopTools_IndexedMapOfShape.hxx>
+ #include <TopoDS_Edge.hxx>
+ #include <TopTools_ListOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <TColStd_MapOfInteger.hxx>
+ #include <TopExp.hxx>
+ #include <TopoDS.hxx>
+-#include <TColStd_MapIteratorOfMapOfInteger.hxx>
++#include <TColStd_MapOfInteger.hxx>
+ #include <ShapeAnalysis_Edge.hxx>
+ #include <BRep_Builder.hxx>
+ #include <TopoDS_Edge.hxx>
+diff --git a/src/ShHealOper/ShHealOper_EdgeDivide.cxx b/src/ShHealOper/ShHealOper_EdgeDivide.cxx
+index f5855c7..175fde6 100644
+--- a/src/ShHealOper/ShHealOper_EdgeDivide.cxx
++++ b/src/ShHealOper/ShHealOper_EdgeDivide.cxx
+@@ -40,7 +40,7 @@
+ #include <ShapeUpgrade_WireDivide.hxx>
+ #include <TopExp.hxx>
+ #include <TopExp_Explorer.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+ #include <TopTools_MapOfShape.hxx>
+ #include <TopoDS.hxx>
+diff --git a/src/ShHealOper/ShHealOper_RemoveFace.cxx b/src/ShHealOper/ShHealOper_RemoveFace.cxx
+index 0f208b9..851d458 100644
+--- a/src/ShHealOper/ShHealOper_RemoveFace.cxx
++++ b/src/ShHealOper/ShHealOper_RemoveFace.cxx
+@@ -46,7 +46,7 @@
+ #include <TopTools_SequenceOfShape.hxx>
+ #include <TopoDS.hxx>
+ #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ 
+ 
+ //=======================================================================
+diff --git a/src/ShHealOper/ShHealOper_RemoveInternalWires.cxx b/src/ShHealOper/ShHealOper_RemoveInternalWires.cxx
+index 0110fca..6bec926 100644
+--- a/src/ShHealOper/ShHealOper_RemoveInternalWires.cxx
++++ b/src/ShHealOper/ShHealOper_RemoveInternalWires.cxx
+@@ -30,7 +30,7 @@
+ #include <TopAbs_ShapeEnum.hxx>
+ #include <TopoDS.hxx>
+ #include <TopTools_ListOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <ShapeAnalysis.hxx>
+ #include <ShapeFix_Shape.hxx>
+ 
+diff --git a/src/ShHealOper/ShHealOper_ShapeProcess.cxx b/src/ShHealOper/ShHealOper_ShapeProcess.cxx
+index ca4bfff..91f5a7e 100644
+--- a/src/ShHealOper/ShHealOper_ShapeProcess.cxx
++++ b/src/ShHealOper/ShHealOper_ShapeProcess.cxx
+@@ -43,12 +43,12 @@
+ #include <TopoDS_Iterator.hxx>
+ #include <TColStd_IndexedDataMapOfTransientTransient.hxx>
+ #include <TNaming_CopyShape.hxx>
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeShape.hxx>
++#include <TopTools_DataMapOfShapeShape.hxx>
+ #include <ShapeExtend_MsgRegistrator.hxx>
+ #include <ShapeExtend_DataMapOfShapeListOfMsg.hxx>
+-#include <ShapeExtend_DataMapIteratorOfDataMapOfShapeListOfMsg.hxx>
++#include <ShapeExtend_DataMapOfShapeListOfMsg.hxx>
++#include <Message_ListOfMsg.hxx>
+ #include <Message_ListOfMsg.hxx>
+-#include <Message_ListIteratorOfListOfMsg.hxx>
+ #include <Message_Msg.hxx>
+ 
+ //=======================================================================

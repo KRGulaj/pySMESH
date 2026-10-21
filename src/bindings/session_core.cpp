@@ -671,7 +671,7 @@ py::dict Session::add_bodies(const TopoDS_Shape& added, const char* op_name) {
 py::dict Session::commit(const std::vector<TopoDS_Shape>& bodies,
                   const Handle(BRepTools_History) & history, const char* op_name,
                   const TopoDS_Shape& built, Validation mode,
-                  const std::vector<std::string>& warnings) {
+                  const std::vector<std::string>& warnings, PieceRule pieces) {
   Handle(BRepTools_History) hist = history;
   if (tear_next_history_) {
     hist.Nullify();
@@ -705,7 +705,7 @@ py::dict Session::commit(const std::vector<TopoDS_Shape>& bodies,
   const TopoDS_Shape new_root = make_root(bodies);
 
   const std::int64_t op_index = next_op_;
-  Delta delta = carry_registry(new_root, hist, op_index);
+  Delta delta = carry_registry(new_root, hist, op_index, pieces);
   delta.valid = verdict;
   delta.warnings = warnings;
 
@@ -864,7 +864,8 @@ void Session::relabel_body(const TopoDS_Shape& body, const TopoDS_Shape& twin,
 }
 
 Delta Session::carry_registry(const TopoDS_Shape& new_root,
-                              const Handle(BRepTools_History) & hist, std::int64_t op_index) {
+                              const Handle(BRepTools_History) & hist, std::int64_t op_index,
+                              PieceRule pieces) {
   const std::vector<TopoDS_Shape> new_order = registered_subshapes(new_root);
   ShapeKeyed<TopAbs_ShapeEnum> members;
   members.reserve(new_order.size());
@@ -968,6 +969,26 @@ Delta Session::carry_registry(const TopoDS_Shape& new_root,
       delta.deleted.push_back(id);
       continue;
     }
+
+    const bool same = live.size() == rec.shapes.size() &&
+                      std::equal(live.begin(), live.end(), rec.shapes.begin(),
+                                 [](const TopoDS_Shape& a, const TopoDS_Shape& b) {
+                                   return a.IsSame(b);
+                                 });
+
+    // The sixth rule (PieceRule::NewPieceIds): a solid this operation cut into several
+    // solids loses its id, and pass 2 names each piece Generated from it. A solid id that
+    // already denoted several solids and that the operation left alone is not cut by it, so
+    // `same` keeps it under the five rules.
+    if (pieces == PieceRule::NewPieceIds && rec.kind == TopAbs_SOLID && live.size() > 1 &&
+        !same) {
+      for (const TopoDS_Shape& s : live) {
+        generated_from[s].push_back(id);
+      }
+      delta.deleted.push_back(id);
+      continue;
+    }
+
     EntityRecord out;
     out.kind = rec.kind;
     out.shapes = live;
@@ -976,11 +997,6 @@ Delta Session::carry_registry(const TopoDS_Shape& new_root,
     }
     next->alive.emplace(id, std::move(out));
 
-    const bool same = live.size() == rec.shapes.size() &&
-                      std::equal(live.begin(), live.end(), rec.shapes.begin(),
-                                 [](const TopoDS_Shape& a, const TopoDS_Shape& b) {
-                                   return a.IsSame(b);
-                                 });
     if (!same) {
       delta.modified.push_back(id);
     }

@@ -21,30 +21,38 @@ from .._core import PysmeshError
 from ._base import _SessionBase
 from ._types import (
     AdjacencyPairs,
+    AxisLine,
     BoundsTable,
     CurvatureTable,
     CurveParameterTable,
     CurveSample,
+    EdgePoint,
     EntityDistance,
     EntityId,
     EntityKind,
+    FaceFrame,
     MassTable,
     Points,
     Projection,
     SurfaceParameterTable,
     SurfaceSample,
+    TangentFrameSample,
     TypeTable,
     Vec3,
     WireTable,
     _DEFAULT_CLASSIFY_TOL,
     _DEFAULT_CURVATURE_SAMPLES,
+    _axis_line,
     _curve_sample,
+    _edge_point,
     _entity_distance,
+    _face_frame,
     _ids,
     _pairs,
     _points,
     _projection,
     _surface_sample,
+    _tangent_frame_sample,
     _values,
 )
 
@@ -498,6 +506,113 @@ class _QueryOps(_SessionBase):
         return _projection(
             self._s.project_on_face(int(face_id), _points("points", points))
         )
+
+    def face_frame(self, face: EntityId) -> FaceFrame:
+        """The frame of a planar face: its centroid, outward normal and x-direction.
+
+        A query: it issues no id and leaves the session unchanged.
+
+        Args:
+            face: A face entity id denoting exactly one planar face.
+
+        Returns:
+            The face's area centroid, its outward unit normal (the rule of
+            :meth:`surface_at`) and its plane's ``XDirection`` made orthogonal to the
+            normal. See :class:`FaceFrame`.
+
+        Raises:
+            PysmeshError: If the id is dead, is not a face, or was split, or if the face is
+                not planar; the message names the face and its surface type.
+        """
+        return _face_frame(self._s.face_frame(int(face)))
+
+    def tangent_frame(
+        self,
+        face: EntityId,
+        u: NDArray[np.float64] | Sequence[float],
+        v: NDArray[np.float64] | Sequence[float],
+    ) -> TangentFrameSample:
+        """Points, outward normals and unit ``dS/du`` tangents of a face, vectorised.
+
+        Sample ``i`` is taken at ``(u[i], v[i])``, the parameters that
+        :meth:`face_parameter_bounds` bounds and :meth:`surface_at` takes. The tangent is
+        the surface's first derivative in ``u`` (``BRepLProp_SLProps::D1U``) scaled to
+        unit length. A query: it issues no id and leaves the session unchanged.
+
+        Args:
+            face: A face entity id denoting exactly one face.
+            u: (N,) ``u`` parameters.
+            v: (N,) ``v`` parameters, as many as ``u``.
+
+        Returns:
+            One point, normal and tangent per parameter pair. See
+            :class:`TangentFrameSample`.
+
+        Raises:
+            PysmeshError: If the id is dead, is not a face, or was split; if ``u`` and
+                ``v`` differ in length or hold a value that is not finite; if a pair lies
+                outside the face's parameter bounds; or if ``dS/du`` or the normal is the
+                null vector there (a sphere's pole, a cone's apex). The message names the
+                face and the first refused ``(u, v)``.
+        """
+        return _tangent_frame_sample(
+            self._s.tangent_frame(int(face), _values("u", u), _values("v", v))
+        )
+
+    def face_face_axis(self, face_a: EntityId, face_b: EntityId) -> AxisLine:
+        """The common line of the planes of two planar faces.
+
+        Each plane is taken through its face's centroid with its face's outward normal (the
+        rule of :meth:`surface_at`), and ``IntAna_QuadQuadGeo`` intersects the two. The
+        direction is therefore the cross product of ``face_a``'s and ``face_b``'s outward
+        normals, made unit; the point is the projection onto the line of the midpoint of
+        the two face centroids. A query: it issues no id and leaves the session unchanged.
+
+        Args:
+            face_a: A face entity id denoting exactly one planar face.
+            face_b: Another one.
+
+        Returns:
+            A point of the line and its unit direction. See :class:`AxisLine`.
+
+        Raises:
+            PysmeshError: If an id is dead, is not a face, or was split; if a face is not
+                planar (the message names its surface type); or if the two planes are
+                parallel, within OCCT's angular precision ``1e-12`` rad (the message names
+                both faces and the angle).
+        """
+        return _axis_line(self._s.face_face_axis(int(face_a), int(face_b)))
+
+    def point_at_length(
+        self, edge: EntityId, length: float, *, from_start: bool = True
+    ) -> EdgePoint:
+        """The point at a given length along an edge, and its curve parameter.
+
+        The length is measured along the edge's curve (``GCPnts_AbscissaPoint``) from its
+        first vertex, or from its last one when ``from_start`` is False. First and last
+        follow the edge's orientation as the model holds it: for a free edge or a wire,
+        the direction it was built in; for an edge of a face, the direction of the first
+        face that holds it. Lengths are integrated adaptively, to 1e-10 of the edge's
+        length; on a line or a circle the answer is exact to round-off. A query: it issues
+        no id and leaves the session unchanged.
+
+        Args:
+            edge: An edge entity id denoting exactly one edge.
+            length: Distance along the edge, in model units, from 0 to the edge's length.
+                A length up to ``1e-7`` (OCCT's ``Precision::Confusion``) past the edge's
+                length is its end.
+            from_start: Measure from the first vertex; False measures from the last.
+
+        Returns:
+            The point and the parameter of the edge's curve there. See
+            :class:`EdgePoint`.
+
+        Raises:
+            PysmeshError: If the id is dead, is not an edge, or was split; if ``length``
+                is not finite, negative, or longer than the edge (the message gives both
+                numbers).
+        """
+        return _edge_point(self._s.point_at_length(int(edge), length, from_start))
 
     def entities_in_box(
         self,

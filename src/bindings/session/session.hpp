@@ -39,6 +39,8 @@
 //   session_heal.cpp       — healing, sewing, defeaturing, imprinting and removal;
 //   session_offset.cpp     — the offset family: hollowing and uniform offsetting;
 //   session_query.cpp      — the geometric query surface over the live shape;
+//   session_check.cpp      — the checks: boolean arguments, validity, short edges, closed
+//                            shells and tolerances;
 //   session_tessellate.cpp — the render mesh, and the incremental delta over it;
 //   session_handoff.cpp    — the export to a mesher, and the id-to-ordinal bijection;
 //   session_progress.cpp   — the progress/cancellation driver (declared in progress.hpp,
@@ -284,6 +286,25 @@ struct SessionState {
 // they exist for. Those report the verdict on the delta instead of raising, and the caller
 // decides whether the improvement was enough.
 enum class Validation : int { Strict = 0, Report = 1 };
+
+// What the id carry does with a SOLID id that an operation cut into several solids.
+//
+// KeepId is the rule of every operation that existed before split_by_faces: the id survives
+// on all the pieces and its name resolves as Ambiguous. NewPieceIds is the sixth rule, which
+// only split_by_faces, split_by_plane and keep_half_space select: the id dies, and each piece
+// gets a new id with the role Generated whose source is the cut solid. An id whose solid
+// stays one solid keeps it under both rules, and faces, edges and vertices follow KeepId
+// under both.
+enum class PieceRule : int { KeepId = 0, NewPieceIds = 1 };
+
+// The step the splitting operations add to run_bop, between OCCT's checked answer and the
+// commit. `refine` receives the splitter's result and history, under the GIL, after every
+// check of run_bop has passed. It returns the shape to commit: the result itself, or a
+// compound of the pieces it keeps. It raises PysmeshError to refuse, and the session is then
+// unchanged.
+struct PieceSplit {
+  std::function<TopoDS_Shape(const TopoDS_Shape&, const Handle(BRepTools_History)&)> refine;
+};
 
 // What one face contributed to the previous render mesh: which triangulation it carried and
 // where that triangulation sat.
@@ -701,9 +722,22 @@ class Session {
 
   // A surface filling the named boundary edges, consuming them. Unlike make_face this
   // handles a non-planar boundary; the surface is an approximation, so the result's edges
-  // are new geometry and the boundary edges' ids die.
-  py::dict make_filling(const std::vector<EntityId>& edge_ids, const py::object& progress,
-                        const py::object& cancel);
+  // are new geometry and the boundary edges' ids die. support_faces, when given and not
+  // empty, maps boundary edges to faces the surface is held tangent to (GeomAbs_G1).
+  py::dict make_filling(const std::vector<EntityId>& edge_ids,
+                        const std::optional<std::map<EntityId, EntityId>>& support_faces,
+                        const py::object& progress, const py::object& cancel);
+
+  // A new free face on the named face's surface, extended beyond the face's parameter range
+  // by the given chord lengths on each side (GeomLib::ExtendSurfByLength, C1). The source
+  // stays; the new face and its sub-shapes are Generated from it.
+  py::dict extend_face(EntityId face_id, double u_min, double u_max, double v_min,
+                       double v_max);
+
+  // A new free edge: the named edge's curve extended at its end (or its start) to the point
+  // `length` along the tangent there (GeomLib::ExtendCurveToPoint, C1). The source stays;
+  // the new edge and its vertices are Generated from it.
+  py::dict extend_edge(EntityId edge_id, double length, bool at_end);
 
   // ---- sweeps ----------------------------------------------------------------------- //
   //
@@ -712,8 +746,10 @@ class Session {
   // the sweep's first shape, so its entity ids carry through structurally, and the walls
   // the sweep generates are named against the profile edges they came from.
 
+  // draft_angle == 0 and symmetric == false take the original path, unchanged; either
+  // one takes extrude_variant.
   py::dict extrude(const std::vector<EntityId>& entity_ids, double vx, double vy,
-                   double vz);
+                   double vz, double draft_angle, bool symmetric);
 
   py::dict revolve(const std::vector<EntityId>& entity_ids, double ox, double oy, double oz,
                    double ax, double ay, double az, double angle_rad);
@@ -765,6 +801,32 @@ class Session {
   py::dict fragment(const std::vector<EntityId>& entity_ids, double fuzzy, bool parallel,
                     const py::object& progress, const py::object& cancel);
 
+  // ---- splitting with the piece rule ----------------------------------------------- //
+  //
+  // Three splits that cut solids by faces or by a plane and give each piece its own id
+  // (PieceRule::NewPieceIds). Each runs BRepAlgoAPI_Splitter serially through run_bop, so it
+  // shares split's checks and messages, and none of them consumes its tools.
+
+  // Split the target solids by faces. A tool face is not consumed: its body stays in the
+  // model untouched.
+  py::dict split_by_faces(const std::vector<EntityId>& targets,
+                          const std::vector<EntityId>& tools, double fuzzy,
+                          const py::object& progress, const py::object& cancel);
+
+  // Split the target solids by the plane through `origin` with normal `normal`. The tool is a
+  // square planar face on that plane, built to cover the targets' bounding box twice over.
+  py::dict split_by_plane(const std::vector<EntityId>& targets, double ox, double oy,
+                          double oz, double nx, double ny, double nz, double fuzzy,
+                          const py::object& progress, const py::object& cancel);
+
+  // Keep the material of the target solids on one side of the plane through `origin` with
+  // normal `normal`: the side the normal points to when keep_positive, the other one
+  // otherwise. A split by the plane, then a removal of the pieces on the other side.
+  py::dict keep_half_space(const std::vector<EntityId>& targets, double ox, double oy,
+                           double oz, double nx, double ny, double nz, bool keep_positive,
+                           double fuzzy, const py::object& progress,
+                           const py::object& cancel);
+
   // ---- fillet and chamfer ----------------------------------------------------------- //
 
   // radius_end, when given, makes the radius evolve linearly along each named edge from
@@ -780,6 +842,11 @@ class Session {
                    const std::optional<double>& distance_end,
                    const std::optional<EntityId>& face_id, const py::object& progress,
                    const py::object& cancel);
+
+  // Round the named corners of a free planar face with arcs of `radius` (OCCT's
+  // BRepFilletAPI_MakeFillet2d). The face and its trimmed edges keep their ids; each arc and
+  // its end vertices are generated from the corner vertex, which dies.
+  py::dict fillet_2d(EntityId face_id, const std::vector<EntityId>& vertex_ids, double radius);
 
   // ---- offsets ---------------------------------------------------------------------- //
   //
@@ -798,6 +865,11 @@ class Session {
   // in gives a solid out; a shell gives a shell.
   py::dict offset(const std::vector<EntityId>& entity_ids, double distance, double tol,
                   const py::object& progress, const py::object& cancel);
+
+  // A new free wire parallel to the planar wire the named edges form, at a signed distance:
+  // positive away from the region the wire bounds (closed by its chord when open). Arc or
+  // intersection joins. Each new edge is generated from the edge or vertex it offsets.
+  py::dict offset_wire(const std::vector<EntityId>& edge_ids, double distance, bool intersection);
 
   // ---- transforms ------------------------------------------------------------------- //
 
@@ -818,6 +890,13 @@ class Session {
   // non-planar surface as a B-spline.
   py::dict scale(double sx, double sy, double sz, double cx, double cy, double cz,
                  const std::optional<std::vector<EntityId>>& entity_ids);
+
+  // Move the bodies owning the named entities rigidly, so that the path edge's frame at its
+  // start lands on its frame at the fraction `distance` of its length: the corrected Frenet
+  // frame of GEOM's PositionAlongPath. `reverse` takes the fraction from the far end. A
+  // moved body that owns the path is refused: the path would move with it.
+  py::dict position_along_path(EntityId path_edge, double distance,
+                               const std::vector<EntityId>& entity_ids, bool reverse);
 
   // Duplicate the bodies owning the named entities. Deliberately committed with no history:
   // BRepBuilderAPI_Copy reports the duplicate as "modified from" the original, which would
@@ -874,6 +953,17 @@ class Session {
   // is never reused; an id on a sub-shape a surviving body also owns stays alive, because
   // that shape is still in the model.
   py::dict remove(const std::vector<EntityId>& entity_ids);
+
+  // Lower every tolerance above `tolerance` in the bodies owning the named entities to it
+  // (ShapeFix_ShapeTolerance::LimitTolerance), on a copy of the bodies, so a retained state
+  // keeps its own tolerances. The topology does not change and every id survives, which is
+  // asserted. Reports the validity verdict as heal does, and refuses when no tolerance was
+  // above the limit.
+  py::dict limit_tolerance(const std::vector<EntityId>& entity_ids, double tolerance);
+
+  // Reverse the named faces: free faces, or faces of a shell that bounds no solid. A face of
+  // a solid is refused. Only orientations change, so every id survives.
+  py::dict change_orientation(const std::vector<EntityId>& face_ids);
 
   // Merge faces and edges that lie on one underlying surface or curve. This is the
   // duplicate-removal pass after a boolean, and the stateless API's unify_same_domain with
@@ -1051,6 +1141,57 @@ class Session {
   // Closest point on a face's underlying surface to each of the given points.
   py::dict project_on_face(EntityId face_id, const PointArray& points) const;
 
+  // ---- construction queries ----------------------------------------------------------- //
+  //
+  // Frames, axes and points to build new geometry on. Each takes the face or edge as the live
+  // root holds it, so a normal is the outward one, by the rule of surface_at.
+
+  // A planar face's frame: its area centroid, its outward normal, and its plane's XDirection
+  // made orthogonal to that normal. Any other surface type is refused, naming it.
+  py::dict face_frame(EntityId face_id) const;
+
+  // Points, outward normals and unit dS/du tangents of a face at parameter pairs (u[i], v[i]).
+  // A parameter outside the face's bounds, or a point where dS/du or the normal is the null
+  // vector, is refused with the face id and the (u, v).
+  py::dict tangent_frame(EntityId face_id, const PointArray& u, const PointArray& v) const;
+
+  // The common line of two planar faces' planes (IntAna_QuadQuadGeo), each plane built on
+  // its face's outward normal, so the direction is n_a x n_b. The point is the projection
+  // onto the line of the midpoint of the two area centroids. Parallel planes are refused.
+  py::dict face_face_axis(EntityId face_a, EntityId face_b) const;
+
+  // The point at `length` along an edge (GCPnts_AbscissaPoint) and its curve parameter,
+  // measured from the edge's first vertex in the orientation the root holds it in, or from
+  // its last one.
+  py::dict point_at_length(EntityId edge_id, double length, bool from_start) const;
+
+  // ---- checks ------------------------------------------------------------------------ //
+  //
+  // Read-only, like the queries above; implemented in session_check.cpp.
+
+  // BOPAlgo_ArgumentAnalyzer on the named arguments and tools, as one compound each, for
+  // `operation` ("fuse", "cut", "common", "section" or "split"), serially, with every check
+  // it offers switched on. One dict per finding: the BOPAlgo_CheckStatus name and the ids of
+  // the faulty shapes on each side.
+  py::list check_boolean(const std::string& operation, const std::vector<EntityId>& arguments,
+                         const std::vector<EntityId>& tools, const py::object& progress,
+                         const py::object& cancel) const;
+
+  // BRepCheck_Analyzer on the bodies owning the named entities, or on every body. One dict
+  // per invalid sub-shape: an id that names it, its kind and its BRepCheck_Status names.
+  py::list check_shape(const std::optional<std::vector<EntityId>>& entity_ids,
+                       const py::object& progress, const py::object& cancel) const;
+
+  // Live edge ids whose length, by the rule of mass_properties, is below `threshold`.
+  py::array_t<std::int64_t> small_edges(double threshold) const;
+
+  // Per named entity: whether its owning body's shells are closed and consistently oriented.
+  py::array_t<bool> is_closed_shell(const std::vector<EntityId>& entity_ids) const;
+
+  // Per named face, edge or vertex: its stored tolerance (BRep_Tool::Tolerance), the largest
+  // over the shapes of a split id.
+  py::array_t<double> tolerances(const std::vector<EntityId>& entity_ids) const;
+
   // Live entities of one kind whose bounding box meets the given box. `strict` asks for
   // containment (the entity's box inside the query box) rather than overlap.
   py::array_t<std::int64_t> entities_in_box(const std::string& kind, double xmin, double ymin,
@@ -1221,6 +1362,18 @@ class Session {
     return new BRepTools_History(args, algo);
   }
 
+  // extrude with a draft angle, or symmetric about the profile. A symmetric sweep moves
+  // the profile by -vector first and sweeps 2 x vector, as GEOM's MakePrismVecH2Ways
+  // does. A draft sweeps a planar face along its normal with BRepOffsetAPI_MakeEvolved.
+  py::dict extrude_variant(const std::vector<EntityId>& entity_ids, const gp_Vec& vec,
+                           double draft_angle, bool symmetric);
+
+  // make_filling with a non-empty support_faces: supported edges stay with their faces'
+  // bodies and constrain the surface with GeomAbs_G1; the others are consumed, as before.
+  py::dict filling_with_supports(const std::vector<EntityId>& edge_ids,
+                                 const std::map<EntityId, EntityId>& support_faces,
+                                 const py::object& progress, const py::object& cancel);
+
   // A shape OCCT's sweeps raise the dimension of. A solid has no higher dimension to sweep
   // into, and a compound sweeps element-wise, which would silently produce a shape the
   // caller did not ask for.
@@ -1245,9 +1398,19 @@ class Session {
   // the arguments, options, history and error channels, so only the operand assignment (on
   // the concrete type, because SetTools is not virtual) and whether the operation replaces
   // or extends the model differ. `op` must already carry its arguments and tools.
+  //
+  // `pieces`, when given, is the splitting operations' step before the commit (PieceSplit),
+  // and the commit then applies PieceRule::NewPieceIds. Every other operation passes none.
   py::dict run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
                    const std::vector<TopoDS_Shape>& consumed, bool additive, double fuzzy,
-                   bool parallel, const ProgressHooks& hooks);
+                   bool parallel, const ProgressHooks& hooks,
+                   const PieceSplit* pieces = nullptr);
+
+  // The plane operations' common part: refuse a target that the plane does not cross, by
+  // the signed distances of its material, then build the bounded tool face. `drop_side` is
+  // 0 for split_by_plane; for keep_half_space it is the sign of the side that is removed.
+  TopoDS_Face plane_tool(const char* op, const std::vector<EntityId>& targets,
+                         const gp_Ax3& plane, double fuzzy, int drop_side) const;
 
   // The edges of every contour OCCT could not build a fillet on. This is the diagnostic
   // that turns "the fillet failed" into "the fillet failed on these edges"; when the
@@ -1364,6 +1527,10 @@ class Session {
   // Live entity ids of one kind, ascending. The order every bulk query's rows are in.
   std::vector<EntityId> ids_of_kind(TopAbs_ShapeEnum kind) const;
 
+  // Every live id of a shape, ascending; for a shape of a kind that carries no id (a shell,
+  // a wire, a compound), the ids of its sub-shapes of the highest dimension that has any.
+  std::vector<EntityId> ids_within(const TopoDS_Shape& shape) const;
+
   // The id that labels a sub-shape of the current root. A merge leaves several ids on one
   // shape; the lowest is the label, and the others stay alive and still resolve — they just
   // do not appear in a per-shape array, which has one row to give. A shape in the root with
@@ -1450,7 +1617,8 @@ class Session {
   py::dict commit(const std::vector<TopoDS_Shape>& bodies,
                   const Handle(BRepTools_History) & history, const char* op_name,
                   const TopoDS_Shape& built, Validation mode = Validation::Strict,
-                  const std::vector<std::string>& warnings = {});
+                  const std::vector<std::string>& warnings = {},
+                  PieceRule pieces = PieceRule::KeepId);
 
   // The refusal of a result BRepCheck_Analyzer rejects (report A7): each status it reports,
   // on which sub-shape, and the live ids that sub-shape comes from through `hist`. The faces
@@ -1459,7 +1627,7 @@ class Session {
                                    const Handle(BRepTools_History) & hist) const;
 
   Delta carry_registry(const TopoDS_Shape& new_root, const Handle(BRepTools_History) & hist,
-                       std::int64_t op_index);
+                       std::int64_t op_index, PieceRule pieces = PieceRule::KeepId);
 
   // A rigid transform applied with Copy = false changes only a shape's Location: the TShape,
   // and with it every sub-shape identity, is preserved. Such an operation therefore needs no

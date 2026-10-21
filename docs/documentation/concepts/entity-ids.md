@@ -70,6 +70,37 @@ Every operation on a `Session` follows the same five rules, stated on `HistoryDe
 - An output with **no input correspondence** gets a new id.
 - A **removed** entity's id is marked dead and is never reused.
 
+### The sixth rule: pieces of a cut solid
+
+Three operations add a sixth rule for solids: `split_by_faces`, `split_by_plane` and
+`keep_half_space`. Every other operation, `split` and `fragment` included, keeps the five
+rules above.
+
+- A target **solid** that the operation cuts into **two or more** solids loses its id. Each
+  piece gets a new id with the role `NameRole.GENERATED`, and `Session.origin` of each piece
+  names the target in its `sources`.
+- A target solid that **stays one solid** keeps its id: the first rule. For
+  `keep_half_space` the count is that of the pieces it keeps, so a box trimmed by a plane
+  keeps its id, and an L-shaped solid whose two legs are trimmed off at their tips loses it.
+- **Faces, edges and vertices** keep the five rules. A face cut in two keeps its id on both
+  pieces and resolves as `ResolutionStatus.AMBIGUOUS`; a new cut face gets a new id.
+
+```python
+s = Session()
+s.add_box(3.0, 7.0, 11.0)
+box = s.entities(EntityKind.SOLID)[0]
+
+delta = s.split_by_plane([box], origin=(1.0, 0.0, 0.0), normal=(1.0, 0.0, 0.0))
+
+s.is_alive(box)                        # False: the box was cut into two solids
+pieces = s.entities(EntityKind.SOLID)  # two new ids, both in delta.created
+s.origin(pieces[0]).sources            # [box]
+```
+
+A piece is a solid in its own right, so it gets a name of its own that resolves as
+`RESOLVED`. Under `split` the pieces share the target's id instead, and a caller cannot
+address one of them without the stateless ordinals.
+
 A fillet is a concrete case of the first and fourth rules at once. Filleting an edge kills
 that edge's id and adds a new face (the fillet surface) plus new edges bounding it:
 

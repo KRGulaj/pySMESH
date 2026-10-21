@@ -2,9 +2,11 @@
 
 pySMESH (`pysmesh`, LGPL-2.1-only) is a pybind11 binding around the SALOME Platform meshing
 stack and Open CASCADE Technology. Its one native library, `pysmesh/_core.pyd`, statically
-links a minimal slice of SALOME SMESH and KERNEL, and netgen with SALOME's NETGENPlugin. It
-links OCCT, Boost and VTK dynamically, and the wheel bundles those DLLs. This file lists
-every third-party component that the shipped wheel contains or needs at runtime.
+links a minimal slice of SALOME SMESH and KERNEL, netgen with SALOME's NETGENPlugin, SALOME
+GEOM's ShHealOper and common_geometry_lib, and FreeCAD's PlaneGCS with Eigen. It links OCCT,
+Boost and VTK dynamically, and the wheel bundles those DLLs. This file lists every
+third-party component that the shipped wheel contains or needs at runtime. A statically
+linked library contributes code to `_core.pyd` only where a binding calls into it.
 
 Upstream URLs, commits and the patch index are in [PROVENANCE.md](PROVENANCE.md).
 
@@ -12,7 +14,10 @@ Upstream URLs, commits and the patch index are in [PROVENANCE.md](PROVENANCE.md)
 |---|---|---|---|
 | SALOME **SMESH** `V9_16_0` (vendored, patched) | LGPL-2.1 | **static** in `_core.pyd` | The complete corresponding source is this repository (`extern/smesh/` and `patches/`). The relinking right holds, because the whole binary rebuilds from that source. |
 | SALOME **KERNEL** and **salome_bootstrap** `V9_16_0` (minimal slice) | LGPL-2.1 | **static** in `_core.pyd` | As SMESH. Source in `extern/kernel/` (`Utils`) and `extern/salome_bootstrap/` (`Basics`, `SALOMELocalTrace`, `Exception`). CORBA is compiled out (`SALOME_LIGHT`). |
-| SALOME **GEOM** `V9_16_0` (`GEOMUtils` only) | LGPL-2.1 | **static** in `_core.pyd` | Source slice in `extern/geom/src/GEOMUtils/`. `patches/geom/GEOMUtils_GEOMAlgo.patch` compiles three functions of SALOME **common_geometry_lib** `V9_16_0` (LGPL-2.1) into it. |
+| SALOME **GEOM** `V9_16_0` (`GEOMUtils`, `ShHealOper`) | LGPL-2.1 | **static** in `_core.pyd` | Source slice in `extern/geom/src/GEOMUtils/` and `extern/geom/src/ShHealOper/`, patched by `patches/geom/`. As SMESH. `patches/geom/GEOMUtils_GEOMAlgo.patch` compiles three functions of SALOME common_geometry_lib `V9_16_0` into `GEOMUtils.cxx`. |
+| SALOME **common_geometry_lib** `V9_16_0` (`GEOMAlgo`, `BlockFix`) | LGPL-2.1 | **static** in `_core.pyd` | Source slice in `extern/common_geometry_lib/` (with its `LICENSE`) and `patches/common_geometry_lib/`. As SMESH. |
+| **PlaneGCS** (FreeCAD `1.1.4`, `src/Mod/Sketcher/App/planegcs`) | LGPL-2.0-or-later (file headers), used under LGPL-2.1 | **static** in `_core.pyd` | The complete corresponding source is this repository (`extern/planegcs/`, with FreeCAD's `LICENSE`, `patches/planegcs/` and the shims in `cmake/PlaneGCS/`). The relinking right holds, because the whole binary rebuilds from that source. Copyright Konstantinos Poulios and Victor Titov. |
+| **Eigen 3.4.1** (`Eigen/`) | MPL-2.0 | header-only, compiled into `_core.pyd` with PlaneGCS | Source in `extern/eigen/`: every file keeps its own header, and `COPYING.MPL2` is the licence text. The MPL-2.0 obligation (the source of the covered files is available) is met by those unmodified files. Compiled with `EIGEN_MPL2_ONLY`, so no LGPL Eigen code is included. `Eigen/` also holds `src/Core/arch/Default/BFloat16.h` (Apache-2.0, the TensorFlow authors) and one method of `src/Geometry/AlignedBox.h` (BSD, Willow Garage and Open Source Robotics Foundation), each with its notice in the file; PlaneGCS uses neither type. |
 | **MEFISTO2** (SMESH `V9_9_0`, carried forward), `trte.c` (f2c), **pthread** shim | LGPL-2.1 | **static** in `_core.pyd` | Source in `extern/mefisto2/` (`aptrte`, `Rn.h` and `StdMeshers_MEFISTO_2D` verbatim from SMESH `V9_9_0`; `trte.c` from `looooo/SMESH`) and `extern/pthread/` (from `looooo/SMESH`). |
 | **netgen** `v6.2.2101` (vendored slice: `libsrc`, `nglib`; patched) | LGPL-2.1 | **static** in `_core.pyd` | The complete corresponding source is this repository (`extern/netgen/` and `patches/netgen/`, including SALOME's `netgen62ForSalome.patch`). The relinking right holds, because the whole binary rebuilds from that source. |
 | **NETGENPlugin** `V9_16_0` (vendored: `src/NETGENPlugin`; patched) | LGPL-2.1 | **static** in `_core.pyd` | Source in `extern/netgenplugin/` and `patches/netgenplugin/`. As SMESH. |
@@ -54,8 +59,11 @@ bundle it. Today that is TKFeat and TKDESTL. `ci/check_wheel.py` asserts the too
 ## Full license texts
 
 - LGPL-2.1: [LICENSE](LICENSE). It covers this project, every vendored SALOME source, netgen
-  (`extern/netgen/LICENSE`), NETGENPlugin (`extern/netgenplugin/LICENSE`), GEOM PARTITION and
-  gzstream.
+  (`extern/netgen/LICENSE`), NETGENPlugin (`extern/netgenplugin/LICENSE`),
+  common_geometry_lib (`extern/common_geometry_lib/LICENSE`), PlaneGCS
+  (`extern/planegcs/LICENSE`, FreeCAD's copy of the text), GEOM PARTITION and gzstream.
+- MPL-2.0: `extern/eigen/COPYING.MPL2`, for Eigen; `extern/eigen/COPYING.README` explains
+  Eigen's licensing and `EIGEN_MPL2_ONLY`.
 - zlib: `extern/zlib/LICENSE`. ConcurrentQueue BSL-1.0: in the header,
   `extern/netgen/libsrc/core/concurrentqueue.h`.
 - The OCCT LGPL-2.1 exception, Boost BSL-1.0, VTK BSD-3-Clause, oneTBB Apache-2.0, {fmt} MIT,

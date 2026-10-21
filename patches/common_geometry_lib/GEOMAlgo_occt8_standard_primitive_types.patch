@@ -1,0 +1,98 @@
+pySMESH: OCCT 8.0 removed Standard_PrimitiveTypes.hxx; include Standard_TypeDef.hxx instead.
+
+Seven GEOMAlgo enum headers (GEOMAlgo_KindOf*.hxx, GEOMAlgo_State.hxx) include
+Standard_PrimitiveTypes.hxx under its own include guard. OCCT 8.0.0 removed that header.
+Standard_TypeDef.hxx declares the primitive types that it brought in. The enums use none of
+them. No compiled code changes.
+
+diff --git a/src/GEOMAlgo/GEOMAlgo_KindOfBounds.hxx b/src/GEOMAlgo/GEOMAlgo_KindOfBounds.hxx
+index 8d1477d..f4051df 100644
+--- a/src/GEOMAlgo/GEOMAlgo_KindOfBounds.hxx
++++ b/src/GEOMAlgo/GEOMAlgo_KindOfBounds.hxx
+@@ -31,7 +31,7 @@ GEOMAlgo_KB_INFINITE
+ };
+ 
+ #ifndef _Standard_PrimitiveTypes_HeaderFile
+-#include <Standard_PrimitiveTypes.hxx>
++#include <Standard_TypeDef.hxx>
+ #endif
+ 
+ #endif
+diff --git a/src/GEOMAlgo/GEOMAlgo_KindOfClosed.hxx b/src/GEOMAlgo/GEOMAlgo_KindOfClosed.hxx
+index 884bea0..dd4babe 100644
+--- a/src/GEOMAlgo/GEOMAlgo_KindOfClosed.hxx
++++ b/src/GEOMAlgo/GEOMAlgo_KindOfClosed.hxx
+@@ -30,7 +30,7 @@ GEOMAlgo_KC_NOTCLOSED
+ };
+ 
+ #ifndef _Standard_PrimitiveTypes_HeaderFile
+-#include <Standard_PrimitiveTypes.hxx>
++#include <Standard_TypeDef.hxx>
+ #endif
+ 
+ #endif
+diff --git a/src/GEOMAlgo/GEOMAlgo_KindOfDef.hxx b/src/GEOMAlgo/GEOMAlgo_KindOfDef.hxx
+index c066396..91fbe1d 100644
+--- a/src/GEOMAlgo/GEOMAlgo_KindOfDef.hxx
++++ b/src/GEOMAlgo/GEOMAlgo_KindOfDef.hxx
+@@ -30,7 +30,7 @@ GEOMAlgo_KD_ARBITRARY
+ };
+ 
+ #ifndef _Standard_PrimitiveTypes_HeaderFile
+-#include <Standard_PrimitiveTypes.hxx>
++#include <Standard_TypeDef.hxx>
+ #endif
+ 
+ #endif
+diff --git a/src/GEOMAlgo/GEOMAlgo_KindOfName.hxx b/src/GEOMAlgo/GEOMAlgo_KindOfName.hxx
+index 7cded63..09333fb 100644
+--- a/src/GEOMAlgo/GEOMAlgo_KindOfName.hxx
++++ b/src/GEOMAlgo/GEOMAlgo_KindOfName.hxx
+@@ -53,7 +53,7 @@ GEOMAlgo_KN_PARABOLA
+ };
+ 
+ #ifndef _Standard_PrimitiveTypes_HeaderFile
+-#include <Standard_PrimitiveTypes.hxx>
++#include <Standard_TypeDef.hxx>
+ #endif
+ 
+ #endif
+diff --git a/src/GEOMAlgo/GEOMAlgo_KindOfPeriod.hxx b/src/GEOMAlgo/GEOMAlgo_KindOfPeriod.hxx
+index f8030e2..0ca0e49 100644
+--- a/src/GEOMAlgo/GEOMAlgo_KindOfPeriod.hxx
++++ b/src/GEOMAlgo/GEOMAlgo_KindOfPeriod.hxx
+@@ -30,7 +30,7 @@ GEOMAlgo_KP_NONPERIODIC
+ };
+ 
+ #ifndef _Standard_PrimitiveTypes_HeaderFile
+-#include <Standard_PrimitiveTypes.hxx>
++#include <Standard_TypeDef.hxx>
+ #endif
+ 
+ #endif
+diff --git a/src/GEOMAlgo/GEOMAlgo_KindOfShape.hxx b/src/GEOMAlgo/GEOMAlgo_KindOfShape.hxx
+index 0e6ef84..ae17795 100644
+--- a/src/GEOMAlgo/GEOMAlgo_KindOfShape.hxx
++++ b/src/GEOMAlgo/GEOMAlgo_KindOfShape.hxx
+@@ -42,7 +42,7 @@ GEOMAlgo_KS_PARABOLA
+ };
+ 
+ #ifndef _Standard_PrimitiveTypes_HeaderFile
+-#include <Standard_PrimitiveTypes.hxx>
++#include <Standard_TypeDef.hxx>
+ #endif
+ 
+ #endif
+diff --git a/src/GEOMAlgo/GEOMAlgo_State.hxx b/src/GEOMAlgo/GEOMAlgo_State.hxx
+index 9217757..b6d6bd6 100644
+--- a/src/GEOMAlgo/GEOMAlgo_State.hxx
++++ b/src/GEOMAlgo/GEOMAlgo_State.hxx
+@@ -34,7 +34,7 @@ enum GEOMAlgo_State {
+ };
+ 
+ #ifndef _Standard_PrimitiveTypes_HeaderFile
+-#include <Standard_PrimitiveTypes.hxx>
++#include <Standard_TypeDef.hxx>
+ #endif
+ 
+ #endif

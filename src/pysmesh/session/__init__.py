@@ -57,6 +57,8 @@ a change on either side has an obvious counterpart on the other:
 ``_heal``            healing, sewing, defeaturing, imprinting and removal
 ``_offset``          hollowing a solid, and offsetting a body
 ``_query``           the geometric query surface over the live shape
+``_check``           the checks: boolean arguments, validity, short edges, closed
+                     shells and tolerances
 ``_render``          the render mesh, and the incremental delta over it
 ``_handoff``         the export to a mesher, and its id-to-ordinal map
 ``_state``           snapshots, the id registry's public face, names and introspection
@@ -69,6 +71,7 @@ what they were, and callers import them from here.
 from __future__ import annotations
 
 from ._boolean import _BooleanOps
+from ._check import _CheckOps
 from ._construct import _ConstructOps
 from ._handoff import _HandoffOps
 from ._heal import _HealOps
@@ -79,15 +82,19 @@ from ._state import _StateOps
 from ._transform import _TransformOps
 from ._types import (
     AdjacencyPairs,
+    AxisLine,
+    BooleanCheckFinding,
     BoundsTable,
     CancelPredicate,
     CurvatureTable,
     CurveParameterTable,
     CurveSample,
+    EdgePoint,
     EntityDistance,
     EntityId,
     EntityKind,
     EntityTable,
+    FaceFrame,
     GlueMode,
     Handoff,
     HistoryDelta,
@@ -101,9 +108,11 @@ from ._types import (
     RenderMesh,
     Resolution,
     ResolutionStatus,
+    ShapeCheckFinding,
     SnapshotMark,
     SurfaceParameterTable,
     SurfaceSample,
+    TangentFrameSample,
     TypeTable,
     Vec3,
     WireTable,
@@ -112,6 +121,7 @@ from ._types import (
 
 class Session(
     _BooleanOps,
+    _CheckOps,
     _ConstructOps,
     _HandoffOps,
     _HealOps,
@@ -157,15 +167,19 @@ class Session(
 
 __all__ = [
     "AdjacencyPairs",
+    "AxisLine",
+    "BooleanCheckFinding",
     "BoundsTable",
     "CancelPredicate",
     "CurvatureTable",
     "CurveParameterTable",
     "CurveSample",
+    "EdgePoint",
     "EntityDistance",
     "EntityId",
     "EntityKind",
     "EntityTable",
+    "FaceFrame",
     "GlueMode",
     "Handoff",
     "HistoryDelta",
@@ -180,9 +194,11 @@ __all__ = [
     "Resolution",
     "ResolutionStatus",
     "Session",
+    "ShapeCheckFinding",
     "SnapshotMark",
     "SurfaceParameterTable",
     "SurfaceSample",
+    "TangentFrameSample",
     "TypeTable",
     "Vec3",
     "WireTable",

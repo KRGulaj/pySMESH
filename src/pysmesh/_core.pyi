@@ -227,10 +227,26 @@ class Session:
     def extract_edges(self, edge_ids: list[int]) -> dict[str, object]: ...
     def make_face(self, edge_ids: list[int]) -> dict[str, object]: ...
     def make_filling(
-        self, edge_ids: list[int], progress: object, cancel: object
+        self,
+        edge_ids: list[int],
+        support_faces: dict[int, int] | None,
+        progress: object,
+        cancel: object,
+    ) -> dict[str, object]: ...
+    def extend_face(
+        self, face_id: int, u_min: float, u_max: float, v_min: float, v_max: float
+    ) -> dict[str, object]: ...
+    def extend_edge(
+        self, edge_id: int, length: float, at_end: bool
     ) -> dict[str, object]: ...
     def extrude(
-        self, entity_ids: list[int], vx: float, vy: float, vz: float
+        self,
+        entity_ids: list[int],
+        vx: float,
+        vy: float,
+        vz: float,
+        draft_angle: float,
+        symmetric: bool,
     ) -> dict[str, object]: ...
     def revolve(
         self,
@@ -320,6 +336,41 @@ class Session:
         progress: object,
         cancel: object,
     ) -> dict[str, object]: ...
+    def split_by_faces(
+        self,
+        targets: list[int],
+        tools: list[int],
+        fuzzy: float,
+        progress: object,
+        cancel: object,
+    ) -> dict[str, object]: ...
+    def split_by_plane(
+        self,
+        targets: list[int],
+        ox: float,
+        oy: float,
+        oz: float,
+        nx: float,
+        ny: float,
+        nz: float,
+        fuzzy: float,
+        progress: object,
+        cancel: object,
+    ) -> dict[str, object]: ...
+    def keep_half_space(
+        self,
+        targets: list[int],
+        ox: float,
+        oy: float,
+        oz: float,
+        nx: float,
+        ny: float,
+        nz: float,
+        keep_positive: bool,
+        fuzzy: float,
+        progress: object,
+        cancel: object,
+    ) -> dict[str, object]: ...
     def fillet(
         self,
         edge_ids: list[int],
@@ -337,6 +388,9 @@ class Session:
         progress: object,
         cancel: object,
     ) -> dict[str, object]: ...
+    def fillet_2d(
+        self, face_id: int, vertex_ids: list[int], radius: float
+    ) -> dict[str, object]: ...
     def make_thick_solid(
         self,
         face_ids: list[int],
@@ -352,6 +406,9 @@ class Session:
         tol: float,
         progress: object,
         cancel: object,
+    ) -> dict[str, object]: ...
+    def offset_wire(
+        self, edge_ids: list[int], distance: float, intersection: bool
     ) -> dict[str, object]: ...
     def translate(
         self, dx: float, dy: float, dz: float, entity_ids: list[int] | None
@@ -386,6 +443,9 @@ class Session:
         cy: float,
         cz: float,
         entity_ids: list[int] | None,
+    ) -> dict[str, object]: ...
+    def position_along_path(
+        self, path_edge: int, distance: float, entity_ids: list[int], reverse: bool
     ) -> dict[str, object]: ...
     def copy(self, entity_ids: list[int]) -> dict[str, object]: ...
     def heal(
@@ -427,6 +487,10 @@ class Session:
         cancel: object,
     ) -> dict[str, object]: ...
     def remove(self, entity_ids: list[int]) -> dict[str, object]: ...
+    def limit_tolerance(
+        self, entity_ids: list[int], tolerance: float
+    ) -> dict[str, object]: ...
+    def change_orientation(self, face_ids: list[int]) -> dict[str, object]: ...
     def unify_same_domain(
         self,
         entity_ids: list[int] | None,
@@ -462,6 +526,28 @@ class Session:
     def project_on_face(
         self, face_id: int, points: NDArray[np.float64]
     ) -> dict[str, object]: ...
+    def face_frame(self, face_id: int) -> dict[str, object]: ...
+    def tangent_frame(
+        self, face_id: int, u: NDArray[np.float64], v: NDArray[np.float64]
+    ) -> dict[str, object]: ...
+    def face_face_axis(self, face_a: int, face_b: int) -> dict[str, object]: ...
+    def point_at_length(
+        self, edge_id: int, length: float, from_start: bool
+    ) -> dict[str, object]: ...
+    def check_boolean(
+        self,
+        operation: str,
+        arguments: list[int],
+        tools: list[int],
+        progress: object,
+        cancel: object,
+    ) -> list[dict[str, object]]: ...
+    def check_shape(
+        self, entity_ids: list[int] | None, progress: object, cancel: object
+    ) -> list[dict[str, object]]: ...
+    def small_edges(self, threshold: float) -> NDArray[np.int64]: ...
+    def is_closed_shell(self, entity_ids: list[int]) -> NDArray[np.bool_]: ...
+    def tolerances(self, entity_ids: list[int]) -> NDArray[np.float64]: ...
     def entities_in_box(
         self,
         kind: str,
