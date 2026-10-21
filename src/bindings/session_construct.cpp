@@ -17,6 +17,7 @@
 #include "session/session.hpp"
 
 #include <BRepBuilderAPI_FindPlane.hxx>
+#include <BRepOffsetAPI_MakeEvolved.hxx>
 #include <GeomLib.hxx>
 #include <Geom_BoundedCurve.hxx>
 #include <Geom_BoundedSurface.hxx>
@@ -1019,12 +1020,16 @@ py::dict Session::extend_edge(EntityId edge_id, double length, bool at_end) {
 // the sweep generates are named against the profile edges they came from.
 
 py::dict Session::extrude(const std::vector<EntityId>& entity_ids, double vx, double vy,
-                   double vz) {
+                   double vz, double draft_angle, bool symmetric) {
   finite_arg("extrude", "vector", vx, vy, vz);
+  finite_arg("extrude", "draft_angle", draft_angle);
   OpGuard guard(in_op_);
   const gp_Vec vec(vx, vy, vz);
   if (vec.Magnitude() <= 0.0) {
     throw PysmeshError("Session.extrude: the extrusion vector must be non-zero.");
+  }
+  if (draft_angle != 0.0 || symmetric) {
+    return extrude_variant(entity_ids, vec, draft_angle, symmetric);
   }
   const TopoDS_Shape profile = sole_body("extrude", entity_ids);
   require_sweepable("extrude", profile);
@@ -1053,6 +1058,274 @@ py::dict Session::extrude(const std::vector<EntityId>& entity_ids, double vx, do
   if (result.IsNull()) {
     throw PysmeshError("Session.extrude: OCCT could not sweep the profile.", "",
                        ids_as_int(entity_ids));
+  }
+  return commit(concat(survivors, result), hist, "extrude", result);
+}
+
+namespace {
+
+// How far a draft sweep's vector may lean off the profile plane's normal, in radians: the
+// angular resolution a caller's normal survives a scaling by the sweep length with.
+constexpr double kDraftAxisTol = 1e-9;
+
+constexpr const char* kDraftHint =
+    "A positive draft moves every side of the profile inward by |vector| tan(draft_angle) "
+    "over the sweep; where that reaches half the profile's width, the opposite walls meet and "
+    "pass through each other.";
+
+// The history of a drafted sweep of `spine` by BRepOffsetAPI_MakeEvolved along the one-edge
+// profile `edge` (first vertex on the spine). MakeEvolved answers GeneratedShapes for a spine
+// edge against each profile sub-shape, and gives the two caps; it answers nothing for a
+// spine vertex. So: the spine face becomes the cap at the spine (Modified), each spine edge
+// its image there (Modified), each spine vertex the matching end of that image (Modified, by
+// the end that coincides with it); each spine edge generates its side face and its edge on
+// the far cap, and the spine face generates the far cap.
+Handle(BRepTools_History) drafted_history(const TopoDS_Shape& spine, const TopoDS_Edge& edge,
+                                          BRepOffsetAPI_MakeEvolved& mk) {
+  Handle(BRepTools_History) hist = new BRepTools_History;
+  TopoDS_Vertex v0, v1;
+  TopExp::Vertices(edge, v0, v1);
+  ShapeSet spine_edges;
+  TopExp::MapShapes(spine, TopAbs_EDGE, spine_edges);
+  ShapeSet near_edges;
+  ShapeSet mapped_vertices;
+  for (int i = 1; i <= spine_edges.Extent(); ++i) {
+    const TopoDS_Shape& e = spine_edges(i);
+    const NCollection_List<TopoDS_Shape>& near = mk.GeneratedShapes(e, v0);
+    for (const TopoDS_Shape& img : near) {
+      hist->AddModified(e, img);
+      near_edges.Add(img);
+    }
+    for (const TopoDS_Shape& f : mk.GeneratedShapes(e, edge)) {
+      hist->AddGenerated(e, f);
+    }
+    for (const TopoDS_Shape& img : mk.GeneratedShapes(e, v1)) {
+      hist->AddGenerated(e, img);
+    }
+    if (near.Extent() != 1 || near.First().ShapeType() != TopAbs_EDGE) {
+      continue;
+    }
+    TopoDS_Vertex a, b, c, d;
+    TopExp::Vertices(TopoDS::Edge(e), a, b);
+    TopExp::Vertices(TopoDS::Edge(near.First()), c, d);
+    if (a.IsNull() || b.IsNull() || c.IsNull() || d.IsNull()) {
+      continue;
+    }
+    const bool straight = BRep_Tool::Pnt(a).Distance(BRep_Tool::Pnt(c)) <=
+                          BRep_Tool::Pnt(a).Distance(BRep_Tool::Pnt(d));
+    const TopoDS_Vertex pairs[2][2] = {{a, straight ? c : d}, {b, straight ? d : c}};
+    for (const auto& pair : pairs) {
+      if (!mapped_vertices.Contains(pair[0])) {
+        hist->AddModified(pair[0], pair[1]);
+        mapped_vertices.Add(pair[0]);
+      }
+    }
+  }
+  // The cap at the spine is the one holding the spine edges' images.
+  const TopoDS_Shape caps[2] = {mk.Top(), mk.Bottom()};
+  int near_cap = 0;
+  for (int k = 0; k < 2; ++k) {
+    for (TopExp_Explorer ex(caps[k], TopAbs_EDGE); ex.More(); ex.Next()) {
+      if (near_edges.Contains(ex.Current())) {
+        near_cap = k;
+      }
+    }
+  }
+  ShapeSet spine_faces;
+  TopExp::MapShapes(spine, TopAbs_FACE, spine_faces);
+  if (spine_faces.Extent() == 1) {
+    hist->AddModified(spine_faces(1), caps[near_cap]);
+    hist->AddGenerated(spine_faces(1), caps[1 - near_cap]);
+  }
+  return hist;
+}
+
+// The evolved sweep lists the same faces in an order that varies from run to run:
+// BRepFill_Evolved gathers them through maps keyed by shape address (two fresh sessions gave
+// equal geometry in a different order, so different bytes and ids). Each shell is rebuilt with
+// the same faces, same TShapes, in an order of their own geometry: area centroid, area, then
+// box. Equal input then gives equal bytes and equal ids, and the history, which names the
+// faces themselves, holds as it is.
+TopoDS_Shape in_geometric_order(const TopoDS_Shape& shape) {
+  BRep_Builder builder;
+  std::vector<TopoDS_Shape> solids;
+  for (TopExp_Explorer ex(shape, TopAbs_SOLID); ex.More(); ex.Next()) {
+    const TopoDS_Shape& solid = ex.Current();
+    TopoDS_Solid rebuilt;
+    builder.MakeSolid(rebuilt);
+    for (TopoDS_Iterator sh(solid, /*cumOri=*/false, /*cumLoc=*/false); sh.More(); sh.Next()) {
+      std::vector<std::pair<std::array<double, 10>, TopoDS_Shape>> faces;
+      for (TopoDS_Iterator f(sh.Value(), false, false); f.More(); f.Next()) {
+        GProp_GProps props;
+        BRepGProp::SurfaceProperties(f.Value(), props);
+        const gp_Pnt c = props.CentreOfMass();
+        double x0, y0, z0, x1, y1, z1;
+        shape_checks::exact_box(f.Value()).Get(x0, y0, z0, x1, y1, z1);
+        faces.push_back({{c.X(), c.Y(), c.Z(), props.Mass(), x0, y0, z0, x1, y1, z1},
+                         f.Value()});
+      }
+      std::stable_sort(faces.begin(), faces.end(),
+                       [](const auto& a, const auto& b) { return a.first < b.first; });
+      TopoDS_Shell shell;
+      builder.MakeShell(shell);
+      for (const auto& f : faces) {
+        builder.Add(shell, f.second);
+      }
+      shell.Closed(sh.Value().Closed());
+      shell.Location(sh.Value().Location());
+      shell.Orientation(sh.Value().Orientation());
+      builder.Add(rebuilt, shell);
+    }
+    rebuilt.Location(solid.Location());
+    rebuilt.Orientation(solid.Orientation());
+    solids.push_back(rebuilt);
+  }
+  if (solids.size() == 1) {
+    return solids.front();
+  }
+  return make_root(solids);
+}
+
+}  // namespace
+
+py::dict Session::extrude_variant(const std::vector<EntityId>& entity_ids, const gp_Vec& vec,
+                                  double draft_angle, bool symmetric) {
+  const TopoDS_Shape profile = sole_body("extrude", entity_ids);
+  require_sweepable("extrude", profile);
+  const std::vector<TopoDS_Shape> survivors = bodies_excluding({profile});
+  const bool drafted = draft_angle != 0.0;
+  gp_Dir axis;
+  if (drafted) {
+    if (!(std::abs(draft_angle) < 0.5 * M_PI)) {
+      throw PysmeshError("Session.extrude: the draft angle " + extend_num(draft_angle) +
+                             " rad is not between -pi/2 and pi/2; it leans the walls flat or "
+                             "past.",
+                         "", ids_as_int(entity_ids));
+    }
+    if (profile.ShapeType() != TopAbs_FACE) {
+      throw PysmeshError("Session.extrude: a draft angle applies to a planar face profile; the "
+                         "named entities belong to a " +
+                             std::string(TopAbs::ShapeTypeToString(profile.ShapeType())) +
+                             " body.",
+                         "", ids_as_int(entity_ids));
+    }
+    const BRepAdaptor_Surface surface(TopoDS::Face(profile), false);
+    if (surface.GetType() != GeomAbs_Plane) {
+      throw PysmeshError("Session.extrude: a draft angle applies to a planar face profile; the "
+                         "profile face is a " +
+                             std::string(surface_type_name(surface.GetType())) + " face.",
+                         "", ids_as_int(entity_ids));
+    }
+    axis = surface.Plane().Axis().Direction();
+    const double off = vec.Angle(gp_Vec(axis));
+    const double tilt = std::min(off, M_PI - off);
+    if (tilt > kDraftAxisTol) {
+      throw PysmeshError("Session.extrude: a draft angle applies to a sweep along the profile "
+                         "face's normal; the vector is " +
+                             extend_num(tilt) + " rad off it.",
+                         "", ids_as_int(entity_ids));
+    }
+  }
+
+  TopoDS_Shape result;
+  Handle(BRepTools_History) hist;
+  std::string interference;
+  double length = vec.Magnitude();
+  double reached = 0.0;
+  {
+    py::gil_scoped_release release;
+    const char* stage = "moving the profile by -vector failed";
+    try {
+      // A symmetric sweep starts at -vector: the profile is moved there, by a change of
+      // location, and swept twice as far. The move's history carries the profile's ids onto
+      // the moved profile, and the sweep's history is composed after it.
+      TopoDS_Shape base = profile;
+      gp_Vec sweep = vec;
+      Handle(BRepTools_History) moved;
+      if (symmetric) {
+        gp_Trsf shift;
+        shift.SetTranslation(-vec);
+        BRepBuilderAPI_Transform mover(profile, shift, /*Copy=*/false);
+        base = mover.Shape();
+        moved = history_of(profile, mover);
+        sweep = 2.0 * vec;
+        length = sweep.Magnitude();
+      }
+      Handle(BRepTools_History) swept;
+      if (!drafted) {
+        stage = "BRepPrimAPI_MakePrism failed";
+        BRepPrimAPI_MakePrism mk(base, sweep, /*Copy=*/false);
+        mk.Build();
+        if (mk.IsDone()) {
+          stage = "reading the history of BRepPrimAPI_MakePrism failed";
+          result = mk.Shape();
+          swept = history_of(base, mk);
+        }
+      } else {
+        // The evolved sweep of the face along one straight profile edge. The profile is given
+        // in the global frame (theIsAxeProf): its z runs along the spine plane's own axis,
+        // whatever the face's orientation, and +y moves the far cap into the face, so a
+        // positive draft narrows the solid (measured on OCCT 8.0.1).
+        stage = "BRepOffsetAPI_MakeEvolved failed";
+        const double z = sweep.Dot(gp_Vec(axis)) > 0.0 ? length : -length;
+        const TopoDS_Edge edge =
+            BRepBuilderAPI_MakeEdge(gp_Pnt(0.0, 0.0, 0.0),
+                                    gp_Pnt(0.0, length * std::tan(draft_angle), z))
+                .Edge();
+        const TopoDS_Wire wire = BRepBuilderAPI_MakeWire(edge).Wire();
+        BRepOffsetAPI_MakeEvolved mk(base, wire, GeomAbs_Arc, /*theIsAxeProf=*/true,
+                                     /*theIsSolid=*/true, /*theIsProfOnSpine=*/false,
+                                     Precision::Confusion(), /*theIsVolume=*/false,
+                                     /*theRunInParallel=*/false);
+        mk.Build();
+        if (mk.IsDone()) {
+          stage = "reading the history of BRepOffsetAPI_MakeEvolved failed";
+          result = in_geometric_order(mk.Shape());
+          swept = drafted_history(base, edge, mk);
+          stage = "checking the drafted solid for self-interference failed";
+          interference = shape_checks::self_interference_refusal("Session.extrude", result);
+          // How far the solid reaches along the profile's normal: the z range of its box in
+          // the profile plane's frame. Where a narrowing draft makes the walls meet before
+          // the sweep ends, MakeEvolved gives a valid solid that stops there, in a ridge.
+          stage = "measuring the drafted solid's height failed";
+          gp_Trsf to_plane;
+          to_plane.SetTransformation(
+              BRepAdaptor_Surface(TopoDS::Face(base), false).Plane().Position());
+          double x0, y0, z0, x1, y1, z1;
+          shape_checks::exact_box(result.Moved(TopLoc_Location(to_plane)))
+              .Get(x0, y0, z0, x1, y1, z1);
+          reached = std::max(std::abs(z0), std::abs(z1));
+        }
+      }
+      if (!result.IsNull()) {
+        if (moved.IsNull()) {
+          hist = swept;
+        } else {
+          moved->Merge(swept);
+          hist = moved;
+        }
+      }
+    } catch (const std::exception& e) {
+      py::gil_scoped_acquire acquire;
+      throw PysmeshError(std::string("Session.extrude: ") + stage + ": " + e.what());
+    }
+  }
+  if (result.IsNull()) {
+    throw PysmeshError("Session.extrude: OCCT could not sweep the profile" +
+                           std::string(drafted ? " with the draft angle " +
+                                                     extend_num(draft_angle) + " rad"
+                                               : std::string()) +
+                           ".",
+                       "", ids_as_int(entity_ids));
+  }
+  refuse_self_interference(interference, kDraftHint);
+  if (drafted &&
+      reached < length - std::max(shape_checks::max_tolerance({result}), Precision::Confusion())) {
+    throw PysmeshError("Session.extrude: at the draft angle " + extend_num(draft_angle) +
+                           " rad the walls meet " + extend_num(reached) +
+                           " from the profile, short of the sweep length " +
+                           extend_num(length) + "; the solid would end there in a ridge.",
+                       kDraftHint, ids_as_int(entity_ids));
   }
   return commit(concat(survivors, result), hist, "extrude", result);
 }

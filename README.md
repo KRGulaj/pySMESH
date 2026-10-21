@@ -268,6 +268,11 @@ argument analyzer on a boolean's operands), `check_shape` (`BRepCheck_Analyzer`
 per body, one finding per invalid sub-shape), `small_edges`,
 `is_closed_shell` and `tolerances`.
 
+`extrude` takes two keyword options. `draft_angle` leans the walls of a
+planar face's sweep by an angle in radians: a positive angle narrows the
+solid, a negative one widens it. `symmetric=True` runs the sweep from
+`-vector` to `+vector`.
+
 Two queries answer the questions a feature filter asks. `surface_parameters`
 reads a face's analytic parameters off its surface: a radius, a cone's
 taper, a torus's two radii. `face_wires` splits a face's boundary into its

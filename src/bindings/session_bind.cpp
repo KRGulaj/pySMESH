@@ -70,7 +70,7 @@ void bind_session(py::module_& m) {
       .def("extend_edge", &Session::extend_edge, py::arg("edge_id"), py::arg("length"),
            py::arg("at_end"))
       .def("extrude", &Session::extrude, py::arg("entity_ids"), py::arg("vx"), py::arg("vy"),
-           py::arg("vz"))
+           py::arg("vz"), py::arg("draft_angle"), py::arg("symmetric"))
       .def("revolve", &Session::revolve, py::arg("entity_ids"), py::arg("ox"), py::arg("oy"),
            py::arg("oz"), py::arg("ax"), py::arg("ay"), py::arg("az"), py::arg("angle_rad"))
       .def("pipe", &Session::pipe, py::arg("spine_ids"), py::arg("profile_ids"),

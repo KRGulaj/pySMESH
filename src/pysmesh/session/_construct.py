@@ -680,7 +680,14 @@ class _ConstructOps(_SessionBase):
 
     # ---- sweeps ----------------------------------------------------------------------- #
 
-    def extrude(self, entities: Sequence[EntityId], vector: Vec3) -> HistoryDelta:
+    def extrude(
+        self,
+        entities: Sequence[EntityId],
+        vector: Vec3,
+        *,
+        draft_angle: float = 0.0,
+        symmetric: bool = False,
+    ) -> HistoryDelta:
         """Sweep a profile linearly, consuming it.
 
         A sweep raises the profile's dimension: an edge becomes a face, a wire a shell, a
@@ -688,20 +695,51 @@ class _ConstructOps(_SessionBase):
         through, and each wall the sweep generates is named against the profile edge it
         came from.
 
+        With ``symmetric`` the sweep runs from ``-vector`` to ``+vector``, a total length of
+        twice ``vector``, as GEOM's ``MakePrismVecH2Ways``: the profile is moved by
+        ``-vector`` and swept by ``2 * vector``, so its ids carry onto the moved profile,
+        which is the start of the solid.
+
+        With a ``draft_angle`` the walls lean by that angle off the sweep direction: a
+        positive angle narrows the solid along the sweep (the far face is the profile
+        offset inward by ``|vector| tan(draft_angle)``), a negative one widens it. A draft
+        applies to a planar face profile swept along its normal, either way. OCCT's evolved
+        sweep (``BRepOffsetAPI_MakeEvolved``) builds it, the engine of OCCT's own drafted
+        prisms: a straight profile edge gives a planar wall and an arc a conical one, so
+        the geometry is exact. It offsets the profile with arc joins, the only kind it
+        implements: where the offset moves away from a corner, at a convex corner when the
+        solid widens or a reflex one (a hole's corner) when it narrows, the corner becomes
+        a cylinder or cone face. The profile face, its edges and its vertices carry their
+        ids onto the start of the solid; each wall and each edge of the far face is
+        generated from its profile edge, and the far face from the profile face.
+
+        With neither, the sweep is the plain one, unchanged.
+
         Args:
             entities: Entities identifying the profile. They must all belong to one body,
                 which is the body swept.
             vector: The extrusion vector; must be non-zero.
+            draft_angle: The draft, in radians, with ``|draft_angle| < pi / 2``. 0 sweeps
+                without one.
+            symmetric: Sweep from ``-vector`` to ``+vector``.
 
         Returns:
             The delta for this operation.
 
         Raises:
             PysmeshError: On a zero vector, a dead id, entities spanning two bodies, a
-                profile body that is a solid or a compound, or a sweep OCCT cannot build.
+                profile body that is a solid or a compound, or a sweep OCCT cannot build;
+                with a draft angle, also on an angle that is not finite or not inside
+                ``(-pi/2, pi/2)``, a profile that is not one planar face (the message names
+                its kind or surface type), a vector more than ``1e-9`` rad off the
+                face's normal (the message gives the angle), a narrowing draft whose
+                walls meet before the sweep's end (the message gives where they meet and
+                the sweep length), or a drafted solid that intersects itself.
         """
         vx, vy, vz = vector
-        return _delta(self._s.extrude(_ids(entities), vx, vy, vz))
+        return _delta(
+            self._s.extrude(_ids(entities), vx, vy, vz, draft_angle, symmetric)
+        )
 
     def revolve(
         self,

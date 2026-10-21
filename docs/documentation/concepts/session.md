@@ -98,6 +98,17 @@ not cross is refused, with its range of signed distances from the plane. The thr
 their boolean on one thread, so they take no `parallel` argument, and two runs on equal
 input give equal bytes and equal ids.
 
+### Drafted and symmetric extrusion
+
+`extrude` takes two keyword options. With `symmetric=True` the sweep runs from
+`-vector` to `+vector`. With `draft_angle` the walls lean by that angle, in radians:
+a positive angle narrows the solid along the sweep, a negative one widens it. A draft
+applies to one planar face swept along its normal. OCCT's evolved sweep builds the
+drafted solid with exact planes and cones. Its offset rounds a corner with a cylinder
+or cone face where the offset moves away from the corner. A narrowing draft whose walls
+meet before the end of the sweep is refused, with the height where they meet. With
+neither option, `extrude` is the plain sweep, unchanged.
+
 ### Booleans: `fuzzy` and `parallel`
 
 Every boolean and `imprint` takes `fuzzy` (extra tolerance for deciding two shapes touch)

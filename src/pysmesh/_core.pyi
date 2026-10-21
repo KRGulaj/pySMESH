@@ -236,7 +236,13 @@ class Session:
         self, edge_id: int, length: float, at_end: bool
     ) -> dict[str, object]: ...
     def extrude(
-        self, entity_ids: list[int], vx: float, vy: float, vz: float
+        self,
+        entity_ids: list[int],
+        vx: float,
+        vy: float,
+        vz: float,
+        draft_angle: float,
+        symmetric: bool,
     ) -> dict[str, object]: ...
     def revolve(
         self,

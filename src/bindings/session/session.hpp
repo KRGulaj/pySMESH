@@ -744,8 +744,10 @@ class Session {
   // the sweep's first shape, so its entity ids carry through structurally, and the walls
   // the sweep generates are named against the profile edges they came from.
 
+  // draft_angle == 0 and symmetric == false take the original path, unchanged; either
+  // one takes extrude_variant.
   py::dict extrude(const std::vector<EntityId>& entity_ids, double vx, double vy,
-                   double vz);
+                   double vz, double draft_angle, bool symmetric);
 
   py::dict revolve(const std::vector<EntityId>& entity_ids, double ox, double oy, double oz,
                    double ax, double ay, double az, double angle_rad);
@@ -1340,6 +1342,12 @@ class Session {
     args.Append(argument);
     return new BRepTools_History(args, algo);
   }
+
+  // extrude with a draft angle, or symmetric about the profile. A symmetric sweep moves
+  // the profile by -vector first and sweeps 2 x vector, as GEOM's MakePrismVecH2Ways
+  // does. A draft sweeps a planar face along its normal with BRepOffsetAPI_MakeEvolved.
+  py::dict extrude_variant(const std::vector<EntityId>& entity_ids, const gp_Vec& vec,
+                           double draft_angle, bool symmetric);
 
   // A shape OCCT's sweeps raise the dimension of. A solid has no higher dimension to sweep
   // into, and a compound sweeps element-wise, which would silently produce a shape the
