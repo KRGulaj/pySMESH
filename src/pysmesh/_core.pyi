@@ -434,6 +434,9 @@ class Session:
         cz: float,
         entity_ids: list[int] | None,
     ) -> dict[str, object]: ...
+    def position_along_path(
+        self, path_edge: int, distance: float, entity_ids: list[int], reverse: bool
+    ) -> dict[str, object]: ...
     def copy(self, entity_ids: list[int]) -> dict[str, object]: ...
     def heal(
         self,

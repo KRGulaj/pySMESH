@@ -879,6 +879,13 @@ class Session {
   py::dict scale(double sx, double sy, double sz, double cx, double cy, double cz,
                  const std::optional<std::vector<EntityId>>& entity_ids);
 
+  // Move the bodies owning the named entities rigidly, so that the path edge's frame at its
+  // start lands on its frame at the fraction `distance` of its length: the corrected Frenet
+  // frame of GEOM's PositionAlongPath. `reverse` takes the fraction from the far end. A
+  // moved body that owns the path is refused: the path would move with it.
+  py::dict position_along_path(EntityId path_edge, double distance,
+                               const std::vector<EntityId>& entity_ids, bool reverse);
+
   // Duplicate the bodies owning the named entities. Deliberately committed with no history:
   // BRepBuilderAPI_Copy reports the duplicate as "modified from" the original, which would
   // move the original's id onto the copy. The originals keep their ids because they are

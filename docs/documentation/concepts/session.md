@@ -73,7 +73,7 @@ other.
 | Splits with piece ids | `split_by_faces`, `split_by_plane`, `keep_half_space` |
 | Fillet and chamfer | `fillet`, `chamfer` |
 | Offsets | `make_thick_solid`, `offset` |
-| Transforms | `translate`, `rotate`, `mirror`, `scale`, `copy` |
+| Transforms | `translate`, `rotate`, `mirror`, `scale`, `position_along_path`, `copy` |
 | Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove`, `limit_tolerance`, `change_orientation` |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
@@ -108,6 +108,17 @@ drafted solid with exact planes and cones. Its offset rounds a corner with a cyl
 or cone face where the offset moves away from the corner. A narrowing draft whose walls
 meet before the end of the sweep is refused, with the height where they meet. With
 neither option, `extrude` is the plain sweep, unchanged.
+
+### Moving along a path
+
+`position_along_path` moves the bodies of the named entities rigidly along a
+path edge. It takes the path's frame at its start onto its frame at a fraction of
+the path's length, measured by arc length. The frame is OCCT's corrected Frenet
+frame, as GEOM's `PositionAlongPath` uses it: origin on the curve, z along the
+tangent, x along the normal. On a straight path the move is a translation, on a
+circular arc a rotation about the arc's axis. Every id survives, as for
+`translate`. A moved body that owns the path edge is refused, because the path
+would move with it.
 
 ### Booleans: `fuzzy` and `parallel`
 

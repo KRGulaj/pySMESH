@@ -126,6 +126,8 @@ void bind_session(py::module_& m) {
            py::arg("nx"), py::arg("ny"), py::arg("nz"), py::arg("entity_ids"))
       .def("scale", &Session::scale, py::arg("sx"), py::arg("sy"), py::arg("sz"),
            py::arg("cx"), py::arg("cy"), py::arg("cz"), py::arg("entity_ids"))
+      .def("position_along_path", &Session::position_along_path, py::arg("path_edge"),
+           py::arg("distance"), py::arg("entity_ids"), py::arg("reverse"))
       .def("copy", &Session::copy, py::arg("entity_ids"))
       .def("heal", &Session::heal, py::arg("entity_ids"), py::arg("precision"),
            py::arg("min_tolerance"), py::arg("max_tolerance"), py::arg("progress"),

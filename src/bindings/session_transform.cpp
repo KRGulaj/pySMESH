@@ -14,6 +14,15 @@
 
 #include "session/session.hpp"
 
+#include <GCPnts_AbscissaPoint.hxx>
+#include <GeomAdaptor_Curve.hxx>
+#include <GeomFill_CorrectedFrenet.hxx>
+#include <GeomFill_CurveAndTrihedron.hxx>
+
+#include <algorithm>
+#include <cctype>
+#include <limits>
+
 namespace pysmesh {
 namespace session {
 
@@ -92,6 +101,143 @@ py::dict Session::scale(double sx, double sy, double sz, double cx, double cy, d
                            hist = history_of(input, mk);
                          }
                        });
+}
+
+namespace {
+
+// The relative tolerance the path's length is integrated to, as point_at_length does it.
+constexpr double kPathLengthRelTol = 1e-10;
+
+// The frame GEOM's PositionAlongPath places a shape by, at parameter u of the path curve.
+// GeomFill_CurveAndTrihedron over GeomFill_CorrectedFrenet gives the matrix of columns
+// (normal, binormal, tangent) and the curve point: the frame's origin is the point, its z
+// axis the tangent and its x axis the normal.
+gp_Ax3 path_frame(GeomFill_CurveAndTrihedron& law, double u) {
+  gp_Mat m;
+  gp_Vec v;
+  if (!law.D0(u, m, v)) {
+    throw Standard_Failure("GeomFill_CurveAndTrihedron::D0 found no frame");
+  }
+  return gp_Ax3(gp_Pnt(v.XYZ()), gp_Dir(m.Column(3)), gp_Dir(m.Column(1)));
+}
+
+}  // namespace
+
+// GEOM's PositionAlongPath (GEOMImpl_PositionDriver) takes the frame of BRepFill_Edge3DLaw
+// over GeomFill_CorrectedFrenet and finds the length to 1e-4. One edge needs no law per
+// edge of a wire, so the same GeomFill_CurveAndTrihedron runs on the edge's curve, reversed
+// on a REVERSED edge as Edge3DLaw does, and the length is integrated to 1e-10 of itself.
+// The start frame is the frame at the path's first vertex, not GEOM's section placement:
+// the move does not depend on where the moved bodies are.
+py::dict Session::position_along_path(EntityId path_edge, double distance,
+                                      const std::vector<EntityId>& entity_ids, bool reverse) {
+  static constexpr const char* kOp = "position_along_path";
+  finite_arg(kOp, "distance", distance);
+  OpGuard guard(in_op_);
+  const std::string path_text = "path edge " + std::to_string(path_edge);
+  if (entity_ids.empty()) {
+    throw PysmeshError("Session.position_along_path: no entity is named; there is nothing to "
+                       "move along " + path_text + ".",
+                       "", {static_cast<int>(path_edge)});
+  }
+  const TopoDS_Edge edge = sole_edge(kOp, path_edge);
+  if (!(distance >= 0.0 && distance <= 1.0)) {
+    throw PysmeshError("Session.position_along_path: distance " + number_text(distance) +
+                           " along " + path_text +
+                           " is outside [0, 1]; it is a fraction of the path's length.",
+                       "", {static_cast<int>(path_edge)});
+  }
+  // The path cannot move with the bodies it places.
+  const ShapeKeyed<TopoDS_Shape> owners = body_of_subshape();
+  const TopoDS_Shape path_body = sole_owner_body(owners, {edge});
+  for (EntityId id : entity_ids) {
+    const EntityRecord& rec = require_alive(kOp, id);
+    if (!sole_owner_body(owners, rec.shapes).IsSame(path_body)) {
+      continue;
+    }
+    std::string owner;
+    const auto body_ids = state_.registry->by_shape.find(path_body);
+    if (path_body.IsSame(edge)) {
+      owner = "is itself a free edge body";
+    } else if (body_ids != state_.registry->by_shape.end()) {
+      std::string kind = kind_name(path_body.ShapeType());
+      std::transform(kind.begin(), kind.end(), kind.begin(),
+                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      owner = "belongs to " + kind + " " + std::to_string(body_ids->second.front());
+    } else {
+      owner = "belongs to a " + std::string(TopAbs::ShapeTypeToString(path_body.ShapeType())) +
+              " body";
+    }
+    throw PysmeshError("Session.position_along_path: " + path_text + " " + owner +
+                           ", which entity " + std::to_string(id) +
+                           " moves; a path cannot move with the bodies it places.",
+                       "", {static_cast<int>(path_edge), static_cast<int>(id)});
+  }
+
+  const double fraction = reverse ? 1.0 - distance : distance;
+  double first = 0.0;
+  double last = 0.0;
+  Handle(Geom_Curve) curve = BRep_Tool::Curve(edge, first, last);
+  if (curve.IsNull()) {
+    throw PysmeshError("Session.position_along_path: " + path_text +
+                           " has no 3D curve (it is degenerate); it has no length to move "
+                           "along.",
+                       "", {static_cast<int>(path_edge)});
+  }
+  if (edge.Orientation() == TopAbs_REVERSED) {
+    Handle(Geom_TrimmedCurve) reversed = new Geom_TrimmedCurve(curve, first, last);
+    reversed->Reverse();
+    curve = reversed;
+    first = curve->FirstParameter();
+    last = curve->LastParameter();
+  }
+  gp_Trsf move;
+  double total = 0.0;
+  const char* stage = "measuring the path's length failed";
+  try {
+    Handle(GeomAdaptor_Curve) adaptor = new GeomAdaptor_Curve(curve, first, last);
+    const double tol = std::max(kPathLengthRelTol * GCPnts_AbscissaPoint::Length(*adaptor),
+                                std::numeric_limits<double>::min());
+    total = GCPnts_AbscissaPoint::Length(*adaptor, tol);
+    if (total > Precision::Confusion()) {
+      double u = first;
+      if (fraction == 1.0) {
+        u = last;
+      } else if (fraction > 0.0) {
+        stage = "finding the parameter at the fraction failed";
+        const GCPnts_AbscissaPoint ap(tol, *adaptor, fraction * total, first);
+        if (!ap.IsDone()) {
+          throw Standard_Failure("GCPnts_AbscissaPoint::IsDone() is false");
+        }
+        u = ap.Parameter();
+      }
+      stage = "building the corrected Frenet frames failed";
+      GeomFill_CurveAndTrihedron law(new GeomFill_CorrectedFrenet());
+      law.SetCurve(adaptor);
+      move.SetDisplacement(path_frame(law, first), path_frame(law, u));
+    }
+  } catch (const std::exception& e) {
+    throw PysmeshError("Session.position_along_path: " + path_text + ": " + stage + ": " +
+                           e.what(),
+                       "", {static_cast<int>(path_edge)});
+  }
+  if (!(total > Precision::Confusion())) {
+    throw PysmeshError("Session.position_along_path: " + path_text + " has length " +
+                           number_text(total) + "; it has no length to move along.",
+                       "", {static_cast<int>(path_edge)});
+  }
+  // A6: a move onto the start frame changes nothing.
+  gp_XYZ axis;
+  double angle = 0.0;
+  move.GetRotation(axis, angle);
+  if (move.TranslationPart().Modulus() <= Precision::Confusion() &&
+      std::abs(angle) <= Precision::Angular()) {
+    throw PysmeshError("Session.position_along_path: at fraction " + number_text(fraction) +
+                           " of " + path_text +
+                           " the frame is the start frame; the move would change nothing.",
+                       "", {static_cast<int>(path_edge)});
+  }
+  return apply_trsf(move, std::optional<std::vector<EntityId>>(entity_ids), kOp);
 }
 
 // Duplicate the bodies owning the named entities. Deliberately committed with no history:

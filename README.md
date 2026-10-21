@@ -273,6 +273,10 @@ planar face's sweep by an angle in radians: a positive angle narrows the
 solid, a negative one widens it. `symmetric=True` runs the sweep from
 `-vector` to `+vector`.
 
+`position_along_path` moves bodies rigidly along a path edge, from the
+path's start to a fraction of its length, in the curve's corrected Frenet
+frame. Every id survives, as for `translate`.
+
 Two queries answer the questions a feature filter asks. `surface_parameters`
 reads a face's analytic parameters off its surface: a radius, a cone's
 taper, a torus's two radii. `face_wires` splits a face's boundary into its

@@ -147,6 +147,56 @@ class _TransformOps(_SessionBase):
         ids = None if entities is None else _ids(entities)
         return _delta(self._s.scale(sx, sy, sz, cx, cy, cz, ids))
 
+    def position_along_path(
+        self,
+        path_edge: EntityId,
+        distance: float,
+        entities: Sequence[EntityId],
+        *,
+        reverse: bool = False,
+    ) -> HistoryDelta:
+        """Move the bodies owning the named entities along a path edge.
+
+        The move is rigid. It takes the path's frame at its start onto its frame at
+        ``distance``, a fraction of the path's length. The frame is OCCT's corrected
+        Frenet frame (``GeomFill_CorrectedFrenet``), as GEOM's ``PositionAlongPath`` uses
+        it: its origin is the curve point, its z axis the unit tangent and its x axis the
+        principal normal. On a twisted curve OCCT turns the normal about the tangent to
+        keep the frame's twist small. The start is the path edge's first vertex in its own
+        orientation, as for :meth:`point_at_length`. So a body at the start of the path
+        arrives at the same place relative to the frame at ``distance``: on a straight
+        path the move is a translation, on a circular arc a rotation about the arc's
+        axis.
+
+        Like :meth:`translate`, the move changes only locations, so **every entity id
+        survives**. The path edge stays where it is.
+
+        Args:
+            path_edge: The edge to move along.
+            distance: The fraction of the path's length, in ``[0, 1]``, measured by arc
+                length.
+            entities: Entities whose owning bodies move; at least one. No other body
+                moves.
+            reverse: Measure ``distance`` from the path's far end, as GEOM does: the
+                bodies move to the fraction ``1 - distance``.
+
+        Returns:
+            The delta; ``created`` and ``deleted`` are always empty.
+
+        Raises:
+            PysmeshError: If ``entities`` is empty, if an id is dead, if ``path_edge`` is
+                not one edge or has no length, if ``distance`` is not finite or is outside
+                ``[0, 1]``, if a moved body owns the path edge (the message names the
+                body), if the frame at the fraction is the start frame (the move would
+                change nothing), or if the moved bodies share sub-shapes with bodies that
+                stay put.
+        """
+        return _delta(
+            self._s.position_along_path(
+                int(path_edge), distance, _ids(entities), reverse
+            )
+        )
+
     def copy(self, entities: Sequence[EntityId]) -> HistoryDelta:
         """Duplicate the bodies owning the named entities.
 
