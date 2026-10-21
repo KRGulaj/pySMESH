@@ -1027,6 +1027,10 @@ class Session {
   py::dict fill_holes(const std::vector<EntityId>& entity_ids,
                       const std::optional<std::vector<EntityId>>& edge_ids);
 
+  // GEOM's SuppressFaces: ShHealOper_RemoveFace takes the named faces out of their shells
+  // and leaves the hole open; nothing is extended to close it.
+  py::dict suppress_faces(const std::vector<EntityId>& face_ids);
+
   // ---- snapshot / restore ----------------------------------------------------------- //
 
   // Guarded like an operation, not like a query. These mutate the session, and an operation

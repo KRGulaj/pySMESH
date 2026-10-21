@@ -316,6 +316,11 @@ vertex whose tolerance covers the gap.
 the holes' own edges, as GEOM's `FillHoles` does, so an open shell closes in
 one step. Each new face gets a new id generated from the edges of its hole.
 
+`suppress_faces` takes faces out of their shells and leaves the hole open, as
+GEOM's `SuppressFaces` does: a solid becomes an open shell. `defeature`, by
+contrast, extends the neighbouring faces over the removed feature and keeps a
+closed solid.
+
 `make_filling` takes `support_faces`: the filled surface is tangent to each
 named face along its boundary edge, and those edges keep their ids.
 

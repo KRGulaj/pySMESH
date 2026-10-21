@@ -21,6 +21,7 @@
 #include <ShHealOper_CloseContour.hxx>
 #include <ShHealOper_EdgeDivide.hxx>
 #include <ShHealOper_FillHoles.hxx>
+#include <ShHealOper_RemoveFace.hxx>
 #include <TColStd_SequenceOfReal.hxx>
 #include <TopTools_SequenceOfShape.hxx>
 
@@ -44,6 +45,41 @@ std::string id_list(const std::vector<EntityId>& ids) {
   std::string out;
   for (EntityId id : ids) {
     out += (out.empty() ? "" : ", ") + std::to_string(id);
+  }
+  return out;
+}
+
+// The history `hist` of an operation on `input`, keeping only the images of the kind of
+// the shape they are images of.
+//
+// BRepTools_ReShape::History replaces a shape that a wire or a shell replaced by the edges
+// or faces of it (its Add helper explodes the two containers). That is right for an edge
+// divided into a wire of pieces, and wrong for a solid that an operation left as an open
+// shell: the solid would be "modified" into faces, and its id would carry over onto them.
+// An id never changes kind. So the Modified images of another kind are dropped, and a shape
+// that keeps none dies with the operation, as one that is no longer in the model does.
+// Generated and Removed relations are kept as they are.
+Handle(BRepTools_History) kind_preserving(const Handle(BRepTools_History)& hist,
+                                          const TopoDS_Shape& input) {
+  Handle(BRepTools_History) out = new BRepTools_History;
+  for (TopAbs_ShapeEnum k : kEntityKinds) {
+    ShapeSet subs;
+    TopExp::MapShapes(input, k, subs);
+    for (int i = 1; i <= subs.Extent(); ++i) {
+      const TopoDS_Shape& s = subs.FindKey(i);
+      if (hist->IsRemoved(s)) {
+        out->Remove(s);
+        continue;
+      }
+      for (const TopoDS_Shape& m : hist->Modified(s)) {
+        if (m.ShapeType() == k) {
+          out->AddModified(s, m);
+        }
+      }
+      for (const TopoDS_Shape& g : hist->Generated(s)) {
+        out->AddGenerated(s, g);
+      }
+    }
   }
   return out;
 }
@@ -137,7 +173,7 @@ py::dict Session::divide_edge(EntityId edge_id, const std::vector<double>& posit
         status = divider.GetErrorStatus();
         if (done) {
           result = divider.GetResultShape();
-          hist = divider.Context()->History();
+          hist = kind_preserving(divider.Context()->History(), input);
           // The vertices that divide the edge are generated from it.
           ShapeSet before;
           TopExp::MapShapes(input, TopAbs_VERTEX, before);
@@ -326,7 +362,7 @@ py::dict Session::close_contour(const std::vector<EntityId>& edge_ids, bool comm
       status = closer.GetErrorStatus();
       if (done) {
         result = closer.GetResultShape();
-        hist = closer.Context()->History();
+        hist = kind_preserving(closer.Context()->History(), body);
         std::vector<TopoDS_Edge> inputs;
         for (const TopoDS_Shape& e : edges) {
           inputs.push_back(TopoDS::Edge(e));
@@ -440,7 +476,7 @@ py::dict Session::fill_holes(const std::vector<EntityId>& entity_ids,
         NCollection_List<TopoDS_Shape> arguments;
         arguments.Append(input);
         hist = new BRepTools_History(arguments, copier);
-        hist->Merge(filler.Context()->History());
+        hist->Merge(kind_preserving(filler.Context()->History(), copy));
         // Each new face is generated from the edges of the hole it fills.
         ShapeKeyed<TopoDS_Shape> input_of;
         ShapeSet in_edges;
@@ -493,6 +529,66 @@ py::dict Session::fill_holes(const std::vector<EntityId>& entity_ids,
              : ": they have no hole bounded by free edges."));
   }
   return commit(concat(untouched, result), hist, op, result);
+}
+
+// ---- suppress_faces ----------------------------------------------------------------- //
+
+py::dict Session::suppress_faces(const std::vector<EntityId>& face_ids) {
+  const char* op = "suppress_faces";
+  OpGuard guard(in_op_);
+  const std::vector<TopoDS_Shape> faces = faces_of(op, face_ids);
+  const std::vector<TopoDS_Shape> scope = scoped_bodies(face_ids, op);
+  const std::vector<TopoDS_Shape> untouched = bodies_excluding(scope);
+  const TopoDS_Shape input = make_root(scope);
+
+  TopoDS_Shape result;
+  Handle(BRepTools_History) hist;
+  bool done = false;
+  int status = 0;
+  {
+    py::gil_scoped_release release;
+    try {
+      // GEOM's SuppressFaces: ShHealOper_RemoveFace::Perform(faces). The session's bodies
+      // go in as one compound, which ShHealOper treats part by part; GEOM glues the parts
+      // of a compound afterwards, which here would join bodies the session keeps apart.
+      ShHealOper_RemoveFace remover(input);
+      TopTools_SequenceOfShape seq;
+      for (const TopoDS_Shape& f : faces) {
+        seq.Append(f);
+      }
+      done = remover.Perform(seq);
+      status = remover.GetErrorStatus();
+      if (done) {
+        result = remover.GetResultShape();
+        hist = kind_preserving(remover.Context()->History(), input);
+      }
+    } catch (const std::exception& e) {
+      py::gil_scoped_acquire acquire;
+      throw PysmeshError(std::string("Session.suppress_faces: OCCT threw: ") + e.what());
+    }
+  }
+  if (!done) {
+    throw PysmeshError("Session.suppress_faces: ShHealOper_RemoveFace removed none of the "
+                       "faces " + id_list(face_ids) + " (" + shheal_error_text(status) + ").");
+  }
+  // Every named face must be gone: a face ShHealOper did not reach would leave the call a
+  // partial success.
+  ShapeSet left;
+  if (!result.IsNull()) {
+    TopExp::MapShapes(result, TopAbs_FACE, left);
+  }
+  std::vector<EntityId> stayed;
+  for (std::size_t i = 0; i < faces.size(); ++i) {
+    if (left.Contains(faces[i])) {
+      stayed.push_back(face_ids[i]);
+    }
+  }
+  if (!stayed.empty()) {
+    throw PysmeshError("Session.suppress_faces: the faces " + id_list(stayed) +
+                       " are still in the result; nothing is committed.",
+                       "", ids_as_int(stayed));
+  }
+  return commit(concat(untouched, result), hist, op, result, Validation::Report);
 }
 
 }  // namespace session

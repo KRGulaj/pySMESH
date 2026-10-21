@@ -161,6 +161,7 @@ void bind_session(py::module_& m) {
       .def("close_contour", &Session::close_contour, py::arg("edge_ids"),
            py::arg("common_vertex"))
       .def("fill_holes", &Session::fill_holes, py::arg("entity_ids"), py::arg("edge_ids"))
+      .def("suppress_faces", &Session::suppress_faces, py::arg("face_ids"))
       .def("entity_types", &Session::entity_types, py::arg("kind"))
       .def("surface_parameters", &Session::surface_parameters, py::arg("face_ids"))
       .def("bounding_boxes", &Session::bounding_boxes, py::arg("kind"))

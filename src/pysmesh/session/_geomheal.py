@@ -187,3 +187,46 @@ class _GeomHealOps(_SessionBase):
         """
         edge_ids = None if edges is None else _ids(edges)
         return _delta(self._s.fill_holes(_ids(entities), edge_ids))
+
+    def suppress_faces(self, faces: Sequence[EntityId]) -> HistoryDelta:
+        """Take faces out of their shells and leave the hole open.
+
+        GEOM's ``SuppressFaces``: ``ShHealOper_RemoveFace::Perform(faces)``. What happens,
+        read at the source (``ShHealOper_RemoveFace.cxx``) and measured on OCCT 8.0.1:
+
+        * Each named face is removed from its shell. Nothing is extended or built to close
+          the hole: the neighbouring faces keep their surfaces and their boundaries. Their
+          edges along the hole only lose the curve they had on the removed face's surface
+          (they are copied without it, and keep their ids).
+        * A shell with two or more faces left stays a shell, now open. A shell with one
+          face left becomes that face. A shell with none left disappears.
+        * A solid is built again from its shells (``ShapeFix_Solid``). When the removal
+          opens its shell, the result is that open shell, not a solid: the solid's id dies,
+          and the body becomes a shell body.
+
+        **suppress_faces and defeature.** :meth:`defeature` removes a feature and closes
+        the gap: it extends the neighbouring faces until they meet, so a solid stays a
+        closed solid (a filleted box becomes the sharp box, a plate with a hole the plain
+        plate). suppress_faces closes nothing: the neighbours stay as they are, and a solid
+        becomes an open shell with a hole where the faces were. Use defeature to simplify a
+        solid; use suppress_faces to cut faces out of a shell, for example before
+        :meth:`fill_holes` or a :meth:`sew` with other faces.
+
+        As in :meth:`heal`, the result is committed whatever ``BRepCheck_Analyzer`` says of
+        it, and :attr:`HistoryDelta.valid` carries the verdict. An open shell is valid.
+
+        Args:
+            faces: Face entity ids, each denoting one face. At least one. They may belong
+                to several bodies.
+
+        Returns:
+            The delta: the named faces in ``deleted``, with every edge and vertex that only
+            they held, and the id of each solid that became a shell.
+
+        Raises:
+            PysmeshError: If no face is named; if an id is dead, is not a face or was
+                split; if the bodies share sub-shapes with bodies left out; or if
+                ShHealOper removes none of the faces or leaves one of them in the result
+                (``.face_ids`` names those). Nothing is committed then.
+        """
+        return _delta(self._s.suppress_faces(_ids(faces)))

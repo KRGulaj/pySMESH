@@ -301,6 +301,12 @@ class _HealOps(_SessionBase):
         a split comes from an imprint or an import. Removing that face changes nothing, and
         :meth:`unify_same_domain` is the operation that merges it, keeping its id.
 
+        **defeature and suppress_faces.** defeature extends the neighbouring faces over the
+        removed feature until they meet, so a solid stays a closed solid.
+        :meth:`suppress_faces` only takes the faces out of their shell: the neighbours stay
+        as they are, and a solid becomes an open shell with a hole. Use defeature to
+        simplify a solid, and suppress_faces to cut faces out of a shell.
+
         Args:
             face_ids: Faces of the features to remove. At least one, all on one body.
             parallel: Run OCCT's internal steps in parallel.

@@ -76,7 +76,7 @@ other.
 | Transforms | `translate`, `rotate`, `mirror`, `scale`, `position_along_path`, `copy` |
 | Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove`, `limit_tolerance`, `change_orientation` |
 | Gluing | `glue` (coincident faces or edges, GEOM's gluer) |
-| GEOM healing operators | `divide_edge`, `close_contour`, `fill_holes` |
+| GEOM healing operators | `divide_edge`, `close_contour`, `fill_holes`, `suppress_faces` |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
 | Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
@@ -180,6 +180,24 @@ When to use which:
 stays open until a `sew` joins the cap. The surface of `fill_holes` is a GeomPlate
 approximation within 1e-4, also for a planar hole: on a disk of radius 2 its area is
 12.56630 against the exact 12.56637.
+
+### Suppressing faces
+
+`suppress_faces(faces)` is GEOM's `SuppressFaces`. It takes the named faces out of their
+shells and closes nothing. The neighbouring faces keep their surfaces and boundaries. A
+shell with two or more faces left stays an open shell, with one face left it becomes that
+face, and with none it disappears. A solid whose shell the removal opens becomes an open
+shell body, and the solid's id dies.
+
+When to use which:
+
+| Operation | Neighbouring faces | Result type |
+|---|---|---|
+| `defeature` | extended over the removed feature until they meet | a closed solid (a filleted box becomes the sharp box) |
+| `suppress_faces` | unchanged; the hole stays open | an open shell, or a face |
+
+Use `defeature` to simplify a solid. Use `suppress_faces` to cut faces out of a shell,
+for example before `fill_holes` or a `sew` with other faces.
 
 ### Booleans: `fuzzy` and `parallel`
 
