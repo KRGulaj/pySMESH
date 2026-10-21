@@ -227,7 +227,11 @@ class Session:
     def extract_edges(self, edge_ids: list[int]) -> dict[str, object]: ...
     def make_face(self, edge_ids: list[int]) -> dict[str, object]: ...
     def make_filling(
-        self, edge_ids: list[int], progress: object, cancel: object
+        self,
+        edge_ids: list[int],
+        support_faces: dict[int, int] | None,
+        progress: object,
+        cancel: object,
     ) -> dict[str, object]: ...
     def extend_face(
         self, face_id: int, u_min: float, u_max: float, v_min: float, v_max: float

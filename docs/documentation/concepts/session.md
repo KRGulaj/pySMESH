@@ -109,6 +109,16 @@ or cone face where the offset moves away from the corner. A narrowing draft whos
 meet before the end of the sweep is refused, with the height where they meet. With
 neither option, `extrude` is the plain sweep, unchanged.
 
+### Filling tangent to faces
+
+`make_filling` takes `support_faces`, a mapping from boundary edges to faces
+that contain them. The surface is tangent to each support face along its edge
+(G1), as in GEOM's `MakeFaceWithConstraints`. A supported edge belongs to its
+face's body, so it is not consumed and keeps its id. The boundary edges must
+meet at shared vertices: edges of two bodies that only touch at coincident
+vertices are refused, because OCCT leaves that boundary open. With no
+`support_faces`, `make_filling` is unchanged.
+
 ### Moving along a path
 
 `position_along_path` moves the bodies of the named entities rigidly along a

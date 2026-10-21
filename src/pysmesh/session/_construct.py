@@ -11,7 +11,7 @@ across per-area translation units; see the package docstring for the whole surfa
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Literal
 
 from .._core import PysmeshError
@@ -577,6 +577,7 @@ class _ConstructOps(_SessionBase):
         self,
         edge_ids: Sequence[EntityId],
         *,
+        support_faces: Mapping[EntityId, EntityId] | None = None,
         progress: ProgressCallback | None = None,
         cancel: CancelPredicate | None = None,
     ) -> HistoryDelta:
@@ -585,8 +586,17 @@ class _ConstructOps(_SessionBase):
         The surface is an approximation, so the resulting face's edges are new geometry and
         the boundary edges' ids die.
 
+        ``support_faces`` maps boundary edges to adjacent faces, as GEOM's
+        ``MakeFaceWithConstraints`` takes them: the surface passes through each such edge
+        and is tangent to its face along it (OCCT's ``GeomAbs_G1``, to the 0.01 rad that
+        ``BRepOffsetAPI_MakeFilling`` holds by default). A supported edge is an edge of its
+        face, so it is not consumed: it keeps its id, and its face's body stays as it is.
+        The other edges are consumed as before. With ``None`` or an empty mapping, the
+        filling is the plain one, unchanged.
+
         Args:
             edge_ids: Edges bounding the surface.
+            support_faces: Boundary edge id -> id of a face that contains that edge.
             progress: Called with the fraction done — a float in ``[0, 1]``, strictly
                 increasing — while the operation runs. ``None`` reports nothing.
             cancel: Called with no arguments; return ``True`` to stop the operation.
@@ -597,10 +607,17 @@ class _ConstructOps(_SessionBase):
             The delta for this operation.
 
         Raises:
-            PysmeshError: If an id is dead or is not an edge, if an edge belongs to a solid
-                or a face, or if OCCT cannot fill the boundary.
+            PysmeshError: If an id is dead or is not an edge, if an edge without a support
+                belongs to a solid or a face, if a ``support_faces`` key is not one of
+                ``edge_ids`` (the message lists them), if a support is not a face or does
+                not contain its edge, or if OCCT cannot fill the boundary.
         """
-        return _delta(self._s.make_filling(_ids(edge_ids), progress, cancel))
+        supports = (
+            None
+            if support_faces is None
+            else {int(e): int(f) for e, f in support_faces.items()}
+        )
+        return _delta(self._s.make_filling(_ids(edge_ids), supports, progress, cancel))
 
     def extend_face(
         self,
@@ -837,7 +854,9 @@ class _ConstructOps(_SessionBase):
                 names the faces and where.
         """
         return _delta(
-            self._s.pipe_shell(_ids(spine), _ids(profile), frenet, solid, progress, cancel)
+            self._s.pipe_shell(
+                _ids(spine), _ids(profile), frenet, solid, progress, cancel
+            )
         )
 
     def thru_sections(

@@ -722,9 +722,11 @@ class Session {
 
   // A surface filling the named boundary edges, consuming them. Unlike make_face this
   // handles a non-planar boundary; the surface is an approximation, so the result's edges
-  // are new geometry and the boundary edges' ids die.
-  py::dict make_filling(const std::vector<EntityId>& edge_ids, const py::object& progress,
-                        const py::object& cancel);
+  // are new geometry and the boundary edges' ids die. support_faces, when given and not
+  // empty, maps boundary edges to faces the surface is held tangent to (GeomAbs_G1).
+  py::dict make_filling(const std::vector<EntityId>& edge_ids,
+                        const std::optional<std::map<EntityId, EntityId>>& support_faces,
+                        const py::object& progress, const py::object& cancel);
 
   // A new free face on the named face's surface, extended beyond the face's parameter range
   // by the given chord lengths on each side (GeomLib::ExtendSurfByLength, C1). The source
@@ -1360,6 +1362,12 @@ class Session {
   // does. A draft sweeps a planar face along its normal with BRepOffsetAPI_MakeEvolved.
   py::dict extrude_variant(const std::vector<EntityId>& entity_ids, const gp_Vec& vec,
                            double draft_angle, bool symmetric);
+
+  // make_filling with a non-empty support_faces: supported edges stay with their faces'
+  // bodies and constrain the surface with GeomAbs_G1; the others are consumed, as before.
+  py::dict filling_with_supports(const std::vector<EntityId>& edge_ids,
+                                 const std::map<EntityId, EntityId>& support_faces,
+                                 const py::object& progress, const py::object& cancel);
 
   // A shape OCCT's sweeps raise the dimension of. A solid has no higher dimension to sweep
   // into, and a compound sweeps element-wise, which would silently produce a shape the

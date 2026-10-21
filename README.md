@@ -281,6 +281,9 @@ frame. Every id survives, as for `translate`.
 and its trimmed edges keep their ids; each arc is new, generated from the
 corner vertex it replaces.
 
+`make_filling` takes `support_faces`: the filled surface is tangent to each
+named face along its boundary edge, and those edges keep their ids.
+
 Two queries answer the questions a feature filter asks. `surface_parameters`
 reads a face's analytic parameters off its surface: a radius, a cone's
 taper, a torus's two radii. `face_wires` splits a face's boundary into its

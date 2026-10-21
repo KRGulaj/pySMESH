@@ -63,8 +63,8 @@ void bind_session(py::module_& m) {
       .def("make_wire", &Session::make_wire, py::arg("edge_ids"))
       .def("extract_edges", &Session::extract_edges, py::arg("edge_ids"))
       .def("make_face", &Session::make_face, py::arg("edge_ids"))
-      .def("make_filling", &Session::make_filling, py::arg("edge_ids"), py::arg("progress"),
-           py::arg("cancel"))
+      .def("make_filling", &Session::make_filling, py::arg("edge_ids"),
+           py::arg("support_faces"), py::arg("progress"), py::arg("cancel"))
       .def("extend_face", &Session::extend_face, py::arg("face_id"), py::arg("u_min"),
            py::arg("u_max"), py::arg("v_min"), py::arg("v_max"))
       .def("extend_edge", &Session::extend_edge, py::arg("edge_id"), py::arg("length"),

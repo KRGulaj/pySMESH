@@ -768,8 +768,12 @@ py::dict Session::make_face(const std::vector<EntityId>& edge_ids) {
 // handles a non-planar boundary; the surface is an approximation, so the result's edges
 // are new geometry and the boundary edges' ids die.
 py::dict Session::make_filling(const std::vector<EntityId>& edge_ids,
+                               const std::optional<std::map<EntityId, EntityId>>& support_faces,
                                const py::object& progress, const py::object& cancel) {
   OpGuard guard(in_op_);
+  if (support_faces.has_value() && !support_faces->empty()) {
+    return filling_with_supports(edge_ids, *support_faces, progress, cancel);
+  }
   const std::vector<TopoDS_Shape> edges = edges_of("make_filling", edge_ids);
   const std::vector<TopoDS_Shape> owners = owner_bodies("make_filling", edge_ids);
   for (const TopoDS_Shape& b : owners) {
@@ -807,6 +811,144 @@ py::dict Session::make_filling(const std::vector<EntityId>& edge_ids,
   }
   return commit(concat(survivors, face), Handle(BRepTools_History)(), "make_filling",
                 face);
+}
+
+// make_filling with support faces, as GEOM's MakeFaceWithConstraints builds it
+// (GEOMImpl_FillingDriver, FILLING_ON_CONSTRAINTS): each supported edge is added with its
+// face and GeomAbs_G1, every other edge with GeomAbs_C0, in the order named. A supported
+// edge is an edge of its support face, so it belongs to that face's body: it is not
+// consumed, and its body stays as it is. The other edges follow make_filling's own rule:
+// loose edges and wires, consumed.
+py::dict Session::filling_with_supports(const std::vector<EntityId>& edge_ids,
+                                        const std::map<EntityId, EntityId>& support_faces,
+                                        const py::object& progress,
+                                        const py::object& cancel) {
+  static constexpr const char* kOp = "make_filling";
+  const std::vector<TopoDS_Shape> edges = edges_of(kOp, edge_ids);
+  std::string named;
+  for (EntityId id : edge_ids) {
+    named += (named.empty() ? "" : ", ") + std::to_string(id);
+  }
+  std::vector<TopoDS_Face> supports(edges.size());
+  for (const auto& [edge_id, face_id] : support_faces) {
+    if (std::find(edge_ids.begin(), edge_ids.end(), edge_id) == edge_ids.end()) {
+      throw PysmeshError("Session.make_filling: support edge " + std::to_string(edge_id) +
+                             " is not one of the boundary edges (" + named + ").",
+                         "", {static_cast<int>(edge_id)});
+    }
+    const TopoDS_Shape& edge = require_alive(kOp, edge_id).shapes.front();
+    const TopoDS_Face face = sole_face(kOp, face_id);
+    ShapeSet face_edges;
+    TopExp::MapShapes(face, TopAbs_EDGE, face_edges);
+    if (!face_edges.Contains(edge)) {
+      throw PysmeshError("Session.make_filling: face " + std::to_string(face_id) +
+                             " does not contain edge " + std::to_string(edge_id) +
+                             "; the filling can be tangent to a face only along an edge of "
+                             "that face.",
+                         "", {static_cast<int>(edge_id), static_cast<int>(face_id)});
+    }
+    for (std::size_t i = 0; i < edges.size(); ++i) {
+      if (!edges[i].IsSame(edge)) {
+        continue;
+      }
+      if (!supports[i].IsNull() && !supports[i].IsSame(face)) {
+        throw PysmeshError("Session.make_filling: edge " + std::to_string(edge_id) +
+                               " is given two support faces.",
+                           "", {static_cast<int>(edge_id), static_cast<int>(face_id)});
+      }
+      supports[i] = face;
+    }
+  }
+  // BRepFill_Filling maps each boundary vertex to one new vertex by identity, so edges
+  // that only touch at coincident vertices of different bodies leave the new wire open
+  // and the face invalid (BRepCheck_NotClosed; measured on OCCT 8.0.1, with or without a
+  // support). Every end vertex is shared by exactly two boundary edges, or none is built.
+  {
+    NCollection_IndexedDataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher> ends;
+    std::vector<std::pair<TopoDS_Shape, EntityId>> first_edge;
+    for (std::size_t i = 0; i < edges.size(); ++i) {
+      TopoDS_Vertex a, b;
+      TopExp::Vertices(TopoDS::Edge(edges[i]), a, b);
+      for (const TopoDS_Vertex& v : {a, b}) {
+        if (v.IsNull()) {
+          continue;
+        }
+        const int k = ends.FindIndex(v);
+        if (k == 0) {
+          ends.Add(v, 1);
+          first_edge.emplace_back(v, edge_ids[i]);
+        } else {
+          ++ends.ChangeFromIndex(k);
+        }
+      }
+    }
+    for (const auto& [v, edge_id] : first_edge) {
+      const int count = ends.FindFromKey(v);
+      if (count == 2) {
+        continue;
+      }
+      const auto ids = state_.registry->by_shape.find(v);
+      const std::string vertex = ids == state_.registry->by_shape.end()
+                                     ? std::string("an end vertex")
+                                     : "vertex " + std::to_string(ids->second.front());
+      throw PysmeshError("Session.make_filling: " + vertex + " of edge " +
+                             std::to_string(edge_id) + " is an end of " +
+                             std::to_string(count) +
+                             " of the boundary edges, not 2; the boundary edges (" + named +
+                             ") do not meet at shared vertices, so they bound no face.",
+                         "", {static_cast<int>(edge_id)});
+    }
+  }
+  std::vector<EntityId> free_ids;
+  for (EntityId id : edge_ids) {
+    if (support_faces.find(id) == support_faces.end()) {
+      free_ids.push_back(id);
+    }
+  }
+  std::vector<TopoDS_Shape> consumed;
+  if (!free_ids.empty()) {
+    consumed = owner_bodies(kOp, free_ids);
+    for (const TopoDS_Shape& b : consumed) {
+      require_curve_body(kOp, b);
+    }
+  }
+  const std::vector<TopoDS_Shape> survivors = bodies_excluding(consumed);
+  ProgressDriver driver(kOp, hooks_of(kOp, progress, cancel));
+  TopoDS_Shape face;
+  {
+    py::gil_scoped_release release;
+    try {
+      BRepOffsetAPI_MakeFilling mk;
+      for (std::size_t i = 0; i < edges.size(); ++i) {
+        if (supports[i].IsNull()) {
+          mk.Add(TopoDS::Edge(edges[i]), GeomAbs_C0);
+        } else {
+          mk.Add(TopoDS::Edge(edges[i]), supports[i], GeomAbs_G1);
+        }
+      }
+      mk.Build(driver.range());
+      if (mk.IsDone()) {
+        face = mk.Shape();
+      }
+    } catch (const std::exception& e) {
+      py::gil_scoped_acquire acquire;
+      throw PysmeshError(std::string("Session.make_filling: BRepOffsetAPI_MakeFilling with "
+                                     "support faces failed: ") +
+                             e.what(),
+                         "", ids_as_int(edge_ids));
+    }
+  }
+  driver.finish();
+  if (driver.cancelled()) {
+    ProgressDriver::raise_cancelled(kOp);
+  }
+  if (face.IsNull()) {
+    throw PysmeshError("Session.make_filling: OCCT could not fill the boundary edges (" +
+                           named + ") tangent to their support faces.",
+                       "BRepOffsetAPI_MakeFilling::IsDone() is false.",
+                       ids_as_int(edge_ids));
+  }
+  return commit(concat(survivors, face), Handle(BRepTools_History)(), kOp, face);
 }
 
 // ---- extending a face or an edge ----------------------------------------------------- //
