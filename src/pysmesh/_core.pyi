@@ -534,6 +534,32 @@ class Session:
     def point_at_length(
         self, edge_id: int, length: float, from_start: bool
     ) -> dict[str, object]: ...
+    def entities_on(
+        self,
+        kind: str,
+        region: str,
+        values: list[float],
+        solid_id: int | None,
+        state: str,
+        tolerance: float | None,
+    ) -> NDArray[np.int64]: ...
+    def in_place_brep(
+        self,
+        kind: str,
+        data: bytes,
+        ordinals: list[int],
+        progress: object,
+        cancel: object,
+    ) -> list[NDArray[np.int64]]: ...
+    def in_place_snapshot(
+        self,
+        kind: str,
+        mark: int,
+        ids: list[int],
+        progress: object,
+        cancel: object,
+    ) -> list[NDArray[np.int64]]: ...
+    def find_same(self, entity_id: int, within: list[int]) -> NDArray[np.int64]: ...
     def check_boolean(
         self,
         operation: str,

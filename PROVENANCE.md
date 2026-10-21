@@ -138,6 +138,18 @@ compile error. Compiled with `/showIncludes`, `GCS.cpp` reads every Eigen header
 `extern/eigen`; the build environment's own Eigen (under `Library/include/eigen3`) is on no
 include path.
 
+## Algorithm code copied from GEOM
+
+A few GEOM functions that pySMESH needs live in `GEOMImpl`, GEOM's driver layer, which is
+not vendored (it depends on OCAF documents and `GEOM_Function`). They are copied into
+pySMESH's own sources, unchanged but for the namespace they live in, with their origin and
+licence in a comment above them. All are from SALOME GEOM tag `V9_16_0`
+(`7d0a18e1554c25bca2c2d9882e0621ea3f7f9c81`), LGPL-2.1-or-later, used under LGPL-2.1.
+
+| Function | Upstream file | Local file | Used by |
+|---|---|---|---|
+| `MAX_TOLERANCE`, `isSameEdge`, `isSameFace`, `isSameSolid` | `src/GEOMImpl/GEOMImpl_IShapesOperations.cxx` | `src/bindings/session_locate.cpp` | `Session.find_same` (GEOM's `GetSameIDs` rule) |
+
 ## Small pieces borrowed from looooo/SMESH
 
 [looooo/SMESH](https://github.com/looooo/SMESH) is an actively maintained fork that keeps

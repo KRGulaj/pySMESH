@@ -55,6 +55,8 @@ a change on either side has an obvious counterpart on the other:
 ``_boolean``         the boolean family, fillet and chamfer
 ``_transform``       the transforms, and copy
 ``_heal``            healing, sewing, defeaturing, imprinting and removal
+``_locate``          locating entities with GEOM's classifiers: on a region, in
+                     place of old sub-shapes, the same as another entity
 ``_offset``          hollowing a solid, and offsetting a body
 ``_query``           the geometric query surface over the live shape
 ``_check``           the checks: boolean arguments, validity, short edges, closed
@@ -75,6 +77,7 @@ from ._check import _CheckOps
 from ._construct import _ConstructOps
 from ._handoff import _HandoffOps
 from ._heal import _HealOps
+from ._locate import _LocateOps
 from ._offset import _OffsetOps
 from ._query import _QueryOps
 from ._render import _RenderOps
@@ -85,10 +88,12 @@ from ._types import (
     AxisLine,
     BooleanCheckFinding,
     BoundsTable,
+    BoxRegion,
     CancelPredicate,
     CurvatureTable,
     CurveParameterTable,
     CurveSample,
+    CylinderRegion,
     EdgePoint,
     EntityDistance,
     EntityId,
@@ -102,14 +107,18 @@ from ._types import (
     Name,
     NameRole,
     Origin,
+    PlaneRegion,
     Points,
     ProgressCallback,
     Projection,
+    Region,
+    RegionState,
     RenderMesh,
     Resolution,
     ResolutionStatus,
     ShapeCheckFinding,
     SnapshotMark,
+    SphereRegion,
     SurfaceParameterTable,
     SurfaceSample,
     TangentFrameSample,
@@ -125,6 +134,7 @@ class Session(
     _ConstructOps,
     _HandoffOps,
     _HealOps,
+    _LocateOps,
     _OffsetOps,
     _QueryOps,
     _RenderOps,
@@ -170,10 +180,12 @@ __all__ = [
     "AxisLine",
     "BooleanCheckFinding",
     "BoundsTable",
+    "BoxRegion",
     "CancelPredicate",
     "CurvatureTable",
     "CurveParameterTable",
     "CurveSample",
+    "CylinderRegion",
     "EdgePoint",
     "EntityDistance",
     "EntityId",
@@ -187,15 +199,19 @@ __all__ = [
     "Name",
     "NameRole",
     "Origin",
+    "PlaneRegion",
     "Points",
     "ProgressCallback",
     "Projection",
+    "Region",
+    "RegionState",
     "RenderMesh",
     "Resolution",
     "ResolutionStatus",
     "Session",
     "ShapeCheckFinding",
     "SnapshotMark",
+    "SphereRegion",
     "SurfaceParameterTable",
     "SurfaceSample",
     "TangentFrameSample",

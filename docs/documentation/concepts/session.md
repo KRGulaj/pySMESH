@@ -78,6 +78,7 @@ other.
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
 | Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
+| Locating entities | `entities_on`, `in_place`, `find_same` |
 | Checks | `check_boolean`, `check_shape`, `small_edges`, `is_closed_shell`, `tolerances` |
 | Handoff | `export_handoff`, `brep`, `write_step` |
 | Identity and introspection | `entities`, `entity_kind`, `is_alive`, `shape_count`, `name_of`, `origin`, `resolve`, `op_count`, `state_op_index`, `issued_id_count`, `entity_count` |
@@ -222,6 +223,40 @@ normals. `point_at_length` is the point at a length along an edge, from either e
 Each refuses what has no answer, naming the entity and the value: a curved face for a
 frame, a parameter outside the face or at a singular point, two parallel planes, a
 length off the edge. None of them issues an id.
+
+## Locating entities
+
+Three queries run GEOM's classifiers on the live model. None of them issues an id or
+writes to a shape of the model.
+
+- `entities_on(kind, region, state)` lists the live ids of a kind that lie on, in or out
+  of a region: a `PlaneRegion`, a `CylinderRegion`, a `SphereRegion`, a `BoxRegion` or a
+  solid of the model. It is GEOM's `GetShapesOnPlane`, `GetShapesOnCylinder`,
+  `GetShapesOnSphere`, `GetShapesOnBox` and `GetShapesOnShape`, with GEOM's tolerances.
+  For a plane, "out" is the side the normal points to.
+- `in_place(kind, source, old)` lists the live ids that now stand in place of old
+  sub-shapes. `source` is BREP bytes with handoff ordinals in `old`, or a snapshot mark
+  with ids live in that snapshot. It is GEOM's `GetInPlace`. It finds a face that an
+  operation trimmed, split or merged into a larger one. An empty answer means the old
+  sub-shape is gone.
+- `find_same(entity, within)` lists the live ids that GEOM's `GetSame` rule calls the
+  same as one entity: coincident vertices, edges, faces or solids within 1e-7.
+
+```python
+from pysmesh import PlaneRegion
+
+below = s.entities_on(EntityKind.FACE, PlaneRegion((0, 0, 5), (0, 0, 1)), "in")
+
+handoff = s.export_handoff()
+mark = s.snapshot()
+s.fillet(edges, 0.5)
+now = s.in_place(EntityKind.FACE, mark, [face])            # by snapshot ids
+same = s.in_place(EntityKind.FACE, handoff.brep, [0, 1])   # by handoff ordinals
+```
+
+`entities_on` samples each face at the nodes of a triangulation of a private copy of
+the model, meshed as GEOM meshes it. Its answer does not depend on an earlier
+`tessellate`, and the model's faces keep the triangulation they had.
 
 ## Checks
 

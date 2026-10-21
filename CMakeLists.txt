@@ -185,6 +185,7 @@ pybind11_add_module(_core
     src/bindings/session_offset.cpp
     src/bindings/session_query.cpp
     src/bindings/session_check.cpp
+    src/bindings/session_locate.cpp
     src/bindings/session_tessellate.cpp
     src/bindings/session_handoff.cpp
     src/bindings/session_progress.cpp

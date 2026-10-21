@@ -263,6 +263,12 @@ Four construction queries give frames and points to build on: `face_frame`
 (the common line of two planar faces) and `point_at_length` (the point at a
 length along an edge).
 
+Three queries locate entities with GEOM's classifiers: `entities_on` (the
+ids on, in or out of a plane, cylinder, sphere, box or solid), `in_place` (the
+ids that now stand in place of old sub-shapes, named by handoff ordinals in
+BREP bytes or by ids of a snapshot) and `find_same` (the ids that GEOM's
+`GetSame` rule calls the same as one entity).
+
 Five checks read a model without changing it: `check_boolean` (OCCT's
 argument analyzer on a boolean's operands), `check_shape` (`BRepCheck_Analyzer`
 per body, one finding per invalid sub-shape), `small_edges`,

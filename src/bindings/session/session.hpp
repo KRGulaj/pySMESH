@@ -41,6 +41,8 @@
 //   session_query.cpp      — the geometric query surface over the live shape;
 //   session_check.cpp      — the checks: boolean arguments, validity, short edges, closed
 //                            shells and tolerances;
+//   session_locate.cpp     — locating entities with GEOM's classifiers: on a region, in
+//                            place of old sub-shapes, the same as another entity;
 //   session_tessellate.cpp — the render mesh, and the incremental delta over it;
 //   session_handoff.cpp    — the export to a mesher, and the id-to-ordinal bijection;
 //   session_progress.cpp   — the progress/cancellation driver (declared in progress.hpp,
@@ -399,6 +401,15 @@ inline std::vector<TopoDS_Shape> root_bodies(const TopoDS_Shape& root) {
 // Every registered-kind sub-shape of `shape`, in a deterministic traversal order: solids,
 // then faces, then edges, then vertices, each in TopExp::MapShapes order. Determinism here
 // is load-bearing — it is what makes the ordinal in a name reproducible.
+// The per-kind traversal of the meshing handoff: the shape at 0-based ordinal i of `kind` is
+// the key at index i + 1 of `out`. export_handoff writes its id arrays in this order, and
+// in_place reads the ordinals of handed-off bytes in it, so the two cannot drift apart. A
+// reader of the BREP bytes reproduces it, because BRepTools::Read rebuilds the compound in
+// the order it was written.
+inline void handoff_order(const TopoDS_Shape& root, TopAbs_ShapeEnum kind, ShapeSet& out) {
+  TopExp::MapShapes(root, kind, out);
+}
+
 inline std::vector<TopoDS_Shape> registered_subshapes(const TopoDS_Shape& shape) {
   std::vector<TopoDS_Shape> out;
   if (shape.IsNull()) {
@@ -1165,6 +1176,38 @@ class Session {
   // its last one.
   py::dict point_at_length(EntityId edge_id, double length, bool from_start) const;
 
+  // ---- locating entities -------------------------------------------------------------- //
+  //
+  // Read-only, like the queries above; implemented in session_locate.cpp. They run GEOM's
+  // classifiers on the live model: none issues an id, advances the operation counter or
+  // writes to a shape of the model.
+
+  // Live ids of `kind` whose shapes GEOMAlgo_FinderShapeOn2 puts in `state` ("on", "in",
+  // "out", "on_in", "on_out") against a region. `region` is "plane" (origin, normal),
+  // "cylinder" (axis origin, direction, radius), "sphere" (centre, radius) or "box" (min
+  // corner, max corner), with those numbers in `values`; or "solid", with `solid_id`.
+  // `tolerance` absent takes GEOM's value for the region, as GEOM's GetShapesOn* take it.
+  py::array_t<std::int64_t> entities_on(const std::string& kind, const std::string& region,
+                                        const std::vector<double>& values,
+                                        const std::optional<EntityId>& solid_id,
+                                        const std::string& state,
+                                        const std::optional<double>& tolerance) const;
+
+  // GEOMAlgo_GetInPlace of the current model against old sub-shapes of `kind`: the shapes at
+  // the 0-based handoff ordinals of the BREP `data` (in_place_brep), or the shapes of ids live
+  // in the snapshot `mark` (in_place_snapshot). One ascending id array per entry.
+  py::list in_place_brep(const std::string& kind, const py::bytes& data,
+                         const std::vector<std::int64_t>& ordinals, const py::object& progress,
+                         const py::object& cancel) const;
+  py::list in_place_snapshot(const std::string& kind, std::int64_t mark,
+                             const std::vector<EntityId>& ids, const py::object& progress,
+                             const py::object& cancel) const;
+
+  // Live ids of the entity's kind, in the bodies owning `within`, that GEOM's GetSame rule
+  // (isSameEdge, isSameFace, isSameSolid, the vertex distance) calls the same as `entity_id`.
+  py::array_t<std::int64_t> find_same(EntityId entity_id,
+                                      const std::vector<EntityId>& within) const;
+
   // ---- checks ------------------------------------------------------------------------ //
   //
   // Read-only, like the queries above; implemented in session_check.cpp.
@@ -1523,6 +1566,14 @@ class Session {
                                            const std::vector<EntityId>& ids) const;
 
   // ---- query helpers ---------------------------------------------------------------- //
+
+  // in_place's common half: GEOMAlgo_GetInPlace of the live model against each entry's old
+  // shapes, with the GIL released and the hooks polled; one ascending id array per entry.
+  // `entry` names entry i in a refusal.
+  py::list in_place_answer(const char* op, const std::string& kind,
+                           const std::vector<std::vector<TopoDS_Shape>>& whats,
+                           const ProgressHooks& hooks,
+                           const std::function<std::string(std::size_t)>& entry) const;
 
   // Live entity ids of one kind, ascending. The order every bulk query's rows are in.
   std::vector<EntityId> ids_of_kind(TopAbs_ShapeEnum kind) const;
