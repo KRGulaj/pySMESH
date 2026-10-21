@@ -76,7 +76,7 @@ other.
 | Transforms | `translate`, `rotate`, `mirror`, `scale`, `position_along_path`, `copy` |
 | Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove`, `limit_tolerance`, `change_orientation` |
 | Gluing | `glue` (coincident faces or edges, GEOM's gluer) |
-| GEOM healing operators | `divide_edge` |
+| GEOM healing operators | `divide_edge`, `close_contour` |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
 | Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
@@ -150,6 +150,16 @@ fractions of its length, or of its parameter range with `by="parameter"`, in eve
 that holds it. The pieces get new ids generated from the edge, which dies: the sixth rule
 for edges, see [Entity IDs and ordinals](entity-ids.md#the-sixth-rule-for-edges-pieces-of-a-divided-edge).
 The faces keep their ids.
+
+### Closing a contour
+
+`close_contour(edges, common_vertex=False)` is GEOM's `CloseContour`. The edges must be
+exactly one open wire: a wire of a face, or a free wire. A gap wider than 1 model unit is
+closed by a new straight edge, a narrower one by pulling the two end edges together. With
+`common_vertex=True` the two ends become one vertex whose tolerance covers the gap. A new
+edge gets a new id generated from the two edges it joins; every other id stays. A free
+wire comes out as one closed wire. Like `heal`, the operation reports the validity verdict
+instead of refusing an invalid result.
 
 ### Booleans: `fuzzy` and `parallel`
 

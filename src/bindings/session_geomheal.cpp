@@ -18,6 +18,7 @@
 #include "session/session.hpp"
 
 #include <GCPnts_AbscissaPoint.hxx>
+#include <ShHealOper_CloseContour.hxx>
 #include <ShHealOper_EdgeDivide.hxx>
 #include <TColStd_SequenceOfReal.hxx>
 
@@ -34,6 +35,15 @@ std::string shheal_error_text(int status) {
     case ShHealOper_ErrorExecution: return "the execution failed";
     default: return "an undocumented status";
   }
+}
+
+// The ids, as "1, 2, 3".
+std::string id_list(const std::vector<EntityId>& ids) {
+  std::string out;
+  for (EntityId id : ids) {
+    out += (out.empty() ? "" : ", ") + std::to_string(id);
+  }
+  return out;
 }
 
 // The bodies of the root that hold `sub`, and the others.
@@ -165,6 +175,200 @@ py::dict Session::divide_edge(EntityId edge_id, const std::vector<double>& posit
   }
   return commit(concat(untouched, result), hist, op, result, Validation::Strict, {},
                 PieceRule::new_piece_ids(TopAbs_EDGE));
+}
+
+// ---- close_contour ------------------------------------------------------------------ //
+
+namespace {
+
+// The 3-D curve of an edge, without its location, for telling a copy of an edge (same
+// curve) from a new edge.
+Handle(Geom_Curve) curve_of(const TopoDS_Edge& edge) {
+  TopLoc_Location loc;
+  double first = 0.0;
+  double last = 0.0;
+  return BRep_Tool::Curve(edge, loc, first, last);
+}
+
+// The history of a contour closing, as the session names it: a new edge that closes a gap
+// is generated from the edges whose ends it joins, never a modification of one of them.
+//
+// ShHealOper_CloseContour, closing a gap in a face, replaces the edge before the gap with a
+// wire of two edges: a copy of it (on its own curve, with the new end vertex) and the new
+// edge (ShHealOper_CloseContour::buildEdge). The context's history therefore reports the
+// new edge as a modification of the edge before the gap. Here, for an input edge with
+// several images, the images that are not on the input edge's own curve are taken out of
+// its Modified list. (An edge with one image keeps it whatever its curve: ShapeFix_Wire's
+// FixGaps3d gives the edges it pulls together new curves.) Every new edge of the result,
+// that one and a free closing edge alike, is then recorded as Generated from each input
+// edge whose image shares a vertex with it.
+void adapt_closing_history(const Handle(BRepTools_History)& hist,
+                           const std::vector<TopoDS_Edge>& inputs, const TopoDS_Shape& input,
+                           const TopoDS_Shape& result) {
+  ShapeSet images;  // the images of the input edges after the adaptation
+  for (const TopoDS_Edge& e : inputs) {
+    const NCollection_List<TopoDS_Shape>& mods = hist->Modified(e);
+    if (mods.Extent() > 1) {
+      std::vector<TopoDS_Shape> kept;
+      for (const TopoDS_Shape& m : mods) {
+        if (m.ShapeType() == TopAbs_EDGE && curve_of(TopoDS::Edge(m)) == curve_of(e)) {
+          kept.push_back(m);
+        }
+      }
+      if (kept.size() != 1) {
+        throw PysmeshError("Session.close_contour: an edge has " +
+                           std::to_string(mods.Extent()) + " images, of which " +
+                           std::to_string(kept.size()) +
+                           " are on its own curve; the copy of the edge cannot be told from "
+                           "the closing edge. This is a bug, not a caller error.");
+      }
+      hist->ReplaceModified(e, kept.front());
+    }
+    if (hist->Modified(e).IsEmpty() && !hist->IsRemoved(e)) {
+      images.Add(e);
+    }
+    for (const TopoDS_Shape& m : hist->Modified(e)) {
+      images.Add(m);
+    }
+  }
+  ShapeSet before;
+  TopExp::MapShapes(input, TopAbs_EDGE, before);
+  ShapeSet after;
+  TopExp::MapShapes(result, TopAbs_EDGE, after);
+  for (int i = 1; i <= after.Extent(); ++i) {
+    const TopoDS_Shape& c = after.FindKey(i);
+    if (before.Contains(c) || images.Contains(c)) {
+      continue;
+    }
+    ShapeSet ends;
+    TopExp::MapShapes(c, TopAbs_VERTEX, ends);
+    for (std::size_t k = 0; k < inputs.size(); ++k) {
+      const auto touches = [&ends](const TopoDS_Shape& edge) {
+        for (TopExp_Explorer v(edge, TopAbs_VERTEX); v.More(); v.Next()) {
+          if (ends.Contains(v.Current())) {
+            return true;
+          }
+        }
+        return false;
+      };
+      bool joined = false;
+      if (hist->Modified(inputs[k]).IsEmpty()) {
+        joined = touches(inputs[k]);
+      }
+      for (const TopoDS_Shape& m : hist->Modified(inputs[k])) {
+        joined = joined || touches(m);
+      }
+      if (joined) {
+        hist->AddGenerated(inputs[k], c);
+      }
+    }
+  }
+}
+
+}  // namespace
+
+py::dict Session::close_contour(const std::vector<EntityId>& edge_ids, bool common_vertex) {
+  const char* op = "close_contour";
+  OpGuard guard(in_op_);
+  std::vector<EntityId> named;
+  const std::vector<TopoDS_Shape> edges = edges_of(op, edge_ids, &named);
+  const TopoDS_Shape body = sole_body(op, edge_ids);
+
+  // The one wire, of the body's faces or of the free wire body, whose edges are exactly the
+  // named ones.
+  ShapeSet wanted;
+  for (const TopoDS_Shape& e : edges) {
+    wanted.Add(e);
+  }
+  TopoDS_Wire wire;
+  int matches = 0;
+  for (TopExp_Explorer w(body, TopAbs_WIRE); w.More(); w.Next()) {
+    ShapeSet in_wire;
+    TopExp::MapShapes(w.Current(), TopAbs_EDGE, in_wire);
+    bool same = in_wire.Extent() == wanted.Extent();
+    for (int i = 1; i <= in_wire.Extent() && same; ++i) {
+      same = wanted.Contains(in_wire.FindKey(i));
+    }
+    if (same && (wire.IsNull() || !wire.IsSame(w.Current()))) {
+      wire = TopoDS::Wire(w.Current());
+      ++matches;
+    }
+  }
+  if (body.ShapeType() == TopAbs_EDGE && wanted.Extent() == 1) {
+    wire = BRepBuilderAPI_MakeWire(TopoDS::Edge(body)).Wire();
+    matches = 1;
+  }
+  if (matches != 1) {
+    throw PysmeshError("Session.close_contour: the edges " + id_list(edge_ids) +
+                       " are not the edges of one wire of their body; a contour to close is "
+                       "one open wire of a face, or a free wire.");
+  }
+  TopoDS_Vertex first, last;
+  TopExp::Vertices(wire, first, last);
+  if (!first.IsNull() && first.IsSame(last)) {
+    throw PysmeshError("Session.close_contour: the wire of the edges " + id_list(edge_ids) +
+                       " is closed already; there is no gap to close.");
+  }
+
+  const std::vector<TopoDS_Shape> untouched = bodies_excluding({body});
+  TopoDS_Shape result;
+  Handle(BRepTools_History) hist;
+  bool done = false;
+  int status = 0;
+  {
+    py::gil_scoped_release release;
+    try {
+      // GEOM's CloseContour: Perform(wire, isCommonVertex, !isCommonVertex).
+      ShHealOper_CloseContour closer(body);
+      done = closer.Perform(wire, common_vertex, !common_vertex);
+      status = closer.GetErrorStatus();
+      if (done) {
+        result = closer.GetResultShape();
+        hist = closer.Context()->History();
+        std::vector<TopoDS_Edge> inputs;
+        for (const TopoDS_Shape& e : edges) {
+          inputs.push_back(TopoDS::Edge(e));
+        }
+        adapt_closing_history(hist, inputs, body, result);
+        // For a free wire ShHealOper returns the wire and the closing edges side by side in
+        // a compound (ShHealOper_CloseContour::build adds myFreeEdges). They share their
+        // end vertices, so one closed wire is built over the same edges.
+        if (result.ShapeType() == TopAbs_COMPOUND &&
+            (body.ShapeType() == TopAbs_WIRE || body.ShapeType() == TopAbs_EDGE)) {
+          NCollection_List<TopoDS_Shape> parts;
+          ShapeSet all;
+          TopExp::MapShapes(result, TopAbs_EDGE, all);
+          for (int i = 1; i <= all.Extent(); ++i) {
+            parts.Append(all.FindKey(i));
+          }
+          BRepBuilderAPI_MakeWire joined;
+          joined.Add(parts);
+          ShapeSet kept;
+          if (joined.IsDone()) {
+            TopExp::MapShapes(joined.Wire(), TopAbs_EDGE, kept);
+          }
+          bool same = joined.IsDone() && kept.Extent() == all.Extent();
+          for (int i = 1; i <= all.Extent() && same; ++i) {
+            same = kept.Contains(all.FindKey(i));
+          }
+          if (!same) {
+            throw PysmeshError("Session.close_contour: the closed contour's edges do not "
+                               "join into one wire over the same edges; nothing is "
+                               "committed. This is a bug, not a caller error.");
+          }
+          result = joined.Wire();
+        }
+      }
+    } catch (const std::exception& e) {
+      py::gil_scoped_acquire acquire;
+      throw PysmeshError(std::string("Session.close_contour: OCCT threw: ") + e.what());
+    }
+  }
+  if (!done || result.IsNull()) {
+    throw PysmeshError("Session.close_contour: ShHealOper_CloseContour closed nothing for the "
+                       "edges " + id_list(edge_ids) + " (" + shheal_error_text(status) + ").");
+  }
+  return commit(concat(untouched, result), hist, op, result, Validation::Report);
 }
 
 }  // namespace session

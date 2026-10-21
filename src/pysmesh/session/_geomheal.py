@@ -18,7 +18,7 @@ import numpy as np
 
 from .._core import PysmeshError
 from ._base import _SessionBase
-from ._types import EntityId, HistoryDelta, _delta
+from ._types import EntityId, HistoryDelta, _delta, _ids
 
 
 def _fractions(where: str, values: Sequence[float]) -> list[float]:
@@ -85,3 +85,53 @@ class _GeomHealOps(_SessionBase):
         """
         values = _fractions("Session.divide_edge", positions)
         return _delta(self._s.divide_edge(int(edge), values, by))
+
+    def close_contour(
+        self, edges: Sequence[EntityId], *, common_vertex: bool = False
+    ) -> HistoryDelta:
+        """Close the gap between the two ends of an open wire.
+
+        GEOM's ``CloseContour``: ``ShHealOper_CloseContour`` on the body that owns the
+        edges, with GEOM's call ``Perform(wire, isCommonVertex, not isCommonVertex)``.
+        The edges must be exactly the edges of one open wire: a wire of a face of the body
+        (an open contour, which makes the face invalid) or a free wire.
+
+        **common_vertex.** GEOM: "If True: closure by creation of a common vertex; if
+        False: closure by creation of an edge between ends."
+
+        * ``common_vertex=False``: a gap wider than 1 model unit is closed by a new
+          straight edge between the two ends: a line in the face's parameter space when
+          the wire is a face's, a 3-D line for a free wire. A narrower gap is closed by
+          ``ShapeFix_Wire``, which moves the ends of the curves together
+          (``FixGaps3d``, ``FixGaps2d``) and merges the two end vertices.
+        * ``common_vertex=True``: no edge is added. The two end vertices become one,
+          whose tolerance grows to cover the gap (GEOM's documentation: "its tolerance is
+          increased to a value of the gap between the ends of the contour").
+
+        The threshold of 1 model unit is ShHealOper's own maximum tolerance
+        (``ShHealOper_CloseContour::Init``): an absolute length, which GEOM does not
+        expose.
+
+        **Identity.** A new closing edge gets a new id whose role is ``GENERATED`` and
+        whose origin is the edges whose ends it joins. ShHealOper reports the closing edge
+        in a face as a modification of the edge before the gap; the session takes it out
+        of that edge's history, so that edge keeps its id alone. The wire's edges and the
+        face keep their ids.
+
+        Like :meth:`heal`, the operation commits what OCCT built whatever
+        ``BRepCheck_Analyzer`` says of it: its input is broken by assumption.
+        :attr:`HistoryDelta.valid` carries the verdict.
+
+        Args:
+            edges: The edges of one open wire, in any order. At least one.
+            common_vertex: Close by one common vertex instead of a new edge.
+
+        Returns:
+            The delta, with the verdict on ``valid``.
+
+        Raises:
+            PysmeshError: If an id is dead, is not an edge or was split; if the edges
+                belong to two bodies or are not exactly the edges of one wire of their
+                body; if the wire is closed already; or if ShHealOper closes nothing.
+        """
+        return _delta(self._s.close_contour(_ids(edges), common_vertex))

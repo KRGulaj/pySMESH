@@ -158,6 +158,8 @@ void bind_session(py::module_& m) {
            py::arg("cancel"))
       .def("divide_edge", &Session::divide_edge, py::arg("edge_id"), py::arg("positions"),
            py::arg("by"))
+      .def("close_contour", &Session::close_contour, py::arg("edge_ids"),
+           py::arg("common_vertex"))
       .def("entity_types", &Session::entity_types, py::arg("kind"))
       .def("surface_parameters", &Session::surface_parameters, py::arg("face_ids"))
       .def("bounding_boxes", &Session::bounding_boxes, py::arg("kind"))

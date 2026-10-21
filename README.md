@@ -308,6 +308,10 @@ splits nothing: faces that overlap only in part stay apart.
 in every face that holds it, as GEOM's `DivideEdge` does. The edge's id dies
 and each piece gets a new id generated from it; the faces keep theirs.
 
+`close_contour` closes one open wire, of a face or free, as GEOM's
+`CloseContour` does: by a new edge between the two ends, or by one common
+vertex whose tolerance covers the gap.
+
 `make_filling` takes `support_faces`: the filled surface is tangent to each
 named face along its boundary edge, and those edges keep their ids.
 

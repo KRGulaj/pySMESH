@@ -1015,6 +1015,12 @@ class Session {
   py::dict divide_edge(EntityId edge_id, const std::vector<double>& positions,
                        const std::string& by);
 
+  // GEOM's CloseContour: ShHealOper_CloseContour closes the one open wire the named edges
+  // form, of a face or a free wire, by a new edge between its ends or, with common_vertex,
+  // by one vertex whose tolerance covers the gap. A new edge is generated from the edges
+  // whose ends it joins.
+  py::dict close_contour(const std::vector<EntityId>& edge_ids, bool common_vertex);
+
   // ---- snapshot / restore ----------------------------------------------------------- //
 
   // Guarded like an operation, not like a query. These mutate the session, and an operation
