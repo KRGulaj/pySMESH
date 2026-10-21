@@ -228,6 +228,7 @@ from .offset import (
 from .session import (
     AdjacencyPairs,
     AxisLine,
+    BooleanCheckFinding,
     BoundsTable,
     CurvatureTable,
     CurveParameterTable,
@@ -252,6 +253,7 @@ from .session import (
     ProgressCallback,
     ResolutionStatus,
     Session,
+    ShapeCheckFinding,
     SnapshotMark,
     SurfaceParameterTable,
     SurfaceSample,
@@ -288,6 +290,7 @@ __version__: Final[str] = _build_info.VERSION
 
 __all__ = [
     "AxisLine",
+    "BooleanCheckFinding",
     "EdgePoint",
     "FaceFrame",
     "Fineness",
@@ -458,6 +461,7 @@ __all__ = [
     "Selection",
     "Session",
     "Shape",
+    "ShapeCheckFinding",
     "ShapeDistanceResult",
     "SharpEdges",
     "Skew",

@@ -78,6 +78,7 @@ other.
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
 | Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
+| Checks | `check_boolean`, `check_shape`, `small_edges`, `is_closed_shell`, `tolerances` |
 | Handoff | `export_handoff`, `brep`, `write_step` |
 | Identity and introspection | `entities`, `entity_kind`, `is_alive`, `shape_count`, `name_of`, `origin`, `resolve`, `op_count`, `state_op_index`, `issued_id_count`, `entity_count` |
 
@@ -189,6 +190,19 @@ normals. `point_at_length` is the point at a length along an edge, from either e
 Each refuses what has no answer, naming the entity and the value: a curved face for a
 frame, a parameter outside the face or at a singular point, two parallel planes, a
 length off the edge. None of them issues an id.
+
+## Checks
+
+Five read-only checks say whether a model is fit for the next operation.
+`check_boolean` runs OCCT's `BOPAlgo_ArgumentAnalyzer` on a boolean's arguments and
+tools with every check it offers, and returns one finding per problem: the OCCT check
+that failed and the ids on each side. `check_shape` runs `BRepCheck_Analyzer` on the
+bodies and returns one finding per invalid sub-shape, with its id, its kind and its
+`BRepCheck_Status` names. Both take `progress` and `cancel`; `check_shape` checks one
+body at a time, because OCCT gives its analyzer no progress range. `small_edges` lists
+the edges shorter than a length, `is_closed_shell` says per entity whether its body is
+bounded by closed, consistently oriented shells, and `tolerances` gives the stored
+tolerance of each face, edge or vertex. An empty finding list means no problem.
 
 ## Reaching a mesher
 

@@ -263,6 +263,11 @@ Four construction queries give frames and points to build on: `face_frame`
 (the common line of two planar faces) and `point_at_length` (the point at a
 length along an edge).
 
+Five checks read a model without changing it: `check_boolean` (OCCT's
+argument analyzer on a boolean's operands), `check_shape` (`BRepCheck_Analyzer`
+per body, one finding per invalid sub-shape), `small_edges`,
+`is_closed_shell` and `tolerances`.
+
 Two queries answer the questions a feature filter asks. `surface_parameters`
 reads a face's analytic parameters off its surface: a radius, a cone's
 taper, a torus's two radii. `face_wires` splits a face's boundary into its

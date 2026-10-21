@@ -505,6 +505,20 @@ class Session:
     def point_at_length(
         self, edge_id: int, length: float, from_start: bool
     ) -> dict[str, object]: ...
+    def check_boolean(
+        self,
+        operation: str,
+        arguments: list[int],
+        tools: list[int],
+        progress: object,
+        cancel: object,
+    ) -> list[dict[str, object]]: ...
+    def check_shape(
+        self, entity_ids: list[int] | None, progress: object, cancel: object
+    ) -> list[dict[str, object]]: ...
+    def small_edges(self, threshold: float) -> NDArray[np.int64]: ...
+    def is_closed_shell(self, entity_ids: list[int]) -> NDArray[np.bool_]: ...
+    def tolerances(self, entity_ids: list[int]) -> NDArray[np.float64]: ...
     def entities_in_box(
         self,
         kind: str,

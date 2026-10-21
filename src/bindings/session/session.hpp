@@ -39,6 +39,8 @@
 //   session_heal.cpp       — healing, sewing, defeaturing, imprinting and removal;
 //   session_offset.cpp     — the offset family: hollowing and uniform offsetting;
 //   session_query.cpp      — the geometric query surface over the live shape;
+//   session_check.cpp      — the checks: boolean arguments, validity, short edges, closed
+//                            shells and tolerances;
 //   session_tessellate.cpp — the render mesh, and the incremental delta over it;
 //   session_handoff.cpp    — the export to a mesher, and the id-to-ordinal bijection;
 //   session_progress.cpp   — the progress/cancellation driver (declared in progress.hpp,
@@ -1120,6 +1122,33 @@ class Session {
   // its last one.
   py::dict point_at_length(EntityId edge_id, double length, bool from_start) const;
 
+  // ---- checks ------------------------------------------------------------------------ //
+  //
+  // Read-only, like the queries above; implemented in session_check.cpp.
+
+  // BOPAlgo_ArgumentAnalyzer on the named arguments and tools, as one compound each, for
+  // `operation` ("fuse", "cut", "common", "section" or "split"), serially, with every check
+  // it offers switched on. One dict per finding: the BOPAlgo_CheckStatus name and the ids of
+  // the faulty shapes on each side.
+  py::list check_boolean(const std::string& operation, const std::vector<EntityId>& arguments,
+                         const std::vector<EntityId>& tools, const py::object& progress,
+                         const py::object& cancel) const;
+
+  // BRepCheck_Analyzer on the bodies owning the named entities, or on every body. One dict
+  // per invalid sub-shape: an id that names it, its kind and its BRepCheck_Status names.
+  py::list check_shape(const std::optional<std::vector<EntityId>>& entity_ids,
+                       const py::object& progress, const py::object& cancel) const;
+
+  // Live edge ids whose length, by the rule of mass_properties, is below `threshold`.
+  py::array_t<std::int64_t> small_edges(double threshold) const;
+
+  // Per named entity: whether its owning body's shells are closed and consistently oriented.
+  py::array_t<bool> is_closed_shell(const std::vector<EntityId>& entity_ids) const;
+
+  // Per named face, edge or vertex: its stored tolerance (BRep_Tool::Tolerance), the largest
+  // over the shapes of a split id.
+  py::array_t<double> tolerances(const std::vector<EntityId>& entity_ids) const;
+
   // Live entities of one kind whose bounding box meets the given box. `strict` asks for
   // containment (the entity's box inside the query box) rather than overlap.
   py::array_t<std::int64_t> entities_in_box(const std::string& kind, double xmin, double ymin,
@@ -1442,6 +1471,10 @@ class Session {
 
   // Live entity ids of one kind, ascending. The order every bulk query's rows are in.
   std::vector<EntityId> ids_of_kind(TopAbs_ShapeEnum kind) const;
+
+  // Every live id of a shape, ascending; for a shape of a kind that carries no id (a shell,
+  // a wire, a compound), the ids of its sub-shapes of the highest dimension that has any.
+  std::vector<EntityId> ids_within(const TopoDS_Shape& shape) const;
 
   // The id that labels a sub-shape of the current root. A merge leaves several ids on one
   // shape; the lowest is the label, and the others stay alive and still resolve — they just

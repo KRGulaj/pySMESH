@@ -763,6 +763,49 @@ class EdgePoint:
 
 
 @dataclass(frozen=True)
+class BooleanCheckFinding:
+    """One finding of :meth:`Session.check_boolean`.
+
+    Attributes:
+        check: The name of the OCCT check that failed, the ``BOPAlgo_CheckStatus``
+            enumerator: ``"BOPAlgo_BadType"``, ``"BOPAlgo_SelfIntersect"``,
+            ``"BOPAlgo_TooSmallEdge"``, ``"BOPAlgo_NonRecoverableFace"``,
+            ``"BOPAlgo_IncompatibilityOfVertex"``, ``"BOPAlgo_IncompatibilityOfEdge"``,
+            ``"BOPAlgo_IncompatibilityOfFace"``, ``"BOPAlgo_OperationAborted"``,
+            ``"BOPAlgo_GeomAbs_C0"``, ``"BOPAlgo_InvalidCurveOnSurface"``,
+            ``"BOPAlgo_NotValid"`` or ``"BOPAlgo_CheckUnknown"``.
+        argument_ids: (K,) int64, ascending — the ids of the arguments' shapes the finding
+            names. A shell or a wire is named by the ids of its faces or edges. When OCCT
+            names the whole operand, these are its ids.
+        tool_ids: (K,) int64, ascending — the same on the tools' side. Empty when the
+            finding is about the arguments only.
+    """
+
+    check: str
+    argument_ids: NDArray[np.int64]
+    tool_ids: NDArray[np.int64]
+
+
+@dataclass(frozen=True)
+class ShapeCheckFinding:
+    """One invalid sub-shape that :meth:`Session.check_shape` found.
+
+    Attributes:
+        entity_id: The id that names the sub-shape: its own (the lowest when several ids
+            denote it); for a shell, which has no id, the solid that holds it; for a wire,
+            the face that holds it, or the first of its edges for a wire with no face.
+        kind: The sub-shape's kind: ``"SOLID"``, ``"SHELL"``, ``"FACE"``, ``"WIRE"``,
+            ``"EDGE"`` or ``"VERTEX"``.
+        statuses: The ``BRepCheck_Status`` names ``BRepCheck_Analyzer`` gives it, each once,
+            for example ``("BRepCheck_NotClosed",)``.
+    """
+
+    entity_id: EntityId
+    kind: str
+    statuses: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class RenderMesh:
     """Triangles, edge polylines and vertex points of the live shape, from one call.
 
@@ -1013,6 +1056,34 @@ def _edge_point(raw: dict[str, object]) -> EdgePoint:
     return EdgePoint(
         point=cast("NDArray[np.float64]", raw["point"]),
         parameter=cast("float", raw["parameter"]),
+    )
+
+
+def _boolean_check_findings(
+    rows: list[dict[str, object]],
+) -> tuple[BooleanCheckFinding, ...]:
+    """Wrap the raw ``_core`` boolean-check rows in their frozen dataclasses."""
+    return tuple(
+        BooleanCheckFinding(
+            check=cast("str", row["check"]),
+            argument_ids=cast("NDArray[np.int64]", row["argument_ids"]),
+            tool_ids=cast("NDArray[np.int64]", row["tool_ids"]),
+        )
+        for row in rows
+    )
+
+
+def _shape_check_findings(
+    rows: list[dict[str, object]],
+) -> tuple[ShapeCheckFinding, ...]:
+    """Wrap the raw ``_core`` shape-check rows in their frozen dataclasses."""
+    return tuple(
+        ShapeCheckFinding(
+            entity_id=EntityId(cast("int", row["entity_id"])),
+            kind=cast("str", row["kind"]),
+            statuses=tuple(cast("list[str]", row["statuses"])),
+        )
+        for row in rows
     )
 
 

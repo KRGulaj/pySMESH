@@ -162,6 +162,13 @@ void bind_session(py::module_& m) {
       .def("face_face_axis", &Session::face_face_axis, py::arg("face_a"), py::arg("face_b"))
       .def("point_at_length", &Session::point_at_length, py::arg("edge_id"),
            py::arg("length"), py::arg("from_start"))
+      .def("check_boolean", &Session::check_boolean, py::arg("operation"),
+           py::arg("arguments"), py::arg("tools"), py::arg("progress"), py::arg("cancel"))
+      .def("check_shape", &Session::check_shape, py::arg("entity_ids"), py::arg("progress"),
+           py::arg("cancel"))
+      .def("small_edges", &Session::small_edges, py::arg("threshold"))
+      .def("is_closed_shell", &Session::is_closed_shell, py::arg("entity_ids"))
+      .def("tolerances", &Session::tolerances, py::arg("entity_ids"))
       .def("entities_in_box", &Session::entities_in_box, py::arg("kind"), py::arg("xmin"),
            py::arg("ymin"), py::arg("zmin"), py::arg("xmax"), py::arg("ymax"),
            py::arg("zmax"), py::arg("strict"))
