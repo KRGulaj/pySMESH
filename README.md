@@ -284,6 +284,10 @@ corner vertex it replaces.
 `make_filling` takes `support_faces`: the filled surface is tangent to each
 named face along its boundary edge, and those edges keep their ids.
 
+`offset_wire` adds a new wire parallel to a planar wire, with arc or
+intersection joins. A positive distance moves away from the region the
+wire bounds; an open wire bounds it with the chord between its ends.
+
 Two queries answer the questions a feature filter asks. `surface_parameters`
 reads a face's analytic parameters off its surface: a radius, a cone's
 taper, a torus's two radii. `face_wires` splits a face's boundary into its

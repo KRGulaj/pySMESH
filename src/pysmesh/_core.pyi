@@ -407,6 +407,9 @@ class Session:
         progress: object,
         cancel: object,
     ) -> dict[str, object]: ...
+    def offset_wire(
+        self, edge_ids: list[int], distance: float, intersection: bool
+    ) -> dict[str, object]: ...
     def translate(
         self, dx: float, dy: float, dz: float, entity_ids: list[int] | None
     ) -> dict[str, object]: ...

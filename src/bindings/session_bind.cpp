@@ -119,6 +119,8 @@ void bind_session(py::module_& m) {
            py::arg("thickness"), py::arg("tol"), py::arg("progress"), py::arg("cancel"))
       .def("offset", &Session::offset, py::arg("entity_ids"), py::arg("distance"),
            py::arg("tol"), py::arg("progress"), py::arg("cancel"))
+      .def("offset_wire", &Session::offset_wire, py::arg("edge_ids"), py::arg("distance"),
+           py::arg("intersection"))
       .def("translate", &Session::translate, py::arg("dx"), py::arg("dy"), py::arg("dz"),
            py::arg("entity_ids"))
       .def("rotate", &Session::rotate, py::arg("ox"), py::arg("oy"), py::arg("oz"),

@@ -45,6 +45,11 @@
 
 #include "offset_guard.hpp"
 
+#include <BRepLib_FindSurface.hxx>
+#include <BRepOffsetAPI_MakeOffset.hxx>
+#include <GCPnts_AbscissaPoint.hxx>
+#include <Geom_Plane.hxx>
+
 namespace pysmesh {
 namespace session {
 
@@ -689,6 +694,272 @@ py::dict Session::offset(const std::vector<EntityId>& entity_ids, double distanc
   // this the five outer walls of a hollowed box would each lose their id and be re-issued.
   relabel_body(owner, work.shape, work.to_work);
   return commit(concat(survivors, result), hist, "offset", result);
+}
+
+// ---- offset of a planar wire --------------------------------------------------------- //
+
+namespace {
+
+// Points along the wire, in its order and direction, each edge sampled at this many steps.
+constexpr int kWireSamples = 16;
+
+// Points along the wire in its order and direction, from its first vertex to its last.
+std::vector<gp_Pnt> wire_points(const TopoDS_Wire& wire) {
+  std::vector<gp_Pnt> points;
+  gp_Pnt end;
+  for (BRepTools_WireExplorer ex(wire); ex.More(); ex.Next()) {
+    const BRepAdaptor_Curve curve(ex.Current());
+    const bool forward = ex.Current().Orientation() != TopAbs_REVERSED;
+    const double a = forward ? curve.FirstParameter() : curve.LastParameter();
+    const double b = forward ? curve.LastParameter() : curve.FirstParameter();
+    for (int k = 0; k < kWireSamples; ++k) {
+      points.push_back(curve.Value(a + (b - a) * k / kWireSamples));
+    }
+    end = curve.Value(b);
+  }
+  points.push_back(end);
+  return points;
+}
+
+// Whether every point lies within Precision::Confusion() of the line through the first
+// point and the point farthest from it.
+bool on_one_line(const std::vector<gp_Pnt>& points) {
+  gp_Pnt far = points.front();
+  for (const gp_Pnt& p : points) {
+    if (p.SquareDistance(points.front()) > far.SquareDistance(points.front())) {
+      far = p;
+    }
+  }
+  if (far.Distance(points.front()) <= Precision::Confusion()) {
+    return true;
+  }
+  const gp_Lin line(points.front(), gp_Dir(gp_Vec(points.front(), far)));
+  for (const gp_Pnt& p : points) {
+    if (line.Distance(p) > Precision::Confusion()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Twice the vector area of the polygon through the wire's points, closed by the chord from
+// the last point back to the first (Newell's method). Its direction is the normal about
+// which that loop turns counter-clockwise; its length is twice the area it encloses.
+gp_Vec chord_closed_area(const std::vector<gp_Pnt>& points) {
+  gp_XYZ centre(0.0, 0.0, 0.0);
+  for (const gp_Pnt& p : points) {
+    centre += p.XYZ();
+  }
+  centre /= static_cast<double>(points.size());
+  gp_XYZ sum(0.0, 0.0, 0.0);
+  for (std::size_t i = 0; i < points.size(); ++i) {
+    const gp_XYZ p = points[i].XYZ() - centre;
+    const gp_XYZ q = points[(i + 1) % points.size()].XYZ() - centre;
+    sum += p.Crossed(q);
+  }
+  return gp_Vec(sum);
+}
+
+}  // namespace
+
+// BRepOffsetAPI_MakeOffset offsets a closed wire outward for a positive distance whichever
+// way it runs (measured on OCCT 8.0.1). An open wire it offsets to one side of the plane
+// it finds for the wire, and which side depends on that plane's normal. The normal is set
+// here instead: the one about which the wire, closed by its chord, turns counter-clockwise,
+// so a positive distance moves an open wire away from that region as it moves a closed
+// wire away from the region it bounds.
+py::dict Session::offset_wire(const std::vector<EntityId>& edge_ids, double distance,
+                              bool intersection) {
+  static constexpr const char* kOp = "offset_wire";
+  finite_arg(kOp, "distance", distance);
+  OpGuard guard(in_op_);
+  const std::vector<TopoDS_Shape> edges = edges_of(kOp, edge_ids);
+  std::string named;
+  for (EntityId id : edge_ids) {
+    named += (named.empty() ? "" : ", ") + std::to_string(id);
+  }
+  const std::string wire_text = "the wire of edges (" + named + ")";
+  if (distance == 0.0) {
+    throw PysmeshError("Session.offset_wire: distance 0 leaves " + wire_text +
+                           " where it is; there is no offset to build.",
+                       "", ids_as_int(edge_ids));
+  }
+
+  // One wire, the edges added until none more connects; each edge of the wire is traced
+  // back to the input edge it is, or was copied from (BRepLib_MakeWire copies an edge
+  // whose end only coincides with the wire's, on the same curve).
+  BRepBuilderAPI_MakeWire mk_wire;
+  std::vector<bool> placed(edges.size(), false);
+  for (bool growing = true; growing;) {
+    growing = false;
+    for (std::size_t i = 0; i < edges.size(); ++i) {
+      if (placed[i]) {
+        continue;
+      }
+      mk_wire.Add(TopoDS::Edge(edges[i]));
+      if (mk_wire.IsDone()) {
+        placed[i] = true;
+        growing = true;
+      }
+    }
+  }
+  if (std::find(placed.begin(), placed.end(), false) != placed.end()) {
+    throw PysmeshError("Session.offset_wire: the edges (" + named +
+                           ") do not form one connected wire.",
+                       "", ids_as_int(edge_ids));
+  }
+  const TopoDS_Wire wire = mk_wire.Wire();
+  const auto source_of = [&edges](const TopoDS_Shape& e) -> TopoDS_Shape {
+    double f = 0.0;
+    double l = 0.0;
+    const Handle(Geom_Curve) c = BRep_Tool::Curve(TopoDS::Edge(e), f, l);
+    for (const TopoDS_Shape& in : edges) {
+      double fi = 0.0;
+      double li = 0.0;
+      if (in.IsSame(e) ||
+          (!c.IsNull() && BRep_Tool::Curve(TopoDS::Edge(in), fi, li) == c && fi == f &&
+           li == l)) {
+        return in;
+      }
+    }
+    return TopoDS_Shape();
+  };
+
+  double length = 0.0;
+  for (const TopoDS_Shape& e : edges) {
+    length += GCPnts_AbscissaPoint::Length(BRepAdaptor_Curve(TopoDS::Edge(e)));
+  }
+  const std::vector<gp_Pnt> points = wire_points(wire);
+  const gp_Vec area = chord_closed_area(points);
+  // A loop of this area or less is a sliver 1e-7 wide over the wire's length.
+  const bool no_area = 0.5 * area.Magnitude() <= Precision::Confusion() * length;
+  if (on_one_line(points)) {
+    throw PysmeshError("Session.offset_wire: the edges (" + named +
+                           ") lie on one straight line; they span no plane, so the wire has "
+                           "no side to offset to.",
+                       "", ids_as_int(edge_ids));
+  }
+  const BRepLib_FindSurface plane_finder(wire, -1.0, /*OnlyPlane=*/true);
+  if (!plane_finder.Found()) {
+    throw PysmeshError("Session.offset_wire: the edges (" + named +
+                           ") do not lie in one plane.",
+                       "", ids_as_int(edge_ids));
+  }
+  const bool closed = BRep_Tool::IsClosed(wire);
+  if (!closed && no_area) {
+    throw PysmeshError("Session.offset_wire: the open wire of edges (" + named +
+                           ") and the chord from its last vertex to its first enclose no "
+                           "area, so neither side of the wire is the outside.",
+                       "", ids_as_int(edge_ids));
+  }
+
+  TopoDS_Shape result;
+  Handle(BRepTools_History) hist = new BRepTools_History;
+  const GeomAbs_JoinType join = intersection ? GeomAbs_Intersection : GeomAbs_Arc;
+  const char* stage = "BRepOffsetAPI_MakeOffset failed";
+  {
+    py::gil_scoped_release release;
+    try {
+      std::unique_ptr<BRepOffsetAPI_MakeOffset> maker;
+      if (closed) {
+        maker = std::make_unique<BRepOffsetAPI_MakeOffset>(wire, join,
+                                                           /*IsOpenResult=*/false);
+      } else {
+        const Handle(Geom_Plane) found = Handle(Geom_Plane)::DownCast(plane_finder.Surface());
+        gp_Pln pln = found->Pln().Transformed(plane_finder.Location().Transformation());
+        if (gp_Vec(pln.Axis().Direction()).Dot(area) < 0.0) {
+          pln = gp_Pln(pln.Location(), pln.Axis().Direction().Reversed());
+        }
+        TopoDS_Face face =
+            TopoDS::Face(BRepBuilderAPI_MakeFace(pln).Face().EmptyCopied());
+        BRep_Builder().Add(face, wire);
+        maker = std::make_unique<BRepOffsetAPI_MakeOffset>(face, join,
+                                                           /*IsOpenResult=*/true);
+      }
+      BRepOffsetAPI_MakeOffset& mk = *maker;
+      mk.Perform(distance);
+      if (mk.IsDone()) {
+        stage = "reading the history of BRepOffsetAPI_MakeOffset failed";
+        result = mk.Shape();
+        ShapeSet out_edges;
+        TopExp::MapShapes(result, TopAbs_EDGE, out_edges);
+        ShapeSet attributed;
+        // Each offset edge is generated from the input edge it runs along, and an arc join
+        // from the input vertex it rounds; each new vertex from the source of an edge it
+        // bounds, the first in the wire's order.
+        for (BRepTools_WireExplorer ex(wire); ex.More(); ex.Next()) {
+          const TopoDS_Shape source = source_of(ex.Current());
+          if (source.IsNull()) {
+            continue;
+          }
+          for (const TopoDS_Shape& g : mk.Generated(ex.Current())) {
+            if (out_edges.Contains(g) && !attributed.Contains(g)) {
+              hist->AddGenerated(source, g);
+              attributed.Add(g);
+            }
+          }
+          const TopoDS_Vertex corner = ex.CurrentVertex();
+          ShapeSet source_vertices;
+          TopExp::MapShapes(source, TopAbs_VERTEX, source_vertices);
+          TopoDS_Shape origin;
+          for (int k = 1; k <= source_vertices.Extent() && origin.IsNull(); ++k) {
+            if (BRep_Tool::Pnt(TopoDS::Vertex(source_vertices(k)))
+                    .Distance(BRep_Tool::Pnt(corner)) <= BRep_Tool::Tolerance(corner)) {
+              origin = source_vertices(k);
+            }
+          }
+          if (origin.IsNull()) {
+            continue;
+          }
+          for (const TopoDS_Shape& g : mk.Generated(corner)) {
+            if (out_edges.Contains(g) && !attributed.Contains(g)) {
+              hist->AddGenerated(origin, g);
+              attributed.Add(g);
+            }
+          }
+        }
+        for (TopExp_Explorer ex(result, TopAbs_EDGE); ex.More(); ex.Next()) {
+          for (const TopoDS_Shape& source : edges) {
+            for (const TopoDS_Shape& g : hist->Generated(source)) {
+              if (!g.IsSame(ex.Current())) {
+                continue;
+              }
+              for (TopExp_Explorer v(ex.Current(), TopAbs_VERTEX); v.More(); v.Next()) {
+                if (!attributed.Contains(v.Current())) {
+                  hist->AddGenerated(source, v.Current());
+                  attributed.Add(v.Current());
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (const std::exception& e) {
+      py::gil_scoped_acquire acquire;
+      throw PysmeshError(std::string("Session.offset_wire: ") + stage + ": " + e.what(), "",
+                         ids_as_int(edge_ids));
+    }
+  }
+  int wires = 0;
+  TopoDS_Shape one_wire;
+  if (!result.IsNull()) {
+    for (TopExp_Explorer ex(result, TopAbs_WIRE); ex.More(); ex.Next()) {
+      ++wires;
+      one_wire = ex.Current();
+    }
+  }
+  if (wires == 0) {
+    throw PysmeshError("Session.offset_wire: OCCT built no offset of " + wire_text +
+                           " at distance " + number_text(distance) + ".",
+                       "BRepOffsetAPI_MakeOffset gave no wire.", ids_as_int(edge_ids));
+  }
+  if (wires > 1) {
+    throw PysmeshError("Session.offset_wire: the offset of " + wire_text + " at distance " +
+                           number_text(distance) + " falls into " + std::to_string(wires) +
+                           " separate wires, not one.",
+                       "", ids_as_int(edge_ids));
+  }
+  return commit(concat(root_bodies(state_.root), one_wire), hist, kOp, one_wire);
 }
 
 }  // namespace session

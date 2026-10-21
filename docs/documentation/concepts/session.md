@@ -72,7 +72,7 @@ other.
 | Booleans with history | `fuse`, `cut`, `common`, `section`, `split`, `fragment` |
 | Splits with piece ids | `split_by_faces`, `split_by_plane`, `keep_half_space` |
 | Fillet and chamfer | `fillet`, `chamfer`, `fillet_2d` (corners of a free planar face) |
-| Offsets | `make_thick_solid`, `offset` |
+| Offsets | `make_thick_solid`, `offset`, `offset_wire` (a parallel planar wire) |
 | Transforms | `translate`, `rotate`, `mirror`, `scale`, `position_along_path`, `copy` |
 | Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove`, `limit_tolerance`, `change_orientation` |
 | Tessellation | `tessellate` (the incremental render mesh) |

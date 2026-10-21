@@ -866,6 +866,11 @@ class Session {
   py::dict offset(const std::vector<EntityId>& entity_ids, double distance, double tol,
                   const py::object& progress, const py::object& cancel);
 
+  // A new free wire parallel to the planar wire the named edges form, at a signed distance:
+  // positive away from the region the wire bounds (closed by its chord when open). Arc or
+  // intersection joins. Each new edge is generated from the edge or vertex it offsets.
+  py::dict offset_wire(const std::vector<EntityId>& edge_ids, double distance, bool intersection);
+
   // ---- transforms ------------------------------------------------------------------- //
 
   py::dict translate(double dx, double dy, double dz,
