@@ -1021,6 +1021,12 @@ class Session {
   // whose ends it joins.
   py::dict close_contour(const std::vector<EntityId>& edge_ids, bool common_vertex);
 
+  // GEOM's FillHoles: ShHealOper_FillHoles fills the free-boundary holes of the bodies of the
+  // named entities, or only those the named free edges bound, with GeomPlate faces sewn into
+  // the bodies' shells. Each new face is generated from the edges of its hole.
+  py::dict fill_holes(const std::vector<EntityId>& entity_ids,
+                      const std::optional<std::vector<EntityId>>& edge_ids);
+
   // ---- snapshot / restore ----------------------------------------------------------- //
 
   // Guarded like an operation, not like a query. These mutate the session, and an operation

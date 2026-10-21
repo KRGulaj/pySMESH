@@ -312,6 +312,10 @@ and each piece gets a new id generated from it; the faces keep theirs.
 `CloseContour` does: by a new edge between the two ends, or by one common
 vertex whose tolerance covers the gap.
 
+`fill_holes` fills the free-boundary holes of shells and faces with faces on
+the holes' own edges, as GEOM's `FillHoles` does, so an open shell closes in
+one step. Each new face gets a new id generated from the edges of its hole.
+
 `make_filling` takes `support_faces`: the filled surface is tangent to each
 named face along its boundary edge, and those edges keep their ids.
 

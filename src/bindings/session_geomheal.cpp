@@ -20,7 +20,9 @@
 #include <GCPnts_AbscissaPoint.hxx>
 #include <ShHealOper_CloseContour.hxx>
 #include <ShHealOper_EdgeDivide.hxx>
+#include <ShHealOper_FillHoles.hxx>
 #include <TColStd_SequenceOfReal.hxx>
+#include <TopTools_SequenceOfShape.hxx>
 
 namespace pysmesh {
 namespace session {
@@ -369,6 +371,128 @@ py::dict Session::close_contour(const std::vector<EntityId>& edge_ids, bool comm
                        "edges " + id_list(edge_ids) + " (" + shheal_error_text(status) + ").");
   }
   return commit(concat(untouched, result), hist, op, result, Validation::Report);
+}
+
+// ---- fill_holes --------------------------------------------------------------------- //
+
+py::dict Session::fill_holes(const std::vector<EntityId>& entity_ids,
+                             const std::optional<std::vector<EntityId>>& edge_ids) {
+  const char* op = "fill_holes";
+  OpGuard guard(in_op_);
+  if (entity_ids.empty()) {
+    throw PysmeshError("Session.fill_holes: no entity is named; there is no body to fill.");
+  }
+  const std::vector<TopoDS_Shape> scope = scoped_bodies(entity_ids, op);
+  const std::vector<TopoDS_Shape> untouched = bodies_excluding(scope);
+  const TopoDS_Shape input = make_root(scope);
+
+  // The edges that bound the holes to fill: free boundary edges of the bodies, each held by
+  // one face of them.
+  std::vector<TopoDS_Shape> bounds;
+  if (edge_ids.has_value()) {
+    std::vector<EntityId> kept;
+    bounds = edges_of(op, *edge_ids, &kept);
+    NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
+                               TopTools_ShapeMapHasher>
+        edge_faces;
+    TopExp::MapShapesAndUniqueAncestors(input, TopAbs_EDGE, TopAbs_FACE, edge_faces);
+    for (std::size_t i = 0; i < bounds.size(); ++i) {
+      const int k = edge_faces.FindIndex(bounds[i]);
+      if (k == 0) {
+        throw PysmeshError("Session.fill_holes: edge " + std::to_string(kept[i]) +
+                           " is not an edge of a face of the bodies of the named entities.");
+      }
+      if (edge_faces.FindFromIndex(k).Extent() != 1) {
+        throw PysmeshError("Session.fill_holes: edge " + std::to_string(kept[i]) + " is held by " +
+                           std::to_string(edge_faces.FindFromIndex(k).Extent()) +
+                           " faces; a hole is bounded by free edges, each held by one face.");
+      }
+    }
+  }
+
+  TopoDS_Shape result;
+  Handle(BRepTools_History) hist;
+  bool done = false;
+  int status = 0;
+  {
+    py::gil_scoped_release release;
+    try {
+      // ShHealOper_FillHoles writes the new face's pcurves into the boundary edges it is
+      // given (ShHealOper_FillHoles::addFace, BRep_Builder::UpdateEdge), and a retained
+      // state shares those edges. It works on a copy with its own topology instead; the
+      // copy's history carries every id onto the copy first.
+      BRepBuilderAPI_Copy copier(input, /*copyGeom=*/false, /*copyMesh=*/false);
+      const TopoDS_Shape copy = copier.Shape();
+      ShHealOper_FillHoles filler(copy);
+      // GEOM's FillHoles: the default GeomPlate parameters (InitParameters()).
+      if (edge_ids.has_value()) {
+        TopTools_SequenceOfShape seq;
+        for (const TopoDS_Shape& e : bounds) {
+          seq.Append(copier.ModifiedShape(e));
+        }
+        done = filler.Fill(seq);
+      } else {
+        done = filler.Fill();
+      }
+      status = filler.GetErrorStatus();
+      if (done) {
+        result = filler.GetResultShape();
+        NCollection_List<TopoDS_Shape> arguments;
+        arguments.Append(input);
+        hist = new BRepTools_History(arguments, copier);
+        hist->Merge(filler.Context()->History());
+        // Each new face is generated from the edges of the hole it fills.
+        ShapeKeyed<TopoDS_Shape> input_of;
+        ShapeSet in_edges;
+        TopExp::MapShapes(input, TopAbs_EDGE, in_edges);
+        for (int i = 1; i <= in_edges.Extent(); ++i) {
+          const TopoDS_Shape& e = in_edges.FindKey(i);
+          const NCollection_List<TopoDS_Shape>& images = hist->Modified(e);
+          if (images.IsEmpty()) {
+            input_of.emplace(e, e);
+          }
+          for (const TopoDS_Shape& m : images) {
+            input_of.emplace(m, e);
+          }
+        }
+        ShapeSet old_faces;
+        TopExp::MapShapes(input, TopAbs_FACE, old_faces);
+        ShapeSet images_of_faces;
+        for (int i = 1; i <= old_faces.Extent(); ++i) {
+          for (const TopoDS_Shape& m : hist->Modified(old_faces.FindKey(i))) {
+            images_of_faces.Add(m);
+          }
+        }
+        for (TopExp_Explorer f(result, TopAbs_FACE); f.More(); f.Next()) {
+          if (images_of_faces.Contains(f.Current()) || old_faces.Contains(f.Current())) {
+            continue;
+          }
+          for (TopExp_Explorer e(f.Current(), TopAbs_EDGE); e.More(); e.Next()) {
+            const auto it = input_of.find(e.Current());
+            if (it != input_of.end()) {
+              hist->AddGenerated(it->second, f.Current());
+            }
+          }
+        }
+      }
+    } catch (const std::exception& e) {
+      py::gil_scoped_acquire acquire;
+      throw PysmeshError(std::string("Session.fill_holes: OCCT threw: ") + e.what());
+    }
+  }
+  if (!done || result.IsNull()) {
+    throw PysmeshError(
+        std::string("Session.fill_holes: ShHealOper_FillHoles filled nothing in the bodies of "
+                    "the entities ") +
+        id_list(entity_ids) +
+        (edge_ids.has_value() ? " for the edges " + id_list(*edge_ids) : std::string()) +
+        // Fill returns false with no error when it finds no loop at all, and with
+        // InvalidParameters when the loops it finds are not holes (prepareWires).
+        (status == ShHealOper_ErrorExecution
+             ? ": GeomPlate built no surface for a hole (" + shheal_error_text(status) + ")."
+             : ": they have no hole bounded by free edges."));
+  }
+  return commit(concat(untouched, result), hist, op, result);
 }
 
 }  // namespace session

@@ -76,7 +76,7 @@ other.
 | Transforms | `translate`, `rotate`, `mirror`, `scale`, `position_along_path`, `copy` |
 | Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove`, `limit_tolerance`, `change_orientation` |
 | Gluing | `glue` (coincident faces or edges, GEOM's gluer) |
-| GEOM healing operators | `divide_edge`, `close_contour` |
+| GEOM healing operators | `divide_edge`, `close_contour`, `fill_holes` |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
 | Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
@@ -160,6 +160,26 @@ closed by a new straight edge, a narrower one by pulling the two end edges toget
 edge gets a new id generated from the two edges it joins; every other id stays. A free
 wire comes out as one closed wire. Like `heal`, the operation reports the validity verdict
 instead of refusing an invalid result.
+
+### Filling holes
+
+`fill_holes(entities, edges=None)` is GEOM's `FillHoles`. It fills each free-boundary hole
+of the named shells and faces with a GeomPlate face built on the hole's own edges, and puts
+the face in the shell, so the shell closes. With `edges`, only the holes those edges bound
+are filled. Each new face gets a new id generated from the edges of its hole.
+
+When to use which:
+
+| Need | Use |
+|---|---|
+| Close an open shell in one step, the cap sharing the shell's edges | `fill_holes` |
+| An exact planar cap on a planar loop | `extract_edges` of the loop, then `make_face` |
+| A free filling surface on a non-planar loop, tangent to faces if asked | `extract_edges`, then `make_filling` |
+
+`make_face` and `make_filling` make a separate face on copies of the edges, so the body
+stays open until a `sew` joins the cap. The surface of `fill_holes` is a GeomPlate
+approximation within 1e-4, also for a planar hole: on a disk of radius 2 its area is
+12.56630 against the exact 12.56637.
 
 ### Booleans: `fuzzy` and `parallel`
 

@@ -135,3 +135,55 @@ class _GeomHealOps(_SessionBase):
                 body; if the wire is closed already; or if ShHealOper closes nothing.
         """
         return _delta(self._s.close_contour(_ids(edges), common_vertex))
+
+    def fill_holes(
+        self,
+        entities: Sequence[EntityId],
+        *,
+        edges: Sequence[EntityId] | None = None,
+    ) -> HistoryDelta:
+        """Fill the holes of shells and faces with new faces sewn in along their edges.
+
+        GEOM's ``FillHoles``: ``ShHealOper_FillHoles`` with GEOM's default parameters. It
+        finds the free boundaries of the bodies that own ``entities`` (the loops of edges
+        that one face holds), builds a ``GeomPlate`` surface through each loop (degree 3,
+        5 points on each curve, 12 iterations, 3-D tolerance 1e-4, approximated to degree
+        8 with 9 segments at most) and adds a face on it bounded by the loop's own edges.
+        The face goes into the shell that holds the loop, which becomes one shell with the
+        new face. A loop of one edge is filled only when the edge is a closed curve.
+
+        **Which holes.** With ``edges=None`` every free boundary is filled, and a free face
+        has its outer boundary filled too, since that boundary is free as well. With
+        ``edges``, only the loops those edges form are filled.
+
+        **Identity.** Each new face gets a new id, generated from the edges of its hole.
+        The bodies keep every id: ShHealOper writes the new face's curves into the boundary
+        edges, so it works on a copy of the bodies, and every id of them is carried onto
+        the copy (they are all in ``modified``).
+
+        **fill_holes, make_face and make_filling.** :meth:`make_face` caps a planar loop
+        with an exact plane, and :meth:`make_filling` a non-planar loop with a filling
+        surface. Each makes a separate free face on copies of the loop's edges
+        (:meth:`extract_edges`), so the body stays open and a :meth:`sew` is needed to
+        join the cap. fill_holes builds the face on the loop's own edges and puts it in the
+        body's shell, so the shell is closed in one step; its surface is a ``GeomPlate``
+        approximation within 1e-4 even for a planar hole. Use make_face where the cap must
+        be an exact plane, and fill_holes to close a shell.
+
+        Args:
+            entities: Entities whose owning bodies are filled. At least one.
+            edges: Free edges of those bodies that bound the holes to fill. ``None`` fills
+                every free boundary.
+
+        Returns:
+            The delta: the new faces in ``created``.
+
+        Raises:
+            PysmeshError: If no entity is named, an id is dead, or the bodies share
+                sub-shapes with bodies left out; if a named edge is not an edge of those
+                bodies, or is held by more than one face; if there is no hole bounded by
+                free edges, or GeomPlate builds no surface (nothing is committed then); or
+                if the result is invalid.
+        """
+        edge_ids = None if edges is None else _ids(edges)
+        return _delta(self._s.fill_holes(_ids(entities), edge_ids))

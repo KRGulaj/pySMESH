@@ -32,6 +32,7 @@
 #include <string>
 #include <vector>
 
+#include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
@@ -74,6 +75,9 @@
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Shell.hxx>
 #include <TopoDS_Vertex.hxx>
+#include <TopExp_Explorer.hxx>
+#include <gp_Ax2.hxx>
+#include <gp_Dir.hxx>
 #include <gp_Pnt.hxx>
 #include <gp_Pnt2d.hxx>
 #include <gp_Trsf.hxx>
@@ -544,6 +548,30 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // sphere_hole_shell: the shell of a sphere of radius 3 with the part inside a cylinder cut
+  // away. The cylinder has radius 1 and its axis runs along +x at z = 1.5, from x = 0 to
+  // x = 5, so it leaves one hole whose boundary (two intersection curves joined at the
+  // cylinder's extremes) is not planar. A one-face open shell: the fill_holes fixture.
+  {
+    TopoDS_Shape sphere_shell;
+    for (TopExp_Explorer e(BRepPrimAPI_MakeSphere(3.0).Shape(), TopAbs_SHELL); e.More();
+         e.Next()) {
+      sphere_shell = e.Current();
+    }
+    const TopoDS_Shape tool =
+        BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0.0, 0.0, 1.5), gp_Dir(1.0, 0.0, 0.0)), 1.0, 5.0)
+            .Shape();
+    TopoDS_Shape holed;
+    for (TopExp_Explorer e(BRepAlgoAPI_Cut(sphere_shell, tool).Shape(), TopAbs_SHELL);
+         e.More(); e.Next()) {
+      holed = e.Current();
+    }
+    if (!BRepTools::Write(holed, (out_dir + "/sphere_hole_shell.brep").c_str())) {
+      std::fprintf(stderr, "failed to write sphere_hole_shell.brep\n");
+      return 1;
+    }
+  }
+
   // box_far: a second BOX_EDGE cube whose min corner sits at x = 5, so it spans x in [5, 7]
   // while box spans x in [0, 2] (both share y, z in [0, BOX_EDGE]). The exact minimum
   // distance to box is therefore 5 - BOX_EDGE = 3.0, purely along +x — the analytical case
@@ -579,6 +607,7 @@ int main(int argc, char** argv) {
 
   std::printf(
       "wrote box.brep, cylinder.brep, sphere.brep, split_box.brep, open_box_shell.brep, "
+      "sphere_hole_shell.brep, "
       "box_far.brep, named_box_mm.step, named_box_m.step, box_mm.igs, box_m.igs, "
       "box_inch.igs, box_mesh + sphere_mesh to %s\n",
       out_dir.c_str());
