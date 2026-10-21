@@ -17,6 +17,10 @@
 #include "session/session.hpp"
 
 #include <BRepBuilderAPI_FindPlane.hxx>
+#include <GeomLib.hxx>
+#include <Geom_BoundedCurve.hxx>
+#include <Geom_BoundedSurface.hxx>
+#include <Geom_RectangularTrimmedSurface.hxx>
 
 #include "shape_checks.hpp"
 
@@ -802,6 +806,209 @@ py::dict Session::make_filling(const std::vector<EntityId>& edge_ids,
   }
   return commit(concat(survivors, face), Handle(BRepTools_History)(), "make_filling",
                 face);
+}
+
+// ---- extending a face or an edge ----------------------------------------------------- //
+//
+// Both add a new free body and leave the source where it is. OCCT gives no history for a
+// surface or a curve rebuilt by GeomLib, so the relation is stated here: every sub-shape of
+// the new body is Generated from the source, which names it against the source.
+
+namespace {
+
+// Six significant digits, as a refusal text prints a value.
+std::string extend_num(double v) {
+  char buf[32];
+  std::snprintf(buf, sizeof(buf), "%.6g", v);
+  return buf;
+}
+
+Handle(BRepTools_History) generated_from_source(const TopoDS_Shape& source,
+                                                const TopoDS_Shape& built) {
+  Handle(BRepTools_History) hist = new BRepTools_History;
+  for (const TopoDS_Shape& s : registered_subshapes(built)) {
+    hist->AddGenerated(source, s);
+  }
+  return hist;
+}
+
+}  // namespace
+
+py::dict Session::extend_face(EntityId face_id, double u_min, double u_max, double v_min,
+                              double v_max) {
+  const double lengths[4] = {u_min, u_max, v_min, v_max};
+  const char* names[4] = {"u_min", "u_max", "v_min", "v_max"};
+  for (int i = 0; i < 4; ++i) {
+    finite_arg("extend_face", names[i], lengths[i]);
+  }
+  OpGuard guard(in_op_);
+  bool any = false;
+  for (int i = 0; i < 4; ++i) {
+    if (lengths[i] < 0.0) {
+      throw PysmeshError(std::string("Session.extend_face: the extension ") + names[i] +
+                         " of face " + std::to_string(face_id) + " is " +
+                         extend_num(lengths[i]) + "; a length is 0 or more.",
+                         "", {static_cast<int>(face_id)});
+    }
+    any = any || lengths[i] > 0.0;
+  }
+  if (!any) {
+    throw PysmeshError("Session.extend_face: every extension of face " +
+                           std::to_string(face_id) + " is 0; nothing to extend.",
+                       "", {static_cast<int>(face_id)});
+  }
+  const TopoDS_Face face = sole_face("extend_face", face_id);
+  const std::string type = surface_type_name(BRepAdaptor_Surface(face, false).GetType());
+  double u0 = 0.0, u1 = 0.0, v0 = 0.0, v1 = 0.0;
+  BRepTools::UVBounds(face, u0, u1, v0, v1);
+  if (Precision::IsInfinite(u0) || Precision::IsInfinite(u1) || Precision::IsInfinite(v0) ||
+      Precision::IsInfinite(v1)) {
+    throw PysmeshError("Session.extend_face: face " + std::to_string(face_id) +
+                           " lies on an unbounded " + type +
+                           " surface and has no boundary; there is no side to extend from.",
+                       "", {static_cast<int>(face_id)});
+  }
+  const Handle(Geom_Surface) surface = BRep_Tool::Surface(face);
+  // A face that covers a whole period of its surface has no free side in that direction:
+  // its two sides meet at the seam.
+  for (const bool in_u : {true, false}) {
+    const bool asked = in_u ? (u_min > 0.0 || u_max > 0.0) : (v_min > 0.0 || v_max > 0.0);
+    const bool periodic = in_u ? surface->IsUPeriodic() : surface->IsVPeriodic();
+    if (!asked || !periodic) {
+      continue;
+    }
+    const double span = in_u ? u1 - u0 : v1 - v0;
+    const double period = in_u ? surface->UPeriod() : surface->VPeriod();
+    if (span >= period - Precision::PConfusion()) {
+      const char* dir = in_u ? "u" : "v";
+      throw PysmeshError("Session.extend_face: face " + std::to_string(face_id) +
+                             " covers the whole period of its " + type + " surface in " +
+                             dir + " (" + extend_num(span) + "); its two sides in " + dir +
+                             " meet at the seam, so there is none to extend.",
+                         "", {static_cast<int>(face_id)});
+    }
+  }
+
+  TopoDS_Shape built;
+  std::string failed;
+  {
+    py::gil_scoped_release release;
+    try {
+      Handle(Geom_BoundedSurface) bounded =
+          new Geom_RectangularTrimmedSurface(surface, u0, u1, v0, v1);
+      for (int i = 0; i < 4 && failed.empty(); ++i) {
+        if (lengths[i] <= 0.0) {
+          continue;
+        }
+        // GeomLib replaces the handle with the extended B-spline, and leaves it alone when
+        // it does nothing.
+        const Handle(Geom_BoundedSurface) before = bounded;
+        GeomLib::ExtendSurfByLength(bounded, lengths[i], /*Cont=*/1, /*InU=*/i < 2,
+                                    /*After=*/i % 2 == 1);
+        if (bounded == before) {
+          failed = std::string("GeomLib::ExtendSurfByLength left the surface unchanged for ") +
+                   names[i] + " = " + extend_num(lengths[i]);
+        }
+      }
+      if (failed.empty()) {
+        BRepBuilderAPI_MakeFace mk(bounded, Precision::Confusion());
+        if (mk.IsDone()) {
+          built = mk.Face();
+          if (face.Orientation() == TopAbs_REVERSED) {
+            built.Reverse();
+          }
+        } else {
+          failed = "BRepBuilderAPI_MakeFace could not build a face on the extended surface";
+        }
+      }
+    } catch (const std::exception& e) {
+      failed = std::string("OCCT threw: ") + e.what();
+    }
+  }
+  if (!failed.empty()) {
+    throw PysmeshError("Session.extend_face: OCCT could not extend face " +
+                           std::to_string(face_id) + " (" + type + "): " + failed + ".",
+                       "", {static_cast<int>(face_id)});
+  }
+  return commit(concat(root_bodies(state_.root), built), generated_from_source(face, built),
+                "extend_face", built);
+}
+
+py::dict Session::extend_edge(EntityId edge_id, double length, bool at_end) {
+  finite_arg("extend_edge", "length", length);
+  OpGuard guard(in_op_);
+  if (!(length > 0.0)) {
+    throw PysmeshError("Session.extend_edge: the extension of edge " + std::to_string(edge_id) +
+                           " is " + extend_num(length) + "; a length is more than 0.",
+                       "", {static_cast<int>(edge_id)});
+  }
+  const TopoDS_Edge edge = sole_edge("extend_edge", edge_id);
+  double first = 0.0, last = 0.0;
+  const Handle(Geom_Curve) curve =
+      BRep_Tool::Degenerated(edge) ? Handle(Geom_Curve)() : BRep_Tool::Curve(edge, first, last);
+  if (curve.IsNull()) {
+    throw PysmeshError("Session.extend_edge: edge " + std::to_string(edge_id) +
+                           " has no 3-D curve (a degenerated edge), so it has no tangent to "
+                           "extend along.",
+                       "", {static_cast<int>(edge_id)});
+  }
+  const std::string type = curve_type_name(BRepAdaptor_Curve(edge).GetType());
+  TopoDS_Vertex v_first, v_last;
+  TopExp::Vertices(edge, v_first, v_last);
+  if (!v_first.IsNull() && v_first.IsSame(v_last)) {
+    throw PysmeshError("Session.extend_edge: edge " + std::to_string(edge_id) +
+                           " is a closed " + type + "; it has no free end to extend.",
+                       "", {static_cast<int>(edge_id)});
+  }
+  // The edge's end in the orientation the root holds it in is the curve's last parameter on
+  // a FORWARD edge and its first one on a REVERSED edge.
+  const bool forward = edge.Orientation() != TopAbs_REVERSED;
+  const bool after = at_end == forward;
+  gp_Pnt end_point;
+  gp_Vec d1;
+  curve->D1(after ? last : first, end_point, d1);
+  if (d1.Magnitude() <= Precision::Confusion()) {
+    throw PysmeshError("Session.extend_edge: the tangent of edge " + std::to_string(edge_id) +
+                           " at that end is the null vector; there is no direction to extend "
+                           "along.",
+                       "", {static_cast<int>(edge_id)});
+  }
+  const gp_Vec outward = (after ? d1 : -d1).Normalized();
+  const gp_Pnt target = end_point.Translated(outward * length);
+
+  TopoDS_Shape built;
+  std::string failed;
+  {
+    py::gil_scoped_release release;
+    try {
+      Handle(Geom_BoundedCurve) bounded = new Geom_TrimmedCurve(curve, first, last);
+      const Handle(Geom_BoundedCurve) before = bounded;
+      GeomLib::ExtendCurveToPoint(bounded, target, /*Cont=*/1, after);
+      if (bounded == before) {
+        failed = "GeomLib::ExtendCurveToPoint left the curve unchanged";
+      } else {
+        BRepBuilderAPI_MakeEdge mk(bounded);
+        if (mk.IsDone()) {
+          built = mk.Edge();
+          if (!forward) {
+            built.Reverse();
+          }
+        } else {
+          failed = "BRepBuilderAPI_MakeEdge could not build an edge on the extended curve";
+        }
+      }
+    } catch (const std::exception& e) {
+      failed = std::string("OCCT threw: ") + e.what();
+    }
+  }
+  if (!failed.empty()) {
+    throw PysmeshError("Session.extend_edge: OCCT could not extend edge " +
+                           std::to_string(edge_id) + " (" + type + ") by " +
+                           extend_num(length) + ": " + failed + ".",
+                       "", {static_cast<int>(edge_id)});
+  }
+  return commit(concat(root_bodies(state_.root), built), generated_from_source(edge, built),
+                "extend_edge", built);
 }
 
 // ---- sweeps ----------------------------------------------------------------------- //

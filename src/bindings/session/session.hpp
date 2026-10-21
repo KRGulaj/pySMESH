@@ -726,6 +726,17 @@ class Session {
   py::dict make_filling(const std::vector<EntityId>& edge_ids, const py::object& progress,
                         const py::object& cancel);
 
+  // A new free face on the named face's surface, extended beyond the face's parameter range
+  // by the given chord lengths on each side (GeomLib::ExtendSurfByLength, C1). The source
+  // stays; the new face and its sub-shapes are Generated from it.
+  py::dict extend_face(EntityId face_id, double u_min, double u_max, double v_min,
+                       double v_max);
+
+  // A new free edge: the named edge's curve extended at its end (or its start) to the point
+  // `length` along the tangent there (GeomLib::ExtendCurveToPoint, C1). The source stays;
+  // the new edge and its vertices are Generated from it.
+  py::dict extend_edge(EntityId edge_id, double length, bool at_end);
+
   // ---- sweeps ----------------------------------------------------------------------- //
   //
   // Each sweep consumes the profile body and raises its dimension: an edge sweeps to a

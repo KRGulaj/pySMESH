@@ -602,6 +602,82 @@ class _ConstructOps(_SessionBase):
         """
         return _delta(self._s.make_filling(_ids(edge_ids), progress, cancel))
 
+    def extend_face(
+        self,
+        face: EntityId,
+        *,
+        u_min: float = 0.0,
+        u_max: float = 0.0,
+        v_min: float = 0.0,
+        v_max: float = 0.0,
+    ) -> HistoryDelta:
+        """Add a new free face: a face's surface extended beyond its sides.
+
+        The face's surface, trimmed to the face's parameter range, is extended on each
+        side with a non-zero length by OCCT's ``GeomLib::ExtendSurfByLength``, with
+        tangent (C1, so G1) continuity, and a new face is built on the whole extended
+        surface. Each length is the chord length of the extension on that side, in model
+        units: ``u_min`` and ``u_max`` extend the face before its first and after its last
+        ``u`` parameter (the ``u`` of :meth:`face_parameter_bounds`), ``v_min`` and
+        ``v_max`` the same in ``v``. The new surface is a B-spline; on a plane, or along
+        the straight direction of a cylinder, the extension is exact.
+
+        The source face stays. The new face, its edges and its vertices get new ids with
+        the role :attr:`NameRole.GENERATED`, whose origin is the source face. The new face
+        has the source's orientation, so its outward normal agrees with the source's.
+
+        Args:
+            face: A face entity id denoting exactly one face.
+            u_min: Extension before the first ``u`` parameter, in model units (>= 0).
+            u_max: Extension after the last ``u`` parameter (>= 0).
+            v_min: Extension before the first ``v`` parameter (>= 0).
+            v_max: Extension after the last ``v`` parameter (>= 0).
+
+        Returns:
+            The delta; ``created`` holds the new face and its sub-shapes.
+
+        Raises:
+            PysmeshError: If the id is dead, is not a face, or was split; if a length is
+                not finite or negative, or every length is 0; if the face lies on an
+                unbounded surface with no boundary (an infinite plane; the message names
+                the surface type); if the face covers the whole period of its surface in
+                a direction it is asked to extend in (a full cylinder in ``u``); or if
+                OCCT cannot extend it.
+        """
+        return _delta(self._s.extend_face(int(face), u_min, u_max, v_min, v_max))
+
+    def extend_edge(
+        self, edge: EntityId, length: float, *, at_end: bool = True
+    ) -> HistoryDelta:
+        """Add a new free edge: an edge's curve extended beyond one of its ends.
+
+        The edge's curve is extended at its end (``at_end``) or at its start to the point
+        ``length`` beyond it along the tangent there, by OCCT's
+        ``GeomLib::ExtendCurveToPoint``, with tangent (C1, so G1) continuity, and a new
+        edge is built on the whole extended curve. End and start follow the edge's
+        orientation as the model holds it, as in :meth:`point_at_length`. The new curve
+        is a B-spline; its original part is the source curve, and the added part ends
+        exactly at the target point.
+
+        The source edge stays. The new edge and its vertices get new ids with the role
+        :attr:`NameRole.GENERATED`, whose origin is the source edge.
+
+        Args:
+            edge: An edge entity id denoting exactly one edge.
+            length: Distance from the end to the target point along the tangent, in
+                model units (> 0).
+            at_end: Extend after the last vertex; False extends before the first.
+
+        Returns:
+            The delta; ``created`` holds the new edge and its vertices.
+
+        Raises:
+            PysmeshError: If the id is dead, is not an edge, or was split; if ``length``
+                is not finite or not positive; if the edge is degenerated or closed (a
+                whole circle has no free end); or if OCCT cannot extend it.
+        """
+        return _delta(self._s.extend_edge(int(edge), length, at_end))
+
     # ---- sweeps ----------------------------------------------------------------------- #
 
     def extrude(self, entities: Sequence[EntityId], vector: Vec3) -> HistoryDelta:
