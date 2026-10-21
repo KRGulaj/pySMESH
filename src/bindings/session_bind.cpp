@@ -113,6 +113,8 @@ void bind_session(py::module_& m) {
       .def("chamfer", &Session::chamfer, py::arg("edge_ids"), py::arg("distance"),
            py::arg("distance_end"), py::arg("face_id"), py::arg("progress"),
            py::arg("cancel"))
+      .def("fillet_2d", &Session::fillet_2d, py::arg("face_id"), py::arg("vertex_ids"),
+           py::arg("radius"))
       .def("make_thick_solid", &Session::make_thick_solid, py::arg("face_ids"),
            py::arg("thickness"), py::arg("tol"), py::arg("progress"), py::arg("cancel"))
       .def("offset", &Session::offset, py::arg("entity_ids"), py::arg("distance"),

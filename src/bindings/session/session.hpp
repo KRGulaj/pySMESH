@@ -841,6 +841,11 @@ class Session {
                    const std::optional<EntityId>& face_id, const py::object& progress,
                    const py::object& cancel);
 
+  // Round the named corners of a free planar face with arcs of `radius` (OCCT's
+  // BRepFilletAPI_MakeFillet2d). The face and its trimmed edges keep their ids; each arc and
+  // its end vertices are generated from the corner vertex, which dies.
+  py::dict fillet_2d(EntityId face_id, const std::vector<EntityId>& vertex_ids, double radius);
+
   // ---- offsets ---------------------------------------------------------------------- //
   //
   // Both drive TKOffset's BRepOffsetAPI with BRepOffset_Skin and GeomAbs_Intersection, the

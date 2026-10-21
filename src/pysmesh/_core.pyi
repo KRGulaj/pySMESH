@@ -384,6 +384,9 @@ class Session:
         progress: object,
         cancel: object,
     ) -> dict[str, object]: ...
+    def fillet_2d(
+        self, face_id: int, vertex_ids: list[int], radius: float
+    ) -> dict[str, object]: ...
     def make_thick_solid(
         self,
         face_ids: list[int],

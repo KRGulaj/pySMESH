@@ -17,6 +17,9 @@
 
 #include "session/session.hpp"
 
+#include <BRepFilletAPI_MakeFillet2d.hxx>
+#include <ChFi2d_ConstructionError.hxx>
+
 #include <ElSLib.hxx>
 
 #include "shape_checks.hpp"
@@ -728,6 +731,195 @@ py::dict Session::chamfer(const std::vector<EntityId>& edge_ids, double distance
         ids_as_int(edge_ids));
   }
   return commit(concat(survivors, result), hist, "chamfer", result);
+}
+
+namespace {
+
+// Why ChFi2d_Builder stopped at a vertex, from the statuses ChFi2d_ConstructionError names.
+std::string fillet_2d_reason(ChFi2d_ConstructionError status) {
+  switch (status) {
+    case ChFi2d_NotPlanar:
+      return "the face's surface is not a Geom_Plane";
+    case ChFi2d_ComputationError:
+      return "no arc of that radius fits between the two edges that meet there";
+    case ChFi2d_ConnexionError:
+      return "the vertex does not join two edges of the face";
+    case ChFi2d_TangencyError:
+      return "the two edges that meet there are tangent";
+    case ChFi2d_NotAuthorized:
+      return "an edge that meets there is neither a line nor a circle arc";
+    default:
+      return "OCCT's ChFi2d_Builder ended with status " + std::to_string(static_cast<int>(status));
+  }
+}
+
+}  // namespace
+
+// BRepFilletAPI_MakeFillet2d rebuilds the face from one new wire on the same plane
+// (ChFi2d_Builder::BuildNewWire): untouched edges and vertices keep their TShapes, the two
+// edges at a rounded corner are rebuilt shorter, and the arc is new. Its Modified answers
+// edges only, so the history is written here: the face and each trimmed edge are Modified,
+// the arc and its two new end vertices are Generated from the corner vertex, and the corner
+// vertex, and an edge the arc used up entirely, are Removed.
+py::dict Session::fillet_2d(EntityId face_id, const std::vector<EntityId>& vertex_ids,
+                            double radius) {
+  static constexpr const char* kOp = "fillet_2d";
+  finite_arg(kOp, "radius", radius);
+  OpGuard guard(in_op_);
+  const std::string face_text = "face " + std::to_string(face_id);
+  if (vertex_ids.empty()) {
+    throw PysmeshError("Session.fillet_2d: no vertex of " + face_text +
+                           " is named; there is no corner to round.",
+                       "", {static_cast<int>(face_id)});
+  }
+  if (!(radius > 0.0)) {
+    throw PysmeshError("Session.fillet_2d: the radius " + number_text(radius) +
+                           " of the fillets on " + face_text + " is not positive.",
+                       "", {static_cast<int>(face_id)});
+  }
+  const TopoDS_Face face = sole_face(kOp, face_id);
+  const TopoDS_Shape body = sole_owner_body(body_of_subshape(), {face});
+  if (!body.IsSame(face)) {
+    // A face of a solid bounds its material; a face of a shell shares its edges.
+    for (TopExp_Explorer solid(body, TopAbs_SOLID); solid.More(); solid.Next()) {
+      for (TopExp_Explorer f(solid.Current(), TopAbs_FACE); f.More(); f.Next()) {
+        if (f.Current().IsSame(face)) {
+          const auto ids = state_.registry->by_shape.find(solid.Current());
+          const std::string solid_id = ids == state_.registry->by_shape.end()
+                                           ? std::string("of the model")
+                                           : std::to_string(ids->second.front());
+          throw PysmeshError("Session.fillet_2d: " + face_text + " bounds solid " +
+                                 solid_id +
+                                 "; a 2D fillet rounds the corners of a free face only.",
+                             "", {static_cast<int>(face_id)});
+        }
+      }
+    }
+    throw PysmeshError("Session.fillet_2d: " + face_text + " belongs to a " +
+                           std::string(TopAbs::ShapeTypeToString(body.ShapeType())) +
+                           " body; a 2D fillet rounds the corners of a free face only.",
+                       "", {static_cast<int>(face_id)});
+  }
+  const BRepAdaptor_Surface surface(face, false);
+  if (surface.GetType() != GeomAbs_Plane) {
+    throw PysmeshError("Session.fillet_2d: " + face_text + " is a " +
+                           std::string(surface_type_name(surface.GetType())) +
+                           " face; a 2D fillet rounds the corners of a planar face.",
+                       "", {static_cast<int>(face_id)});
+  }
+  int wires = 0;
+  for (TopExp_Explorer w(face, TopAbs_WIRE); w.More(); w.Next()) {
+    ++wires;
+  }
+  if (wires != 1) {
+    throw PysmeshError("Session.fillet_2d: " + face_text + " is bounded by " +
+                           std::to_string(wires) +
+                           " wires; OCCT's 2D fillet rebuilds the face from one wire, so it "
+                           "rounds the corners of a face without holes only.",
+                       "", {static_cast<int>(face_id)});
+  }
+  ShapeSet face_vertices;
+  TopExp::MapShapes(face, TopAbs_VERTEX, face_vertices);
+  std::vector<TopoDS_Vertex> corners;
+  for (EntityId id : vertex_ids) {
+    const EntityRecord& rec = require_alive(kOp, id);
+    if (rec.kind != TopAbs_VERTEX) {
+      throw PysmeshError("Session.fillet_2d: entity " + std::to_string(id) + " is a " +
+                             kind_name(rec.kind) + ", not a VERTEX.",
+                         "", {static_cast<int>(id)});
+    }
+    if (rec.shapes.size() != 1 || !face_vertices.Contains(rec.shapes.front())) {
+      throw PysmeshError("Session.fillet_2d: vertex " + std::to_string(id) +
+                             " is not a vertex of " + face_text + ".",
+                         "", {static_cast<int>(face_id), static_cast<int>(id)});
+    }
+    const TopoDS_Vertex v = TopoDS::Vertex(face_vertices.FindKey(
+        face_vertices.FindIndex(rec.shapes.front())));
+    for (const TopoDS_Vertex& c : corners) {
+      if (c.IsSame(v)) {
+        throw PysmeshError("Session.fillet_2d: vertex " + std::to_string(id) +
+                               " of " + face_text + " is named twice.",
+                           "", {static_cast<int>(face_id), static_cast<int>(id)});
+      }
+    }
+    corners.push_back(v);
+  }
+  const std::vector<TopoDS_Shape> survivors = bodies_excluding({body});
+
+  TopoDS_Face result;
+  std::vector<TopoDS_Edge> arcs;
+  std::size_t stopped_at = corners.size();
+  ChFi2d_ConstructionError status = ChFi2d_IsDone;
+  Handle(BRepTools_History) hist = new BRepTools_History;
+  const char* stage = "BRepFilletAPI_MakeFillet2d::Init failed";
+  try {
+    BRepFilletAPI_MakeFillet2d mk(face);
+    for (std::size_t i = 0; i < corners.size() && stopped_at == corners.size(); ++i) {
+      stage = "BRepFilletAPI_MakeFillet2d::AddFillet failed";
+      const TopoDS_Edge arc = mk.AddFillet(corners[i], radius);
+      if (mk.Status() != ChFi2d_IsDone) {
+        status = mk.Status();
+        stopped_at = i;
+      }
+      arcs.push_back(arc);
+    }
+    if (stopped_at == corners.size()) {
+      stage = "BRepFilletAPI_MakeFillet2d::Build failed";
+      mk.Build();
+      if (mk.IsDone()) {
+        stage = "writing the history of the 2D fillet failed";
+        result = TopoDS::Face(mk.Shape());
+        // ChFi2d_Builder builds the new face FORWARD on the plane of the face as it reads
+        // it FORWARD; the face's own orientation gives back its outward normal.
+        result.Orientation(face.Orientation());
+        ShapeSet out_edges;
+        ShapeSet out_vertices;
+        TopExp::MapShapes(result, TopAbs_EDGE, out_edges);
+        TopExp::MapShapes(result, TopAbs_VERTEX, out_vertices);
+        hist->AddModified(face, result);
+        for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+          const TopoDS_Edge& e = TopoDS::Edge(ex.Current());
+          const TopoDS_Edge now = mk.HasDescendant(e) ? mk.DescendantEdge(e) : e;
+          if (!out_edges.Contains(now)) {
+            hist->Remove(e);
+          } else if (!now.IsSame(e)) {
+            hist->AddModified(e, now);
+          }
+        }
+        for (int i = 1; i <= face_vertices.Extent(); ++i) {
+          if (!out_vertices.Contains(face_vertices(i))) {
+            hist->Remove(face_vertices(i));
+          }
+        }
+        for (std::size_t i = 0; i < corners.size(); ++i) {
+          hist->AddGenerated(corners[i], arcs[i]);
+          for (TopExp_Explorer ex(arcs[i], TopAbs_VERTEX); ex.More(); ex.Next()) {
+            if (!face_vertices.Contains(ex.Current())) {
+              hist->AddGenerated(corners[i], ex.Current());
+            }
+          }
+        }
+      }
+    }
+  } catch (const std::exception& e) {
+    throw PysmeshError(std::string("Session.fillet_2d: ") + stage + ": " + e.what(), "",
+                       {static_cast<int>(face_id)});
+  }
+  if (stopped_at != corners.size()) {
+    throw PysmeshError("Session.fillet_2d: at vertex " +
+                           std::to_string(vertex_ids[stopped_at]) + " of " + face_text +
+                           " no fillet of radius " + number_text(radius) + " was built: " +
+                           fillet_2d_reason(status) + ".",
+                       "", {static_cast<int>(face_id),
+                            static_cast<int>(vertex_ids[stopped_at])});
+  }
+  if (result.IsNull()) {
+    throw PysmeshError("Session.fillet_2d: OCCT built no face for the fillets of radius " +
+                           number_text(radius) + " on " + face_text + ".",
+                       "BRepFilletAPI_MakeFillet2d::IsDone() is false.",
+                       {static_cast<int>(face_id)});
+  }
+  return commit(concat(survivors, result), hist, kOp, result);
 }
 
 // The fuzzy value is the one tolerance a caller supplies to a boolean, and it is checked

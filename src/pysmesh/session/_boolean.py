@@ -530,3 +530,36 @@ class _BooleanOps(_SessionBase):
                 _ids(edge_ids), distance, distance_end, native_face, progress, cancel
             )
         )
+
+    def fillet_2d(
+        self, face: EntityId, vertices: Sequence[EntityId], radius: float
+    ) -> HistoryDelta:
+        """Round corners of a free planar face with circle arcs.
+
+        At each named vertex, OCCT's ``BRepFilletAPI_MakeFillet2d`` replaces the corner
+        by an arc of ``radius`` tangent to the two edges that meet there, and trims both
+        edges to the arc. The two edges must be lines or circle arcs. The face is a body
+        on its own, bounded by one wire.
+
+        The face keeps its id and its outward normal, and each trimmed edge keeps its id.
+        Each arc and its two end vertices are new, generated from the corner vertex they
+        replace; the corner vertex dies.
+
+        Args:
+            face: A free planar face without holes.
+            vertices: Vertices of ``face`` to round; at least one, each named once.
+            radius: The radius of every arc (> 0).
+
+        Returns:
+            The delta for this operation.
+
+        Raises:
+            PysmeshError: If ``vertices`` is empty or names a vertex twice, if ``radius``
+                is not finite or not positive, if an id is dead or of the wrong kind, if a
+                vertex is not a vertex of ``face``, if ``face`` bounds a solid or belongs
+                to a shell (the message names the solid or the body's type), if it is not
+                planar or has holes, or if OCCT cannot build a fillet at a vertex (the
+                message names the vertex and the reason: the arc does not fit, the edges
+                are tangent, or an edge is neither a line nor a circle arc).
+        """
+        return _delta(self._s.fillet_2d(int(face), _ids(vertices), radius))

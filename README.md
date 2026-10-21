@@ -277,6 +277,10 @@ solid, a negative one widens it. `symmetric=True` runs the sweep from
 path's start to a fraction of its length, in the curve's corrected Frenet
 frame. Every id survives, as for `translate`.
 
+`fillet_2d` rounds corners of a free planar face with circle arcs. The face
+and its trimmed edges keep their ids; each arc is new, generated from the
+corner vertex it replaces.
+
 Two queries answer the questions a feature filter asks. `surface_parameters`
 reads a face's analytic parameters off its surface: a radius, a cone's
 taper, a torus's two radii. `face_wires` splits a face's boundary into its
