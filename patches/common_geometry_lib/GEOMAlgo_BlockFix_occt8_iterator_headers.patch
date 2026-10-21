@@ -1,0 +1,386 @@
+pySMESH: OCCT 8.0 removed the iterator headers of the TopTools, TColStd and BRep containers; include the container header instead.
+
+common_geometry_lib V9_16_0 includes seven iterator headers that OCCT 8.0.0 removed, for
+example TopTools_ListIteratorOfListOfShape.hxx. In OCCT 8.0.1 the header of each container,
+for example TopTools_ListOfShape.hxx, still declares the iterator typedef as a deprecated
+alias of the NCollection iterator. Each include names that container header instead. No
+compiled code changes. conda-forge's OCCT 8.0 pass on SMESH ports the same includes the same
+way (patches/occt8/0004-occt-8.0-compat.patch).
+
+diff --git a/src/BlockFix/BlockFix.cxx b/src/BlockFix/BlockFix.cxx
+index 8df1813..0e85243 100644
+--- a/src/BlockFix/BlockFix.cxx
++++ b/src/BlockFix/BlockFix.cxx
+@@ -43,10 +43,10 @@
+ #include <TopoDS_Vertex.hxx>
+ 
+ #include <TopTools_ListOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <TopTools_MapOfShape.hxx>
+ #include <TopTools_DataMapOfShapeShape.hxx>
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeShape.hxx>
++#include <TopTools_DataMapOfShapeShape.hxx>
+ 
+ #include <BRep_Tool.hxx>
+ #include <BRep_Builder.hxx>
+diff --git a/src/BlockFix/BlockFix_CheckTool.cxx b/src/BlockFix/BlockFix_CheckTool.cxx
+index 2ab40ad..198adc1 100644
+--- a/src/BlockFix/BlockFix_CheckTool.cxx
++++ b/src/BlockFix/BlockFix_CheckTool.cxx
+@@ -45,7 +45,7 @@
+ #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+ #include <TopTools_IndexedMapOfShape.hxx>
+ #include <TopTools_MapOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ 
+ //=======================================================================
+ //function : BlockFix_CheckTool()
+diff --git a/src/BlockFix/BlockFix_UnionEdges.cxx b/src/BlockFix/BlockFix_UnionEdges.cxx
+index 8b99016..3a451a1 100644
+--- a/src/BlockFix/BlockFix_UnionEdges.cxx
++++ b/src/BlockFix/BlockFix_UnionEdges.cxx
+@@ -35,7 +35,7 @@
+ 
+ #include <BRep_Builder.hxx>
+ #include <BRep_CurveRepresentation.hxx>
+-#include <BRep_ListIteratorOfListOfCurveRepresentation.hxx>
++#include <BRep_ListOfCurveRepresentation.hxx>
+ #include <BRep_TEdge.hxx>
+ #include <BRep_Tool.hxx>
+ #include <BRepLib.hxx>
+@@ -47,9 +47,9 @@
+ 
+ #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+-#include <TopTools_MapIteratorOfMapOfShape.hxx>
+ #include <TopTools_MapOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_MapOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <TopTools_SequenceOfShape.hxx>
+ 
+ #include <TopoDS.hxx>
+@@ -82,7 +82,7 @@
+ #include <TColGeom2d_HArray1OfBSplineCurve.hxx>
+ #include <TColGeom2d_SequenceOfBoundedCurve.hxx>
+ #include <TColStd_Array1OfReal.hxx>
+-#include <TColStd_ListIteratorOfListOfInteger.hxx>
++#include <TColStd_ListOfInteger.hxx>
+ #include <TColStd_ListOfInteger.hxx>
+ #include <TColStd_MapOfInteger.hxx>
+ 
+diff --git a/src/BlockFix/BlockFix_UnionFaces.cxx b/src/BlockFix/BlockFix_UnionFaces.cxx
+index 9c6429b..c12f082 100644
+--- a/src/BlockFix/BlockFix_UnionFaces.cxx
++++ b/src/BlockFix/BlockFix_UnionFaces.cxx
+@@ -57,9 +57,9 @@
+ #include <TopTools_SequenceOfShape.hxx>
+ #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
++#include <TopTools_MapOfShape.hxx>
+ #include <TopTools_MapOfShape.hxx>
+-#include <TopTools_MapIteratorOfMapOfShape.hxx>
+ 
+ #include <TopoDS.hxx>
+ #include <TopoDS_Edge.hxx>
+diff --git a/src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx b/src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx
+index f1af724..333aa71 100644
+--- a/src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx
+@@ -92,7 +92,7 @@
+ #include <TopTools_DataMapOfShapeReal.hxx>
+ #include <TColgp_SequenceOfPnt2d.hxx>
+ 
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <TopTools_IndexedMapOfShape.hxx>
+ #include <TopAbs_ShapeEnum.hxx>
+ 
+diff --git a/src/GEOMAlgo/GEOMAlgo_Extractor.cxx b/src/GEOMAlgo/GEOMAlgo_Extractor.cxx
+index 4943b63..37b0318 100644
+--- a/src/GEOMAlgo/GEOMAlgo_Extractor.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_Extractor.cxx
+@@ -42,8 +42,8 @@
+ #include <TopoDS_Face.hxx>
+ #include <TopoDS_Iterator.hxx>
+ #include <TopTools_IndexedMapOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
+-#include <TopTools_MapIteratorOfMapOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
++#include <TopTools_MapOfShape.hxx>
+ #include <TopTools_MapOfShape.hxx>
+ 
+ 
+diff --git a/src/GEOMAlgo/GEOMAlgo_GetInPlace.cxx b/src/GEOMAlgo/GEOMAlgo_GetInPlace.cxx
+index f9444af..1222971 100644
+--- a/src/GEOMAlgo/GEOMAlgo_GetInPlace.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_GetInPlace.cxx
+@@ -32,7 +32,7 @@
+ #include <gp_Pnt.hxx>
+ 
+ #include <TColStd_ListOfInteger.hxx>
+-#include <TColStd_ListIteratorOfListOfInteger.hxx>
++#include <TColStd_ListOfInteger.hxx>
+ 
+ #include <TopAbs_ShapeEnum.hxx>
+ 
+@@ -56,10 +56,10 @@
+ #include <TopTools_IndexedMapOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+ #include <TopTools_DataMapOfShapeListOfShape.hxx>
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeListOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_DataMapOfShapeListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
++#include <TopTools_MapOfShape.hxx>
+ #include <TopTools_MapOfShape.hxx>
+-#include <TopTools_MapIteratorOfMapOfShape.hxx>
+ 
+ #include <GEOMAlgo_BoxBndTree.hxx>
+ #include <GEOMAlgo_CoupleOfShapes.hxx>
+diff --git a/src/GEOMAlgo/GEOMAlgo_GetInPlace_2.cxx b/src/GEOMAlgo/GEOMAlgo_GetInPlace_2.cxx
+index 370f017..34ee2b0 100644
+--- a/src/GEOMAlgo/GEOMAlgo_GetInPlace_2.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_GetInPlace_2.cxx
+@@ -37,8 +37,8 @@
+ #include <BRep_Tool.hxx>
+ #include <BRep_Builder.hxx>
+ 
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
+-#include <TopTools_MapIteratorOfMapOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
++#include <TopTools_MapOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+ #include <TopTools_IndexedMapOfShape.hxx>
+ 
+diff --git a/src/GEOMAlgo/GEOMAlgo_GlueAnalyser.cxx b/src/GEOMAlgo/GEOMAlgo_GlueAnalyser.cxx
+index 634a553..01a1fca 100644
+--- a/src/GEOMAlgo/GEOMAlgo_GlueAnalyser.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_GlueAnalyser.cxx
+@@ -31,7 +31,7 @@
+ #include <Bnd_BoundSortBox.hxx>
+ #include <BRepBndLib.hxx>
+ 
+-#include <TColStd_ListIteratorOfListOfInteger.hxx>
++#include <TColStd_ListOfInteger.hxx>
+ #include <TColStd_ListOfInteger.hxx>
+ 
+ #include <TopoDS.hxx>
+@@ -47,9 +47,9 @@
+ 
+ #include <TopTools_IndexedMapOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeListOfShape.hxx>
++#include <TopTools_DataMapOfShapeListOfShape.hxx>
+ #include <TopTools_MapOfShape.hxx>
+ 
+ #include <GEOMAlgo_IndexedDataMapOfIntegerShape.hxx>
+diff --git a/src/GEOMAlgo/GEOMAlgo_GlueDetector.cxx b/src/GEOMAlgo/GEOMAlgo_GlueDetector.cxx
+index 5f95205..037b896 100644
+--- a/src/GEOMAlgo/GEOMAlgo_GlueDetector.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_GlueDetector.cxx
+@@ -29,8 +29,8 @@
+ #include <NCollection_UBTreeFiller.hxx>
+ 
+ #include <TColStd_ListOfInteger.hxx>
+-#include <TColStd_ListIteratorOfListOfInteger.hxx>
+-#include <TColStd_MapIteratorOfMapOfInteger.hxx>
++#include <TColStd_ListOfInteger.hxx>
++#include <TColStd_MapOfInteger.hxx>
+ 
+ #include <TopoDS_Shape.hxx>
+ #include <TopoDS_Face.hxx>
+@@ -42,10 +42,10 @@
+ 
+ #include <TopTools_IndexedMapOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
++#include <TopTools_DataMapOfShapeListOfShape.hxx>
++#include <TopTools_MapOfShape.hxx>
+ #include <TopTools_MapOfShape.hxx>
+-#include <TopTools_MapIteratorOfMapOfShape.hxx>
+ 
+ #include <TopExp.hxx>
+ #include <BRep_Tool.hxx>
+diff --git a/src/GEOMAlgo/GEOMAlgo_Gluer.cxx b/src/GEOMAlgo/GEOMAlgo_Gluer.cxx
+index 5b54bdb..231844a 100644
+--- a/src/GEOMAlgo/GEOMAlgo_Gluer.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_Gluer.cxx
+@@ -31,10 +31,10 @@
+ 
+ #include <NCollection_UBTreeFiller.hxx>
+ 
+-#include <TColStd_MapIteratorOfMapOfInteger.hxx>
+ #include <TColStd_MapOfInteger.hxx>
++#include <TColStd_MapOfInteger.hxx>
++#include <TColStd_ListOfInteger.hxx>
+ #include <TColStd_ListOfInteger.hxx>
+-#include <TColStd_ListIteratorOfListOfInteger.hxx>
+ 
+ #include <gp_Pnt.hxx>
+ #include <gp_Dir.hxx>
+@@ -63,8 +63,8 @@
+ 
+ #include <TopTools_IndexedMapOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
++#include <TopTools_DataMapOfShapeListOfShape.hxx>
+ #include <TopTools_MapOfShape.hxx>
+ #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+ 
+diff --git a/src/GEOMAlgo/GEOMAlgo_Gluer2.cxx b/src/GEOMAlgo/GEOMAlgo_Gluer2.cxx
+index 055583a..97ab000 100644
+--- a/src/GEOMAlgo/GEOMAlgo_Gluer2.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_Gluer2.cxx
+@@ -37,11 +37,11 @@
+ #include <BRepLib.hxx>
+ 
+ #include <TopTools_MapOfShape.hxx>
+-#include <TopTools_MapIteratorOfMapOfShape.hxx>
++#include <TopTools_MapOfShape.hxx>
+ #include <TopTools_DataMapOfShapeShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
++#include <TopTools_DataMapOfShapeListOfShape.hxx>
+ #include <TopTools_IndexedMapOfShape.hxx>
+ 
+ #include <BOPTools_AlgoTools.hxx>
+diff --git a/src/GEOMAlgo/GEOMAlgo_Gluer2_1.cxx b/src/GEOMAlgo/GEOMAlgo_Gluer2_1.cxx
+index ebcdcf6..41d4d0e 100644
+--- a/src/GEOMAlgo/GEOMAlgo_Gluer2_1.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_Gluer2_1.cxx
+@@ -48,7 +48,7 @@
+ #include <TopExp.hxx>
+ 
+ #include <TopTools_MapOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+ 
+ #include <BOPTools_AlgoTools.hxx>
+diff --git a/src/GEOMAlgo/GEOMAlgo_Gluer2_3.cxx b/src/GEOMAlgo/GEOMAlgo_Gluer2_3.cxx
+index fbc399d..0a0e9df 100644
+--- a/src/GEOMAlgo/GEOMAlgo_Gluer2_3.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_Gluer2_3.cxx
+@@ -35,13 +35,13 @@
+ #include <TopExp.hxx>
+ #include <TopExp_Explorer.hxx>
+ 
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeListOfShape.hxx>
++#include <TopTools_DataMapOfShapeListOfShape.hxx>
+ #include <TopTools_DataMapOfShapeListOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+ #include <TopTools_MapOfShape.hxx>
+-#include <TopTools_MapIteratorOfMapOfShape.hxx>
+-#include <TopTools_DataMapIteratorOfDataMapOfShapeListOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_MapOfShape.hxx>
++#include <TopTools_DataMapOfShapeListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <TopTools_IndexedMapOfShape.hxx>
+ 
+ #include <GEOMAlgo_CoupleOfShapes.hxx>
+diff --git a/src/GEOMAlgo/GEOMAlgo_PassKey.cxx b/src/GEOMAlgo/GEOMAlgo_PassKey.cxx
+index a152f2e..d01848e 100644
+--- a/src/GEOMAlgo/GEOMAlgo_PassKey.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_PassKey.cxx
+@@ -29,7 +29,7 @@
+ 
+ #include <stdio.h>
+ #include <string.h>
+-#include <TColStd_ListIteratorOfListOfInteger.hxx>
++#include <TColStd_ListOfInteger.hxx>
+ #include <TColStd_ListOfInteger.hxx>
+ 
+ #ifdef WIN32
+diff --git a/src/GEOMAlgo/GEOMAlgo_PassKeyShape.cxx b/src/GEOMAlgo/GEOMAlgo_PassKeyShape.cxx
+index 93c8912..232dfb9 100644
+--- a/src/GEOMAlgo/GEOMAlgo_PassKeyShape.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_PassKeyShape.cxx
+@@ -30,7 +30,7 @@
+ #include <Basics_OCCTVersion.hxx>
+ 
+ #include <TopTools_ListOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ 
+ 
+ static
+diff --git a/src/GEOMAlgo/GEOMAlgo_ShapeSolid.cxx b/src/GEOMAlgo/GEOMAlgo_ShapeSolid.cxx
+index 1503b26..46d3611 100644
+--- a/src/GEOMAlgo/GEOMAlgo_ShapeSolid.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_ShapeSolid.cxx
+@@ -27,7 +27,7 @@
+ //
+ #include <GEOMAlgo_ShapeSolid.hxx>
+ 
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+ 
+ //=======================================================================
+diff --git a/src/GEOMAlgo/GEOMAlgo_ShellSolid.cxx b/src/GEOMAlgo/GEOMAlgo_ShellSolid.cxx
+index e8e8627..8081fe1 100644
+--- a/src/GEOMAlgo/GEOMAlgo_ShellSolid.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_ShellSolid.cxx
+@@ -43,7 +43,7 @@
+ #include <BRepTools.hxx>
+ 
+ #include <TopTools_ListOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <TopExp_Explorer.hxx>
+ 
+ #include <BOPTools_AlgoTools.hxx>
+diff --git a/src/GEOMAlgo/GEOMAlgo_SolidSolid.cxx b/src/GEOMAlgo/GEOMAlgo_SolidSolid.cxx
+index e42ac0a..d76a0d8 100644
+--- a/src/GEOMAlgo/GEOMAlgo_SolidSolid.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_SolidSolid.cxx
+@@ -34,7 +34,7 @@
+ #include <TopExp.hxx>
+ 
+ #include <TopTools_ListOfShape.hxx>
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <TopTools_IndexedMapOfShape.hxx>
+ 
+ #include <GEOMAlgo_IndexedDataMapOfShapeState.hxx>
+diff --git a/src/GEOMAlgo/GEOMAlgo_VertexSolid.cxx b/src/GEOMAlgo/GEOMAlgo_VertexSolid.cxx
+index c911a35..d659d76 100644
+--- a/src/GEOMAlgo/GEOMAlgo_VertexSolid.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_VertexSolid.cxx
+@@ -32,7 +32,7 @@
+ #include <TopAbs_ShapeEnum.hxx>
+ #include <TopAbs_State.hxx>
+ 
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+ #include <TopTools_IndexedMapOfShape.hxx>
+ 
+diff --git a/src/GEOMAlgo/GEOMAlgo_WireSolid.cxx b/src/GEOMAlgo/GEOMAlgo_WireSolid.cxx
+index bf5d8e8..d873c9b 100644
+--- a/src/GEOMAlgo/GEOMAlgo_WireSolid.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_WireSolid.cxx
+@@ -31,7 +31,7 @@
+ 
+ #include <TopAbs_ShapeEnum.hxx>
+ 
+-#include <TopTools_ListIteratorOfListOfShape.hxx>
++#include <TopTools_ListOfShape.hxx>
+ 
+ #include <BOPDS_DS.hxx>
+ #include <BOPDS_IndexRange.hxx>

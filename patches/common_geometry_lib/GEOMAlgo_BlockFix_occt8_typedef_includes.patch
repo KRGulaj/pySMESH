@@ -1,0 +1,81 @@
+pySMESH: OCCT 8.0 headers no longer include the TopTools, TColStd and TColgp typedef headers; include the ones each file uses.
+
+In OCCT 7.x, headers such as BRepTools.hxx and BOPAlgo_Builder.hxx brought in the typedef
+headers of the TCollection-style containers (TopTools_IndexedMapOfShape.hxx, and so on).
+OCCT 8.0 headers use the NCollection types directly and include none of them, so six files
+that use those typedefs without including them do not compile. Each file now includes the
+typedef headers that it uses. No compiled code changes.
+
+diff --git a/src/BlockFix/BlockFix.cxx b/src/BlockFix/BlockFix.cxx
+index 0e85243..b66b354 100644
+--- a/src/BlockFix/BlockFix.cxx
++++ b/src/BlockFix/BlockFix.cxx
+@@ -85,6 +85,8 @@
+ #include <Geom2d_Curve.hxx>
+ 
+ #include <TColgp_SequenceOfPnt2d.hxx>
++#include <TopTools_IndexedMapOfShape.hxx>
++#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+ 
+ #include <Basics_OCCTVersion.hxx>
+ 
+diff --git a/src/BlockFix/BlockFix_SphereSpaceModifier.cxx b/src/BlockFix/BlockFix_SphereSpaceModifier.cxx
+index 9940bfe..6b0a292 100644
+--- a/src/BlockFix/BlockFix_SphereSpaceModifier.cxx
++++ b/src/BlockFix/BlockFix_SphereSpaceModifier.cxx
+@@ -60,6 +60,7 @@
+ 
+ #include <gp_Pnt.hxx>
+ #include <gp_Sphere.hxx>
++#include <TopTools_MapOfShape.hxx>
+ 
+ IMPLEMENT_STANDARD_RTTIEXT(BlockFix_SphereSpaceModifier, BRepTools_Modification)
+ 
+diff --git a/src/BlockFix/BlockFix_UnionEdges.cxx b/src/BlockFix/BlockFix_UnionEdges.cxx
+index 3a451a1..6ae704a 100644
+--- a/src/BlockFix/BlockFix_UnionEdges.cxx
++++ b/src/BlockFix/BlockFix_UnionEdges.cxx
+@@ -85,6 +85,7 @@
+ #include <TColStd_ListOfInteger.hxx>
+ #include <TColStd_ListOfInteger.hxx>
+ #include <TColStd_MapOfInteger.hxx>
++#include <TColStd_HArray1OfInteger.hxx>
+ 
+ #include "utilities.h"
+ 
+diff --git a/src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx b/src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx
+index 333aa71..37addfe 100644
+--- a/src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx
+@@ -106,6 +106,7 @@
+ #include <ShapeFix.hxx>
+ 
+ #include <BRepMesh_IncrementalMesh.hxx>
++#include <TColgp_Array1OfPnt.hxx>
+ 
+ #include <Prs3d.hxx>
+ 
+diff --git a/src/GEOMAlgo/GEOMAlgo_RemoverWebs.cxx b/src/GEOMAlgo/GEOMAlgo_RemoverWebs.cxx
+index 4cb3c6e..7ffa55e 100644
+--- a/src/GEOMAlgo/GEOMAlgo_RemoverWebs.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_RemoverWebs.cxx
+@@ -41,6 +41,7 @@
+ 
+ #include <BOPTools_AlgoTools.hxx>
+ #include <TopTools_MapOfShape.hxx>
++#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+ 
+ //=======================================================================
+ //function : 
+diff --git a/src/GEOMAlgo/GEOMAlgo_Splitter.cxx b/src/GEOMAlgo/GEOMAlgo_Splitter.cxx
+index c110611..48d596d 100644
+--- a/src/GEOMAlgo/GEOMAlgo_Splitter.cxx
++++ b/src/GEOMAlgo/GEOMAlgo_Splitter.cxx
+@@ -37,6 +37,7 @@
+ #include <BRep_Builder.hxx>
+ 
+ #include <TopTools_MapOfShape.hxx>
++#include <TopTools_IndexedMapOfShape.hxx>
+ #include <TopTools_ListOfShape.hxx>
+ 
+ #include <TopExp.hxx>

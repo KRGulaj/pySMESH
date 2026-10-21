@@ -84,5 +84,6 @@ int main() {
   run_occt_probe();
   run_smesh_probe();
   run_netgen_probe();
+  run_geom_probe();
   return probe::summarize();
 }

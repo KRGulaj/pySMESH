@@ -1,0 +1,33 @@
+pySMESH: run the two QR decompositions of System::diagnose on the calling thread.
+
+System::diagnose starts identifyDependentParametersDenseQR (DenseQR) or
+identifyDependentParametersSparseQR (SparseQR, the default) with std::async and the default
+launch policy, so the runtime may run it on a worker thread while the calling thread computes
+the second QR decomposition (FreeCAD's comment above each call). pySMESH runs its algorithms
+on the calling thread: a result must not depend on scheduling, and no thread may outlive a
+call. With std::launch::deferred the task runs on the calling thread when diagnose waits on
+its future, which it does before it reads anything the task writes. The result is the same;
+only the thread changes. These two calls are the only thread starts on the solve and diagnose
+paths: no PlaneGCS source starts a std::thread or calls std::async elsewhere, and Eigen runs
+on one thread (no OpenMP, and System::System calls Eigen::setNbThreads(1)).
+
+diff --git a/Mod/Sketcher/App/planegcs/GCS.cpp b/Mod/Sketcher/App/planegcs/GCS.cpp
+index 533a8c6..0d4b192 100644
+--- a/Mod/Sketcher/App/planegcs/GCS.cpp
++++ b/Mod/Sketcher/App/planegcs/GCS.cpp
+@@ -4901,6 +4901,7 @@ int System::diagnose(Algorithm alg)
+         // identifyDependentParametersDenseQR(J, jacobianconstraintmap, pdiagnoselist, true)
+         //
+         auto fut = std::async(
++            std::launch::deferred,
+             &System::identifyDependentParametersDenseQR,
+             this,
+             J,
+@@ -4978,6 +4979,7 @@ int System::diagnose(Algorithm alg)
+         // std::async(std::launch::deferred,&System::identifyDependentParametersSparseQR, this,
+         // J, jacobianconstraintmap, pdiagnoselist, false);
+         auto fut = std::async(
++            std::launch::deferred,
+             &System::identifyDependentParametersSparseQR,
+             this,
+             J,

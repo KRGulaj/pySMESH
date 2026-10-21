@@ -22,7 +22,10 @@ its modules together.
 | SALOME SMESH | [SalomePlatform/smesh](https://github.com/SalomePlatform/smesh) | tag `V9_16_0`, `b4e78157e55cf3be47713911f1e6cfa2ba8e9f1c` | `extern/smesh/` | squashed subtree: `d5c62b136` + merge `66014401a` |
 | SALOME KERNEL | [SalomePlatform/kernel](https://github.com/SalomePlatform/kernel) | tag `V9_16_0`, `3de71b3a6d0b73f9dc011c4e0de36012253030c5` | `extern/kernel/` | squashed subtree: `a10077419` + merge `79e3f3671` |
 | SALOME salome_bootstrap | [SalomePlatform/salome_bootstrap](https://github.com/SalomePlatform/salome_bootstrap) | tag `V9_16_0`, `679a7b147192b3e3ac798c6dca59034edec2f78b` | `extern/salome_bootstrap/` | squashed subtree: `cdcd692c3` + merge `4b3c6a672` |
-| SALOME GEOM (`GEOMUtils` only) | [SalomePlatform/geom](https://github.com/SalomePlatform/geom) | tag `V9_16_0`, `7d0a18e1554c25bca2c2d9882e0621ea3f7f9c81` | `extern/geom/src/GEOMUtils/` | sparse copy of one directory: `06bb22494` |
+| SALOME GEOM (`GEOMUtils`, `ShHealOper`) | [SalomePlatform/geom](https://github.com/SalomePlatform/geom) | tag `V9_16_0`, `7d0a18e1554c25bca2c2d9882e0621ea3f7f9c81` | `extern/geom/src/GEOMUtils/`, `extern/geom/src/ShHealOper/` | sparse copy of two directories: `06bb22494` (`GEOMUtils`), `6fb5fa5eb` (`ShHealOper`) |
+| SALOME common_geometry_lib (`GEOMAlgo`, `BlockFix`, `LICENSE`) | [SalomePlatform/common_geometry_lib](https://github.com/SalomePlatform/common_geometry_lib) | tag `V9_16_0`, `e7b5227096fef835a448004ee06cf5938850b1c4` | `extern/common_geometry_lib/` | sparse copy of two directories and the licence: `74c292f4f` |
+| PlaneGCS (FreeCAD `src/Mod/Sketcher/App/planegcs`, 11 files, and the repository `LICENSE`) | [FreeCAD/FreeCAD](https://github.com/FreeCAD/FreeCAD) | tag `1.1.4`, `4fd3bf320d9566a27e60069fc8387448aaa3a094` | `extern/planegcs/` | verbatim copy of the files: `53b32f76a` |
+| Eigen (`Eigen/`, `COPYING.MPL2`, `COPYING.README`) | [libeigen/eigen](https://gitlab.com/libeigen/eigen) | tag `3.4.1`, `d71c30c47858effcbd39967097a2d99ee48db464` | `extern/eigen/` | verbatim copy of the tag tree: `5ead91d3b` |
 | MEFISTO (carried forward) | SALOME SMESH | tag `V9_9_0`, `4df9beadff0df879bcabb7c5472188f18cd30b42` | `extern/mefisto2/` | verbatim copy: `0825b092b` (see below) |
 | netgen (`libsrc`, `nglib`, `LICENSE`, `AUTHORS`) | [NGSolve/netgen](https://github.com/NGSolve/netgen) | tag `v6.2.2101`, `5e489319c60926daa836cecff39f0e92779032ba` | `extern/netgen/` | verbatim copy of the tag tree: `6732723fa` |
 | SALOME NETGENPlugin (`src/NETGENPlugin`, `LICENSE`) | [SalomePlatform/netgenplugin](https://github.com/SalomePlatform/netgenplugin) | tag `V9_16_0`, `553d8c3d7977acf19bf87ff8a9b2c36a0691332b` | `extern/netgenplugin/` | verbatim copy of the tag tree: `b2176930a` |
@@ -31,16 +34,45 @@ its modules together.
 Up to 4.2.2 the SALOME trees were at tag `V9_9_0`. Each subtree tree hash equals the upstream
 tree of its tag, and each copied file equals its upstream blob.
 
-GEOM is a sparse copy of one directory, not a full subtree — GEOM itself is a large CORBA/GUI
-module we don't need, and SMESH only reaches into it for `GEOMUtils.cxx` (a handful of
+GEOM is a sparse copy of two directories, not a full subtree — GEOM itself is a large
+CORBA/GUI module we don't need. SMESH reaches into it for `GEOMUtils.cxx` (a handful of
 standalone OCCT geometry helpers used by `SMESH_Mesh`, the `SMESH_Controls` classifier and the
-Cartesian mesher). Since `V9_16_0`, `GEOMUtils.cxx` calls three functions of the GEOMAlgo
-package, which SALOME moved out of GEOM into
+Cartesian mesher). `ShHealOper` is GEOM's shape-healing package; it is copied from the tag
+`V9_16_0` (tree `ddf44997`), not from a later commit. Both compile into the static library
+`Geom` (`cmake/Geom/CMakeLists.txt`).
+
+Since `V9_16_0`, `GEOMUtils.cxx` calls three functions of the GEOMAlgo package, which SALOME
+moved out of GEOM into
 [SalomePlatform/common_geometry_lib](https://github.com/SalomePlatform/common_geometry_lib)
-(geom commit `f5db6d7cf`). pySMESH does not vendor that repository: the pySMESH patch
-`geom/GEOMUtils_GEOMAlgo.patch` defines the three functions inside `GEOMUtils.cxx`, with bodies
-verbatim from `common_geometry_lib` tag `V9_16_0` (`e7b5227096fef835a448004ee06cf5938850b1c4`,
-`src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx`, LGPL-2.1).
+(geom commit `f5db6d7cf`). The pySMESH patch `geom/GEOMUtils_GEOMAlgo.patch` defines the three
+functions inside `GEOMUtils.cxx`, with bodies verbatim from `common_geometry_lib` tag
+`V9_16_0` (`e7b5227096fef835a448004ee06cf5938850b1c4`, `src/GEOMAlgo/GEOMAlgo_AlgoTools.cxx`,
+LGPL-2.1), in a file-local namespace.
+
+common_geometry_lib is now vendored as well: its `GEOMAlgo` and `BlockFix` packages, at the
+same tag (trees `61d54511` and `cdf3a80c`), compile into the static library `CommonGeomLib`
+(`cmake/CommonGeomLib/CMakeLists.txt`). `GeomAnaTool` is not vendored. `ShHealOper` needs
+`GEOMAlgo_AlgoTools::FixCurveOnSurfaceTolerances`, so `Geom` links `CommonGeomLib`. The patch
+`geom/GEOMUtils_GEOMAlgo.patch` stays. Its three functions have internal linkage
+(`` `anonymous namespace'::GEOMAlgo_AlgoTools ``), and the library's are external functions of
+the namespace `GEOMAlgo_AlgoTools`, so the two never meet at link time: `v2_probe` links both
+objects with no duplicate or ambiguous symbol. With `CommonGeomLib` in every link that has
+`Geom`, the patch is redundant in substance, and a later change can drop it in favour of the
+library's own `GEOMAlgo_AlgoTools.hxx`.
+
+`ShHealOper_ShapeProcess::Perform` copies its input with `TNaming_CopyShape::CopyTool`, a
+static function of OCCT's TKCAF. It reads no OCAF document, and TKCAF is already in the link
+set (STEP names), so it adds no DLL.
+
+`ShHealOper_ShapeProcess` reads its operators and their parameters from a `Resource_Manager`
+named `ShHealing`. That manager loads a resource file only when the environment variable
+`CSF_ShHealingDefaults` or `CSF_ShHealingUserDefaults` names a directory
+(`Resource_Manager::GetResourcePath`), and pySMESH ships no such file and sets neither
+variable. `SetOperators` writes the key `ShapeProcess.exec.op` and `SetParameter` writes
+`ShapeProcess.<name>` into the manager's per-object copy
+(`ShapeProcess_Context::LoadResourceManager`), so the two calls are the whole input. An
+operator that finds no value for a parameter uses the default in its code
+(`ShapeProcess_OperLibrary.cxx`). The probe's `SH1` case runs the class this way.
 
 netgen and NETGENPlugin are copied, not subtrees. Each copied directory's git tree hash
 equals the tag's (netgen `libsrc` `be4cb70f`, `nglib` `d9d08d25`; NETGENPlugin
@@ -68,6 +100,43 @@ We build for 64-bit Windows, so `SALOME_USE_64BIT_IDS` is on and `smIdType` reso
 The SALOME trace macros of `V9_16_0` (`SALOMELocalTrace/utilities.h`) write only when the
 environment variable `SALOME_VERBOSE` is set to a value above 0 (KERNEL commits `5b7bbcc7` and
 `e7d8bf15`). With it unset, SMESH writes no trace to stdout.
+
+## PlaneGCS and Eigen
+
+PlaneGCS is FreeCAD's 2-D geometric constraint solver. The 11 files of
+`src/Mod/Sketcher/App/planegcs` at tag `1.1.4` are copied verbatim into `extern/planegcs/`,
+each blob equal to the tag's, with FreeCAD's root `LICENSE` (the LGPL-2.1 text). Every file
+carries the notice "GNU Library General Public License ... version 2 of the License, or (at
+your option) any later version" (LGPL-2.0-or-later), with the copyright of Konstantinos
+Poulios (2011) or, for `Geo.cpp`, Victor Titov (2014). `cmake/PlaneGCS/CMakeLists.txt`
+compiles them into the static library `PlaneGCS`.
+
+The sources include four FreeCAD headers that pySMESH does not vendor. pySMESH provides each
+as a small shim of its own in `cmake/PlaneGCS/`:
+
+| FreeCAD header | Shim | What it does |
+|---|---|---|
+| `src/Mod/Sketcher/SketcherGlobal.h` (as `../../SketcherGlobal.h`) | `SketcherGlobal.h` | an empty `SketcherExport`: the library is static. `prepare.py` stages it two levels above the sources, where the relative include leads. |
+| `src/FCConfig.h` | `FCConfig.h` | nothing: `GCS.cpp` includes it and uses none of its macros. |
+| `src/Base/Console.h` | `Base/Console.h` | `Base::Console().log()` and `.warning()` discard their message: pySMESH writes nothing to the standard streams. |
+| `src/boost_graph_adjacency_list.hpp` | `boost_graph_adjacency_list.hpp` | includes `<boost/graph/adjacency_list.hpp>` with `BOOST_ALLOW_DEPRECATED_HEADERS`, as FreeCAD's does. |
+
+`PlaneGCS` compiles as C++20, because `Constraints.cpp` and `GCS.cpp` use `<numbers>`; the
+rest of pySMESH stays at C++17. Boost.Graph and Boost.Math are header-only and come from the
+build environment's Boost.
+
+`System::diagnose` started two QR decompositions with `std::async`, so one could run on a
+worker thread. `patches/planegcs/GCS_diagnose_serial.patch` gives both calls the policy
+`std::launch::deferred`, which runs them on the calling thread. These were the only thread
+starts on the solve and diagnose paths.
+
+Eigen 3.4.1 is header-only. `extern/eigen/` holds `Eigen/` (its tree equals the tag's) and the
+licence files `COPYING.MPL2` and `COPYING.README`; `unsupported/` is not vendored. `PlaneGCS`
+puts `extern/eigen` first on its include path and defines `EIGEN_MPL2_ONLY` for every
+translation unit that includes a PlaneGCS header, so an include of Eigen's LGPL code is a
+compile error. Compiled with `/showIncludes`, `GCS.cpp` reads every Eigen header from
+`extern/eigen`; the build environment's own Eigen (under `Library/include/eigen3`) is on no
+include path.
 
 ## Small pieces borrowed from looooo/SMESH
 
@@ -114,8 +183,9 @@ patches change them:
 
 ## Patches
 
-`patches/{kernel,geom,smesh,occt8}/*.patch`: 40 patches, applied by `prepare.py` in the order
-of its `PATCH_MANIFEST`, which the index below follows.
+`patches/{kernel,smesh,occt8}/*.patch` and `patches/geom/GEOMUtils_GEOMAlgo.patch`: 40
+patches, applied by `prepare.py` in the order of its `PATCH_MANIFEST`, which the index below
+follows.
 
 - 12 come from looooo/SMESH's own patch set: the Windows/MSVC fixes and the MED strip.
 - 2, the `occt8/` pair, come from conda-forge's `smesh-feedstock` recipe. It is the only working
@@ -128,6 +198,11 @@ of its `PATCH_MANIFEST`, which the index below follows.
 `prepare.py` after the SMESH ones, patch the netgen and NETGENPlugin slices staged at
 `staged/src/Netgen` and `staged/src/NETGENPlugin` (looooo's layout). They are in the
 NETGEN part of the index below.
+
+`patches/common_geometry_lib/` (4 patches), `patches/geom/ShHealOper_*.patch` (1) and
+`patches/planegcs/` (1), applied by `prepare.py` after the NETGENPlugin ones, patch the
+geometry libraries staged at `staged/src/CommonGeomLib`, `staged/src/Geom` and
+`staged/src/PlaneGCS`. They are in the geometry part of the index below.
 
 `patches/occt801/` is a different kind: it patches OCCT itself, not SMESH, and
 `ci/build_occt.py` applies it, not `prepare.py`. See
@@ -217,6 +292,21 @@ upstream (a backport). All apply at fuzz 0 in this order.
 | `netgenplugin/NETGENPlugin_remesher_no_parameters.patch` | P | The remesher with no parameters hypothesis no longer reads address 0 (`LoadLocalMeshSize` of a null name). |
 | `netgenplugin/NETGENPlugin_remesher_partial_result.patch` | P | A stopped or failed STL surface meshing (nglib returns NG_OK for both) is not taken for the remeshed mesh. |
 
+### Geometry library patch index
+
+All pySMESH's own (**P**). Each header states the reason in its first line. The OCCT 8.0.1
+port changes includes and one type name; no compiled behaviour changes. All apply at fuzz 0
+in this order.
+
+| Patch | Root | What it does |
+|---|---|---|
+| `common_geometry_lib/GEOMAlgo_BlockFix_occt8_iterator_headers.patch` | `src/CommonGeomLib` | OCCT 8.0 removed the iterator headers of the TopTools, TColStd and BRep containers (for example `TopTools_ListIteratorOfListOfShape.hxx`); each include names the container header, which still declares the iterator typedef. |
+| `common_geometry_lib/GEOMAlgo_occt8_standard_primitive_types.patch` | `src/CommonGeomLib` | OCCT 8.0 removed `Standard_PrimitiveTypes.hxx`; seven enum headers include `Standard_TypeDef.hxx` instead. |
+| `common_geometry_lib/GEOMAlgo_occt8_bopds_list_of_pave_block.patch` | `src/CommonGeomLib` | OCCT 8.0 removed `BOPDS_ListOfPaveBlock`; `GEOMAlgo_WireSolid.cxx` names the list type `BOPDS_DS::PaveBlocks` returns. |
+| `common_geometry_lib/GEOMAlgo_BlockFix_occt8_typedef_includes.patch` | `src/CommonGeomLib` | OCCT 8.0 headers no longer include the TopTools, TColStd and TColgp typedef headers; six files include the ones they use. |
+| `geom/ShHealOper_occt8_iterator_headers.patch` | `src/Geom` | As the first one, for five iterator headers of `ShHealOper`. |
+| `planegcs/GCS_diagnose_serial.patch` | `src/PlaneGCS` | `System::diagnose` runs its two QR decompositions on the calling thread (`std::launch::deferred` instead of the default launch policy of `std::async`). |
+
 ### Patches that `V9_16_0` made obsolete
 
 Removed by the port, each with the `V9_16_0` evidence:
@@ -305,6 +395,12 @@ binding that first calls it.
 
 SMESH `V9_16_0` adds no toolkit. Its `SMESH_DriverShape.cxx` reads and writes STEP through
 `STEPControl`, so `cmake/SMESH` links TKDESTEP and TKXSBase, which `_core` links already.
+
+The geometry libraries add no toolkit either. `CommonGeomLib` links the toolkits of the OCCT
+packages its sources include (each mapped by OCCT's own `PACKAGES.cmake`): TKernel, TKMath,
+TKG2d, TKG3d, TKGeomBase, TKGeomAlgo, TKBRep, TKTopAlgo, TKBO, TKShHealing, TKOffset, TKMesh and
+TKV3d. `ShHealOper` adds TKCAF (`TNaming_CopyShape`). PlaneGCS calls no OCCT. Every one of
+these toolkits is in the closure above.
 
 ## How OCCT is built
 

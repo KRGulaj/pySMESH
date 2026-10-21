@@ -3,8 +3,10 @@
 # Layout:
 #   extern/{smesh,kernel,geom,mefisto2,pthread}  pristine vendored upstream (never edited)
 #   extern/{netgen,netgenplugin,zlib}            pristine vendored upstream (never edited)
+#   extern/{common_geometry_lib,planegcs,eigen}  pristine vendored upstream (never edited)
 #   prepare.py                                   stages + patches -> staged/
-#   cmake/{Kernel,Geom,SMESH,Netgen,NETGENPlugin}/CMakeLists.txt  static-lib definitions
+#   cmake/{Kernel,CommonGeomLib,Geom,PlaneGCS,SMESH,Netgen,NETGENPlugin}/CMakeLists.txt
+#                                                static-lib definitions
 #   src/bindings/                                pybind11 module
 #
 # OCCT + VTK + Boost are dynamic and are all build-time only: every one of their DLLs is
@@ -148,7 +150,11 @@ endif()
 # Static libraries
 # --------------------------------------------------------------------------- #
 include(${CMAKE_SOURCE_DIR}/cmake/Kernel/CMakeLists.txt)
+# SALOME common_geometry_lib V9_16_0: GEOMAlgo and BlockFix, one static library.
+include(${CMAKE_SOURCE_DIR}/cmake/CommonGeomLib/CMakeLists.txt)
 include(${CMAKE_SOURCE_DIR}/cmake/Geom/CMakeLists.txt)
+# PlaneGCS, FreeCAD's 2-D constraint solver, with Eigen 3.4.1 (MPL2-only).
+include(${CMAKE_SOURCE_DIR}/cmake/PlaneGCS/CMakeLists.txt)
 include(${CMAKE_SOURCE_DIR}/cmake/SMESH/CMakeLists.txt)
 # netgen 6.2.2101, ngcore, nglib and zlib, static (NETGEN_STATIC_LIBS).
 include(${CMAKE_SOURCE_DIR}/cmake/Netgen/CMakeLists.txt)
@@ -228,8 +234,12 @@ set_source_files_properties(src/bindings/mesher_netgen.cpp PROPERTIES
 # links TKBO); they are listed explicitly because the bindings call them directly. TKBool is
 # deliberately NOT listed: OCCT 8.0 keeps BRepAlgoAPI_* in TKBO, and TKBool holds the legacy
 # TopOpeBRep engine plus BRepFill_PipeShell, which is reached only through TKOffset's facade.
+#
+# Geom carries CommonGeomLib (GEOMAlgo, BlockFix) and ShHealOper; PlaneGCS is its own static
+# library. Each is static, and the linker takes an object of them only when a binding calls
+# into it, so a library that no binding calls adds nothing to _core.pyd.
 target_link_libraries(_core PRIVATE
-    ${NETGENPLUGIN_STATIC_LIBS} ${SMESH_STATIC_LIBS} Geom Kernel
+    ${NETGENPLUGIN_STATIC_LIBS} ${SMESH_STATIC_LIBS} Geom CommonGeomLib PlaneGCS Kernel
     ${NETGEN_STATIC_LIBS}
     VTK::CommonCore VTK::CommonDataModel VTK::FiltersVerdict
     TKShHealing
@@ -328,7 +338,8 @@ if(PYSMESH_BUILD_V2_PROBE)
         tests/probe/probe_main.cpp
         tests/probe/probe_occt.cpp
         tests/probe/probe_smesh.cpp
-        tests/probe/probe_netgen.cpp)
+        tests/probe/probe_netgen.cpp
+        tests/probe/probe_geom.cpp)
     target_include_directories(v2_probe PRIVATE ${CMAKE_SOURCE_DIR}/tests/probe)
     # probe_netgen.cpp includes netgen and NETGENPlugin headers, so it gets netgen's own
     # define set.
@@ -337,7 +348,7 @@ if(PYSMESH_BUILD_V2_PROBE)
         COMPILE_OPTIONS "${PYSMESH_NETGEN_OPTIONS}"
         INCLUDE_DIRECTORIES "${PYSMESH_NETGEN_INCLUDE_DIRS};${NETGENPLUGIN_SRC_DIR}")
     target_link_libraries(v2_probe PRIVATE
-        ${NETGENPLUGIN_STATIC_LIBS} ${SMESH_STATIC_LIBS} Geom Kernel
+        ${NETGENPLUGIN_STATIC_LIBS} ${SMESH_STATIC_LIBS} Geom CommonGeomLib PlaneGCS Kernel
         ${NETGEN_STATIC_LIBS}
         VTK::CommonCore VTK::CommonDataModel VTK::FiltersVerdict
         TKShHealing TKMesh TKOffset TKTopAlgo TKPrim TKBO TKFillet TKFeat TKHelix

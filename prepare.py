@@ -9,7 +9,10 @@ modified. Every SALOME tree is at tag ``V9_16_0``:
 * ``extern/salome_bootstrap``: SALOME salome_bootstrap, a squashed git subtree. Since
   ``V9_16_0`` it holds the KERNEL basics: ``Basics/``, ``SALOMELocalTrace/`` and the
   ``SALOME_Exception`` class (``Exception/``).
-* ``extern/geom/src/GEOMUtils``: one directory of SALOME GEOM, a sparse copy.
+* ``extern/geom/src/GEOMUtils`` and ``extern/geom/src/ShHealOper``: two directories of
+  SALOME GEOM, a sparse copy.
+* ``extern/common_geometry_lib``: SALOME common_geometry_lib, a sparse copy of
+  ``src/GEOMAlgo``, ``src/BlockFix`` and the licence.
 * ``extern/mefisto2``: the MEFISTO 2-D triangulator, carried forward verbatim from SMESH
   ``V9_9_0`` (SALOME removed it in 2022), and looooo's f2c translation ``trte.c``.
 * ``extern/netgen``: netgen at tag ``v6.2.2101``, a sparse copy of ``libsrc/``,
@@ -17,8 +20,12 @@ modified. Every SALOME tree is at tag ``V9_16_0``:
 * ``extern/netgenplugin``: SALOME NETGENPlugin at tag ``V9_16_0``, a sparse copy of
   ``src/NETGENPlugin/`` and the licence.
 
-``extern/zlib`` (zlib 1.3.2, the top-level files of the release) is compiled where it is
-and is not staged: no patch touches it.
+* ``extern/planegcs``: the 2-D constraint solver PlaneGCS of FreeCAD at tag ``1.1.4``,
+  the 11 files of ``src/Mod/Sketcher/App/planegcs`` and the licence of the repository.
+
+``extern/zlib`` (zlib 1.3.2, the top-level files of the release) and ``extern/eigen``
+(Eigen 3.4.1, header-only) are used where they are and are not staged: no patch touches
+them.
 
 ``prepare.py`` copies the pieces we compile into ``staged/``, in the layout that the
 looooo/SMESH patch series expects. Then it applies the patches and the source edits:
@@ -36,7 +43,11 @@ looooo/SMESH patch series expects. Then it applies the patches and the source ed
 5. The NETGENPlugin series (``patches/netgenplugin/*.patch``): the OCCT 8 port from
    conda-forge, then the pySMESH patches that remove CORBA and SALOMEDS and keep the
    plugin inside the host process's contract.
-6. The source edits in this file that no patch carries (see ``_apply_source_edits``).
+6. The pySMESH series of the geometry libraries: the OCCT 8.0.1 port of
+   common_geometry_lib (``patches/common_geometry_lib/*.patch``) and of ShHealOper
+   (``patches/geom/ShHealOper_*.patch``), and the PlaneGCS patches that run its solver on
+   the calling thread (``patches/planegcs/*.patch``).
+7. The source edits in this file that no patch carries (see ``_apply_source_edits``).
 
 Every patch is re-ported to its tree and must apply exactly: every hunk at fuzz 0. A
 hunk that fails, is already applied, or targets a file that is not staged stops the run.
@@ -161,12 +172,46 @@ PATCH_MANIFEST: Final[tuple[tuple[str, str], ...]] = (
     ("netgenplugin/NETGENPlugin_remesher_stl_topology.patch", "src/NETGENPlugin"),
     ("netgenplugin/NETGENPlugin_remesher_no_parameters.patch", "src/NETGENPlugin"),
     ("netgenplugin/NETGENPlugin_remesher_partial_result.patch", "src/NETGENPlugin"),
+    # --- common_geometry_lib V9_16_0 (pySMESH, OCCT 8.0.1 port) : root staged/src/CommonGeomLib
+    (
+        "common_geometry_lib/GEOMAlgo_BlockFix_occt8_iterator_headers.patch",
+        "src/CommonGeomLib",
+    ),
+    (
+        "common_geometry_lib/GEOMAlgo_occt8_standard_primitive_types.patch",
+        "src/CommonGeomLib",
+    ),
+    (
+        "common_geometry_lib/GEOMAlgo_occt8_bopds_list_of_pave_block.patch",
+        "src/CommonGeomLib",
+    ),
+    (
+        "common_geometry_lib/GEOMAlgo_BlockFix_occt8_typedef_includes.patch",
+        "src/CommonGeomLib",
+    ),
+    # --- GEOM ShHealOper V9_16_0 (pySMESH, OCCT 8.0.1 port) : root staged/src/Geom ---
+    ("geom/ShHealOper_occt8_iterator_headers.patch", "src/Geom"),
+    # --- PlaneGCS (FreeCAD 1.1.4, pySMESH) : root staged/src/PlaneGCS ---
+    ("planegcs/GCS_diagnose_serial.patch", "src/PlaneGCS"),
 )
 
 # netgen slice: the directories of extern/netgen that prepare.py copies to
 # staged/src/Netgen. That is the layout of looooo/SMESH and conda-forge, whose netgen
 # patches name their files under src/Netgen.
 NETGEN_SLICE: Final[tuple[str, ...]] = ("libsrc", "nglib")
+
+# common_geometry_lib slice: the directories of extern/common_geometry_lib/src that
+# prepare.py copies to staged/src/CommonGeomLib/src, where
+# cmake/CommonGeomLib/CMakeLists.txt compiles them.
+COMMON_GEOMETRY_SLICE: Final[tuple[str, ...]] = ("GEOMAlgo", "BlockFix")
+
+# PlaneGCS is staged at FreeCAD's own depth, because its headers include FreeCAD's global
+# header as "../../SketcherGlobal.h" from src/Mod/Sketcher/App/planegcs. The pySMESH shim
+# cmake/PlaneGCS/SketcherGlobal.h is staged where that path leads; the other FreeCAD-only
+# headers are shims in cmake/PlaneGCS, found through the include path.
+PLANEGCS_STAGED: Final[str] = "src/PlaneGCS/Mod/Sketcher/App/planegcs"
+PLANEGCS_GLOBAL_SHIM: Final[str] = "cmake/PlaneGCS/SketcherGlobal.h"
+PLANEGCS_GLOBAL_STAGED: Final[str] = "src/PlaneGCS/Mod/Sketcher/SketcherGlobal.h"
 
 
 def _copytree(src: Path, dst: Path) -> None:
@@ -180,14 +225,36 @@ def _copytree(src: Path, dst: Path) -> None:
 def _stage_sources() -> None:
     """Copy the compiled slices from extern/ into staged/src/.
 
-    The slices go to ``Kernel``, ``Geom``, ``SMESH``, ``Netgen`` and ``NETGENPlugin``.
+    The slices go to ``Kernel``, ``Geom``, ``CommonGeomLib``, ``PlaneGCS``, ``SMESH``,
+    ``Netgen`` and ``NETGENPlugin``.
     """
     logger.info("staging KERNEL slice (salome_bootstrap + kernel)")
     for src_rel, dst_rel in KERNEL_SLICE:
         _copytree(EXTERN / src_rel, STAGED / "src/Kernel/src" / dst_rel)
 
-    logger.info("staging GEOMUtils slice")
+    logger.info("staging GEOM slice (GEOMUtils, ShHealOper)")
     _copytree(EXTERN / "geom/src/GEOMUtils", STAGED / "src/Geom/src/GEOMUtils")
+    _copytree(EXTERN / "geom/src/ShHealOper", STAGED / "src/Geom/src/ShHealOper")
+
+    logger.info("staging common_geometry_lib slice (GEOMAlgo, BlockFix)")
+    for name in COMMON_GEOMETRY_SLICE:
+        _copytree(
+            EXTERN / "common_geometry_lib/src" / name,
+            STAGED / "src/CommonGeomLib/src" / name,
+        )
+
+    logger.info("staging PlaneGCS sources (extern/planegcs) and its global-header shim")
+    planegcs = EXTERN / "planegcs"
+    sources = sorted(planegcs.glob("*.h")) + sorted(planegcs.glob("*.cpp"))
+    if not sources:
+        raise FileNotFoundError(f"expected vendored source missing: {planegcs}")
+    (STAGED / PLANEGCS_STAGED).mkdir(parents=True, exist_ok=True)
+    for src in sources:
+        shutil.copyfile(src, STAGED / PLANEGCS_STAGED / src.name)
+    shim = ROOT / PLANEGCS_GLOBAL_SHIM
+    if not shim.is_file():
+        raise FileNotFoundError(f"PlaneGCS shim header missing: {shim}")
+    shutil.copyfile(shim, STAGED / PLANEGCS_GLOBAL_STAGED)
 
     logger.info("staging SMESH src")
     _copytree(EXTERN / "smesh/src", STAGED / "src/SMESH/src")

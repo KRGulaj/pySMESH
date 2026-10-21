@@ -45,9 +45,10 @@ int summarize();
 
 }  // namespace probe
 
-// Implemented in probe_occt.cpp / probe_smesh.cpp / probe_netgen.cpp.
+// Implemented in probe_occt.cpp / probe_smesh.cpp / probe_netgen.cpp / probe_geom.cpp.
 void run_occt_probe();
 void run_smesh_probe();
 void run_netgen_probe();
+void run_geom_probe();
 
 #endif  // PYSMESH_TESTS_PROBE_PROBE_HPP
