@@ -533,7 +533,8 @@ py::array_t<std::int64_t> Session::entities_on(const std::string& kind,
         throw PysmeshError("Session.entities_on: the box extends " +
                            number_text(values[3 + i] - values[i]) + " along " +
                            std::string(1, static_cast<char>('x' + i)) +
-                           " (from " + number_text(values[i]) + " to " + number_text(values[3 + i]) +
+                           " (from " + number_text(values[i]) + " to " +
+                           number_text(values[3 + i]) +
                            "); a box region has a positive extent along every axis.");
       }
     }

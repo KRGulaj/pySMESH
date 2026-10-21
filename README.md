@@ -321,6 +321,11 @@ GEOM's `SuppressFaces` does: a solid becomes an open shell. `defeature`, by
 contrast, extends the neighbouring faces over the removed feature and keeps a
 closed solid.
 
+`shape_process` runs a sequence of OCCT's ShapeProcess operators, as GEOM's
+`ShapeProcess` does, with every parameter given and no defaults. It reads no
+`CSF_ShHealing*` resource file, and every id is carried through the copy and
+through ShapeProcess's own history.
+
 `make_filling` takes `support_faces`: the filled surface is tangent to each
 named face along its boundary edge, and those edges keep their ids.
 

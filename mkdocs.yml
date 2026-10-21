@@ -81,6 +81,7 @@ nav:
       - Entity IDs and ordinals: concepts/entity-ids.md
       - Session: concepts/session.md
       - Selection rules: concepts/selection-rules.md
+      - Shape processing: concepts/shape-process.md
       - Meshing model: concepts/meshing-model.md
       - Discrete meshes: concepts/discrete-meshes.md
       - Units: concepts/units.md

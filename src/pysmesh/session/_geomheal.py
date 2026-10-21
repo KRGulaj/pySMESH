@@ -11,14 +11,24 @@ across per-area translation units; see the package docstring for the whole surfa
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Literal
+from collections.abc import Mapping, Sequence
+from typing import Literal, TypeAlias
 
 import numpy as np
 
 from .._core import PysmeshError
 from ._base import _SessionBase
-from ._types import EntityId, HistoryDelta, _delta, _ids
+from ._types import (
+    CancelPredicate,
+    EntityId,
+    HistoryDelta,
+    ProgressCallback,
+    _delta,
+    _ids,
+)
+
+# The value of one ShapeProcess parameter: a real, an integer, a bool or a continuity name.
+ShapeProcessValue: TypeAlias = float | int | bool | str
 
 
 def _fractions(where: str, values: Sequence[float]) -> list[float]:
@@ -30,6 +40,45 @@ def _fractions(where: str, values: Sequence[float]) -> list[float]:
         ):
             raise PysmeshError(f"{where}: the position {v!r} is not a number.")
         out.append(float(v))
+    return out
+
+
+def _operator_names(operators: Sequence[str]) -> list[str]:
+    """The sequence as a list of str; refused when an entry is not a str."""
+    if isinstance(operators, str):
+        raise PysmeshError(
+            "Session.shape_process: operators is one str; give a sequence of operator "
+            f"names, such as [{operators!r}]."
+        )
+    out: list[str] = []
+    for name in operators:
+        if not isinstance(name, str):
+            raise PysmeshError(
+                f"Session.shape_process: the operator {name!r} is not a str."
+            )
+        out.append(name)
+    return out
+
+
+def _parameter_values(
+    parameters: Mapping[str, ShapeProcessValue],
+) -> dict[str, ShapeProcessValue]:
+    """The parameters as a dict, NumPy scalars as Python ones; the types are checked natively."""
+    if not isinstance(parameters, Mapping):
+        raise PysmeshError(
+            "Session.shape_process: parameters is a "
+            f"{type(parameters).__name__}, not a mapping of 'Operator.Name' to a value."
+        )
+    out: dict[str, ShapeProcessValue] = {}
+    for name, value in parameters.items():
+        if isinstance(value, np.bool_):
+            out[name] = bool(value)
+        elif isinstance(value, np.integer):
+            out[name] = int(value)
+        elif isinstance(value, np.floating):
+            out[name] = float(value)
+        else:
+            out[name] = value
     return out
 
 
@@ -230,3 +279,106 @@ class _GeomHealOps(_SessionBase):
                 (``.face_ids`` names those). Nothing is committed then.
         """
         return _delta(self._s.suppress_faces(_ids(faces)))
+
+    def shape_process(
+        self,
+        entities: Sequence[EntityId],
+        operators: Sequence[str],
+        parameters: Mapping[str, ShapeProcessValue],
+        *,
+        progress: ProgressCallback | None = None,
+        cancel: CancelPredicate | None = None,
+    ) -> HistoryDelta:
+        """Run a sequence of OCCT's ShapeProcess operators, with every parameter given.
+
+        GEOM's ``ShapeProcess`` (``geomBuilder.ProcessShape``): the steps of
+        ``ShHealOper_ShapeProcess::Perform`` (GEOM V9_16_0), composed here so that the copy
+        map is kept. The bodies are copied with ``TNaming_CopyShape::CopyTool``, the
+        operators run in order through ``ShapeProcessAPI_ApplySequence::PrepareShape``,
+        and ``GEOMAlgo_AlgoTools::FixCurveOnSurfaceTolerances`` closes, as in GEOM.
+
+        **Every parameter is given.** ``parameters`` maps ``"Operator.Name"`` to a value
+        for every parameter that each named operator reads, read at the OCCT 8.0.1 source
+        (``ShapeProcess_OperLibrary.cxx``). The table of operators and parameters is in
+        ``docs/documentation/concepts/shape-process.md``. There are no defaults: a missing,
+        unknown or wrongly typed parameter is refused. A value is a real (a ``float``, or
+        an ``int``), an integer (an ``int``), a ``bool``, or a continuity (``"C0"``,
+        ``"G1"``, ``"C1"``, ``"G2"``, ``"C2"``, ``"C3"``, ``"CN"``). A parameter that the
+        operator reads only under a condition is required too: SetTolerance's ``Value``
+        and ``Ratio`` (read when ``Mode > 0``) and ``Regularity`` (so
+        ``BRepLib::EncodeRegularity`` always runs).
+
+        **GEOM's values are a reference, not defaults.** GEOM's ``ShHealing`` resource
+        file holds absolute lengths in model units, such as 0.05 for
+        ``DropSmallEdges.Tolerance3d``: plausible for a model in millimetres, 1000 times
+        too large for a model in metres. Choose every value for the model. GEOM's values
+        for its default sequence (FixShape, FixFaceSize, DropSmallEdges, SameParameter):
+
+        * FixShape: ``Tolerance3d`` 1e-7, ``MinTolerance3d`` 1e-7, ``MaxTolerance3d`` 1;
+          ``-1`` for every ``Fix...Mode`` that GEOM sets, except
+          ``FixEdgeSameParameterMode`` 0; ``ModifyTopologyMode`` 0,
+          ``ModifyGeometryMode`` 1, ``ClosedWireMode`` 1, ``PreferencePCurveMode`` 1,
+          ``CreateOpenSolidMode`` 0. GEOM sets no value for ``FixVertexPositionMode``,
+          ``FixVertexToleranceMode``, ``FixShellOrientationMode``,
+          ``FixFaceOrientationMode``, ``FixAddNaturalBoundMode``,
+          ``RemoveSmallAreaFaceMode``, ``FixSplitFaceMode``, ``RemoveLoopMode``,
+          ``FixNotchedEdgesMode``, ``FixTailMode``, ``MaxTailAngle`` (degrees) and
+          ``MaxTailWidth``.
+        * FixFaceSize: ``Tolerance`` 0.05.
+        * DropSmallEdges: ``Tolerance3d`` 0.05.
+        * SameParameter: ``Force`` 0, ``Tolerance3d`` 1e-7.
+
+        The table gives GEOM's values for the other operators.
+
+        **Environment.** The sequence reads no resource file, so the
+        ``CSF_ShHealingDefaults`` and ``CSF_ShHealingUserDefaults`` files that GEOM's
+        resource manager reads change nothing. A real is passed with all its digits;
+        GEOM's ``SetParameter`` keeps 6 significant digits
+        (``Resource_Manager::SetResource(double)`` writes ``%g``).
+
+        **Identity.** Each id goes through the copy map to the copy, and through the
+        ShapeProcess context map to its image. A modified entity keeps its id; an entity
+        split into several keeps its id on every piece; a removed one dies; a new one,
+        such as a split line, gets a new id. The history goes down to the vertices, but a
+        vertex that an operator replaces without recording it gets a new id. Each body is
+        processed in its own frame and placed back, as
+        ``ShapeProcess_OperLibrary::ApplyModifier`` does with the bodies of a compound;
+        ShapeProcess records no history below a placed body otherwise.
+
+        As in :meth:`heal`, the result is committed whatever ``BRepCheck_Analyzer`` says
+        of it, and :attr:`HistoryDelta.valid` carries the verdict.
+
+        Args:
+            entities: Entities whose owning bodies are processed. At least one.
+            operators: The operator names, in the order they run, each one of
+                DirectFaces, SameParameter, SetTolerance, SplitAngle, BSplineRestriction,
+                ElementaryToRevolution, SweptToElementary, SurfaceToBSpline, ToBezier,
+                SplitContinuity, SplitClosedFaces, FixWireGaps, FixFaceSize,
+                DropSmallSolids, DropSmallEdges, FixShape, SplitClosedEdges,
+                SplitCommonVertex. At least one; an operator may run more than once.
+            parameters: ``"Operator.Name"`` to its value, for every parameter of every
+                named operator, and for no other.
+            progress: Called with the fraction done — a float in ``[0, 1]``, strictly
+                increasing — while the operators run. ``None`` reports nothing.
+            cancel: Called with no arguments; return ``True`` to stop. It stops between
+                two operators, and inside FixShape. The call then raises
+                :class:`PysmeshCancelled` and commits nothing.
+
+        Returns:
+            The delta, with the verdict on ``valid``.
+
+        Raises:
+            PysmeshError: If no entity or no operator is named; if an id is dead, or the
+                bodies share sub-shapes with bodies left out; if an operator is unknown
+                (the message lists the operators); if a parameter is missing, unknown or
+                of the wrong type, or a real is not finite (the message names them); if a
+                sub-shape is placed twice in the bodies (an instanced part); if an
+                operator fails inside OCCT; or if the sequence changes nothing. Nothing is
+                committed then.
+            PysmeshCancelled: If ``cancel`` returned True.
+        """
+        names = _operator_names(operators)
+        values = _parameter_values(parameters)
+        return _delta(
+            self._s.shape_process(_ids(entities), names, values, progress, cancel)
+        )

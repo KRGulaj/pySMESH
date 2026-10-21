@@ -76,7 +76,7 @@ other.
 | Transforms | `translate`, `rotate`, `mirror`, `scale`, `position_along_path`, `copy` |
 | Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove`, `limit_tolerance`, `change_orientation` |
 | Gluing | `glue` (coincident faces or edges, GEOM's gluer) |
-| GEOM healing operators | `divide_edge`, `close_contour`, `fill_holes`, `suppress_faces` |
+| GEOM healing operators | `divide_edge`, `close_contour`, `fill_holes`, `suppress_faces`, `shape_process` |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
 | Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
@@ -198,6 +198,18 @@ When to use which:
 
 Use `defeature` to simplify a solid. Use `suppress_faces` to cut faces out of a shell,
 for example before `fill_holes` or a `sew` with other faces.
+
+### Shape processing
+
+`shape_process(entities, operators, parameters)` is GEOM's `ShapeProcess`: OCCT's
+ShapeProcess operators run in order on a copy of the bodies, through the steps of
+`ShHealOper_ShapeProcess::Perform`. `parameters` gives every parameter of every named
+operator; there are no defaults, and GEOM's `ShHealing` values, absolute lengths in model
+units, are a reference only. No `CSF_ShHealing*` resource file is read. Every id goes
+through the copy and through ShapeProcess's own history: a split face keeps its id on
+every piece. Each body is processed in its own frame and placed back. See
+[Shape processing](shape-process.md) for the operators and their parameters. It takes
+`progress` and `cancel`: a cancel stops between two operators, and inside FixShape.
 
 ### Booleans: `fuzzy` and `parallel`
 

@@ -162,6 +162,9 @@ void bind_session(py::module_& m) {
            py::arg("common_vertex"))
       .def("fill_holes", &Session::fill_holes, py::arg("entity_ids"), py::arg("edge_ids"))
       .def("suppress_faces", &Session::suppress_faces, py::arg("face_ids"))
+      .def("shape_process", &Session::shape_process, py::arg("entity_ids"),
+           py::arg("operators"), py::arg("parameters"), py::arg("progress"),
+           py::arg("cancel"))
       .def("entity_types", &Session::entity_types, py::arg("kind"))
       .def("surface_parameters", &Session::surface_parameters, py::arg("face_ids"))
       .def("bounding_boxes", &Session::bounding_boxes, py::arg("kind"))

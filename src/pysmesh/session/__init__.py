@@ -79,7 +79,7 @@ from __future__ import annotations
 from ._boolean import _BooleanOps
 from ._check import _CheckOps
 from ._construct import _ConstructOps
-from ._geomheal import _GeomHealOps
+from ._geomheal import ShapeProcessValue, _GeomHealOps
 from ._glue import _GlueOps
 from ._handoff import _HandoffOps
 from ._heal import _HealOps
@@ -88,6 +88,7 @@ from ._offset import _OffsetOps
 from ._query import _QueryOps
 from ._render import _RenderOps
 from ._select import (
+    RULE_FORMAT,
     BelongsTo,
     ContinuousFaces,
     EdgeSize,
@@ -101,7 +102,6 @@ from ._select import (
     OnPlane,
     OnPlaneSide,
     OppositeToEdge,
-    RULE_FORMAT,
     RelativeToSolid,
     Rule,
     SizeComparator,
@@ -109,9 +109,9 @@ from ._select import (
     TopoConnectedFaces,
     VerticalFace,
     VolumeSize,
+    _SelectOps,
     rule_from_dict,
     rule_to_dict,
-    _SelectOps,
 )
 from ._state import _StateOps
 from ._transform import _TransformOps
@@ -261,6 +261,7 @@ __all__ = [
     "Rule",
     "Session",
     "ShapeCheckFinding",
+    "ShapeProcessValue",
     "SizeComparator",
     "SnapshotMark",
     "SolidLocation",

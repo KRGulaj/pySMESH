@@ -158,6 +158,14 @@ LGPL-2.1-or-later, used under LGPL-2.1), for the arguments `GEOMUtils::CheckTria
 gives it. Its one change is a progress range for the mesher, so that a cancel stops
 `Session.entities_on` in its mesh. The mesh parameters are the ones of GEOM's call.
 
+`Session.shape_process` (`src/bindings/session_geomheal.cpp`) takes the steps of
+`ShHealOper_ShapeProcess::Perform`, from the vendored GEOM tag `V9_16_0`
+(`src/ShHealOper/ShHealOper_ShapeProcess.cxx`), in its order, and keeps the
+`TNaming_CopyShape` copy map that `Perform` keeps local. It changes three things and none
+of the shape OCCT builds: the sequence reads no resource file (an empty resource name,
+every resource set by the caller), its history goes down to the vertices, and each body
+is processed without its placement and placed back.
+
 ## Small pieces borrowed from looooo/SMESH
 
 [looooo/SMESH](https://github.com/looooo/SMESH) is an actively maintained fork that keeps

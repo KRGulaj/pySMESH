@@ -1031,6 +1031,14 @@ class Session {
   // and leaves the hole open; nothing is extended to close it.
   py::dict suppress_faces(const std::vector<EntityId>& face_ids);
 
+  // GEOM's ShapeProcess: the steps of ShHealOper_ShapeProcess::Perform with the copy
+  // map kept, on the bodies of `entity_ids`. `operators` is the sequence; `parameters`
+  // maps "Operator.Name" to a value for every parameter the named operators read.
+  py::dict shape_process(const std::vector<EntityId>& entity_ids,
+                         const std::vector<std::string>& operators,
+                         const py::dict& parameters, const py::object& progress,
+                         const py::object& cancel);
+
   // ---- snapshot / restore ----------------------------------------------------------- //
 
   // Guarded like an operation, not like a query. These mutate the session, and an operation
