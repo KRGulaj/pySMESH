@@ -153,6 +153,9 @@ void bind_session(py::module_& m) {
       .def("unify_same_domain", &Session::unify_same_domain, py::arg("entity_ids"),
            py::arg("unify_faces"), py::arg("unify_edges"), py::arg("concat_bsplines"),
            py::arg("linear_tol"), py::arg("angular_tol_rad"))
+      .def("glue", &Session::glue, py::arg("entity_ids"), py::arg("tolerance"),
+           py::arg("kind"), py::arg("keep_non_solids"), py::arg("progress"),
+           py::arg("cancel"))
       .def("entity_types", &Session::entity_types, py::arg("kind"))
       .def("surface_parameters", &Session::surface_parameters, py::arg("face_ids"))
       .def("bounding_boxes", &Session::bounding_boxes, py::arg("kind"))

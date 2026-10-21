@@ -299,6 +299,11 @@ frame. Every id survives, as for `translate`.
 and its trimmed edges keep their ids; each arc is new, generated from the
 corner vertex it replaces.
 
+`glue` merges the coincident faces (or, with `kind="edges"`, only the edges)
+of the named bodies within a tolerance, as GEOM's `MakeGlueFaces` does. Each
+glued shape keeps the ids of every shape glued into it. Unlike `fragment`, it
+splits nothing: faces that overlap only in part stay apart.
+
 `make_filling` takes `support_faces`: the filled surface is tangent to each
 named face along its boundary edge, and those edges keep their ids.
 

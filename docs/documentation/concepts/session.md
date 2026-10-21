@@ -75,6 +75,7 @@ other.
 | Offsets | `make_thick_solid`, `offset`, `offset_wire` (a parallel planar wire) |
 | Transforms | `translate`, `rotate`, `mirror`, `scale`, `position_along_path`, `copy` |
 | Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove`, `limit_tolerance`, `change_orientation` |
+| Gluing | `glue` (coincident faces or edges, GEOM's gluer) |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
 | Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
@@ -131,6 +132,15 @@ tangent, x along the normal. On a straight path the move is a translation, on a
 circular arc a rotation about the arc's axis. Every id survives, as for
 `translate`. A moved body that owns the path edge is refused, because the path
 would move with it.
+
+### Gluing
+
+`glue(entities, tolerance)` is GEOM's `MakeGlueFaces`: it merges the faces, edges and
+vertices of the named bodies that coincide within `tolerance`. With `kind="edges"` it is
+`MakeGlueEdges`, and only coincident edges merge. Every id of a glued group survives on its
+one shape, as for a merge. Glue intersects nothing: two faces merge only when they coincide
+as a whole. `fragment` intersects the operands and splits faces that overlap in part. A
+glue that finds nothing coincident is refused, naming the bodies and the tolerance.
 
 ### Booleans: `fuzzy` and `parallel`
 

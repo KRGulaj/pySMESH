@@ -44,6 +44,7 @@
 //   session_locate.cpp     — locating entities with GEOM's classifiers: on a region, in
 //                            place of old sub-shapes, the same as another entity;
 //   session_select.cpp     — the shape tests behind the selection filters;
+//   session_glue.cpp       — gluing coincident sub-shapes with GEOM's gluer;
 //   session_tessellate.cpp — the render mesh, and the incremental delta over it;
 //   session_handoff.cpp    — the export to a mesher, and the id-to-ordinal bijection;
 //   session_progress.cpp   — the progress/cancellation driver (declared in progress.hpp,
@@ -983,6 +984,14 @@ class Session {
   py::dict unify_same_domain(const std::optional<std::vector<EntityId>>& entity_ids,
                              bool unify_faces, bool unify_edges, bool concat_bsplines,
                              double linear_tol, double angular_tol_rad);
+
+  // GEOM's MakeGlueFaces / MakeGlueEdges on the bodies owning the named entities:
+  // GEOMAlgo_Gluer2 merges their sub-shapes that coincide within `tolerance` ("faces"
+  // glues every detected group, "edges" only the groups of edges). Every id of a glued
+  // group survives on its one shape. Implemented in session_glue.cpp.
+  py::dict glue(const std::vector<EntityId>& entity_ids, double tolerance,
+                const std::string& kind, bool keep_non_solids, const py::object& progress,
+                const py::object& cancel);
 
   // ---- snapshot / restore ----------------------------------------------------------- //
 

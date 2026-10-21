@@ -55,6 +55,7 @@ a change on either side has an obvious counterpart on the other:
 ``_boolean``         the boolean family, fillet and chamfer
 ``_transform``       the transforms, and copy
 ``_heal``            healing, sewing, defeaturing, imprinting and removal
+``_glue``            gluing coincident sub-shapes with GEOM's gluer
 ``_locate``          locating entities with GEOM's classifiers: on a region, in
                      place of old sub-shapes, the same as another entity
 ``_offset``          hollowing a solid, and offsetting a body
@@ -76,6 +77,7 @@ from __future__ import annotations
 from ._boolean import _BooleanOps
 from ._check import _CheckOps
 from ._construct import _ConstructOps
+from ._glue import _GlueOps
 from ._handoff import _HandoffOps
 from ._heal import _HealOps
 from ._locate import _LocateOps
@@ -159,6 +161,7 @@ class Session(
     _BooleanOps,
     _CheckOps,
     _ConstructOps,
+    _GlueOps,
     _HandoffOps,
     _HealOps,
     _LocateOps,
