@@ -223,6 +223,12 @@ class _HealOps(_SessionBase):
         session's identity carried across it: merged entities keep **all** their ids, so
         several ids come to denote one shape and every stale reference still resolves.
 
+        **GEOM's UnionFaces.** GEOM's ``UnionFaces`` (V9_16_0, OCCT 7.5.3 and later) is this
+        operation with ``unify_edges=False`` and ``concat_bsplines=True``. GEOM passes one
+        number, ``aTol``, as the linear tolerance and as the angular tolerance in radians:
+        the largest tolerance of the faces of the shape, at least 1e-7. Pass it as
+        ``linear_tol`` and as ``angular_tol_deg=math.degrees(aTol)`` to get GEOM's result.
+
         Args:
             entities: Entities whose owning bodies are unified. ``None`` unifies the whole
                 model.

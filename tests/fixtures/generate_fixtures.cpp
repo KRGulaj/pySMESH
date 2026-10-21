@@ -35,6 +35,8 @@
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
@@ -57,12 +59,15 @@
 #include <XCAFDoc_ColorType.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
+#include <GeomAPI_PointsToBSplineSurface.hxx>
+#include <Geom_BSplineSurface.hxx>
 #include <Geom_Curve.hxx>
 #include <Geom_Surface.hxx>
 #include <Poly_PolygonOnTriangulation.hxx>
 #include <Poly_Triangulation.hxx>
 #include <TColStd_Array1OfInteger.hxx>
 #include <TColStd_HArray1OfReal.hxx>
+#include <TColgp_Array2OfPnt.hxx>
 #include <TopAbs.hxx>
 #include <TopExp.hxx>
 #include <TopLoc_Location.hxx>
@@ -572,6 +577,34 @@ int main(int argc, char** argv) {
     }
   }
 
+  // quasi_planar_pair: two B-spline faces fitted to z = 1e-9 x y on [0, 3] x [0, 7] and
+  // [3, 6] x [0, 7] (5 x 5 points, degree 3 to 8, C2, 1e-10), sewn along x = 3 at 1e-6.
+  // They lie within 4.2e-8 of the plane z = 0, and their fitted planes differ by about
+  // 3e-9 rad: the unify_same_domain fixture for GEOM's UnionFaces tolerance.
+  {
+    const auto quasi_planar_face = [](double x0) {
+      TColgp_Array2OfPnt pts(1, 5, 1, 5);
+      for (int i = 1; i <= 5; ++i) {
+        for (int j = 1; j <= 5; ++j) {
+          const double x = x0 + (i - 1) * 0.25 * 3.0;
+          const double y = (j - 1) * 0.25 * 7.0;
+          pts(i, j) = gp_Pnt(x, y, 1e-9 * x * y);
+        }
+      }
+      Handle(Geom_BSplineSurface) srf =
+          GeomAPI_PointsToBSplineSurface(pts, 3, 8, GeomAbs_C2, 1e-10).Surface();
+      return BRepBuilderAPI_MakeFace(srf, 1e-7).Face();
+    };
+    BRepBuilderAPI_Sewing sew(1e-6);
+    sew.Add(quasi_planar_face(0.0));
+    sew.Add(quasi_planar_face(3.0));
+    sew.Perform();
+    if (!BRepTools::Write(sew.SewedShape(), (out_dir + "/quasi_planar_pair.brep").c_str())) {
+      std::fprintf(stderr, "failed to write quasi_planar_pair.brep\n");
+      return 1;
+    }
+  }
+
   // box_far: a second BOX_EDGE cube whose min corner sits at x = 5, so it spans x in [5, 7]
   // while box spans x in [0, 2] (both share y, z in [0, BOX_EDGE]). The exact minimum
   // distance to box is therefore 5 - BOX_EDGE = 3.0, purely along +x — the analytical case
@@ -607,7 +640,7 @@ int main(int argc, char** argv) {
 
   std::printf(
       "wrote box.brep, cylinder.brep, sphere.brep, split_box.brep, open_box_shell.brep, "
-      "sphere_hole_shell.brep, "
+      "sphere_hole_shell.brep, quasi_planar_pair.brep, "
       "box_far.brep, named_box_mm.step, named_box_m.step, box_mm.igs, box_m.igs, "
       "box_inch.igs, box_mesh + sphere_mesh to %s\n",
       out_dir.c_str());

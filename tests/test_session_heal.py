@@ -33,6 +33,7 @@ from __future__ import annotations
 import math
 import time
 from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -744,6 +745,78 @@ def test_merging_unifies_what_each_flag_names(
     )
     np.testing.assert_allclose(
         [f.centroid for f in tops], [c for _, c in top], rtol=EXACT_RTOL
+    )
+
+
+def _quasi_planar_pair() -> Session:
+    """Two B-spline faces fitted to ``z = 1e-9 x y``, sewn along ``x = 3``.
+
+    ``tests/fixtures/quasi_planar_pair.brep`` (``generate_fixtures.cpp``): the faces cover
+    ``[0, 3] x [0, 7]`` and ``[3, 6] x [0, 7]`` and lie within 4.2e-8 of the plane
+    ``z = 0``. Their fitted planes differ by about 3e-9 rad.
+    """
+    s = Session()
+    fixture = Path(__file__).resolve().parent / "fixtures" / "quasi_planar_pair.brep"
+    s.add_brep(fixture.read_bytes())
+    return s
+
+
+def test_geom_union_faces_merges_the_quasi_planar_pair_only_at_its_tolerance() -> None:
+    """GEOM's UnionFaces: unify_same_domain(unify_edges=False, concat_bsplines=True).
+
+    OCCT merges two faces that are planar within the linear tolerance when their planes
+    are parallel within the angular tolerance. At the defaults the angle is 0, OCCT's
+    tightest (1e-12 rad), so the pair stays two faces of area 21, with centroids
+    ``(1.5, 3.5, 1e-9 * 1.5 * 3.5)`` and ``(4.5, 3.5, 1e-9 * 4.5 * 3.5)``, the means of
+    ``z = 1e-9 x y`` over each rectangle. At GEOM's ``aTol``, the largest face tolerance
+    (1e-7 here) as both tolerances, they become one planar face: area 42, centroid
+    ``(3, 3.5)``, ``z`` within the linear tolerance of the mean 1.05e-8. The seam edge
+    goes and the long edges stay split: 1 face, 6 edges, 6 vertices.
+    """
+    default = _quasi_planar_pair()
+    geom = _quasi_planar_pair()
+    faces = [EntityId(int(i)) for i in geom.entities(EntityKind.FACE)]
+    a_tol = max(1e-7, float(np.max(geom.tolerances(faces))))
+
+    default.unify_same_domain(unify_edges=False, concat_bsplines=True)
+    geom.unify_same_domain(
+        unify_edges=False,
+        concat_bsplines=True,
+        linear_tol=a_tol,
+        angular_tol_deg=math.degrees(a_tol),
+    )
+
+    kept = sorted(
+        ps.load_brep(default.brep()).faces(), key=lambda f: float(f.centroid[0])
+    )
+    assert model_counts(default) == (0, 2, 7, 6)
+    np.testing.assert_allclose([f.area for f in kept], [21.0, 21.0], rtol=EXACT_RTOL)
+    np.testing.assert_allclose(
+        [f.centroid for f in kept],
+        [(1.5, 3.5, 1e-9 * 1.5 * 3.5), (4.5, 3.5, 1e-9 * 4.5 * 3.5)],
+        rtol=EXACT_RTOL,
+        atol=1e-12,
+    )
+    (merged,) = ps.load_brep(geom.brep()).faces()
+    assert model_counts(geom) == (0, 1, 6, 6)
+    assert merged.surface_type == "Plane"
+    assert merged.area == pytest.approx(42.0, rel=EXACT_RTOL)
+    np.testing.assert_allclose(merged.centroid[:2], (3.0, 3.5), rtol=EXACT_RTOL)
+    assert abs(merged.centroid[2] - 1e-9 * 3.0 * 3.5) <= a_tol
+
+
+def test_geom_union_faces_merges_the_fused_boxes_as_faces_only(
+    fused_boxes: Session,
+) -> None:
+    """On planes the angle does not matter: the faces-only result of the test above."""
+    fused_boxes.unify_same_domain(unify_edges=False, concat_bsplines=True)
+
+    assert model_counts(fused_boxes) == (1, 6, 16, 12)
+    faces = ps.load_brep(fused_boxes.brep()).faces()
+    (top,) = (f for f in faces if math.isclose(f.centroid[2], BOX_DZ, abs_tol=1e-9))
+    assert top.area == pytest.approx(2.0 * BOX_DX * BOX_DY, rel=EXACT_RTOL)
+    np.testing.assert_allclose(
+        top.centroid, (BOX_DX, 0.5 * BOX_DY, BOX_DZ), rtol=EXACT_RTOL
     )
 
 
