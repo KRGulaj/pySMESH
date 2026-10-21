@@ -344,3 +344,28 @@ def test_two_fresh_sessions_give_identical_bytes_and_ids(
     second = _swept(draft, symmetric)
 
     assert first == second
+
+
+@pytest.mark.parametrize(
+    ("draft", "symmetric"), [(ALPHA, False), (-ALPHA, False), (-ALPHA, True)]
+)
+def test_eight_sessions_between_unrelated_ones_give_identical_bytes_and_ids(
+    draft: float, symmetric: bool
+) -> None:
+    """The evolved sweep's face order and shell orientation follow shape addresses.
+
+    Unrelated sessions built in between move the allocator, as a long test run does: on
+    OCCT 8.0.1 the drafted solid then came back as a REVERSED shell of REVERSED faces in
+    24 of 40 runs, before the shells were rebuilt FORWARD.
+    """
+    first = _swept(draft, symmetric)
+    others = []
+
+    for k in range(7):
+        churn = [Session() for _ in range(k + 1)]
+        for i, c in enumerate(churn):
+            c.add_box(1.0 + i, 2.0, 3.0)
+            c.add_cylinder(0.5, 2.0)
+        others.append(_swept(draft, symmetric))
+
+    assert all(other == first for other in others)

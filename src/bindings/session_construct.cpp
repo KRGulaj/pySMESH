@@ -1284,10 +1284,13 @@ Handle(BRepTools_History) drafted_history(const TopoDS_Shape& spine, const TopoD
 
 // The evolved sweep lists the same faces in an order that varies from run to run:
 // BRepFill_Evolved gathers them through maps keyed by shape address (two fresh sessions gave
-// equal geometry in a different order, so different bytes and ids). Each shell is rebuilt with
-// the same faces, same TShapes, in an order of their own geometry: area centroid, area, then
-// box. Equal input then gives equal bytes and equal ids, and the history, which names the
-// faces themselves, holds as it is.
+// equal geometry in a different order, so different bytes and ids). It also returns the
+// same solid as a REVERSED shell of REVERSED faces in some runs and a FORWARD shell of
+// FORWARD faces in others (24 of 40 runs in one process, at -10 degrees, symmetric). Each
+// shell is rebuilt FORWARD in a FORWARD solid, each face carrying the orientation it has in
+// the solid, from the same faces, same TShapes, in an order of their own geometry: area
+// centroid, area, then box. Equal input then gives equal bytes and equal ids, and the
+// history, which names the faces themselves (IsSame ignores orientation), holds as it is.
 TopoDS_Shape in_geometric_order(const TopoDS_Shape& shape) {
   BRep_Builder builder;
   std::vector<TopoDS_Shape> solids;
@@ -1295,9 +1298,10 @@ TopoDS_Shape in_geometric_order(const TopoDS_Shape& shape) {
     const TopoDS_Shape& solid = ex.Current();
     TopoDS_Solid rebuilt;
     builder.MakeSolid(rebuilt);
-    for (TopoDS_Iterator sh(solid, /*cumOri=*/false, /*cumLoc=*/false); sh.More(); sh.Next()) {
+    for (TopoDS_Iterator sh(solid, /*cumOri=*/true, /*cumLoc=*/false); sh.More(); sh.Next()) {
       std::vector<std::pair<std::array<double, 10>, TopoDS_Shape>> faces;
-      for (TopoDS_Iterator f(sh.Value(), false, false); f.More(); f.Next()) {
+      for (TopoDS_Iterator f(sh.Value(), /*cumOri=*/true, /*cumLoc=*/false); f.More();
+           f.Next()) {
         GProp_GProps props;
         BRepGProp::SurfaceProperties(f.Value(), props);
         const gp_Pnt c = props.CentreOfMass();
@@ -1315,11 +1319,9 @@ TopoDS_Shape in_geometric_order(const TopoDS_Shape& shape) {
       }
       shell.Closed(sh.Value().Closed());
       shell.Location(sh.Value().Location());
-      shell.Orientation(sh.Value().Orientation());
       builder.Add(rebuilt, shell);
     }
     rebuilt.Location(solid.Location());
-    rebuilt.Orientation(solid.Orientation());
     solids.push_back(rebuilt);
   }
   if (solids.size() == 1) {
