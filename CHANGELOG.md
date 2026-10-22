@@ -1,5 +1,128 @@
 # Changelog
 
+## 5.2.0
+
+5.2.0 brings SALOME GEOM's modelling, healing and block operations to `Session`. It also adds
+a selection-rule engine and a 2-D sketch constraint solver, `pysmesh.sketch`. It fixes one
+defect in `Session.unify_same_domain`. Every other result of 5.1.2 is unchanged: the golden
+capture matches 5.1.2 at rtol 0, and no existing signature, default or message changed.
+
+### Defect fix
+
+- `Session.unify_same_domain` passed `unify_faces` and `unify_edges` to OCCT in the wrong
+  order.
+  - The default call, with both flags on, was correct.
+  - A call with one flag off did the other merge: "faces only" merged edges, and "edges
+    only" merged faces.
+  - Both flags now do what they say.
+  - The stateless `pysmesh.unify_same_domain` was not affected.
+- A model that used one flag off gives a different result with 5.2.0. The new result is
+  the documented one.
+
+### New native code
+
+All of it is static in `_core.pyd`. The wheel adds no DLL; it still bundles 52.
+
+- SALOME common_geometry_lib `V9_16_0` (GEOMAlgo, BlockFix) and GEOM `V9_16_0` ShHealOper,
+  LGPL-2.1, ported to OCCT 8.0.1 by include-only patches.
+- FreeCAD 1.1.4 PlaneGCS, LGPL-2-or-later. Its two `std::async` calls run deferred, so the
+  solver uses one thread.
+- Eigen 3.4.1, MPL-2.0, headers only, compiled with `EIGEN_MPL2_ONLY`.
+- Algorithm code copied from GEOM `GEOMImpl` and `AdvancedEngine`, without GEOM's driver
+  framework.
+
+`PROVENANCE.md` and `NOTICE.md` list each source, commit and patch.
+
+### Entity ids
+
+- **A sixth id rule.** `split_by_faces`, `split_by_plane` and `keep_half_space` give each
+  piece of a cut solid its own new id, with the role `GENERATED`; the cut solid's id dies.
+  `divide_edge` does the same for the pieces of an edge.
+- A face cut by these operations keeps its id on every piece, as before.
+- The current operations keep the five rules.
+
+### New `Session` operations
+
+- **Splitting:** `split_by_faces`, `split_by_plane`, `keep_half_space`.
+- **Construction queries:** `face_frame`, `tangent_frame`, `face_face_axis`,
+  `point_at_length`.
+- **Checks:** `check_boolean`, `check_shape`, `small_edges`, `is_closed_shell`,
+  `tolerances`.
+- **Locating and selecting:**
+  - `entities_on` finds entities on or inside a plane, cylinder, sphere, box or solid.
+  - `in_place` finds again the entities of an earlier state, from BREP bytes with the ordinals
+    of `export_handoff`, or from a snapshot.
+  - `find_same` finds geometrically identical entities.
+  - `select` takes a rule of 16 filters modelled on SALOME Shaper's. `rule_to_dict` and
+    `rule_from_dict` give a rule a stored form with a format version (format 1).
+- **Modelling:**
+  - `extrude` takes the new keyword arguments `draft_angle` and `symmetric`.
+  - `make_filling` takes the new keyword argument `support_faces`, for a surface tangent to
+    adjacent faces.
+  - New operations: `extend_face`, `extend_edge`, `position_along_path`, `fillet_2d`,
+    `fillet_1d`, `offset_wire`, `smoothing_surface`, `glue`.
+  - With their defaults, `extrude` and `make_filling` give BREP bytes identical to 5.1.2.
+- **Repair:** `limit_tolerance`, `change_orientation`, `divide_edge`, `close_contour`,
+  `fill_holes`, `suppress_faces`, `shape_process`.
+- **Blocks:** `make_quad`, `make_quad_from_vertices`, `make_hexa`, `check_blocks`,
+  `propagation_chain`, `opposite_face`, `face_by_edges`, `find_block_near`, `divided_disk`,
+  `pipe_t_shape` (GEOM's wall, with GEOM's named groups), `multi_transform`,
+  `remove_extra_edges`.
+
+Every operation that changes the model carries ids through its history. Its tests check
+every id against geometry. Each history test was run once with the history broken, to show
+that it fails. `entities_on`, `in_place`, `select`, `glue`, `shape_process`,
+`check_boolean`, `check_shape`, `check_blocks` and `remove_extra_edges` take `progress` and
+`cancel`.
+
+### Sketch solver
+
+`pysmesh.sketch.solve` solves a 2-D sketch given as flat NumPy arrays with PlaneGCS.
+
+- It supports 7 entity kinds and 16 constraint kinds: Shaper's 14, plus distance and
+  symmetric.
+- A row's index is its id, so the diagnosis (conflicting, redundant and partially redundant
+  constraints) names rows of the caller's arrays.
+- Identical arrays give bit-identical results, in fresh processes and after other solves.
+- The solve releases the GIL.
+- A sketch of 200 entities and 400 constraints solves in about 0.2 s.
+- `SketchBuilder` writes the arrays from frozen entity descriptions.
+- `docs/documentation/concepts/sketch.md` is the contract of the arrays.
+
+### Deliberate differences from GEOM
+
+- `shape_process` has no implicit parameters. GEOM's `ShHealing` defaults are absolute
+  lengths. The result does not depend on `CSF_ShHealingDefaults` or
+  `CSF_ShHealingUserDefaults`.
+- `remove_extra_edges` refuses two cases:
+  - a turned sphere or cylinder face whose area changes;
+  - a BlockFix result that `BRepCheck_Analyzer` rejects. GEOM heals that result with
+    absolute lengths.
+- `fillet_1d` refuses a corner where no arc fits. GEOM skips it.
+- There is no `union_faces`. GEOM's `UnionFaces` is
+  `unify_same_domain(unify_edges=False, concat_bsplines=True)` with GEOM's tolerance.
+
+### Known limits
+
+- A widening `draft_angle` rounds the vertical corners, as GEOM does. OCCT's evolved sweep
+  has only the arc join.
+- The partitioned `pipe_t_shape` wall is 1.2e-6 relative below the closed-form volume,
+  because of GEOM's filling face (3-D tolerance 1e-4). The unpartitioned wall matches to
+  about 1e-10.
+- A ShapeProcess operator that replaces a vertex without recording it gives that vertex a new
+  id. The vertex is never given a wrong id.
+- The sketch solver accepts a tangent or a perpendicular with a B-spline only at a clamped
+  end pole.
+- A cancel in `select`'s size filters waits for the shape being measured.
+
+### Wheel
+
+| | 5.1.2 | 5.2.0 |
+|---|---|---|
+| Wheel (cp313) | 41 518 324 bytes (39.6 MiB) | 42 298 174 bytes (40.3 MiB), measured on a local build |
+| Bundled DLLs | 52 | 52 |
+| Tests | 2 420 passed, 2 skipped | 3 135 passed, 2 skipped |
+
 ## 5.1.2
 
 5.1.2 adds a wheel for CPython 3.15 and hardens the build's supply chain. The code and the
