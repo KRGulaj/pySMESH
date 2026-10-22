@@ -125,9 +125,14 @@ def cone_normals() -> NDArray[np.float64]:
 
 
 def angles(normals: NDArray[np.float64], expected: NDArray[np.float64]) -> float:
-    """The largest angle between matching rows, either way round."""
-    cosines = np.clip(np.abs(np.sum(normals * expected, axis=1)), 0.0, 1.0)
-    return float(np.max(np.arccos(cosines)))
+    """The largest angle between matching rows, either way round.
+
+    atan2 of the cross and the dot product resolves the angle to round-off; arccos of the
+    dot product cannot resolve one below sqrt(2 eps) = 1.5e-8.
+    """
+    sines = np.linalg.norm(np.cross(normals, expected), axis=1)
+    cosines = np.abs(np.sum(normals * expected, axis=1))
+    return float(np.max(np.arctan2(sines, cosines)))
 
 
 def filled_rim(s: Session, rim: EntityId, cone: EntityId) -> EntityId:

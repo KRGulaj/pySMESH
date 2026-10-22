@@ -82,7 +82,11 @@ def test_points_on_a_plane_give_that_plane() -> None:
     assert float(np.max(projection.distance)) < 1e-12
     normals = s.surface_at(face, projection.uv).normals
     expected = np.array([-0.3, -0.2, 1.0]) / np.linalg.norm([-0.3, -0.2, 1.0])
-    deviation = np.arccos(np.clip(np.abs(normals @ expected), -1.0, 1.0))
+    # The angle by atan2 of the cross and the dot product resolves to round-off. arccos of
+    # the dot product cannot resolve an angle below sqrt(2 eps) = 1.5e-8: one ulp of the dot
+    # product below 1 reads as 1.49e-8, and that ulp depends on the CPU's math library.
+    cross = np.linalg.norm(np.cross(normals, expected), axis=1)
+    deviation = np.arctan2(cross, np.abs(normals @ expected))
     assert float(np.max(deviation)) < 1e-9
     assert delta.valid is True
 
