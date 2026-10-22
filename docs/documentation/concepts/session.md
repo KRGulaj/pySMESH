@@ -259,7 +259,7 @@ blocks is what a structured hexahedral mesher takes.
   `-main_half_length` to `main_half_length` and a branch along z from the main axis to
   `branch_half_length`, cut into blocks (16, or 12 when the outer radii are equal).
   Its result holds GEOM's named groups: the three pipe-end faces, the edge chains, and
-  the faces on the inner and the outer cylinders.
+  the faces on the inner cylinders.
 
 `divided_disk` and `pipe_t_shape` take numbers only: every id of their result is
 constructed. The other builders consume the bodies of their inputs and keep the inputs'

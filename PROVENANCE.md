@@ -199,8 +199,7 @@ operation code is copied for them. Two things differ. The partition's
 `GEOMAlgo_Splitter` runs serially, so that every run gives the same result. GEOM finds
 the pipe-end faces in place of the common of the shape and its bounding box; pySMESH
 takes the shape's faces that lie on that box (`GEOMAlgo_FinderShapeOn2`), which are the
-same faces, sorted the same way. pySMESH also adds the faces on the outer cylinders by
-the rule of `MakeInternalGroup`, a group GEOM does not make.
+same faces, sorted the same way.
 
 `Session.remove_extra_edges` also copies code of SALOME common_geometry_lib tag `V9_16_0`
 (`e7b5227096fef835a448004ee06cf5938850b1c4`, LGPL-2.1-or-later, used under LGPL-2.1),

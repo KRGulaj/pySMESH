@@ -1012,7 +1012,7 @@ void make_groups(const TopoDS_Shape& aShape, double theR1, double theW1, double 
 // faces on the main pipe's cylinder of radius `theR1` (axis x) whose first vertex has
 // |x| <= theLen1, and those on the incident pipe's cylinder of radius `theR2` (axis z) whose
 // first vertex has z <= theLen2, at the shape's largest vertex tolerance. GEOM names them
-// INTERNAL_FACES; with the outer radii, the same rule gives the outer faces.
+// INTERNAL_FACES.
 std::vector<TopoDS_Shape> faces_on_pipes(const TopoDS_Shape& aShape, double theR1,
                                          double theLen1, double theR2, double theLen2) {
   // Compute tolerance
@@ -1135,9 +1135,6 @@ py::dict Session::pipe_t_shape(double r1, double w1, double l1, double r2, doubl
         }
         groups.push_back(
             {"INTERNAL_FACES", TopAbs_FACE, faces_on_pipes(aShape, r1, l1, r2, l2)});
-        // pySMESH: the outer faces by the same rule (GEOM names no such group).
-        groups.push_back({"EXTERNAL_FACES", TopAbs_FACE,
-                          faces_on_pipes(aShape, aR1Ext, l1, aR2Ext, l2)});
         // The searches meshed the shape; the triangulation is not part of the result.
         BRepTools::Clean(aShape);
         result = aShape;

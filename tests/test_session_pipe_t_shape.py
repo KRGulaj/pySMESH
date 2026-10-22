@@ -146,7 +146,7 @@ def test_the_unpartitioned_wall_has_the_closed_form_volume() -> None:
     assert all(
         s.origin(EntityId(int(i))).role == NameRole.CONSTRUCTED for i in t.delta.created
     )
-    assert [g.name for g in t.groups] == ["INTERNAL_FACES", "EXTERNAL_FACES"]
+    assert [(g.name, g.kind) for g in t.groups] == [("INTERNAL_FACES", EntityKind.FACE)]
 
 
 @pytest.mark.parametrize("dims", [DIMS, EQUAL_OUTER])
@@ -182,26 +182,22 @@ def test_the_pipe_ends_are_the_three_junction_groups() -> None:
 
 
 @pytest.mark.parametrize("partition", [False, True])
-def test_the_internal_and_external_faces_cover_the_cylinders(partition: bool) -> None:
-    r1, w1, l1, r2, w2, l2 = DIMS
+def test_the_internal_faces_cover_the_inner_cylinders(partition: bool) -> None:
+    r1, _, l1, r2, _, l2 = DIMS
     s = Session()
 
     t = s.pipe_t_shape(*DIMS, partition=partition)
 
     rtol = PARTITION_RTOL if partition else WALL_RTOL
-    for name, a, b in (
-        ("INTERNAL_FACES", r1, r2),
-        ("EXTERNAL_FACES", r1 + w1, r2 + w2),
-    ):
-        (g,) = group(t, name)
-        assert g.kind == EntityKind.FACE
-        area, _ = area_and_centroid(s, g.ids)
-        np.testing.assert_allclose(area, cylinder_faces_area(a, l1, b, l2), rtol=rtol)
-        types = s.entity_types(EntityKind.FACE)
-        kinds = {
-            t_ for i, t_ in zip(types.ids, types.types, strict=True) if int(i) in g.ids
-        }
-        assert kinds == {"Cylinder"}
+    (g,) = group(t, "INTERNAL_FACES")
+    assert g.kind == EntityKind.FACE
+    area, _ = area_and_centroid(s, g.ids)
+    np.testing.assert_allclose(area, cylinder_faces_area(r1, l1, r2, l2), rtol=rtol)
+    types = s.entity_types(EntityKind.FACE)
+    kinds = {
+        t_ for i, t_ in zip(types.ids, types.types, strict=True) if int(i) in g.ids
+    }
+    assert kinds == {"Cylinder"}
 
 
 @pytest.mark.parametrize(

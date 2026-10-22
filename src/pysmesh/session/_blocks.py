@@ -490,15 +490,22 @@ class _BlockOps(_SessionBase):
         ``(R1+W1, 0, (L1 + R2+W2) / 2)`` (when the outer radii differ), and by the face
         across the wall where the pipes meet; GEOM checks the quarter is a compound of
         blocks; it is mirrored in ``x = 0`` and ``y = 0`` and the four quarters' faces are
-        glued. Without it the wall is one solid.
+        glued. Without it the wall is one solid. With it the wall's volume is about
+        1.2e-6 relative below the closed form, because GEOM's filling face across the wall
+        (``BRepOffsetAPI_MakeFilling``, 3-D tolerance 1e-4) bounds the blocks there.
 
-        **Groups.** GEOM's named groups, in GEOM's order: with ``partition``, the three
-        pipe ends (``JUNCTION_FACE_1`` .. ``3``, GEOM's sorting of the end faces) and the
-        edge chains GEOM names (``THICKNESS``, ``CIRCULAR_QUARTER_PIPE`` (twice),
-        ``HALF_LENGTH_MAIN_PIPE``, ``HALF_LENGTH_INCIDENT_PIPE``, ``FLANGE``); then
-        ``INTERNAL_FACES``, the faces on the two inner cylinders. pySMESH adds
-        ``EXTERNAL_FACES``, the faces on the two outer cylinders by the same rule; GEOM
-        names no such group.
+        **Groups.** GEOM's named groups, in GEOM's order, each with its kind. With
+        ``partition`` only:
+
+        * ``JUNCTION_FACE_1``, ``JUNCTION_FACE_2``, ``JUNCTION_FACE_3`` (``FACE``): the
+          three pipe ends, in GEOM's sorting of the end faces;
+        * ``THICKNESS``, ``CIRCULAR_QUARTER_PIPE`` (twice), ``HALF_LENGTH_MAIN_PIPE``,
+          ``HALF_LENGTH_INCIDENT_PIPE`` and ``FLANGE`` (``EDGE``): the chains of edges a
+          block mesher gives one number of segments, in GEOM's order of the chains.
+          ``FLANGE`` is there only when the outer radii differ.
+
+        Always: ``INTERNAL_FACES`` (``FACE``), the faces on the two inner cylinders. The
+        faces on the outer cylinders are not a group; :meth:`entities_on` finds them.
 
         Every id is ``CONSTRUCTED``; the result is one body per block (one solid without
         ``partition``).

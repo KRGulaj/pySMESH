@@ -346,7 +346,7 @@ with one number of segments.
 `divided_disk` adds a disk cut into quadrangles, and `pipe_t_shape` adds a T
 of two pipes cut into blocks, as GEOM's `MakeDividedDisk` and
 `MakePipeTShape` do. The T-shape comes with GEOM's named groups: the pipe
-ends, the edge chains and the inner and outer faces.
+ends, the edge chains and the inner faces.
 
 `remove_extra_edges` takes seam and degenerated edges off and joins edges
 on one curve, as GEOM's `RemoveExtraEdges` does, with GEOM's BlockFix

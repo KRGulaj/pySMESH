@@ -925,11 +925,11 @@ class PipeTShapeGroup:
 
     Attributes:
         name: GEOM's name of the group: ``"JUNCTION_FACE_1"``, ``"JUNCTION_FACE_2"``,
-            ``"JUNCTION_FACE_3"`` (the pipe ends), ``"THICKNESS"``,
+            ``"JUNCTION_FACE_3"`` (the pipe ends, ``FACE``); ``"THICKNESS"``,
             ``"CIRCULAR_QUARTER_PIPE"``, ``"HALF_LENGTH_MAIN_PIPE"``,
             ``"HALF_LENGTH_INCIDENT_PIPE"``, ``"FLANGE"`` (chains of edges a block mesher
-            gives one number of segments), ``"INTERNAL_FACES"``; and
-            ``"EXTERNAL_FACES"``, which GEOM does not name.
+            gives one number of segments, ``EDGE``); ``"INTERNAL_FACES"`` (the faces on
+            the inner cylinders, ``FACE``).
         kind: ``FACE`` or ``EDGE``.
         ids: The ids of the group's faces or edges, ascending, each once.
     """
@@ -945,8 +945,8 @@ class PipeTShape:
 
     Attributes:
         delta: The delta of the operation: every id of the T-shape in ``created``.
-        groups: GEOM's named groups, in GEOM's order (the junction faces, the edge chains,
-            the internal faces), then the external faces.
+        groups: GEOM's named groups, in GEOM's order: the junction faces, the edge chains,
+            the internal faces.
     """
 
     delta: HistoryDelta

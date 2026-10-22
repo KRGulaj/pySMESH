@@ -96,12 +96,11 @@ p.check_blocks().is_compound_of_blocks         # True
 [(g.name, len(g.ids)) for g in tee.groups]
 # JUNCTION_FACE_1 4, JUNCTION_FACE_2 4, JUNCTION_FACE_3 4, THICKNESS 21,
 # CIRCULAR_QUARTER_PIPE 6, CIRCULAR_QUARTER_PIPE 8, HALF_LENGTH_MAIN_PIPE 8, FLANGE 8,
-# HALF_LENGTH_INCIDENT_PIPE 8, INTERNAL_FACES 16, EXTERNAL_FACES 16
+# HALF_LENGTH_INCIDENT_PIPE 8, INTERNAL_FACES 16
 ```
 
-The junction faces are the three pipe ends. Each edge group is one propagation chain.
-`INTERNAL_FACES` and `EXTERNAL_FACES` are the faces on the inner and outer cylinders. GEOM
-names no external group; pySMESH adds it by the same rule.
+The groups are GEOM's. The junction faces are the three pipe ends. Each edge group is
+one propagation chain. `INTERNAL_FACES` are the faces on the inner cylinders.
 
 ## What `check_blocks` finds
 
