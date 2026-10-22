@@ -115,13 +115,23 @@ that it fails. `entities_on`, `in_place`, `select`, `glue`, `shape_process`,
   end pole.
 - A cancel in `select`'s size filters waits for the shape being measured.
 
+### Tests
+
+- The suite skips no test.
+  - The Inria reader is tested on files that MMG3D 5.8.0 wrote, committed under
+    `tests/fixtures/engine_gmf/`.
+  - The timing comparison with gmsh left the suite. `benchmark/` measures it, at a matched
+    chordal deviation.
+- Two normal-angle checks measure the angle by `atan2` of the cross and dot products.
+  `arccos` of the dot product cannot resolve an angle below 1.5e-8.
+
 ### Wheel
 
 | | 5.1.2 | 5.2.0 |
 |---|---|---|
 | Wheel (cp313) | 41 518 324 bytes (39.6 MiB) | 42 298 174 bytes (40.3 MiB), measured on a local build |
 | Bundled DLLs | 52 | 52 |
-| Tests | 2 420 passed, 2 skipped | 3 135 passed, 2 skipped |
+| Tests | 2 420 passed, 2 skipped | 3 138 passed, 0 skipped |
 
 ## 5.1.2
 
