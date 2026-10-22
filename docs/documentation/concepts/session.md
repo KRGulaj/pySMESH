@@ -77,6 +77,8 @@ other.
 | Healing | `heal`, `sew`, `remove_internal_wires`, `unify_same_domain`, `defeature`, `imprint`, `remove`, `limit_tolerance`, `change_orientation` |
 | Gluing | `glue` (coincident faces or edges, GEOM's gluer) |
 | GEOM healing operators | `divide_edge`, `close_contour`, `fill_holes`, `suppress_faces`, `shape_process` |
+| GEOM curves and surfaces | `fillet_1d` (corners of a planar wire), `smoothing_surface` (a face through a point cloud) |
+| Blocks | `make_quad`, `make_quad_from_vertices`, `make_hexa`, `multi_transform`, `divided_disk`, `pipe_t_shape`, `remove_extra_edges`; the queries `check_blocks`, `propagation_chain`, `opposite_face`, `face_by_edges`, `find_block_near` |
 | Tessellation | `tessellate` (the incremental render mesh) |
 | Queries | `entity_table`, `entity_types`, `bounding_boxes`, `mass_properties`, `surface_parameters`, `curve_geometry`, `face_wires`, `surface_at`, `curve_at`, `curvature`, `project_on_face`, `distance`, `entities_in_box`, `contains`, `adjacency`, `face_parameter_bounds`, `edge_parameter_bounds` |
 | Construction queries | `face_frame`, `tangent_frame`, `face_face_axis`, `point_at_length` |
@@ -210,6 +212,81 @@ through the copy and through ShapeProcess's own history: a split face keeps its 
 every piece. Each body is processed in its own frame and placed back. See
 [Shape processing](shape-process.md) for the operators and their parameters. It takes
 `progress` and `cancel`: a cancel stops between two operators, and inside FixShape.
+
+### Rounding the corners of a wire
+
+`fillet_1d(edges, vertices, radius)` is GEOM's `MakeFillet1D`, with GEOM's algorithm
+copied into pySMESH. `edges` are every edge of one free planar wire, open or closed;
+`vertices` are its corners to round, and an empty list rounds every corner. A corner is a
+vertex between two edges that neither lie on one line through it nor continue each other
+with a common tangent. Lines, arcs and other planar curves are accepted. The wire is
+replaced by the rounded wire: the trimmed edges keep their ids, and each arc and its two
+end vertices get new ids generated from the corner vertex, which dies. With
+`ignore_secant_vertices=True` (GEOM's default), an arc too large for the edges next to its
+corner is tried again with the collinear and tangent edges of the wire joined; the joined
+edges keep all their ids on one edge. A corner where no arc fits is refused, naming the
+vertex: GEOM leaves such a corner sharp. `fillet_2d` rounds the corners of a planar face
+instead.
+
+### A surface through a point cloud
+
+`smoothing_surface(points)` is GEOM's `MakeSmoothingSurface`: a GeomPlate surface through
+the points, starting from their average plane and approximated by a B-spline, as one new
+free face with constructed ids. The defaults are GEOM's (`max_points=2` Bezier pieces,
+`max_degree=8`, `max_distance=0` for GEOM's computed tolerance). The face passes within
+`max(1e-4, 10 * max_distance)` of the points, plus the plate's own error; points on a
+plane give that plane. Fewer than 3 points, points on one line and two points within
+1e-7 of each other are refused.
+
+### Blocks
+
+The block operations are GEOM's blocks: the quadrangle and hexahedron builders of
+`GEOMImpl_BlockDriver` and the searches of `GEOMImpl_IBlocksOperations`, copied into
+pySMESH. A block is a solid of 6 faces, each one wire of 4 edges; a compound of glued
+blocks is what a structured hexahedral mesher takes.
+
+- `make_quad(edges)` builds a face on 4 edges, or between 2 opposite edges (two straight
+  edges link their ends). `make_quad_from_vertices(vertices)` builds it on 4 corners. The
+  face is a plane where the boundary is planar, otherwise GEOM's filling surface.
+- `make_hexa(faces)` builds a solid on 6 faces, or between 2 opposite faces (GEOM's block
+  explorer builds the 4 sides).
+- `multi_transform(block, vectors, counts)` copies a body along 1 or 2 translation vectors
+  and glues the copies, as `glue` does.
+- `divided_disk(radius, ratio)` adds a disk of quadrangles, GEOM's `MakeDividedDisk`: an
+  inner square (5 faces) or hexagon (18 faces) and the faces between it and the circle.
+  A sweep of it gives a pipe of blocks.
+- `pipe_t_shape(...)` adds GEOM's `MakePipeTShape`: a main pipe along x from
+  `-main_half_length` to `main_half_length` and a branch along z from the main axis to
+  `branch_half_length`, cut into blocks (16, or 12 when the outer radii are equal).
+  Its result holds GEOM's named groups: the three pipe-end faces, the edge chains, and
+  the faces on the inner cylinders.
+
+`divided_disk` and `pipe_t_shape` take numbers only: every id of their result is
+constructed. The other builders consume the bodies of their inputs and keep the inputs'
+ids on the result:
+an edge of a quad, a face of a hexahedron. Ends or edges that the construction welds keep
+all their ids on the welded shape. The new face, solid, or linking edges are generated
+from the inputs.
+
+The queries change nothing. `check_blocks` is GEOM's `CheckCompoundOfBlocks`: a verdict
+and findings of the kinds `NOT_BLOCK`, `EXTRA_EDGE`, `NOT_GLUED` and `NOT_CONNECTED`, each
+with the ids of the bodies. `propagation_chain(edge)` gives the edges opposite to it
+through quadrangles, chain by chain: on a block mesh, the edges that take one number of
+segments. `opposite_face`, `face_by_edges` and `find_block_near` find one face or solid.
+
+`remove_extra_edges(entities, union_faces=False)` is GEOM's `RemoveExtraEdges`: the steps
+of `BlockFix_BlockFixAPI` copied into pySMESH, each with its history. It takes seam and
+degenerated edges off spheres and free-form faces, joins edges on one curve and, with
+`union_faces`, unites faces on one surface. A united face or edge keeps the ids of all
+that it unites; a removed edge or vertex dies. A result with the counts of the input is
+a refusal: nothing was removed. pySMESH differs from GEOM in two places, on purpose:
+
+- A sphere or cylinder face that GEOM puts on a turned surface must keep its area. On a
+  quarter-ball wedge GEOM's rotation changes the face, and the call is refused.
+- A result that `BRepCheck_Analyzer` rejects is refused, not repaired. GEOM repairs it
+  with the healing values of its resource file, and two of them are absolute lengths
+  (0.05 model units). Run `heal` or `shape_process` with values that fit the model, then
+  call again.
 
 ### Booleans: `fuzzy` and `parallel`
 

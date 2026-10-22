@@ -46,6 +46,14 @@
 //   session_select.cpp     — the shape tests behind the selection filters;
 //   session_glue.cpp       — gluing coincident sub-shapes with GEOM's gluer;
 //   session_geomheal.cpp   — GEOM's healing operators (ShHealOper);
+//   session_geomalgo.cpp   — GEOM's algorithms copied into pySMESH: the 1-D fillet and the
+//                            smoothing surface;
+//   session_blocks.cpp     — GEOM's blocks: quadrangles, hexahedra, block checks, searches
+//                            and arrays;
+//   session_blockfix.cpp   — GEOM's RemoveExtraEdges, with the BlockFix steps of
+//                            geom_blockfix.cpp;
+//   session_advanced.cpp   — GEOM's advanced shapes for block meshing: the divided disk and
+//                            the pipe T-shape;
 //   session_tessellate.cpp — the render mesh, and the incremental delta over it;
 //   session_handoff.cpp    — the export to a mesher, and the id-to-ordinal bijection;
 //   session_progress.cpp   — the progress/cancellation driver (declared in progress.hpp,
@@ -448,6 +456,64 @@ inline void append_unique(std::vector<TopoDS_Shape>& dst, const TopoDS_Shape& s)
   }
   dst.push_back(s);
 }
+
+// The history `hist` of an operation on `input`, keeping only the images of the kind of the
+// shape they are images of: an id never changes kind. BRepTools_ReShape::History explodes a
+// replacing wire or shell into its edges or faces. Defined in session_geomheal.cpp; every
+// operation that composes a history from ShapeFix or ShHealOper contexts filters it so.
+Handle(BRepTools_History) kind_preserving(const Handle(BRepTools_History)& hist,
+                                          const TopoDS_Shape& input);
+
+// The history of a sequence of steps, keyed by the sub-shapes of `input`: each sub-shape is
+// followed through the steps in order. A step's Modified images replace it, a shape a step
+// does not name stays itself, a removed one leaves, and the Generated images of a shape and
+// of its images are collected and followed too. Only images of the shape's own kind are
+// kept (the kind_preserving rule). Defined in session_blocks.cpp.
+//
+// BRepTools_History::Merge is not enough where a step leaves a shape as it is while it
+// modifies another shape into it (BRepBuilderAPI_MakeWire welding a vertex onto the wire's
+// vertex): Merge then drops what the next step does to the kept shape (OCCT 8.0.1,
+// BRepTools_History.cxx:283, the shape counts as propagated), and the kept shape's id dies.
+Handle(BRepTools_History) compose_histories(
+    const TopoDS_Shape& input, const std::vector<Handle(BRepTools_History)>& steps);
+
+// GEOM's Propagate (GEOMImpl_IBlocksOperations): the chains of opposite edges through the
+// quadrangles of `shape`, each sorted and in GEOM's order; with `start`, only its chain.
+// Defined in session_blocks.cpp.
+std::vector<std::vector<TopoDS_Shape>> propagation_chains(const TopoDS_Shape& shape,
+                                                          const TopoDS_Shape& start);
+
+// GEOM's CheckCompoundOfBlocks verdict on `shape` (GEOM's theToleranceC1 for the C1 test,
+// negative for none); `failure` receives the glue analyser's failure. Defined in
+// session_blocks.cpp.
+bool is_compound_of_blocks(const TopoDS_Shape& shape, double tolerance_c1,
+                           std::string& failure);
+
+// The resources of GEOM's default ShHealOper_ShapeProcess: the sequence ShapeProcess of
+// GEOM's resource file resources/ShHealing (V9_16_0), with FixFaceSize.Tolerance and
+// DropSmallEdges.Tolerance3d as given (the file says 0.05; MakeAnyFace sets 1e-05).
+// Defined in session_blocks.cpp.
+std::vector<std::pair<std::string, std::string>> geom_shhealing_resources(
+    const std::string& face_size_tolerance, const std::string& small_edges_tolerance);
+
+// What compose_shape_process gives back.
+struct ShapeProcessRun {
+  TopoDS_Shape out;                 // the processed bodies; null when cancelled or alarmed
+  Handle(BRepTools_History) hist;   // input -> out; set when `done`
+  std::vector<std::string> alarms;  // the alarms an operator sent; `out` is null then
+  bool cancelled = false;           // the range was cancelled in the sequence
+  bool done = false;                // ShHealOper_ShapeProcess's isDone
+};
+
+// The steps of ShHealOper_ShapeProcess::Perform on `input` (a compound of bodies), with the
+// TNaming copy map kept so that the history reaches the input's sub-shapes: the sequence
+// `sequence_text` reads only the resources given ("Operator.Name" -> text), never a
+// resource file. Defined in session_geomheal.cpp; Session.shape_process and the block
+// operations' face healing (GEOM's MakeAnyFace) run it.
+ShapeProcessRun compose_shape_process(
+    const TopoDS_Shape& input, const std::string& sequence_text,
+    const std::vector<std::pair<std::string, std::string>>& resources,
+    const Message_ProgressRange& range);
 
 // GProp's adaptive rule cap, the enclosed volume and its sign check live in shape_checks,
 // which the stateless module shares.
@@ -1038,6 +1104,80 @@ class Session {
                          const std::vector<std::string>& operators,
                          const py::dict& parameters, const py::object& progress,
                          const py::object& cancel);
+
+  // ---- GEOM's algorithms, copied (session_geomalgo.cpp) ------------------------------ //
+
+  // GEOM's MakeFillet1D: the corners of one planar wire body rounded by arcs of `radius`
+  // (GEOMImpl_Fillet1d and the driver's logic, copied). The wire body is replaced: its
+  // edges keep their ids, each arc and its two new vertices are generated from the corner
+  // vertex, which dies. An empty vertex list names every corner.
+  py::dict fillet_1d(const std::vector<EntityId>& edge_ids,
+                     const std::vector<EntityId>& vertex_ids, double radius,
+                     bool ignore_secant_vertices);
+
+  // AdvancedEngine's MakeSmoothingSurface: one new free face that approximates the points
+  // (GeomPlate, the driver's geometry code copied). Every id of the face is constructed.
+  py::dict smoothing_surface(const PointArray& points, int max_points, int max_degree,
+                             double max_distance);
+
+  // ---- GEOM's blocks (session_blocks.cpp) -------------------------------------------- //
+  //
+  // The quadrangle and hexahedron builders of GEOMImpl_BlockDriver and the block searches
+  // of GEOMImpl_IBlocksOperations, copied. The builders consume the bodies of their inputs
+  // (loose edges and wires, free vertices, free faces and shells), keep their ids on the
+  // result, and work on copies, because GEOM's code edits tolerances in place.
+
+  // GEOM's MakeQuad (4 edges) and MakeQuad2Edges (2 opposite edges).
+  py::dict make_quad(const std::vector<EntityId>& edge_ids);
+
+  // GEOM's MakeQuad4Vertices.
+  py::dict make_quad_from_vertices(const std::vector<EntityId>& vertex_ids);
+
+  // GEOM's MakeHexa (6 faces) and MakeHexa2Faces (2 opposite faces).
+  py::dict make_hexa(const std::vector<EntityId>& face_ids);
+
+  // GEOM's CheckCompoundOfBlocks on the bodies owning the entities, or on every body.
+  // `angular_tolerance` is GEOM's theToleranceC1: negative for no C1 test.
+  py::dict check_blocks(const std::optional<std::vector<EntityId>>& entity_ids,
+                        double angular_tolerance, const py::object& progress,
+                        const py::object& cancel) const;
+
+  // GEOM's Propagate, for the chain that holds the edge: its live ids, ascending.
+  py::array_t<std::int64_t> propagation_chain(EntityId edge_id) const;
+
+  // GEOM's GetOppositeFace, GetFaceByEdges and GetBlockNearPoint, each one id.
+  EntityId opposite_face(EntityId block_id, EntityId face_id) const;
+  EntityId face_by_edges(EntityId edge_a, EntityId edge_b) const;
+  EntityId find_block_near(double px, double py_, double pz) const;
+
+  // GEOM's MakeMultiTransformation1D and 2D by translation vectors: counts[k] blocks along
+  // vectors[k] (the original counted), glued (GEOMAlgo_Gluer2) at the block's tolerance.
+  py::dict multi_transform(EntityId block_id, const std::vector<std::array<double, 3>>& vectors,
+                           const std::vector<int>& counts);
+
+  // GEOM's RemoveExtraEdges on the bodies owning the entities (session_blockfix.cpp): the
+  // BLOCK_REMOVE_EXTRA branch of GEOMImpl_BlockDriver with BlockFix_BlockFixAPI::Perform
+  // copied, each step's history composed. `union_faces` is geomBuilder's doUnionFaces.
+  py::dict remove_extra_edges(const std::vector<EntityId>& entity_ids, bool union_faces,
+                              const py::object& progress, const py::object& cancel);
+
+  // ---- GEOM's advanced shapes for block meshing (session_advanced.cpp) --------------- //
+
+  // GEOM's MakeDividedDisk: a disk of `radius` in the plane `orientation` ("xy", "yz",
+  // "zx"), split into quadrangles around an inner square or hexagon whose corners lie at
+  // `ratio` percent of the radius (AdvancedEngine_DividedDiskDriver, copied). One new shell
+  // body; every id constructed.
+  py::dict divided_disk(double radius, double ratio, const std::string& orientation,
+                        const std::string& pattern);
+
+  // GEOM's MakePipeTShape for the wall only (no thickness reduction, chamfer or fillet): the
+  // main pipe along x from -l1 to l1, the branch along z from the main axis to l2, inner
+  // radii r1 and r2 and wall thicknesses w1 and w2. With `partition`, GEOM's block
+  // partition (the quarter split, mirrored and glued). The method of AdvancedEngine's
+  // operations, ported to OCCT calls. Returns {"delta", "groups"}: GEOM's named groups,
+  // each {"name", "kind", "ids"}.
+  py::dict pipe_t_shape(double r1, double w1, double l1, double r2, double w2, double l2,
+                        bool partition);
 
   // ---- snapshot / restore ----------------------------------------------------------- //
 

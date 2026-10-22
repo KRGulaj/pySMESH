@@ -46,6 +46,8 @@ pySMESH covers three areas:
   tessellation, offsets, distance and leak checks, point-in-solid
   classification, and geometry queries. See
   [Geometry operations](#geometry-operations).
+- **`pysmesh.sketch`**: a 2-D sketch constraint solver over flat NumPy
+  arrays (FreeCAD's PlaneGCS). See [Sketch solver](#sketch-solver).
 
 Two entry points serve one-shot work outside a session. `compute_viscous_layers`
 grows boundary-layer prisms on a surface mesh that you supply.
@@ -326,6 +328,33 @@ closed solid.
 `CSF_ShHealing*` resource file, and every id is carried through the copy and
 through ShapeProcess's own history.
 
+`fillet_1d` rounds the corners of a free planar wire with circle arcs, as
+GEOM's `MakeFillet1D` does, with GEOM's algorithm copied into pySMESH. The
+trimmed edges keep their ids; each arc is new, generated from the corner
+vertex it replaces. By GEOM's default, an arc too large for the edges next to
+its corner is tried again with the wire's collinear edges joined.
+
+`smoothing_surface` adds a free face through a cloud of points, as GEOM's
+`MakeSmoothingSurface` does: a GeomPlate surface from the points' average
+plane, approximated by a B-spline.
+
+`make_quad`, `make_quad_from_vertices` and `make_hexa` build quadrangle faces
+and hexahedral blocks as GEOM's block operations do, and `multi_transform`
+copies a block along one or two vectors and glues the copies. `check_blocks`
+tells whether the bodies form a compound of glued blocks, and
+`propagation_chain` gives the chain of opposite edges a block mesher meshes
+with one number of segments.
+
+`divided_disk` adds a disk cut into quadrangles, and `pipe_t_shape` adds a T
+of two pipes cut into blocks, as GEOM's `MakeDividedDisk` and
+`MakePipeTShape` do. The T-shape comes with GEOM's named groups: the pipe
+ends, the edge chains and the inner faces.
+
+`remove_extra_edges` takes seam and degenerated edges off and joins edges
+on one curve, as GEOM's `RemoveExtraEdges` does, with GEOM's BlockFix
+steps copied into pySMESH; `union_faces=True` also unites faces on one
+surface. Every id is carried through each step.
+
 `make_filling` takes `support_faces`: the filled surface is tangent to each
 named face along its boundary edge, and those edges keep their ids.
 
@@ -530,6 +559,32 @@ IGES entity count are not printed.
 
 See `src/pysmesh/_core.pyi` for the full typed API. `mypy --strict`
 type-checks against it.
+
+## Sketch solver
+
+`pysmesh.sketch.solve` solves a 2-D sketch with FreeCAD's PlaneGCS: points,
+lines, circles, arcs, ellipses, elliptic arcs and B-splines, under Shaper's
+14 constraints plus distance and symmetric. The sketch is a set of flat
+NumPy arrays, and a row's index is its id, so the diagnosis (conflicting,
+redundant and partially redundant rows) maps back to the caller's lists.
+The solver is a free function: it keeps no state and touches no `Session`.
+Identical arrays give bit-identical results.
+
+```python
+import pysmesh.sketch as sk
+
+b = sk.SketchBuilder()
+c = b.add(sk.Point(0.0, 0.0))
+arc = b.add(sk.Arc(c, b.add(sk.Point(1.0, 0.0)), b.add(sk.Point(0.0, 1.0))))
+b.fix(c)
+b.radius(arc, 2.0)
+arrays = b.build()
+solution = arrays.solve()   # UNDER_CONSTRAINED, dof 2: the two angles are free
+```
+
+The arrays, the kind codes and the units are the contract of
+`docs/documentation/concepts/sketch.md`. A solved sketch becomes CAD through
+the session's `add_line`, `add_arc`, `make_wire` and `make_face`.
 
 ## Packaging model
 

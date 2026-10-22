@@ -82,6 +82,7 @@ nav:
       - Session: concepts/session.md
       - Selection rules: concepts/selection-rules.md
       - Shape processing: concepts/shape-process.md
+      - Sketch arrays: concepts/sketch.md
       - Meshing model: concepts/meshing-model.md
       - Discrete meshes: concepts/discrete-meshes.md
       - Units: concepts/units.md
@@ -91,10 +92,12 @@ nav:
       - Geometry operations: guides/geometry-operations.md
       - Mesh editing: guides/mesh-editing.md
       - Free meshing with NETGEN: guides/netgen.md
+      - Block decomposition: guides/block-decomposition.md
   - Benchmarks:
       - Tessellation against gmsh: benchmarks/gmsh-vs-pysmesh.md
   - API Reference:
       - Overview: reference/index.md
       - Session: reference/session.md
       - Mesher: reference/mesher.md
+      - Sketch: reference/sketch.md
       - Geometry functions: reference/geometry.md

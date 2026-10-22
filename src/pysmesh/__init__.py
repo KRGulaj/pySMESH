@@ -9,7 +9,8 @@ types for geometry query and surface-mesh injection; :func:`compute_viscous_laye
 :class:`VLParams` / :class:`VLResult` / :class:`ExtrusionMethod`) for boundary-layer prism
 generation; :func:`unify_same_domain` (with :class:`UnifyParams` / :class:`UnifyResult`) for
 B-rep same-domain face/edge merging; and :class:`PysmeshError` for every library failure, with
-:class:`PysmeshCancelled` for the subset a caller stopped.
+:class:`PysmeshCancelled` for the subset a caller stopped. The 2-D sketch constraint solver
+is the submodule :mod:`pysmesh.sketch`; its names are not re-exported here.
 
 Runtime contract (changed in 4.0.0): pySMESH has **no shared native dependency**. VTK, OCCT
 and Boost are all private to ``_core``: their DLLs are bundled into the wheel and
@@ -29,6 +30,7 @@ from __future__ import annotations
 from typing import Final
 
 from . import _build_info as _build_info
+from . import sketch as sketch
 
 from ._core import (
     EdgeInfo,
@@ -229,6 +231,9 @@ from .session import (
     AdjacencyPairs,
     AxisLine,
     BelongsTo,
+    BlocksCheck,
+    BlocksErrorKind,
+    BlocksFinding,
     BooleanCheckFinding,
     BoundsTable,
     BoxRegion,
@@ -260,6 +265,8 @@ from .session import (
     OnPlaneSide,
     OppositeToEdge,
     Origin,
+    PipeTShape,
+    PipeTShapeGroup,
     PlaneRegion,
     Projection,
     RelativeToSolid,
@@ -313,11 +320,16 @@ __version__: Final[str] = _build_info.VERSION
 
 __all__ = [
     "AxisLine",
+    "BlocksCheck",
+    "BlocksErrorKind",
+    "BlocksFinding",
     "BooleanCheckFinding",
     "BoxRegion",
     "CylinderRegion",
     "EdgePoint",
     "FaceFrame",
+    "PipeTShape",
+    "PipeTShapeGroup",
     "PlaneRegion",
     "SphereRegion",
     "BelongsTo",

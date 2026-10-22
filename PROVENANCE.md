@@ -138,6 +138,21 @@ compile error. Compiled with `/showIncludes`, `GCS.cpp` reads every Eigen header
 `extern/eigen`; the build environment's own Eigen (under `Library/include/eigen3`) is on no
 include path.
 
+`pysmesh.sketch` (`src/bindings/sketch.cpp`) calls PlaneGCS through `GCS::System` and its
+geometry classes, as they are vendored. The way each sketch constraint becomes PlaneGCS
+equations follows SALOME Shaper's PlaneGCS adapter: `src/SketchSolver/PlaneGCSSolver/` and
+the `SketchSolver_Constraint*` classes, at commit
+`59c5672c2b67ca007cadb522e198a9cf38434886` (`V9_15_0-35-g59c5672c2`, LGPL-2.1-or-later),
+read in `third_party_ref/Salome_shaper`. No Shaper code is copied or compiled: pySMESH's
+code makes the `GCS::System` calls that Shaper's adapter makes, and
+`docs/documentation/concepts/sketch.md` lists them per constraint. Four things differ from
+Shaper, each stated on that page. A BFGS result that leaves a residual is a failure, not a
+solution. A point on a B-spline uses PlaneGCS's `addConstraintPointOnBSpline`, because
+Shaper's form needs Shaper's own B-spline class. A tangent or a perpendicular with a B-spline
+is taken only at an end pole, where PlaneGCS's B-spline gives a direction. Two lines of equal
+length use `addConstraintEqualLength`. The point of a B-spline nearest a point, which starts
+that point's parameter, comes from OCCT's `Geom2dAPI_ProjectPointOnCurve`.
+
 ## Algorithm code copied from GEOM
 
 A few GEOM functions that pySMESH needs live in `GEOMImpl`, GEOM's driver layer, which is
@@ -149,6 +164,89 @@ licence in a comment above them. All are from SALOME GEOM tag `V9_16_0`
 | Function | Upstream file | Local file | Used by |
 |---|---|---|---|
 | `MAX_TOLERANCE`, `isSameEdge`, `isSameFace`, `isSameSolid` | `src/GEOMImpl/GEOMImpl_IShapesOperations.cxx` | `src/bindings/session_locate.cpp` | `Session.find_same` (GEOM's `GetSameIDs` rule) |
+| `GEOMImpl_Fillet1d`, `GEOMImpl_Fillet1dPoint` (the whole class) | `src/GEOMImpl/GEOMImpl_Fillet1d.hxx`, `.cxx` | `src/bindings/geom_fillet1d.hpp`, `.cpp` (four upstream to-do comments removed, their facts kept as plain comments) | `Session.fillet_1d` |
+| `MakeEdgeFromWire` (`GEOMImpl_ShapeDriver`), `AreEdgesC1` (`GEOMImpl_HealingDriver`) | `src/GEOMImpl/GEOMImpl_ShapeDriver.cxx`, `src/GEOMImpl/GEOMImpl_HealingDriver.cxx` | `src/bindings/geom_edge_from_wire.hpp`, `.cpp` (two upstream to-do comments removed, their facts kept as plain comments) | `Session.fillet_1d` (the joining of collinear edges) |
+| `anotherVertex`, `takePlane`, `addEdgeRelation` (`GEOMImpl_Fillet1dDriver`) | `src/GEOMImpl/GEOMImpl_Fillet1dDriver.cxx` | `src/bindings/session_geomalgo.cpp` | `Session.fillet_1d` |
+| `MakeSmoothingSurfaceUnClosed` (`AdvancedEngine_SmoothingSurfaceDriver`) | `src/AdvancedEngine/AdvancedEngine_SmoothingSurfaceDriver.cxx` | `src/bindings/session_geomalgo.cpp` | `Session.smoothing_surface` |
+| `GEOMImpl_Block6Explorer` (the whole class) | `src/GEOMImpl/GEOMImpl_Block6Explorer.hxx`, `.cxx` | `src/bindings/geom_block6.hpp`, `.cpp` | `Session.make_quad`, `make_quad_from_vertices`, `make_hexa`, `opposite_face`, the block searches |
+| The quad and hexa branches of `GEOMImpl_BlockDriver::Execute` (`BLOCK_FACE_FOUR_EDGES`, `BLOCK_FACE_TWO_EDGES`, `BLOCK_FACE_FOUR_PNT`, `BLOCK_SIX_FACES`, `BLOCK_TWO_FACES`) | `src/GEOMImpl/GEOMImpl_BlockDriver.cxx` | `src/bindings/session_blocks.cpp` | `Session.make_quad`, `make_quad_from_vertices`, `make_hexa` |
+| `IsQuadrangle`, `AddBlocksFrom`, `FindConnected`, `HasAnyConnection`, the steps of `CheckCompoundOfBlocks`, `Propagate`, `GetOppositeFace`, `GetFaceByEdges`, `GetBlockNearPoint` (`GEOMImpl_IBlocksOperations`) | `src/GEOMImpl/GEOMImpl_IBlocksOperations.cxx` | `src/bindings/session_blocks.cpp` | `Session.check_blocks`, `propagation_chain`, `opposite_face`, `face_by_edges`, `find_block_near` |
+| `MakeDiskSquare`, `MakeDiskHexagon`, `TransformShape`, `WPlaneTransform` (`AdvancedEngine_DividedDiskDriver`) | `src/AdvancedEngine/AdvancedEngine_DividedDiskDriver.cxx` | `src/bindings/session_advanced.cpp` | `Session.divided_disk` |
+| `MakePipeTShape`, `MakeQuarterPipeTShape` (`AdvancedEngine_PipeTShapeDriver`) | `src/AdvancedEngine/AdvancedEngine_PipeTShapeDriver.cxx` | `src/bindings/session_advanced.cpp` | `Session.pipe_t_shape` |
+| `MakeWireFromEdges` (`GEOMImpl_ShapeDriver`, its `GEOMImpl_WBM_FixTolerance` mode) | `src/GEOMImpl/GEOMImpl_ShapeDriver.cxx` | `src/bindings/session_advanced.cpp` | `Session.pipe_t_shape` |
+| The `BLOCK_REMOVE_EXTRA` branch of `GEOMImpl_BlockDriver::Execute` (its steps; its repair of an invalid result is replaced by a refusal) | `src/GEOMImpl/GEOMImpl_BlockDriver.cxx` | `src/bindings/session_blockfix.cpp` | `Session.remove_extra_edges` |
+
+Four of these carry OCCT 8.0.1 port changes and nothing else: an iterator header that
+OCCT 8.0.1 removed is replaced by the container header that keeps its typedef, and a
+`Standard_Failure::Raise`, which OCCT 8.0.1 removed, is a `throw` of the same exception
+with the same text. `MakeEdgeFromWire` also hands back the history of the `ShapeFix_Shape`
+it runs, read from the fixer's own context; `MakeSmoothingSurfaceUnClosed` keeps only its
+OCCT 7.7 and later adaptor branch.
+
+`Session.fillet_1d` (`src/bindings/session_geomalgo.cpp`) also takes the driver logic of
+`GEOMImpl_Fillet1dDriver::Execute` and `MakeFillet`, and of
+`GEOMImpl_HealingDriver::FuseCollinearEdges` as the driver calls it, in their order. It
+changes four things. Each step writes its history. The wire is a private copy, so
+`FuseCollinearEdges` makes no copy of its own. A corner where no arc fits ends the call
+with a refusal, where GEOM's last pass leaves the corner sharp. `GEOMUtils::FixShapeTolerance`
+is spelled out in its steps, so that the history of its `ShapeFix_Shape` is read.
+
+The block code changes only how the history is kept and how GEOM's driver reports a
+failure. The copied explorer records the edges and faces it makes, and its `MakeFace` and
+`MakeAnyFace` return the history of the face they build. `MakeAnyFace` heals an invalid
+face with GEOM's default `ShHealOper_ShapeProcess`, whose sequence and parameters GEOM
+reads from its `ShHealing` resource file; pySMESH runs the same steps
+(`compose_shape_process` in `src/bindings/session_geomheal.cpp`) with the values of that
+file at `V9_16_0` and the two overrides `MakeAnyFace` sets, and reads no file. GEOM's
+sewing of six faces (`ShHealOper_Sewing`) is asked to record edges and vertices too (its
+`SetHistoryLevel`), which changes no shape it builds. `GetBlockNearPoint` keeps its
+blocks in the order of the model rather than in a map keyed by shape address, so that a
+tie gives the same block in every run. `Propagate` starts at the named edge. The
+builders run on copies of their inputs, because GEOM's code edits tolerances in place.
+
+`Session.pipe_t_shape` (`src/bindings/session_advanced.cpp`) ports the method of
+`AdvancedEngine_IOperations::MakePipeTShape` for the wall (no thickness reduction,
+chamfer or fillet). GEOM builds it from GEOM operation calls on GEOM objects:
+`MakePipeTShapePartition`, `MakePipeTShapeMirrorAndGlue`, `MakeGroups` and
+`MakeInternalGroup`. pySMESH makes the OCCT and GEOM-algorithm calls that those
+operations make, in GEOM's order, with GEOM's tolerances and argument checks; no GEOM
+operation code is copied for them. Two things differ. The partition's
+`GEOMAlgo_Splitter` runs serially, so that every run gives the same result. GEOM finds
+the pipe-end faces in place of the common of the shape and its bounding box; pySMESH
+takes the shape's faces that lie on that box (`GEOMAlgo_FinderShapeOn2`), which are the
+same faces, sorted the same way.
+
+`Session.remove_extra_edges` also copies code of SALOME common_geometry_lib tag `V9_16_0`
+(`e7b5227096fef835a448004ee06cf5938850b1c4`, LGPL-2.1-or-later, used under LGPL-2.1),
+the vendored `extern/common_geometry_lib`:
+
+| Function | Upstream file | Local file |
+|---|---|---|
+| `ComputeMaxTolOfFace`, `FixResult`, `BlockFix::RotateSphereSpace`, `BlockFix::RefillProblemFaces`, `BlockFix::FixRanges` | `src/BlockFix/BlockFix.cxx` | `src/bindings/geom_blockfix.cpp` |
+| `BlockFix_BlockFixAPI::Perform` | `src/BlockFix/BlockFix_BlockFixAPI.cxx` | `src/bindings/geom_blockfix.cpp` |
+
+These functions keep each step's context, modifier and substitution local, so their
+history is out of reach; the copies write it. A script writes `geom_blockfix.cpp` from the
+vendored sources, and every change is marked `pySMESH:` in it. `Perform` becomes a function
+of its members, keeps only its OCCT 7.5.3 and later branches and the two face unification
+values `RemoveExtraEdges` passes (0 and -1), and stops after a cancel. Each step's history
+is kept, and `compose_histories` follows every input sub-shape through the steps in order.
+The vendored classes `BlockFix_SphereSpaceModifier` and `BlockFix_PeriodicSurfaceModifier`
+are called as they are.
+
+`Session.remove_extra_edges` differs from GEOM in two places, both on purpose:
+
+- **Turned faces.** A sphere or cylinder face that `RotateSphereSpace` or `FixRanges` puts
+  on a turned surface must keep its area within 1e-6 relative, where the turned shape is
+  used. If it does not, the call is refused. GEOM has no such check. On a quarter-ball
+  wedge, GEOM's rotation gives a face 3.8e-4 smaller whose mesh reaches 0.033 outside the
+  wedge, and `BRepCheck_Analyzer` accepts the solid. That result is not the input shape.
+- **No repair.** GEOM repairs a result that `BRepCheck_Analyzer` rejects with its default
+  `ShHealOper_ShapeProcess` and the values of its resource file. Two of them are absolute
+  lengths: `FixFaceSize.Tolerance` and `DropSmallEdges.Tolerance3d`, 0.05 model units. In a
+  model in metres, that repair removes faces and edges below 5 cm without a word. pySMESH
+  refuses such a result, and names the `BRepCheck` statuses. A caller can run `heal` or
+  `shape_process` with its own parameters and call again.
 
 One function is adapted, not copied unchanged. `mesh_as_geom` in
 `src/bindings/session_locate.cpp` takes the steps of `GEOMAlgo_AlgoTools::MeshShape` and

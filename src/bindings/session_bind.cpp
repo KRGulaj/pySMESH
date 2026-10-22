@@ -165,6 +165,29 @@ void bind_session(py::module_& m) {
       .def("shape_process", &Session::shape_process, py::arg("entity_ids"),
            py::arg("operators"), py::arg("parameters"), py::arg("progress"),
            py::arg("cancel"))
+      .def("fillet_1d", &Session::fillet_1d, py::arg("edge_ids"), py::arg("vertex_ids"),
+           py::arg("radius"), py::arg("ignore_secant_vertices"))
+      .def("smoothing_surface", &Session::smoothing_surface, py::arg("points"),
+           py::arg("max_points"), py::arg("max_degree"), py::arg("max_distance"))
+      .def("make_quad", &Session::make_quad, py::arg("edge_ids"))
+      .def("make_quad_from_vertices", &Session::make_quad_from_vertices,
+           py::arg("vertex_ids"))
+      .def("make_hexa", &Session::make_hexa, py::arg("face_ids"))
+      .def("check_blocks", &Session::check_blocks, py::arg("entity_ids"),
+           py::arg("angular_tolerance"), py::arg("progress"), py::arg("cancel"))
+      .def("propagation_chain", &Session::propagation_chain, py::arg("edge_id"))
+      .def("opposite_face", &Session::opposite_face, py::arg("block_id"), py::arg("face_id"))
+      .def("face_by_edges", &Session::face_by_edges, py::arg("edge_a"), py::arg("edge_b"))
+      .def("find_block_near", &Session::find_block_near, py::arg("px"), py::arg("py"),
+           py::arg("pz"))
+      .def("multi_transform", &Session::multi_transform, py::arg("block_id"),
+           py::arg("vectors"), py::arg("counts"))
+      .def("remove_extra_edges", &Session::remove_extra_edges, py::arg("entity_ids"),
+           py::arg("union_faces"), py::arg("progress"), py::arg("cancel"))
+      .def("divided_disk", &Session::divided_disk, py::arg("radius"), py::arg("ratio"),
+           py::arg("orientation"), py::arg("pattern"))
+      .def("pipe_t_shape", &Session::pipe_t_shape, py::arg("r1"), py::arg("w1"),
+           py::arg("l1"), py::arg("r2"), py::arg("w2"), py::arg("l2"), py::arg("partition"))
       .def("entity_types", &Session::entity_types, py::arg("kind"))
       .def("surface_parameters", &Session::surface_parameters, py::arg("face_ids"))
       .def("bounding_boxes", &Session::bounding_boxes, py::arg("kind"))

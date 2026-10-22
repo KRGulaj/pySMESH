@@ -189,6 +189,14 @@ pybind11_add_module(_core
     src/bindings/session_select.cpp
     src/bindings/session_glue.cpp
     src/bindings/session_geomheal.cpp
+    src/bindings/session_geomalgo.cpp
+    src/bindings/geom_fillet1d.cpp
+    src/bindings/geom_edge_from_wire.cpp
+    src/bindings/session_blocks.cpp
+    src/bindings/geom_block6.cpp
+    src/bindings/session_advanced.cpp
+    src/bindings/geom_blockfix.cpp
+    src/bindings/session_blockfix.cpp
     src/bindings/session_tessellate.cpp
     src/bindings/session_handoff.cpp
     src/bindings/session_progress.cpp
@@ -207,7 +215,8 @@ pybind11_add_module(_core
     src/bindings/mesher_gmf.cpp
     src/bindings/mesher_viscous.cpp
     src/bindings/mesher_netgen.cpp
-    src/bindings/mesher_bind.cpp)
+    src/bindings/mesher_bind.cpp
+    src/bindings/sketch.cpp)
 target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
 # mesher_netgen.cpp includes the NETGENPlugin headers, and through them netgen's own, so it
 # compiles with netgen's define set (cmake/Netgen/CMakeLists.txt). No other binding file

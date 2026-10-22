@@ -61,6 +61,8 @@ std::string id_list(const std::vector<EntityId>& ids) {
   return out;
 }
 
+}  // namespace
+
 // The history `hist` of an operation on `input`, keeping only the images of the kind of
 // the shape they are images of.
 //
@@ -95,6 +97,8 @@ Handle(BRepTools_History) kind_preserving(const Handle(BRepTools_History)& hist,
   }
   return out;
 }
+
+namespace {
 
 // The bodies of the root that hold `sub`, and the others.
 std::pair<std::vector<TopoDS_Shape>, std::vector<TopoDS_Shape>> split_bodies(
@@ -1083,6 +1087,67 @@ TopoDS_Shape place_back(
 
 }  // namespace
 
+ShapeProcessRun compose_shape_process(
+    const TopoDS_Shape& input, const std::string& sequence_text,
+    const std::vector<std::pair<std::string, std::string>>& resources,
+    const Message_ProgressRange& range) {
+  ShapeProcessRun run;
+  // The steps of ShHealOper_ShapeProcess::Perform (GEOM V9_16_0,
+  // src/ShHealOper/ShHealOper_ShapeProcess.cxx; Copyright (C) 2007-2026 CEA, EDF,
+  // OPEN CASCADE; Copyright (C) 2003-2007 OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
+  // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS; LGPL-2.1 or later, used here
+  // under LGPL-2.1; recorded in PROVENANCE.md), in its order, with the copy map
+  // kept: the tolerance before; the copy that leaves the input untouched
+  // (TNaming_CopyShape::CopyTool); the sequence (ShapeProcessAPI_ApplySequence);
+  // PrepareShape; GEOMAlgo_AlgoTools::FixCurveOnSurfaceTolerances; the isDone test.
+  // Three changes, none of which changes the shape OCCT builds:
+  //  * the sequence's resource manager is the empty one that an empty resource name
+  //    gives (ShapeProcess_Context::Init), not one read from the CSF_ShHealingDefaults
+  //    and CSF_ShHealingUserDefaults files, and every resource is set here;
+  //  * the history goes down to the vertices (TopAbs_VERTEX, where ShHealOper's
+  //    constructor sets TopAbs_EDGE): the detalisation is read only where
+  //    ShapeProcess_ShapeContext records the history;
+  //  * the bodies go in without their placement and are placed back (unplaced_bodies).
+  ShapeAnalysis_ShapeTolerance tolerance;
+  const double initial_tol = tolerance.Tolerance(input, 0);
+  NCollection_IndexedDataMap<Handle(Standard_Transient), Handle(Standard_Transient)> copy_map;
+  TopoDS_Shape copy;
+  TNaming_CopyShape::CopyTool(input, copy_map, copy);
+  std::vector<std::pair<TopoDS_Shape, TopLoc_Location>> bodies;
+  const TopoDS_Compound work = unplaced_bodies(copy, bodies);
+  ShapeProcessAPI_ApplySequence sequence("", "ShapeProcess");
+  sequence.Context()->SetDetalisation(TopAbs_VERTEX);
+  Handle(AlarmLog) log = new AlarmLog;
+  sequence.Context()->SetMessenger(new Message_Messenger(log));
+  const Handle(Resource_Manager)& rm = sequence.Context()->ResourceManager();
+  rm->SetResource("ShapeProcess.exec.op", sequence_text.c_str());
+  for (const auto& [name, value] : resources) {
+    rm->SetResource(("ShapeProcess." + name).c_str(), value.c_str());
+  }
+  const TopoDS_Shape local = sequence.PrepareShape(work, /*fillmap=*/false, TopAbs_EDGE, range);
+  if (range.UserBreak()) {
+    run.cancelled = true;
+    return run;
+  }
+  if (!log->alarms().empty()) {
+    run.alarms = log->alarms();
+    return run;
+  }
+  run.out = place_back(local, bodies, sequence.Context()->Map());
+  const bool tol_changed = GEOMAlgo_AlgoTools::FixCurveOnSurfaceTolerances(run.out);
+  // ShHealOper_ShapeProcess's isDone: the result is another shape, or a tolerance
+  // changed by more than Precision::Confusion().
+  run.done = !work.IsSame(local);
+  if (!run.done) {
+    run.done = std::abs(initial_tol - tolerance.Tolerance(run.out, 0)) > Precision::Confusion() ||
+               tol_changed;
+  }
+  if (run.done) {
+    run.hist = shape_process_history(input, copy, copy_map, sequence.Context()->Map(), run.out);
+  }
+  return run;
+}
+
 py::dict Session::shape_process(const std::vector<EntityId>& entity_ids,
                                 const std::vector<std::string>& operators,
                                 const py::dict& parameters, const py::object& progress,
@@ -1109,47 +1174,15 @@ py::dict Session::shape_process(const std::vector<EntityId>& entity_ids,
                                          const Message_ProgressRange& range, TopoDS_Shape& out,
                                          Handle(BRepTools_History) & hist) {
         require_single_placements(input);
-        // The steps of ShHealOper_ShapeProcess::Perform (GEOM V9_16_0,
-        // src/ShHealOper/ShHealOper_ShapeProcess.cxx; Copyright (C) 2007-2026 CEA, EDF,
-        // OPEN CASCADE; Copyright (C) 2003-2007 OPEN CASCADE, EADS/CCR, LIP6, CEA/DEN,
-        // CEDRAT, EDF R&D, LEG, PRINCIPIA R&D, BUREAU VERITAS; LGPL-2.1 or later, used here
-        // under LGPL-2.1; recorded in PROVENANCE.md), in its order, with the copy map
-        // kept: the tolerance before; the copy that leaves the input untouched
-        // (TNaming_CopyShape::CopyTool); the sequence (ShapeProcessAPI_ApplySequence);
-        // PrepareShape; GEOMAlgo_AlgoTools::FixCurveOnSurfaceTolerances; the isDone test.
-        // Three changes, none of which changes the shape OCCT builds:
-        //  * the sequence's resource manager is the empty one that an empty resource name
-        //    gives (ShapeProcess_Context::Init), not one read from the CSF_ShHealingDefaults
-        //    and CSF_ShHealingUserDefaults files, and every resource is set here;
-        //  * the history goes down to the vertices (TopAbs_VERTEX, where ShHealOper's
-        //    constructor sets TopAbs_EDGE): the detalisation is read only where
-        //    ShapeProcess_ShapeContext records the history;
-        //  * the bodies go in without their placement and are placed back (unplaced_bodies).
-        ShapeAnalysis_ShapeTolerance tolerance;
-        const double initial_tol = tolerance.Tolerance(input, 0);
-        NCollection_IndexedDataMap<Handle(Standard_Transient), Handle(Standard_Transient)>
-            copy_map;
-        TopoDS_Shape copy;
-        TNaming_CopyShape::CopyTool(input, copy_map, copy);
-        std::vector<std::pair<TopoDS_Shape, TopLoc_Location>> bodies;
-        const TopoDS_Compound work = unplaced_bodies(copy, bodies);
-        ShapeProcessAPI_ApplySequence sequence("", "ShapeProcess");
-        sequence.Context()->SetDetalisation(TopAbs_VERTEX);
-        Handle(AlarmLog) log = new AlarmLog;
-        sequence.Context()->SetMessenger(new Message_Messenger(log));
-        const Handle(Resource_Manager)& rm = sequence.Context()->ResourceManager();
-        rm->SetResource("ShapeProcess.exec.op", sequence_text.c_str());
-        for (const auto& [name, value] : resources) {
-          rm->SetResource(("ShapeProcess." + name).c_str(), value.c_str());
-        }
-        const TopoDS_Shape local =
-            sequence.PrepareShape(work, /*fillmap=*/false, TopAbs_EDGE, range);
-        if (range.UserBreak()) {
+        // compose_shape_process: the steps of ShHealOper_ShapeProcess::Perform with the
+        // copy map kept.
+        ShapeProcessRun run = compose_shape_process(input, sequence_text, resources, range);
+        if (run.cancelled) {
           return;  // rework raises the cancel and commits nothing
         }
-        if (!log->alarms().empty()) {
+        if (!run.alarms.empty()) {
           std::string text;
-          for (const std::string& a : log->alarms()) {
+          for (const std::string& a : run.alarms) {
             text += (text.empty() ? "" : "; ") + a;
           }
           throw PysmeshError("Session.shape_process: an operator of the sequence '" +
@@ -1157,21 +1190,13 @@ py::dict Session::shape_process(const std::vector<EntityId>& entity_ids,
                              ids + " (ShapeProcess reported: " + text +
                              "); nothing is committed.");
         }
-        out = place_back(local, bodies, sequence.Context()->Map());
-        const bool tol_changed = GEOMAlgo_AlgoTools::FixCurveOnSurfaceTolerances(out);
-        // ShHealOper_ShapeProcess's isDone: the result is another shape, or a tolerance
-        // changed by more than Precision::Confusion().
-        bool done = !work.IsSame(local);
-        if (!done) {
-          done = std::abs(initial_tol - tolerance.Tolerance(out, 0)) > Precision::Confusion() ||
-                 tol_changed;
-        }
-        if (!done) {
+        if (!run.done) {
           throw PysmeshError("Session.shape_process: the sequence '" + sequence_text +
                              "' changed nothing in the bodies of the entities " + ids +
                              "; nothing is committed.");
         }
-        hist = shape_process_history(input, copy, copy_map, sequence.Context()->Map(), out);
+        out = run.out;
+        hist = run.hist;
       });
 }
 

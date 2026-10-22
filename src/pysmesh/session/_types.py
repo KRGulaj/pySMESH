@@ -880,6 +880,94 @@ class ShapeCheckFinding:
     statuses: tuple[str, ...]
 
 
+class BlocksErrorKind(StrEnum):
+    """The kinds of finding of :meth:`Session.check_blocks`: GEOM's ``BCErrorType``.
+
+    Attributes:
+        NOT_BLOCK: A solid that is not a block (6 faces, each a quadrangle), or a body that
+            is not a solid, face or shell.
+        EXTRA_EDGE: A solid that could be a block once its seam or degenerated edges, or
+            its faces on one surface, were merged (``BlockFix_CheckTool``); see
+            :meth:`Session.remove_extra_edges`.
+        INVALID_CONNECTION: GEOM defines it for two blocks that touch other than by a whole
+            face or edge; GEOM's check (V9_16_0) never reports it, and neither does this
+            one.
+        NOT_CONNECTED: A block that no chain of blocks connects to the largest connected
+            set.
+        NOT_GLUED: Two blocks that touch along coincident faces that are not one face
+            (``GEOMAlgo_GlueAnalyser``); see :meth:`Session.glue`.
+    """
+
+    NOT_BLOCK = "NOT_BLOCK"
+    EXTRA_EDGE = "EXTRA_EDGE"
+    INVALID_CONNECTION = "INVALID_CONNECTION"
+    NOT_CONNECTED = "NOT_CONNECTED"
+    NOT_GLUED = "NOT_GLUED"
+
+
+@dataclass(frozen=True)
+class BlocksFinding:
+    """One finding of :meth:`Session.check_blocks`.
+
+    Attributes:
+        kind: The kind of error.
+        ids: (K,) int64, ascending — the ids of the bodies it names: the solids, or the
+            highest-dimension ids of a body that is not a solid (a wire's edges).
+    """
+
+    kind: BlocksErrorKind
+    ids: NDArray[np.int64]
+
+
+@dataclass(frozen=True)
+class PipeTShapeGroup:
+    """One named group of :meth:`Session.pipe_t_shape`'s result.
+
+    Attributes:
+        name: GEOM's name of the group: ``"JUNCTION_FACE_1"``, ``"JUNCTION_FACE_2"``,
+            ``"JUNCTION_FACE_3"`` (the pipe ends, ``FACE``); ``"THICKNESS"``,
+            ``"CIRCULAR_QUARTER_PIPE"``, ``"HALF_LENGTH_MAIN_PIPE"``,
+            ``"HALF_LENGTH_INCIDENT_PIPE"``, ``"FLANGE"`` (chains of edges a block mesher
+            gives one number of segments, ``EDGE``); ``"INTERNAL_FACES"`` (the faces on
+            the inner cylinders, ``FACE``).
+        kind: ``FACE`` or ``EDGE``.
+        ids: The ids of the group's faces or edges, ascending, each once.
+    """
+
+    name: str
+    kind: EntityKind
+    ids: tuple[EntityId, ...]
+
+
+@dataclass(frozen=True)
+class PipeTShape:
+    """The answer of :meth:`Session.pipe_t_shape`.
+
+    Attributes:
+        delta: The delta of the operation: every id of the T-shape in ``created``.
+        groups: GEOM's named groups, in GEOM's order: the junction faces, the edge chains,
+            the internal faces.
+    """
+
+    delta: HistoryDelta
+    groups: tuple[PipeTShapeGroup, ...]
+
+
+@dataclass(frozen=True)
+class BlocksCheck:
+    """The answer of :meth:`Session.check_blocks`.
+
+    Attributes:
+        is_compound_of_blocks: GEOM's verdict: every solid is a block, the blocks are
+            glued and connected, and there is at least one block.
+        findings: The errors, in GEOM's order: non-blocks, extra edges, the pairs not
+            glued, the blocks not connected.
+    """
+
+    is_compound_of_blocks: bool
+    findings: tuple[BlocksFinding, ...]
+
+
 @dataclass(frozen=True)
 class RenderMesh:
     """Triangles, edge polylines and vertex points of the live shape, from one call.
@@ -1159,6 +1247,39 @@ def _shape_check_findings(
             statuses=tuple(cast("list[str]", row["statuses"])),
         )
         for row in rows
+    )
+
+
+def _blocks_check(raw: dict[str, object]) -> BlocksCheck:
+    """Wrap a raw ``_core`` check_blocks dict in its frozen dataclass."""
+    rows = cast("list[dict[str, object]]", raw["findings"])
+    return BlocksCheck(
+        is_compound_of_blocks=cast("bool", raw["is_compound_of_blocks"]),
+        findings=tuple(
+            BlocksFinding(
+                kind=BlocksErrorKind(cast("str", row["kind"])),
+                ids=cast("NDArray[np.int64]", row["ids"]),
+            )
+            for row in rows
+        ),
+    )
+
+
+def _pipe_t_shape(raw: dict[str, object]) -> PipeTShape:
+    """Wrap a raw ``_core`` pipe_t_shape dict in its frozen dataclass."""
+    rows = cast("list[dict[str, object]]", raw["groups"])
+    return PipeTShape(
+        delta=_delta(cast("dict[str, object]", raw["delta"])),
+        groups=tuple(
+            PipeTShapeGroup(
+                name=cast("str", row["name"]),
+                kind=EntityKind(cast("str", row["kind"])),
+                ids=tuple(
+                    EntityId(int(i)) for i in cast("NDArray[np.int64]", row["ids"])
+                ),
+            )
+            for row in rows
+        ),
     )
 
 
