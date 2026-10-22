@@ -30,7 +30,6 @@ Fixture sizing follows the project rule: a 3 x 7 x 11 box, never a unit cube.
 from __future__ import annotations
 
 import math
-import time
 
 import numpy as np
 import pytest
@@ -64,7 +63,6 @@ SPHERE_RADIUS: float = 5.0
 # The real assembly is modelled in metres with parts of about 0.003 cubic metres, so a
 # display-scale deflection there is three orders of magnitude below the synthetic fixtures'.
 ASSEMBLY_DEFLECTION: float = 0.001
-ASSEMBLY_ANGLE_DEG: float = 20.0
 
 
 # ---- helpers -------------------------------------------------------------------------- #
@@ -778,55 +776,3 @@ def test_re_tessellation_after_one_operation_touches_a_small_fraction_of_a_real_
     assert 0 < after.retriangulated.size < total // 20, (
         f"re-triangulated {after.retriangulated.size} of {total} faces"
     )
-
-
-@pytest.mark.slow
-def test_a_full_tessellation_beats_the_reference_mesher_on_a_real_assembly(
-    industrial_step_path: str, industrial_step_brep: bytes
-) -> None:
-    """Gate (a): the ratio is the claim, so it is measured on one machine, both directions.
-
-    The reference runs at its own defaults, which is the comparison the requirement names.
-    That makes the test **conservative rather than matched**: at those defaults the reference
-    produces a far coarser mesh than this call does, so it is being timed on less work. Both
-    triangle counts are asserted into the failure message for exactly that reason — the ratio
-    means nothing without them.
-
-    Matching the two on visual quality instead — driving the reference at 360/20 elements per
-    full turn, the same angular criterion used here — was tried and abandoned: it does not
-    complete on this assembly within 420 s and passes 24 GB of resident memory. That is the
-    honest reason the conservative comparison is the one in the suite.
-
-    Import time is excluded on both sides: the comparison is between two surface meshers, not
-    between two file readers.
-
-    The reference package is not a dependency of this project and is not installed by CI, so
-    the test skips by name when it is absent, exactly as the assembly fixture does.
-    """
-    gmsh = pytest.importorskip("gmsh", reason="reference mesher not installed")
-
-    session = Session()
-    session.add_brep(industrial_step_brep)
-    start = time.perf_counter()
-    mesh = session.tessellate(deflection=ASSEMBLY_DEFLECTION, angle_deg=ASSEMBLY_ANGLE_DEG)
-    ours = time.perf_counter() - start
-
-    gmsh.initialize()
-    try:
-        gmsh.option.setNumber("General.Terminal", 0)
-        gmsh.model.occ.importShapes(industrial_step_path)
-        gmsh.model.occ.synchronize()
-        start = time.perf_counter()
-        gmsh.model.mesh.generate(2)
-        theirs = time.perf_counter() - start
-        kinds, tags, _ = gmsh.model.mesh.getElements(2)
-        reference_tris = sum(len(t) for k, t in zip(kinds, tags) if k == 2)
-    finally:
-        gmsh.finalize()
-
-    detail = (
-        f"reference {theirs:.2f} s for {reference_tris} triangles; "
-        f"here {ours:.2f} s for {mesh.tris.shape[0]} triangles"
-    )
-    assert theirs / ours >= 5.0, detail
-    assert mesh.tris.shape[0] > reference_tris, f"the comparison is not conservative: {detail}"

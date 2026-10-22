@@ -30,6 +30,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 import pysmesh as ps
 from pysmesh import (
@@ -470,33 +471,81 @@ def test_writing_from_the_mesher_is_the_same_as_writing_its_mesh(tmp_path: Path)
 # ---- Files written by another engine ------------------------------------------------ #
 
 
-def _engine_files() -> list[Path]:
-    """Inria files produced by an external engine, if any have been dropped in.
+# MMG3D 5.8.0 wrote these files with its own writer: the 3 x 7 x 11 box, remeshed to
+# hmax = 1.5 (fixtures/engine_gmf/generate_mmg.py, dev-only, needs mmgpy). Beside
+# vertices, tetrahedra, triangles and edges, MMG writes Corners, RequiredVertices,
+# Normals, Tangents and Ridges, so the reader meets the keywords of a real engine file.
+ENGINE_DIR: Path = Path(__file__).resolve().parent / "fixtures" / "engine_gmf"
+MMG_FILES: tuple[str, ...] = ("mmg3d_box.mesh", "mmg3d_box.meshb")
 
-    ``test_files/`` is git-ignored, so this is empty on CI and on a fresh checkout. The gate
-    asks for files a real engine wrote rather than ones this suite synthesised, and there is
-    no way to satisfy that from in-tree data.
+
+def _cells(mesh: MeshData, element_type: ElementType, size: int) -> NDArray[np.float64]:
+    """(k, size, 3) node coordinates of every element of one fixed-size type."""
+    chosen = np.flatnonzero(mesh.element_type == int(element_type))
+    starts = mesh.element_offsets[chosen]
+    nodes = mesh.element_nodes[starts[:, None] + np.arange(size)]
+    return mesh.node_coords[nodes]
+
+
+@pytest.mark.parametrize("name", MMG_FILES)
+def test_an_mmg_file_reads_back_as_the_box_it_meshes(name: str) -> None:
+    """The tetrahedra fill the box and the triangles cover its boundary.
+
+    The box faces are planar, so remeshing keeps them: the volume is
+    3 * 7 * 11 = 231 and the boundary area is 2 * (3 * 7 + 3 * 11 + 7 * 11) = 262. The
+    eight required vertices are the box corners.
+
+    Every tetrahedron must come out in SMESH's orientation. SMESH's order is Inria's
+    with the second and third nodes swapped (``DriverGMF_Read`` adds
+    ``iN[0], iN[2], iN[1], iN[3]``), so ``det(n1 - n0, n2 - n0, n3 - n0)`` is negative
+    for every valid tetrahedron of the read mesh, and its volume is minus a sixth of it.
     """
-    root = Path(__file__).resolve().parent.parent / "test_files"
-    if not root.is_dir():
-        return []
-    return sorted(p for p in root.glob("*.mesh*") if p.suffix in {".mesh", ".meshb"})
+    box = np.array([BOX_DX, BOX_DY, BOX_DZ])
+
+    result = read_gmf(ENGINE_DIR / name)
+
+    mesh = result.mesh
+    assert isinstance(result, GmfMesh)
+    tets = _cells(mesh, ElementType.TETRAHEDRON, 4)
+    volumes = -np.linalg.det(tets[:, 1:] - tets[:, :1]) / 6.0
+    assert tets.shape[0] > 0
+    assert float(volumes.min()) > 0.0
+    assert float(volumes.sum()) == pytest.approx(float(np.prod(box)), rel=1e-12)
+    tris = _cells(mesh, ElementType.TRIANGLE, 3)
+    normals = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    area = 0.5 * float(np.linalg.norm(normals, axis=1).sum())
+    expected_area = 2.0 * (BOX_DX * BOX_DY + BOX_DX * BOX_DZ + BOX_DY * BOX_DZ)
+    assert area == pytest.approx(expected_area, rel=1e-12)
+    # MMG computes the new boundary points itself: they lie on the faces to round-off.
+    slack = 1e-12 * BOX_DZ
+    assert float(mesh.node_coords.min()) >= -slack
+    assert np.all(mesh.node_coords.max(axis=0) <= box + slack)
+    (required,) = (g for g in result.groups if g.dimension == ElementDimension.NODE)
+    corners = mesh.node_coords[np.isin(mesh.node_id, required.element_ids)]
+    expected_corners = {
+        (BOX_DX * (i & 1), BOX_DY * ((i >> 1) & 1), BOX_DZ * ((i >> 2) & 1))
+        for i in range(8)
+    }
+    assert {tuple(map(float, c)) for c in corners} == expected_corners
 
 
-@pytest.mark.slow
-def test_files_written_by_another_engine_read_back() -> None:
-    """Reads whatever real engine output is present, and skips by name when there is none."""
-    files = _engine_files()
-    if not files:
-        pytest.skip(
-            "no engine-written .mesh/.meshb fixture in test_files/ (git-ignored); drop an "
-            "MMG or fTetWild output there to exercise this gate"
-        )
+def test_the_ascii_and_binary_mmg_files_hold_one_mesh() -> None:
+    """MMG wrote one mesh twice; the two files read back to the same mesh.
 
-    for path in files:
-        result = read_gmf(path)
+    The ASCII file prints coordinates in decimal, so they agree to round-off, not bit
+    for bit.
+    """
+    ascii_path, binary_path = (ENGINE_DIR / name for name in MMG_FILES)
 
-        assert isinstance(result, GmfMesh)
-        assert result.mesh.node_count > 0, path.name
-        assert result.mesh.element_count > 0, path.name
-        assert result.mesh.element_nodes.max() < result.mesh.node_count, path.name
+    ascii_mesh = read_gmf(ascii_path).mesh
+    binary_mesh = read_gmf(binary_path).mesh
+
+    assert ascii_mesh.node_count == binary_mesh.node_count
+    np.testing.assert_allclose(
+        ascii_mesh.node_coords, binary_mesh.node_coords, rtol=0.0, atol=1e-12
+    )
+    np.testing.assert_array_equal(ascii_mesh.element_type, binary_mesh.element_type)
+    np.testing.assert_array_equal(
+        ascii_mesh.element_offsets, binary_mesh.element_offsets
+    )
+    np.testing.assert_array_equal(ascii_mesh.element_nodes, binary_mesh.element_nodes)

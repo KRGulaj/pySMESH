@@ -1988,9 +1988,9 @@ void probe_r18_gmf_driver() {
     std::remove(gpath.c_str());
   }
 
-  note("GMF MMG / fTetWild files",
-       "reading engine-written files is a binding-layer test needing those engines' output "
-       "as fixtures");
+  note("GMF MMG files",
+       "reading an engine-written file is tested at the binding layer, on the MMG3D 5.8.0 "
+       "fixtures in tests/fixtures/engine_gmf (tests/test_gmf.py)");
 }
 
 
