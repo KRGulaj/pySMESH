@@ -45,7 +45,9 @@ class SketchSolution:
             values.
         status: The outcome.
         dof: The degrees of freedom left, from PlaneGCS's diagnosis: the unknowns less
-            the rank of the constraint Jacobian.
+            the rank of the constraint Jacobian. When the sketch is over-constrained with
+            a Jacobian of full rank, it is the unknowns less the non-redundant equations,
+            which is negative.
         conflicting: (K,) int64, the constraint rows PlaneGCS names as conflicting.
         redundant: (K,) int64, the rows that are fully redundant: satisfied by the
             others, so they remove no degree of freedom.

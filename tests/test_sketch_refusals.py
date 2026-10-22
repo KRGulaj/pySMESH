@@ -534,3 +534,7 @@ def test_builder_refusals_name_the_row() -> None:
         ),
     ):
         b.fix(9)
+    with pytest.raises(
+        ps.PysmeshError, match=re.escape("SketchBuilder.add: 3 is not a sketch entity")
+    ):
+        b.add(3)  # type: ignore[arg-type]  # the refusal under test

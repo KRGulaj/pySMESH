@@ -309,9 +309,10 @@ class SketchBuilder:
             The entity's row.
 
         Raises:
-            PysmeshError: If a point row is not a ``POINT`` row of this builder, an
-                elliptic arc's focus is at its center or its minor radius is not above 0,
-                or a B-spline's weights or multiplicities do not match its poles or knots.
+            PysmeshError: If ``entity`` is not a sketch entity, a point row is not a
+                ``POINT`` row of this builder, an elliptic arc's focus is at its center or
+                its minor radius is not above 0, or a B-spline's weights or
+                multiplicities do not match its poles or knots.
         """
         if isinstance(entity, Point):
             return self._entity_row(
@@ -339,7 +340,12 @@ class SketchBuilder:
             )
         if isinstance(entity, EllipticArc):
             return self._add_elliptic_arc(entity)
-        return self._add_bspline(entity)
+        if isinstance(entity, BSpline):
+            return self._add_bspline(entity)
+        raise PysmeshError(
+            f"SketchBuilder.add: {entity!r} is not a sketch entity (Point, Line, Circle, "
+            f"Arc, Ellipse, EllipticArc or BSpline)."
+        )
 
     def _add_arc(self, arc: Arc) -> int:
         """Append an arc with its radius and angles from its points."""
