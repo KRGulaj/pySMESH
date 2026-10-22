@@ -379,14 +379,29 @@ class _BlockOps(_SessionBase):
         7. ``FixRanges``: a cylindrical or spherical face whose U range leaves
            ``[0, 2 pi]`` is put on its surface turned about the axis
            (``BlockFix_PeriodicSurfaceModifier``).
-        8. A result that ``BRepCheck_Analyzer`` rejects is repaired by GEOM's default
-           ``ShapeProcess``: FixShape, FixFaceSize, DropSmallEdges and SameParameter with
-           the values of GEOM's resource file. No resource file is read.
+        8. GEOM's check of the result: ``BRepCheck_Analyzer`` with its geometric controls
+           off.
 
         ``union_faces`` is ``doUnionFaces`` of ``geomBuilder.RemoveExtraEdges``, with its
         default: GEOM passes ``OptimumNbFaces`` 0 when it is true and -1 when it is false.
         Without it, the faces of a box fused from two boxes stay split, and an edge
         between them joins no other edge.
+
+        **Two differences from GEOM, both on purpose.**
+
+        * **Turned faces.** A sphere or cylinder face that step 2 or step 7 puts on a
+          turned surface must keep its area within 1e-6 relative. If it does not, the
+          call is refused. GEOM does not check it. On a quarter ball, GEOM's rotation
+          gives a spherical face 3.8e-4 smaller whose mesh reaches 0.033 outside the body,
+          and ``BRepCheck_Analyzer`` accepts the solid. That result is not the input
+          shape.
+        * **No repair.** If the check of step 8 rejects the result, the call is refused,
+          and the message names the ``BRepCheck`` statuses and the kinds of the
+          sub-shapes. GEOM repairs such a result with its default ``ShapeProcess`` and
+          the values of its resource file. Two of them are absolute lengths (FixFaceSize
+          and DropSmallEdges, 0.05 model units): in a model in metres, that repair
+          removes faces and edges below 5 cm without a word. Run :meth:`heal` or
+          :meth:`shape_process` with parameters that fit the model, then call again.
 
         **Identity.** Each step writes its history, and every id is followed through the
         steps in order. A united face or edge keeps the ids of every face or edge united
@@ -405,10 +420,10 @@ class _BlockOps(_SessionBase):
             in ``deleted``.
 
         Raises:
-            PysmeshError: If ``entities`` is empty or an id is dead; if OCCT fails or the
-                repair reports a failure; or if the result has as many solids, faces,
-                edges and vertices as the bodies: nothing was removed or united, and
-                nothing is committed.
+            PysmeshError: If ``entities`` is empty or an id is dead; if OCCT fails; if a
+                turned face changes its area; if ``BRepCheck_Analyzer`` rejects the
+                result; or if the result has as many solids, faces, edges and vertices as
+                the bodies (nothing was removed or united). Nothing is committed then.
             PysmeshCancelled: If ``cancel`` asked to stop. The session is unchanged.
         """
         return _delta(

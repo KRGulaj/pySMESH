@@ -10,9 +10,12 @@
 // result that BRepCheck rejects. The branch is followed here step by step; Perform and the
 // BlockFix steps it calls are the copies of geom_blockfix.cpp, which write each step's
 // history. compose_histories follows every input sub-shape through the steps in order.
-// pySMESH adds one check that GEOM does not make: a face that GEOM's RotateSphereSpace or
-// FixRanges puts on a turned sphere or cylinder must keep its area
-// (require_turned_faces_kept).
+// pySMESH differs from GEOM in two places:
+//  * a face that GEOM's RotateSphereSpace or FixRanges puts on a turned sphere or cylinder
+//    must keep its area (require_turned_faces_kept);
+//  * a result that BRepCheck rejects is refused, not repaired: GEOM's repair takes the
+//    tolerances of its resource file, absolute lengths (FixFaceSize and DropSmallEdges
+//    0.05), which would remove faces and edges below that size without a word.
 // Copyright (C) 2007-2026 CEA, EDF, OPEN CASCADE, LGPL-2.1 or later, used here under
 // LGPL-2.1, and recorded in PROVENANCE.md.
 //
@@ -21,6 +24,7 @@
 #include "session/session.hpp"
 
 #include "geom_blockfix.hpp"
+#include "shape_checks.hpp"
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepCheck_Analyzer.hxx>
@@ -129,6 +133,33 @@ std::string ids_text(const std::vector<EntityId>& ids) {
   std::string out;
   for (EntityId id : ids) {
     out += (out.empty() ? "" : ", ") + std::to_string(id);
+  }
+  return out;
+}
+
+// The BRepCheck statuses of `shape`, as "EDGE 3: BRepCheck_InvalidCurveOnSurface on FACE 2;
+// ...", the first 20 of them; each ordinal counts its kind in TopExp::MapShapes order.
+std::string findings_text(const TopoDS_Shape& shape,
+                          const std::vector<shape_checks::CheckFinding>& findings) {
+  if (findings.empty()) {
+    return "BRepCheck_Analyzer reported no status on any sub-shape";
+  }
+  const auto named = [&](const TopoDS_Shape& sub) {
+    ShapeSet all;
+    TopExp::MapShapes(shape, sub.ShapeType(), all);
+    return std::string(shape_checks::kind_text(sub)) + " " + std::to_string(all.FindIndex(sub));
+  };
+  constexpr std::size_t kListed = 20;
+  std::string out;
+  for (std::size_t i = 0; i < findings.size() && i < kListed; ++i) {
+    const shape_checks::CheckFinding& f = findings[i];
+    out += (i == 0 ? "" : "; ") + named(f.shape) + ": " + f.status;
+    if (!f.context.IsNull()) {
+      out += " on " + named(f.context);
+    }
+  }
+  if (findings.size() > kListed) {
+    out += "; and " + std::to_string(findings.size() - kListed) + " more";
   }
   return out;
 }
@@ -253,7 +284,8 @@ py::dict Session::remove_extra_edges(const std::vector<EntityId>& entity_ids, bo
   ProgressDriver driver(op, hooks);
   TopoDS_Shape result;
   std::vector<Handle(BRepTools_History)> steps;
-  std::string failure;
+  bool rejected = false;
+  std::vector<shape_checks::CheckFinding> findings;
   {
     py::gil_scoped_release release;
     try {
@@ -272,23 +304,16 @@ py::dict Session::remove_extra_edges(const std::vector<EntityId>& entity_ids, bo
       TopoDS_Shape aFixedExtra = geomcopy::BlockFixAPI_Perform(
           aShapeCopy, Precision::Confusion(), union_faces ? 0 : -1, aPS, steps);
 
-      // Repair result: GEOM's default ShHealOper_ShapeProcess, the sequence and parameters
-      // of its resource file.
+      // Repair result: GEOM runs its default ShHealOper_ShapeProcess on a result that
+      // BRepCheck rejects, with the absolute tolerances of its resource file. pySMESH runs
+      // GEOM's check and refuses such a result.
       if (!aFixedExtra.IsNull() && aPS.More()) {
         BRepCheck_Analyzer ana(aFixedExtra, false);
         if (!ana.IsValid()) {
-          const ShapeProcessRun run = compose_shape_process(
-              aFixedExtra, "FixShape FixFaceSize DropSmallEdges SameParameter",
-              geom_shhealing_resources("0.05", "0.05"), aPS.Next());
-          if (!run.alarms.empty()) {
-            for (const std::string& a : run.alarms) {
-              failure += (failure.empty() ? "" : "; ") + a;
-            }
-          } else if (!run.cancelled && run.done) {
-            aFixedExtra = run.out;
-            steps.push_back(run.hist);
-          }
+          rejected = true;
+          findings = shape_checks::check_findings(aFixedExtra, false);
         }
+        aPS.Next();
       }
       result = aFixedExtra;
     } catch (const PysmeshError&) {
@@ -309,11 +334,14 @@ py::dict Session::remove_extra_edges(const std::vector<EntityId>& entity_ids, bo
   if (driver.cancelled()) {
     ProgressDriver::raise_cancelled(op);
   }
-  if (!failure.empty()) {
-    throw PysmeshError("Session.remove_extra_edges: the repair of the result (GEOM's default "
-                       "ShapeProcess) failed in OCCT on the bodies of the entities " +
-                       ids_text(entity_ids) + " (ShapeProcess reported: " + failure +
-                       "); nothing is committed.");
+  if (rejected) {
+    throw PysmeshError("Session.remove_extra_edges: GEOM's BlockFix gave a shape that "
+                       "BRepCheck_Analyzer rejects for the bodies of the entities " +
+                       ids_text(entity_ids) + " (" + std::to_string(findings.size()) +
+                       " status(es): " + findings_text(result, findings) +
+                       "). GEOM repairs such a shape with the healing of its resource file, "
+                       "whose tolerances are absolute lengths; pySMESH does not repair it. "
+                       "Nothing is committed.");
   }
   if (result.IsNull()) {
     throw PysmeshError("Session.remove_extra_edges: GEOM's BlockFix produced no shape for the "

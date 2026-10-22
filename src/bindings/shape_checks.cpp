@@ -626,9 +626,9 @@ std::string self_interference_refusal(const std::string& op, const TopoDS_Shape&
          pairs;
 }
 
-std::vector<CheckFinding> check_findings(const TopoDS_Shape& shape) {
+std::vector<CheckFinding> check_findings(const TopoDS_Shape& shape, bool geometric_controls) {
   std::vector<CheckFinding> out;
-  const BRepCheck_Analyzer analyzer(shape);
+  const BRepCheck_Analyzer analyzer(shape, geometric_controls);
   const auto name_of = [](BRepCheck_Status status) {
     std::ostringstream s;
     BRepCheck::Print(status, s);

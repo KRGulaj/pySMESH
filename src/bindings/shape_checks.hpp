@@ -191,8 +191,9 @@ struct CheckFinding {
 
 // Every status other than BRepCheck_NoError that BRepCheck_Analyzer reports on `shape` and
 // its sub-shapes, solids first and vertices last, each kind in TopExp::MapShapes order, each
-// (sub-shape, status, context) once.
-std::vector<CheckFinding> check_findings(const TopoDS_Shape& shape);
+// (sub-shape, status, context) once. `geometric_controls` is BRepCheck_Analyzer's own switch.
+std::vector<CheckFinding> check_findings(const TopoDS_Shape& shape,
+                                         bool geometric_controls = true);
 
 // The faces of `shape` that BRepCheck_Analyzer rejects on their own, geometric controls on.
 std::vector<TopoDS_Shape> invalid_faces(const TopoDS_Shape& shape);

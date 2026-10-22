@@ -279,9 +279,14 @@ of `BlockFix_BlockFixAPI` copied into pySMESH, each with its history. It takes s
 degenerated edges off spheres and free-form faces, joins edges on one curve and, with
 `union_faces`, unites faces on one surface. A united face or edge keeps the ids of all
 that it unites; a removed edge or vertex dies. A result with the counts of the input is
-a refusal: nothing was removed. pySMESH adds one check that GEOM does not make: a
-sphere or cylinder face that GEOM puts on a turned surface must keep its area. On a
-quarter-ball wedge GEOM's rotation changes the face, and the call is refused.
+a refusal: nothing was removed. pySMESH differs from GEOM in two places, on purpose:
+
+- A sphere or cylinder face that GEOM puts on a turned surface must keep its area. On a
+  quarter-ball wedge GEOM's rotation changes the face, and the call is refused.
+- A result that `BRepCheck_Analyzer` rejects is refused, not repaired. GEOM repairs it
+  with the healing values of its resource file, and two of them are absolute lengths
+  (0.05 model units). Run `heal` or `shape_process` with values that fit the model, then
+  call again.
 
 ### Booleans: `fuzzy` and `parallel`
 

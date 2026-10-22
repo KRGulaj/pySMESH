@@ -159,7 +159,7 @@ licence in a comment above them. All are from SALOME GEOM tag `V9_16_0`
 | `MakeDiskSquare`, `MakeDiskHexagon`, `TransformShape`, `WPlaneTransform` (`AdvancedEngine_DividedDiskDriver`) | `src/AdvancedEngine/AdvancedEngine_DividedDiskDriver.cxx` | `src/bindings/session_advanced.cpp` | `Session.divided_disk` |
 | `MakePipeTShape`, `MakeQuarterPipeTShape` (`AdvancedEngine_PipeTShapeDriver`) | `src/AdvancedEngine/AdvancedEngine_PipeTShapeDriver.cxx` | `src/bindings/session_advanced.cpp` | `Session.pipe_t_shape` |
 | `MakeWireFromEdges` (`GEOMImpl_ShapeDriver`, its `GEOMImpl_WBM_FixTolerance` mode) | `src/GEOMImpl/GEOMImpl_ShapeDriver.cxx` | `src/bindings/session_advanced.cpp` | `Session.pipe_t_shape` |
-| The `BLOCK_REMOVE_EXTRA` branch of `GEOMImpl_BlockDriver::Execute` (its steps) | `src/GEOMImpl/GEOMImpl_BlockDriver.cxx` | `src/bindings/session_blockfix.cpp` | `Session.remove_extra_edges` |
+| The `BLOCK_REMOVE_EXTRA` branch of `GEOMImpl_BlockDriver::Execute` (its steps; its repair of an invalid result is replaced by a refusal) | `src/GEOMImpl/GEOMImpl_BlockDriver.cxx` | `src/bindings/session_blockfix.cpp` | `Session.remove_extra_edges` |
 
 Four of these carry OCCT 8.0.1 port changes and nothing else: an iterator header that
 OCCT 8.0.1 removed is replaced by the container header that keeps its typedef, and a
@@ -216,12 +216,22 @@ vendored sources, and every change is marked `pySMESH:` in it. `Perform` becomes
 of its members, keeps only its OCCT 7.5.3 and later branches and the two face unification
 values `RemoveExtraEdges` passes (0 and -1), and stops after a cancel. Each step's history
 is kept, and `compose_histories` follows every input sub-shape through the steps in order.
-pySMESH adds one check: a sphere or cylinder face that `RotateSphereSpace` or `FixRanges`
-puts on a turned surface must keep its area within 1e-6 relative, where the turned shape is
-used. GEOM has no such check. On a quarter-ball wedge, its rotation gives a face 3.8e-4
-smaller whose mesh reaches 0.033 outside the wedge. The vendored classes
-`BlockFix_SphereSpaceModifier` and `BlockFix_PeriodicSurfaceModifier` are called as they
-are.
+The vendored classes `BlockFix_SphereSpaceModifier` and `BlockFix_PeriodicSurfaceModifier`
+are called as they are.
+
+`Session.remove_extra_edges` differs from GEOM in two places, both on purpose:
+
+- **Turned faces.** A sphere or cylinder face that `RotateSphereSpace` or `FixRanges` puts
+  on a turned surface must keep its area within 1e-6 relative, where the turned shape is
+  used. If it does not, the call is refused. GEOM has no such check. On a quarter-ball
+  wedge, GEOM's rotation gives a face 3.8e-4 smaller whose mesh reaches 0.033 outside the
+  wedge, and `BRepCheck_Analyzer` accepts the solid. That result is not the input shape.
+- **No repair.** GEOM repairs a result that `BRepCheck_Analyzer` rejects with its default
+  `ShHealOper_ShapeProcess` and the values of its resource file. Two of them are absolute
+  lengths: `FixFaceSize.Tolerance` and `DropSmallEdges.Tolerance3d`, 0.05 model units. In a
+  model in metres, that repair removes faces and edges below 5 cm without a word. pySMESH
+  refuses such a result, and names the `BRepCheck` statuses. A caller can run `heal` or
+  `shape_process` with its own parameters and call again.
 
 One function is adapted, not copied unchanged. `mesh_as_geom` in
 `src/bindings/session_locate.cpp` takes the steps of `GEOMAlgo_AlgoTools::MeshShape` and
