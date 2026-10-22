@@ -82,6 +82,7 @@ nav:
       - Session: concepts/session.md
       - Selection rules: concepts/selection-rules.md
       - Shape processing: concepts/shape-process.md
+      - Sketch arrays: concepts/sketch.md
       - Meshing model: concepts/meshing-model.md
       - Discrete meshes: concepts/discrete-meshes.md
       - Units: concepts/units.md
@@ -98,4 +99,5 @@ nav:
       - Overview: reference/index.md
       - Session: reference/session.md
       - Mesher: reference/mesher.md
+      - Sketch: reference/sketch.md
       - Geometry functions: reference/geometry.md

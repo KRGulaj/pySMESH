@@ -249,7 +249,7 @@ jobs:
           "$VENV_PY" ci/assert_no_host_vtk.py
 
       - name: mypy --strict against the shipped stubs
-        run: mypy --strict src/pysmesh/viscous.py src/pysmesh/unify.py src/pysmesh/session src/pysmesh/mesher src/pysmesh/__init__.py src/pysmesh/_core.pyi
+        run: mypy --strict src/pysmesh/viscous.py src/pysmesh/unify.py src/pysmesh/session src/pysmesh/mesher src/pysmesh/sketch src/pysmesh/__init__.py src/pysmesh/_core.pyi
 
       - name: VTK pin self-consistency (build pin vs compiled binary)
         run: python ci/check_vtk_pin.py

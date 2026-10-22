@@ -46,6 +46,8 @@ pySMESH covers three areas:
   tessellation, offsets, distance and leak checks, point-in-solid
   classification, and geometry queries. See
   [Geometry operations](#geometry-operations).
+- **`pysmesh.sketch`**: a 2-D sketch constraint solver over flat NumPy
+  arrays (FreeCAD's PlaneGCS). See [Sketch solver](#sketch-solver).
 
 Two entry points serve one-shot work outside a session. `compute_viscous_layers`
 grows boundary-layer prisms on a surface mesh that you supply.
@@ -557,6 +559,32 @@ IGES entity count are not printed.
 
 See `src/pysmesh/_core.pyi` for the full typed API. `mypy --strict`
 type-checks against it.
+
+## Sketch solver
+
+`pysmesh.sketch.solve` solves a 2-D sketch with FreeCAD's PlaneGCS: points,
+lines, circles, arcs, ellipses, elliptic arcs and B-splines, under Shaper's
+14 constraints plus distance and symmetric. The sketch is a set of flat
+NumPy arrays, and a row's index is its id, so the diagnosis (conflicting,
+redundant and partially redundant rows) maps back to the caller's lists.
+The solver is a free function: it keeps no state and touches no `Session`.
+Identical arrays give bit-identical results.
+
+```python
+import pysmesh.sketch as sk
+
+b = sk.SketchBuilder()
+c = b.add(sk.Point(0.0, 0.0))
+arc = b.add(sk.Arc(c, b.add(sk.Point(1.0, 0.0)), b.add(sk.Point(0.0, 1.0))))
+b.fix(c)
+b.radius(arc, 2.0)
+arrays = b.build()
+solution = arrays.solve()   # UNDER_CONSTRAINED, dof 2: the two angles are free
+```
+
+The arrays, the kind codes and the units are the contract of
+`docs/documentation/concepts/sketch.md`. A solved sketch becomes CAD through
+the session's `add_line`, `add_arc`, `make_wire` and `make_face`.
 
 ## Packaging model
 

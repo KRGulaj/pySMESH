@@ -215,7 +215,8 @@ pybind11_add_module(_core
     src/bindings/mesher_gmf.cpp
     src/bindings/mesher_viscous.cpp
     src/bindings/mesher_netgen.cpp
-    src/bindings/mesher_bind.cpp)
+    src/bindings/mesher_bind.cpp
+    src/bindings/sketch.cpp)
 target_include_directories(_core PRIVATE ${CMAKE_SOURCE_DIR}/src/bindings)
 # mesher_netgen.cpp includes the NETGENPlugin headers, and through them netgen's own, so it
 # compiles with netgen's define set (cmake/Netgen/CMakeLists.txt). No other binding file

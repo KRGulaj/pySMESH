@@ -4,11 +4,11 @@ The concept and guide pages explain how pySMESH's pieces fit together. This sect
 generated reference: every public class and function, with its full Google-style docstring
 and typed signature, rendered directly from source by `mkdocstrings`.
 
-All 465 of pySMESH's public entities carry a complete docstring. That is not a remembered
+All 501 of pySMESH's public entities carry a complete docstring. That is not a remembered
 figure: `ci/count_documented.py` defines what counts as a public entity, recomputes both
 numbers, and fails the build if one ever goes undocumented. `src/pysmesh/_core.pyi` gives
 the native extension's full typed surface, the same file `mypy --strict` checks a
-consuming application against. Nothing here is hand-copied: this page and the three that
+consuming application against. Nothing here is hand-copied: this page and the four that
 follow it exist to point `mkdocstrings` at the right modules, not to restate what a
 docstring already says. If a reference page and a docstring ever disagree, the docstring in
 the source is correct; open an issue against the page.
@@ -20,6 +20,7 @@ the source is correct; open an issue against the page.
 | `pysmesh` | The top-level namespace. Re-exports every public name below, so `import pysmesh` is enough for almost everything. |
 | [`pysmesh.session`](session.md) | `Session`, `EntityId`, `EntityKind`, and every dataclass an operation or a query returns. See also [Session](../concepts/session.md) and [Entity IDs and ordinals](../concepts/entity-ids.md). |
 | [`pysmesh.mesher`](mesher.md) | `Mesher`, the algorithm and hypothesis catalogue, quality controls and predicates, groups, the editor, the search surface, the medial axis, block decomposition and pattern mapping, and Inria GMF interchange. See also [Meshing model](../concepts/meshing-model.md). |
+| [`pysmesh.sketch`](sketch.md) | `solve`, `SketchSolution`, the kind codes (`SketchEntityKind`, `SketchConstraintKind`, `SketchInternalRole`), `SketchStatus`, and the builders (`SketchBuilder`, `SketchArrays`, `Point`, `Line`, `Circle`, `Arc`, `Ellipse`, `EllipticArc`, `BSpline`). Not re-exported by `pysmesh`: import `pysmesh.sketch`. See also [Sketch arrays](../concepts/sketch.md). |
 | [`pysmesh.step`](geometry.md#step) | `read_step_xde`, `write_step_xde`, `StepImport`, `EntityLabel`. |
 | [`pysmesh.iges`](geometry.md#iges) | `read_iges`, `write_iges`, `IgesImport`, `IGES_UNITS`. |
 | [`pysmesh.tessellate`](geometry.md#tessellation) | `tessellate`, `TessellateParams`, `TessellateResult`. |

@@ -138,6 +138,21 @@ compile error. Compiled with `/showIncludes`, `GCS.cpp` reads every Eigen header
 `extern/eigen`; the build environment's own Eigen (under `Library/include/eigen3`) is on no
 include path.
 
+`pysmesh.sketch` (`src/bindings/sketch.cpp`) calls PlaneGCS through `GCS::System` and its
+geometry classes, as they are vendored. The way each sketch constraint becomes PlaneGCS
+equations follows SALOME Shaper's PlaneGCS adapter: `src/SketchSolver/PlaneGCSSolver/` and
+the `SketchSolver_Constraint*` classes, at commit
+`59c5672c2b67ca007cadb522e198a9cf38434886` (`V9_15_0-35-g59c5672c2`, LGPL-2.1-or-later),
+read in `third_party_ref/Salome_shaper`. No Shaper code is copied or compiled: pySMESH's
+code makes the `GCS::System` calls that Shaper's adapter makes, and
+`docs/documentation/concepts/sketch.md` lists them per constraint. Four things differ from
+Shaper, each stated on that page. A BFGS result that leaves a residual is a failure, not a
+solution. A point on a B-spline uses PlaneGCS's `addConstraintPointOnBSpline`, because
+Shaper's form needs Shaper's own B-spline class. A tangent or a perpendicular with a B-spline
+is taken only at an end pole, where PlaneGCS's B-spline gives a direction. Two lines of equal
+length use `addConstraintEqualLength`. The point of a B-spline nearest a point, which starts
+that point's parameter, comes from OCCT's `Geom2dAPI_ProjectPointOnCurve`.
+
 ## Algorithm code copied from GEOM
 
 A few GEOM functions that pySMESH needs live in `GEOMImpl`, GEOM's driver layer, which is
