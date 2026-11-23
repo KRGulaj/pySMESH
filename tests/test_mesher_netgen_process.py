@@ -155,8 +155,9 @@ def test_a_netgen_compute_that_needs_more_than_2_mb_of_stack_ends_normally() -> 
 
     assert proc.returncode == 0, (proc.returncode, proc.stderr[-2000:])
     result = [line for line in proc.stdout.splitlines() if "WING-BOX-CHILD" in line]
-    assert result == [
+    expected = (
         "WING-BOX-CHILD error Mesher.compute: meshing failed on 1 sub-shape(s). | "
         "FACE 7: NgException at Surface meshing: Problem in Surface mesh generation "
         "(algorithm NETGEN_2D)"
-    ]
+    )
+    assert result == [expected]
