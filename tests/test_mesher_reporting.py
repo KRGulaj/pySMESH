@@ -47,6 +47,10 @@ Each claim is asserted against an oracle the report itself does not produce (rep
   the smallest extent of its box and the size asked, and name the coarse edges when the
   segment is longer than the face is wide. The oracles are the mesh nodes, the Session
   box and the assigned size; a face that fails for another reason gets no such cause.
+* **#30, a NETGEN 3-D stop gives the open front.** "Stop meshing since too many attempts"
+  names no place. The line must give the open front of the kept mesh: its face count and
+  the box of each patch, with every centroid in ``.bad_element_centroids``. The oracles
+  are the injected triangle count and the unit box.
 """
 
 from __future__ import annotations
@@ -870,3 +874,88 @@ def test_a_netgen_face_that_fails_for_another_reason_gets_no_coarse_edge_sentenc
     assert float(match.group(3)) == pytest.approx(2.0, rel=1e-6)
     assert float(match.group(4)) == pytest.approx(0.1, rel=1e-12)
     assert COARSE_EDGES_SENTENCE not in info.value.details
+
+
+FRONT_PATTERN: str = (
+    rf"open front of the kept mesh: (\d+) face\(s\) in (\d+) patch\(es\).*"
+    rf"largest: (\d+) face\(s\) in \({NUMBER}, {NUMBER}, {NUMBER}\) to "
+    rf"\({NUMBER}, {NUMBER}, {NUMBER}\)"
+)
+
+
+def _box_surface_reversed_into_netgen_3d() -> tuple[Mesher, int]:
+    """The unit box surface of NETGEN 2D, every triangle reversed, under Netgen3D.
+
+    NETGEN 3D's advancing front (Delaunay off) cannot fill a surface whose triangles all
+    point inward, and stops with "too many attempts". Returns the mesher and the number
+    of injected triangles.
+    """
+    s = Session()
+    s.add_box(1.0, 1.0, 1.0)
+    shape = ps.load_brep(s.brep())
+    with Mesher(shape) as surface:
+        surface.assign(ps.Netgen1D2D())
+        surface.assign(ps.NetgenParameters2D(max_size=0.1, threads=4))
+        surface.compute()
+        md = surface.mesh()
+    m = Mesher(shape)
+    m.assign(ps.UseExisting1D())
+    m.assign(ps.UseExisting2D())
+    m.assign(ps.Netgen3D())
+    m.assign(ps.NetgenParameters(max_size=0.1, threads=4, use_delaunay=False))
+    ids = m.add_nodes(md.node_coords)
+    triangles = 0
+    for etype, add, kind in (
+        (ps.ElementType.EDGE, m.add_segments, SubShapeKind.EDGE),
+        (ps.ElementType.TRIANGLE, m.add_triangles, SubShapeKind.FACE),
+    ):
+        rows = np.flatnonzero(md.element_type == int(etype))
+        for ordinal in np.unique(md.element_ordinal[rows]):
+            sel = rows[md.element_ordinal[rows] == ordinal]
+            nodes = np.stack([md.nodes_of(int(i)) for i in sel])
+            if etype == ps.ElementType.TRIANGLE:
+                nodes = nodes[:, ::-1]
+                triangles += len(sel)
+            add(ids[nodes], on=SubShape(kind, int(ordinal)))
+    return m, triangles
+
+
+def test_too_many_attempts_names_the_open_front_and_its_patch_boxes() -> None:
+    """The line gives the open face count and patch boxes; centroids lie in the solid.
+
+    NETGEN kept no tetrahedron here, so its front at the stop is the whole injected
+    surface: every one of the injected triangles, in one patch whose box is the unit
+    box. The oracles: the injected triangle count and the box [0, 1]^3.
+    """
+    m, triangles = _box_surface_reversed_into_netgen_3d()
+
+    with m, pytest.raises(ps.PysmeshError) as info:
+        m.compute()
+
+    details = info.value.details
+    match = re.search(FRONT_PATTERN, details)
+    centroids = info.value.bad_element_centroids
+    assert "too many attempts" in details
+    assert match is not None
+    faces, patches, largest = (int(match.group(i)) for i in (1, 2, 3))
+    low = np.array([float(match.group(i)) for i in (4, 5, 6)])
+    high = np.array([float(match.group(i)) for i in (7, 8, 9)])
+    assert faces == triangles
+    assert patches == 1
+    assert largest == triangles
+    np.testing.assert_allclose(low, 0.0, atol=1e-6)
+    np.testing.assert_allclose(high, 1.0, atol=1e-6)
+    assert centroids.shape == (triangles, 3)
+    assert bool(np.all((centroids >= 0.0) & (centroids <= 1.0)))
+
+
+def test_a_clean_netgen_3d_compute_reports_no_front() -> None:
+    """Netgen1D2D3D on the unit box meshes it: no error and no front to report."""
+    with Mesher(_box()) as m:
+        m.assign(ps.Netgen1D2D3D())
+        m.assign(ps.NetgenParameters(max_size=0.25, threads=4))
+
+        report = m.compute()
+
+    assert report.volumes > 0
+    assert all("open front" not in w.text for w in report.warnings)

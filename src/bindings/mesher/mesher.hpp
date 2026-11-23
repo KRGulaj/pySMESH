@@ -59,6 +59,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -509,6 +510,33 @@ class Mesher {
   // segment is longer than the extent.
   std::string netgen_face_sizes(const TopoDS_Shape& face, int ordinal,
                                 const SMESH_Algo& algo) const;
+
+  // One connected patch of an open front: its face count and its box.
+  struct Patch {
+    std::size_t faces = 0;
+    double low[3] = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(),
+                     std::numeric_limits<double>::max()};
+    double high[3] = {std::numeric_limits<double>::lowest(),
+                      std::numeric_limits<double>::lowest(),
+                      std::numeric_limits<double>::lowest()};
+  };
+
+  // The open front of the volume mesh of a solid: the faces of its volume elements that no
+  // other volume element shares and that no 2-D element on a face of the solid covers. When
+  // the solid holds no volume element, every 2-D element on its faces. `centroids` holds
+  // x y z per open face; `patches` are the open faces joined by shared nodes, the largest
+  // first.
+  struct OpenFront {
+    std::size_t faces = 0;
+    bool no_volume = false;
+    std::vector<double> centroids;
+    std::vector<Patch> patches;
+  };
+  OpenFront open_front(const TopoDS_Shape& solid) const;
+
+  // The text of a non-empty front for a failure line: the face count, the patch count and
+  // the box of each of the 5 largest patches.
+  static std::string open_front_text(const OpenFront& front);
 
   // The sub-shape where `hyp`, just assigned on `target`, met two different similar
   // hypotheses (HYP_CONCURRENT), and those hypotheses with where they are assigned.

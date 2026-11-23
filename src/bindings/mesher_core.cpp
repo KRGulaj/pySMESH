@@ -12,6 +12,7 @@
 #include "compute_thread.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cstdio>
@@ -26,6 +27,7 @@
 #include <SMDS_ElemIterator.hxx>
 #include <SMDS_MeshNode.hxx>
 #include <SMDS_MeshElement.hxx>
+#include <SMDS_VolumeTool.hxx>
 #include <SMESHDS_Mesh.hxx>
 #include <SMESHDS_SubMesh.hxx>
 #include <SMESH_Algo.hxx>
@@ -864,6 +866,218 @@ std::string Mesher::with_ordinals(const std::string& text) const {
   return out;
 }
 
+Mesher::OpenFront Mesher::open_front(const TopoDS_Shape& solid) const {
+  // A face is keyed by its corner node ids, sorted, so that the face of one volume and the
+  // same face of its neighbour, or of a boundary element, compare equal whatever their node
+  // order. Up to 4 corners fit an array; a polyhedron face with more is padded no further
+  // and goes to a map of its own.
+  using Key = std::array<smIdType, 4>;
+  const auto key_of = [](const std::vector<smIdType>& ids) {
+    Key key{-1, -1, -1, -1};
+    std::copy(ids.begin(), ids.end(), key.begin());
+    std::sort(key.begin(), key.begin() + static_cast<std::ptrdiff_t>(ids.size()));
+    return key;
+  };
+  std::vector<smIdType> ids;
+  const auto corners = [&ids](const SMDS_MeshElement* owner, const SMDS_MeshNode* const* nodes,
+                              int count) {
+    ids.clear();
+    for (int i = 0; i < count; ++i) {
+      if (!owner->IsMediumNode(nodes[i])) {
+        ids.push_back(nodes[i]->GetID());
+      }
+    }
+  };
+
+  // The boundary: every 2-D element on a face of the solid.
+  std::vector<Key> boundary;
+  std::set<std::vector<smIdType>> boundary_wide;
+  std::vector<const SMDS_MeshElement*> boundary_elements;
+  TopTools_IndexedMapOfShape faces;
+  TopExp::MapShapes(solid, TopAbs_FACE, faces);
+  for (int i = 1; i <= faces.Extent(); ++i) {
+    const SMESHDS_SubMesh* held = meshDS_->MeshElements(faces.FindKey(i));
+    if (held == nullptr) {
+      continue;
+    }
+    for (SMDS_ElemIteratorPtr it = held->GetElements(); it->more();) {
+      const SMDS_MeshElement* e = it->next();
+      if (e->GetType() != SMDSAbs_Face) {
+        continue;
+      }
+      std::vector<const SMDS_MeshNode*> nodes(e->begin_nodes(), e->end_nodes());
+      corners(e, nodes.data(), static_cast<int>(nodes.size()));
+      boundary_elements.push_back(e);
+      if (ids.size() <= 4) {
+        boundary.push_back(key_of(ids));
+      } else {
+        std::sort(ids.begin(), ids.end());
+        boundary_wide.insert(ids);
+      }
+    }
+  }
+  std::sort(boundary.begin(), boundary.end());
+
+  // Every face of every volume element of the solid, with the element and the face index
+  // that give its nodes back.
+  struct VolumeFace {
+    Key key;
+    const SMDS_MeshElement* volume;
+    int face;
+  };
+  std::vector<VolumeFace> volume_faces;
+  std::map<std::vector<smIdType>, std::pair<int, VolumeFace>> wide_faces;
+  std::size_t volumes = 0;
+  SMDS_VolumeTool tool;
+  if (const SMESHDS_SubMesh* held = meshDS_->MeshElements(solid)) {
+    for (SMDS_ElemIteratorPtr it = held->GetElements(); it->more();) {
+      const SMDS_MeshElement* v = it->next();
+      if (v->GetType() != SMDSAbs_Volume || !tool.Set(v)) {
+        continue;
+      }
+      ++volumes;
+      for (int f = 0; f < tool.NbFaces(); ++f) {
+        corners(v, tool.GetFaceNodes(f), tool.NbFaceNodes(f));
+        if (ids.size() <= 4) {
+          volume_faces.push_back({key_of(ids), v, f});
+        } else {
+          std::sort(ids.begin(), ids.end());
+          auto& seen = wide_faces[ids];
+          seen.first += 1;
+          seen.second = {Key{}, v, f};
+        }
+      }
+    }
+  }
+  std::sort(volume_faces.begin(), volume_faces.end(),
+            [](const VolumeFace& a, const VolumeFace& b) { return a.key < b.key; });
+
+  // The open faces, each as its corner nodes.
+  std::vector<std::vector<const SMDS_MeshNode*>> open;
+  const auto add_volume_face = [&](const VolumeFace& vf) {
+    tool.Set(vf.volume);
+    const SMDS_MeshNode* const* nodes = tool.GetFaceNodes(vf.face);
+    std::vector<const SMDS_MeshNode*> face;
+    for (int i = 0; i < tool.NbFaceNodes(vf.face); ++i) {
+      if (!vf.volume->IsMediumNode(nodes[i])) {
+        face.push_back(nodes[i]);
+      }
+    }
+    open.push_back(face);
+  };
+  OpenFront front;
+  if (volumes == 0) {
+    // NETGEN kept no volume element, so its front at the stop is the whole boundary.
+    front.no_volume = true;
+    std::set<std::vector<smIdType>> seen;
+    for (const SMDS_MeshElement* e : boundary_elements) {
+      std::vector<const SMDS_MeshNode*> face;
+      std::vector<smIdType> key;
+      for (int i = 0; i < e->NbCornerNodes(); ++i) {
+        face.push_back(e->GetNode(i));
+        key.push_back(e->GetNode(i)->GetID());
+      }
+      std::sort(key.begin(), key.end());
+      if (seen.insert(key).second) {
+        open.push_back(face);
+      }
+    }
+  } else {
+    for (std::size_t i = 0; i < volume_faces.size();) {
+      std::size_t j = i + 1;
+      while (j < volume_faces.size() && volume_faces[j].key == volume_faces[i].key) {
+        ++j;
+      }
+      if (j == i + 1 &&
+          !std::binary_search(boundary.begin(), boundary.end(), volume_faces[i].key)) {
+        add_volume_face(volume_faces[i]);
+      }
+      i = j;
+    }
+    for (const auto& wide : wide_faces) {
+      if (wide.second.first == 1 && boundary_wide.count(wide.first) == 0) {
+        add_volume_face(wide.second.second);
+      }
+    }
+  }
+  front.faces = open.size();
+  if (open.empty()) {
+    return front;
+  }
+
+  // Patches: open faces joined by a shared node (union-find over the faces).
+  std::vector<std::size_t> parent(open.size());
+  for (std::size_t i = 0; i < parent.size(); ++i) {
+    parent[i] = i;
+  }
+  const auto find = [&parent](std::size_t a) {
+    while (parent[a] != a) {
+      parent[a] = parent[parent[a]];
+      a = parent[a];
+    }
+    return a;
+  };
+  std::map<const SMDS_MeshNode*, std::size_t> first_face;
+  for (std::size_t i = 0; i < open.size(); ++i) {
+    double c[3] = {0.0, 0.0, 0.0};
+    for (const SMDS_MeshNode* n : open[i]) {
+      c[0] += n->X();
+      c[1] += n->Y();
+      c[2] += n->Z();
+      const auto at = first_face.emplace(n, i).first;
+      const std::size_t a = find(i);
+      const std::size_t b = find(at->second);
+      if (a != b) {
+        parent[a] = b;
+      }
+    }
+    for (double& v : c) {
+      v /= static_cast<double>(open[i].size());
+    }
+    front.centroids.insert(front.centroids.end(), c, c + 3);
+  }
+  std::map<std::size_t, Patch> patches;
+  for (std::size_t i = 0; i < open.size(); ++i) {
+    Patch& p = patches[find(i)];
+    p.faces += 1;
+    for (const SMDS_MeshNode* n : open[i]) {
+      const double xyz[3] = {n->X(), n->Y(), n->Z()};
+      for (int d = 0; d < 3; ++d) {
+        p.low[d] = std::min(p.low[d], xyz[d]);
+        p.high[d] = std::max(p.high[d], xyz[d]);
+      }
+    }
+  }
+  for (const auto& p : patches) {
+    front.patches.push_back(p.second);
+  }
+  std::stable_sort(front.patches.begin(), front.patches.end(),
+                   [](const Patch& a, const Patch& b) { return a.faces > b.faces; });
+  return front;
+}
+
+std::string Mesher::open_front_text(const OpenFront& front) {
+  constexpr std::size_t kListed = 5;
+  const auto point = [](const double* xyz) {
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "(%.6g, %.6g, %.6g)", xyz[0], xyz[1], xyz[2]);
+    return std::string(buf);
+  };
+  std::string text = "; open front of the kept mesh: " + std::to_string(front.faces) +
+                     " face(s) in " + std::to_string(front.patches.size()) + " patch(es)";
+  if (front.no_volume) {
+    text += " (NETGEN kept no volume element, so the whole boundary is open)";
+  }
+  text += ", the box of the " + std::to_string(std::min(front.patches.size(), kListed)) +
+          " largest: ";
+  for (std::size_t i = 0; i < front.patches.size() && i < kListed; ++i) {
+    const Patch& p = front.patches[i];
+    text += std::string(i == 0 ? "" : ", ") + std::to_string(p.faces) + " face(s) in " +
+            point(p.low) + " to " + point(p.high);
+  }
+  return text;
+}
+
 std::string Mesher::netgen_face_sizes(const TopoDS_Shape& face, int ordinal,
                                       const SMESH_Algo& algo) const {
   // NETGEN's surface mesher throws "Problem in Surface mesh generation" and drops the
@@ -1372,6 +1586,20 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
       if (kKindTypes[k] == TopAbs_FACE && err->myAlgo != nullptr &&
           (algorithm_name == "NETGEN_2D" || algorithm_name == "NETGEN_2D_ONLY")) {
         line += netgen_face_sizes(ex.Current(), at.second, *err->myAlgo);
+      }
+      // NETGEN 3-D stops a whole subdomain with no location ("Stop meshing since too many
+      // attempts", meshfunc.cpp:218-234). Where it names no bad element, the open front of
+      // the mesh it kept shows where the volume mesh ends.
+      const auto* bad = dynamic_cast<const SMESH_BadInputElements*>(err.get());
+      if (kKindTypes[k] == TopAbs_SOLID &&
+          (algorithm_name == "NETGEN_3D" || algorithm_name == "NETGEN_2D3D") &&
+          (bad == nullptr || !bad->HasBadElems())) {
+        const OpenFront front = open_front(ex.Current());
+        if (front.faces > 0) {
+          line += open_front_text(front);
+          bad_centroids.insert(bad_centroids.end(), front.centroids.begin(),
+                               front.centroids.end());
+        }
       }
       bool seen = false;
       for (const std::string& s : failures) {

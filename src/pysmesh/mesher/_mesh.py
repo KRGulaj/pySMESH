@@ -146,7 +146,15 @@ class _MeshOps(_MesherBase):
                 algorithm failed on gives the longest segment already on its edges, the
                 smallest extent of its box and the size its hypothesis asks for; when that
                 segment is longer than the extent, the line says that the edges were
-                meshed coarser than the face can take. Where the failed algorithm names
+                meshed coarser than the face can take. The line of a solid that a NETGEN
+                3-D algorithm failed on without naming bad elements ("Stop meshing since
+                too many attempts") gives the open front of the mesh it kept: the faces of
+                volume elements that no other volume element and no boundary element
+                covers, or the whole boundary when NETGEN kept no volume element. It gives
+                their count and the box of each of the 5 largest connected patches, and
+                their centroids go to ``.bad_element_centroids``. The front holds the
+                place where NETGEN stopped and every region that it had not reached yet.
+                Where the failed algorithm names
                 bad elements (NETGEN's intersecting triangles), the line of that
                 sub-shape gives their count and the centroids of the first 5, and
                 ``.bad_element_centroids`` is the (k, 3) float64 array of every one; it
