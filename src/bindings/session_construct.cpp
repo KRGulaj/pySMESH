@@ -1640,7 +1640,19 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
   std::vector<TopoDS_Wire> wires;
   bool closed = false;
   for (std::size_t k = 0; k < sections.size(); ++k) {
-    const TopoDS_Shape body = sole_body("thru_sections", sections[k]);
+    // A section is one wire. Edges of several loose bodies are a wire not yet joined, so
+    // the refusal names the section and the operation that joins it, rather than
+    // sole_body's advice to split the call, which a loft cannot follow.
+    const std::vector<TopoDS_Shape> owners = owner_bodies("thru_sections", sections[k]);
+    if (owners.size() != 1) {
+      throw PysmeshError("Session.thru_sections: section " + std::to_string(k + 1) + " of " +
+                         std::to_string(sections.size()) + " names entities of " +
+                         std::to_string(owners.size()) +
+                         " different bodies. A section is one wire or one single-edge "
+                         "body: join the section's edges into one wire with make_wire, "
+                         "then name that wire.");
+    }
+    const TopoDS_Shape body = owners.front();
     for (std::size_t j = 0; j < bodies.size(); ++j) {
       if (!bodies[j].IsSame(body)) {
         continue;
