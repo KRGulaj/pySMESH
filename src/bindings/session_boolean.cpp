@@ -174,6 +174,55 @@ void add_fused_solids(BRepAlgoAPI_BuilderAlgo& op, const TopoDS_Shape& result,
   }
 }
 
+// The shape to add to the model: the result, with each solid that is also the solid of a
+// body the operation keeps rebuilt as a solid of its own (report #6).
+//
+// A splitter that keeps its tools returns a tool that lies inside a target, uncut, as a
+// piece of the target, and that piece is the tool's own TShape. Added as it is, the root
+// would hold that solid twice, as the kept tool body and as the target's piece, and
+// remove() of either body would drop both, since it drops every root body IsSame the
+// doomed one. Each such piece becomes a new TShape over the same shells. The target's
+// piece and the tool are then two solids that share their faces, as they are when the
+// tool crosses the target's boundary. `hist` maps the piece to its copy, so the target's
+// id moves onto the copy and the tool's id stays on the tool. A result that shares no
+// solid with a kept body is returned as it is.
+TopoDS_Shape apart_from_kept(const std::vector<TopoDS_Shape>& survivors,
+                             const TopoDS_Shape& added, const Handle(BRepTools_History) & hist) {
+  if (hist.IsNull()) {
+    return added;
+  }
+  ShapeSet added_solids;
+  TopExp::MapShapes(added, TopAbs_SOLID, added_solids);
+  ShapeSet shared;
+  for (const TopoDS_Shape& body : survivors) {
+    for (TopExp_Explorer ex(body, TopAbs_SOLID); ex.More(); ex.Next()) {
+      if (added_solids.Contains(ex.Current())) {
+        shared.Add(ex.Current());
+      }
+    }
+  }
+  if (shared.IsEmpty()) {
+    return added;
+  }
+  Handle(BRepTools_History) apart = new BRepTools_History();
+  BRep_Builder builder;
+  std::vector<TopoDS_Shape> bodies;
+  for (const TopoDS_Shape& body : root_bodies(added)) {
+    if (body.ShapeType() != TopAbs_SOLID || !shared.Contains(body)) {
+      bodies.push_back(body);
+      continue;
+    }
+    TopoDS_Shape copy = body.EmptyCopied();
+    for (TopoDS_Iterator it(body, /*cumOri=*/false, /*cumLoc=*/false); it.More(); it.Next()) {
+      builder.Add(copy, it.Value());
+    }
+    apart->AddModified(body, copy);
+    bodies.push_back(copy);
+  }
+  hist->Merge(apart);
+  return make_root(bodies);
+}
+
 // Why a result with no solid is wrong, or an empty string when it may be right.
 //
 // It runs only when the result holds no solid although the targets hold one, so a normal
@@ -1266,11 +1315,12 @@ py::dict Session::run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
     throw PysmeshError(leak.first, leak.second, {});
   }
   if (pieces != nullptr) {
-    const TopoDS_Shape kept = pieces->refine(result, hist);
+    const TopoDS_Shape kept = apart_from_kept(survivors, pieces->refine(result, hist), hist);
     return commit(concat(survivors, kept), hist, op_name, kept, Validation::Strict,
                   warning_list, PieceRule::new_piece_ids(TopAbs_SOLID));
   }
-  return commit(concat(survivors, result), hist, op_name, result, Validation::Strict,
+  const TopoDS_Shape added = apart_from_kept(survivors, result, hist);
+  return commit(concat(survivors, added), hist, op_name, added, Validation::Strict,
                 warning_list);
 }
 
