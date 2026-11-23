@@ -17,6 +17,7 @@
 
 #include "session/session.hpp"
 
+#include <BOPAlgo_Builder.hxx>
 #include <BRepFilletAPI_MakeFillet2d.hxx>
 #include <ChFi2d_ConstructionError.hxx>
 
@@ -43,6 +44,134 @@ std::vector<TopoDS_Shape> tools_of(BRepAlgoAPI_BuilderAlgo& op) {
     }
   }
   return out;
+}
+
+// Give each input solid of a fuse the union solid as its modified shape (report #41).
+//
+// BOPAlgo_BOP::BuildSolid builds every solid of a fuse anew, from the faces of the splits
+// of the input solids. No split of an input solid is then in the result, so
+// BOPAlgo_Builder::PrepareHistory reports each input solid as removed, and the session
+// would kill every input solid id. A common keeps the splits themselves, so its history
+// relates each input solid to the result. Every split of an input solid of a fuse is
+// material of the union, so the solid is in fact modified into the result solid that holds
+// its splits. This adds that relation to `hist`, and the identity rule for a merge then
+// keeps the ids of all the fused solids on the union.
+//
+// A split reaches its result solid through a face of that solid, or through other splits:
+// two splits that share a face lie in one result solid, because a fuse keeps no face
+// between two pieces of its material. So a solid wholly inside another one, whose own
+// faces all vanish, still reaches the union. An input solid that the result holds itself,
+// or as a modified shape, is left alone.
+void add_fused_solids(BRepAlgoAPI_BuilderAlgo& op, const TopoDS_Shape& result,
+                      const Handle(BRepTools_History) & hist) {
+  ShapeSet result_solids;
+  TopExp::MapShapes(result, TopAbs_SOLID, result_solids);
+  std::vector<TopoDS_Shape> inputs;
+  for (const TopoDS_Shape& s : op.Arguments()) {
+    inputs.push_back(s);
+  }
+  for (const TopoDS_Shape& s : tools_of(op)) {
+    inputs.push_back(s);
+  }
+  std::vector<TopoDS_Shape> solids;
+  std::vector<TopoDS_Shape> lost;
+  for (const TopoDS_Shape& input : inputs) {
+    for (TopExp_Explorer ex(input, TopAbs_SOLID); ex.More(); ex.Next()) {
+      const TopoDS_Shape& s = ex.Current();
+      solids.push_back(s);
+      bool kept = result_solids.Contains(s);
+      for (const TopoDS_Shape& m : hist->Modified(s)) {
+        kept = kept || result_solids.Contains(m);
+      }
+      if (!kept) {
+        lost.push_back(s);
+      }
+    }
+  }
+  if (lost.empty()) {
+    return;
+  }
+
+  // The splits of every input solid (the solid itself when it has none), 1-based.
+  const auto& images = op.Builder()->Images();
+  ShapeSet pieces;
+  const auto pieces_of = [&](const TopoDS_Shape& s) {
+    std::vector<int> out;
+    const NCollection_List<TopoDS_Shape>* split = images.Seek(s);
+    if (split == nullptr || split->IsEmpty()) {
+      out.push_back(pieces.Add(s));
+      return out;
+    }
+    for (const TopoDS_Shape& p : *split) {
+      out.push_back(pieces.Add(p));
+    }
+    return out;
+  };
+  std::vector<std::vector<int>> pieces_of_solid;
+  for (const TopoDS_Shape& s : solids) {
+    pieces_of_solid.push_back(pieces_of(s));
+  }
+
+  // Union-find over the pieces, joined by the faces they share.
+  std::vector<int> parent(static_cast<std::size_t>(pieces.Extent()) + 1);
+  for (std::size_t i = 0; i < parent.size(); ++i) {
+    parent[i] = static_cast<int>(i);
+  }
+  const auto root = [&](int i) {
+    while (parent[static_cast<std::size_t>(i)] != i) {
+      parent[static_cast<std::size_t>(i)] =
+          parent[static_cast<std::size_t>(parent[static_cast<std::size_t>(i)])];
+      i = parent[static_cast<std::size_t>(i)];
+    }
+    return i;
+  };
+  ShapeKeyed<int> piece_of_face;
+  for (int p = 1; p <= pieces.Extent(); ++p) {
+    for (TopExp_Explorer ex(pieces.FindKey(p), TopAbs_FACE); ex.More(); ex.Next()) {
+      const auto [it, added] = piece_of_face.emplace(ex.Current(), p);
+      if (!added) {
+        parent[static_cast<std::size_t>(root(p))] = root(it->second);
+      }
+    }
+  }
+
+  // The result solids each group of pieces reaches through a face.
+  std::unordered_map<int, std::vector<int>> reached;
+  for (int r = 1; r <= result_solids.Extent(); ++r) {
+    for (TopExp_Explorer ex(result_solids.FindKey(r), TopAbs_FACE); ex.More(); ex.Next()) {
+      const auto it = piece_of_face.find(ex.Current());
+      if (it == piece_of_face.end()) {
+        continue;
+      }
+      std::vector<int>& to = reached[root(it->second)];
+      if (std::find(to.begin(), to.end(), r) == to.end()) {
+        to.push_back(r);
+      }
+    }
+  }
+
+  for (const TopoDS_Shape& s : lost) {
+    const auto at = std::find_if(solids.begin(), solids.end(),
+                                 [&](const TopoDS_Shape& x) { return x.IsSame(s); });
+    std::vector<int> targets;
+    for (int p : pieces_of_solid[static_cast<std::size_t>(at - solids.begin())]) {
+      const auto it = reached.find(root(p));
+      if (it == reached.end()) {
+        continue;
+      }
+      for (int r : it->second) {
+        if (std::find(targets.begin(), targets.end(), r) == targets.end()) {
+          targets.push_back(r);
+        }
+      }
+    }
+    std::sort(targets.begin(), targets.end());
+    for (int r : targets) {
+      TopoDS_Shape union_solid = result_solids.FindKey(r);
+      union_solid.Orientation(s.Orientation());
+      hist->AddModified(s, union_solid);
+    }
+  }
 }
 
 // Why a result with no solid is wrong, or an empty string when it may be right.
@@ -1022,6 +1151,15 @@ py::dict Session::run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
     } else {
       result = op.Shape();
       hist = op.History();
+      if (dynamic_cast<BRepAlgoAPI_Fuse*>(&op) != nullptr && !hist.IsNull()) {
+        try {
+          add_fused_solids(op, result, hist);
+        } catch (const std::exception& e) {
+          py::gil_scoped_acquire acquire;
+          throw PysmeshError(std::string("Session.") + op_name +
+                             ": relating the input solids to the union threw: " + e.what());
+        }
+      }
       std::ostringstream w;
       op.DumpWarnings(w);
       warnings = w.str();

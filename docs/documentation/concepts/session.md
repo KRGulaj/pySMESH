@@ -131,7 +131,7 @@ elsewhere. A kept body stays in the model unchanged, with every id it had.
 
 | Operation | Targets | Tools | Solid ids after the operation |
 |---|---|---|---|
-| `fuse` | consumed | consumed | The union is a new solid with a new id. The target and tool solid ids die. |
+| `fuse` | consumed | consumed | The target and tool solid ids all survive on the union (`merged`). A solid that touches no other keeps its id on its own solid. |
 | `cut` | consumed | consumed | A target solid keeps its id on what remains of it. The tool solid ids die. |
 | `common` | consumed | consumed | The target and tool solid ids all survive on the intersection (`merged`). |
 | `section` | kept | kept | Every operand id survives. The section edges and vertices get new ids. |
@@ -537,7 +537,7 @@ came from. By default `export_handoff` verifies the id-to-sub-shape map is a bij
 before it returns, and raises rather than handing back a map that has quietly lost some of
 the caller's names. Three causes make the pairing ambiguous: a same-domain merge leaves
 several live ids on one face, a boolean leaves both operands' ids on every sub-shape they
-share (every `common`, and a `fuse` with coincident sub-shapes), and a split leaves one live
+share (every `common` and every `fuse` of solids that meet), and a split leaves one live
 id on several.
 
 `export_handoff(allow_aliases=True)` returns a many-to-one map instead. Each ordinal

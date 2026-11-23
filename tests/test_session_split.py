@@ -185,9 +185,13 @@ def l_prism_session() -> tuple[Session, EntityId]:
     s.add_box(1.0, 3.0, 1.0)
     a, b = (EntityId(int(i)) for i in s.entities(EntityKind.SOLID))
     s.fuse([a], [b], parallel=False)
-    solids = s.entities(EntityKind.SOLID)
+    # The fuse keeps both box ids on the L. A fresh session over its BREP gives the L
+    # one id, which is the target these tests name.
+    one = Session()
+    one.add_brep(s.brep())
+    solids = one.entities(EntityKind.SOLID)
     assert solids.size == 1
-    return s, EntityId(int(solids[0]))
+    return one, EntityId(int(solids[0]))
 
 
 def free_face_at_x(s: Session, x: float) -> EntityId:

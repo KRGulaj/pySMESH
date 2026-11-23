@@ -54,6 +54,11 @@ class _BooleanOps(_SessionBase):
     ) -> HistoryDelta:
         """Boolean-union solids, carrying every input entity's id through the history.
 
+        The ids of all the input solids that one union solid holds survive on it, as
+        ``merged``: the union is denoted by every id that contributed to it, as after
+        :meth:`common`. Use ``entities(SOLID, distinct=True)`` to count the solids. An
+        input solid that touches no other keeps its id on its own solid.
+
         Args:
             targets: Solid entity ids used as boolean arguments. At least one.
             tools: Solid entity ids used as boolean tools. At least one.
