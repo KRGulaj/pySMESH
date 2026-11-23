@@ -202,7 +202,19 @@ class Session(
       :attr:`ResolutionStatus.AMBIGUOUS` rather than picking one;
     * several entities merged onto one output — **all** their ids survive on it;
     * an output with no input correspondence gets a **new** id;
-    * a removed entity's id is marked **dead** and is never reused.
+    * a removed entity's id is marked **dead** and is never reused. A later call that
+      names it raises :class:`PysmeshError` with the ``op_index`` and the ``op`` of the
+      :class:`HistoryDelta` of the operation that consumed it.
+
+    Cost: each operation commits a new root and carries every live id into a new
+    registry. So the time of one operation is linear in the live entity count, and the
+    time of a long build is quadratic in it. Measured with one ``add_polyline`` and one
+    ``make_face`` per unit square (9 live ids per square): 1.9 ms per square while the
+    session holds 0 to 250 squares, and 48 ms per square at 1 750 to 2 000 squares.
+    Validation is not the cause: with ``validate=False`` the second figure is 41 ms. To
+    build thousands of bodies, build them in sessions of a few hundred bodies each. Then
+    merge the BREPs into one session with :meth:`add_brep`. The same 2 000 squares took
+    4.4 s in 8 sessions of 250, against 41 s in one session.
 
     Arguments: every float argument must be finite. A NaN or an infinity raises
     :class:`PysmeshError` naming the operation, the argument and the value, before any

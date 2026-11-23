@@ -899,3 +899,74 @@ def test_snapshot_and_restore_round_trip_at_any_depth(depth: int) -> None:
         s.restore(mark)
         assert s.brep() == brep
         assert tuple(s.entities(EntityKind.FACE).tolist()) == faces
+
+
+# ---- A dead id names the operation that consumed it --------------------------- #
+
+
+def _box_and_tool() -> tuple[Session, EntityId, EntityId]:
+    """A 4 x 4 x 4 box and a 2 x 2 x 2 box that pokes out of its top face."""
+    s = Session()
+    s.add_box(4.0, 4.0, 4.0)
+    s.add_box(2.0, 2.0, 2.0, origin=(1.0, 1.0, 3.0))
+    box, tool = (EntityId(int(i)) for i in s.entities(EntityKind.SOLID))
+    return s, box, tool
+
+
+def test_a_tool_consumed_by_cut_is_refused_naming_the_cut_and_its_op_index() -> None:
+    """remove(tool) after cut names "cut" and the op_index of the cut's HistoryDelta."""
+    s, box, tool = _box_and_tool()
+    cut = s.cut([box], [tool])
+
+    with pytest.raises(ps.PysmeshError) as info:
+        s.remove([tool])
+
+    assert str(info.value) == (
+        f"Session.remove: entity {tool} is dead "
+        f"(consumed by operation {cut.op_index}, {cut.op})."
+    )
+    assert cut.op == "cut"
+
+
+def test_an_id_that_remove_killed_is_refused_naming_the_remove() -> None:
+    """A query of a removed body's solid names "remove" and the remove's op_index."""
+    s, _, tool = _box_and_tool()
+    removed = s.remove([tool])
+
+    with pytest.raises(ps.PysmeshError) as info:
+        s.mass_properties([tool])
+
+    assert str(info.value) == (
+        f"Session.mass_properties: entity {tool} is dead "
+        f"(consumed by operation {removed.op_index}, remove)."
+    )
+    assert tool in removed.deleted
+
+
+def _dead_text(s: Session, entity: EntityId) -> str:
+    """The refusal a query of a dead id raises."""
+    with pytest.raises(ps.PysmeshError) as info:
+        s.mass_properties([entity])
+    return str(info.value)
+
+
+def test_a_dead_id_names_the_operation_of_the_state_that_was_restored() -> None:
+    """Each branch names the operation that killed the id on it, after any restore."""
+    s, box, tool = _box_and_tool()
+    start = s.snapshot()
+    cut = s.cut([box], [tool])
+    added = s.add_box(1.0, 1.0, 1.0, origin=(10.0, 0.0, 0.0))
+    late = next(e for e in added.created if s.entity_kind(e) is EntityKind.SOLID)
+    after_cut = s.snapshot()
+    s.restore(start)
+    removed = s.remove([tool])
+
+    on_remove_branch = _dead_text(s, tool)
+    s.restore(after_cut)
+    on_cut_branch = _dead_text(s, tool)
+    s.restore(start)
+    abandoned = _dead_text(s, late)
+
+    assert f"(consumed by operation {removed.op_index}, remove)" in on_remove_branch
+    assert f"(consumed by operation {cut.op_index}, cut)" in on_cut_branch
+    assert "issued on a branch that restore left" in abandoned

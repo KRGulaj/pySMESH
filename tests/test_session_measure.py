@@ -385,7 +385,8 @@ def _plate(hole_2mm: bool, corners: int) -> tuple[Session, EntityId]:
     )
     s.fillet(_vertical_edges(s, (x, x + dx), (y, y + dy)), POCKET_R)
     s.cut(body, pocket)
-    solids = [EntityId(int(i)) for i in s.entities(EntityKind.SOLID)]
+    # The boss fuse keeps the boss id on the plate beside the plate's own (a merge).
+    solids = [EntityId(int(i)) for i in s.entities(EntityKind.SOLID, distinct=True)]
     assert len(solids) == 1
     return s, solids[0]
 

@@ -892,6 +892,9 @@ class _ConstructOps(_SessionBase):
             PysmeshError: On fewer than two sections, a repeated body other than the
                 first named again as the last (the message names both positions), a
                 section that is not a wire or edge, or a loft OCCT cannot build. Also,
+                if the entities of one section belong to several bodies, such as two
+                open edges: the message names the section and its body count, and says
+                to join the section's edges into one wire with :meth:`make_wire`. Also,
                 with ``solid``, if OCCT's planar cap on the first or the last section is
                 missing or invalid: the section is not planar to its edge tolerance
                 (1e-7). The message names the section and how far its points spread

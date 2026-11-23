@@ -2144,3 +2144,78 @@ def test_the_two_level_box_query_equals_the_all_exact_rule_on_the_production_ass
     mismatches = _two_level_mismatches(s, kind)
 
     assert mismatches == []
+
+
+# ---- A split id: the refusal names a route to one piece ------------------------ #
+
+
+def _fragmented_overlapping_boxes() -> Session:
+    """Two 2 x 2 x 2 boxes overlapping on 1 <= x <= 2, fragmented.
+
+    Each box edge along x crosses the other box's wall at x = 1 or x = 2, so it is split
+    into two pieces of length 1. Each 2 x 2 wall that x = 1 or x = 2 crosses is split
+    into two 1 x 2 pieces of area 2. Under fragment every piece keeps the id it came
+    from.
+    """
+    s = Session()
+    s.add_box(2.0, 2.0, 2.0)
+    s.add_box(2.0, 2.0, 2.0, origin=(1.0, 0.0, 0.0))
+    s.fragment(list(s.entities(EntityKind.SOLID)))
+    return s
+
+
+def _split_id(s: Session, kind: EntityKind) -> EntityId:
+    """The first live id of one kind that denotes more than one shape."""
+    return next(e for e in s.entities(kind) if s.shape_count(e) > 1)
+
+
+def _handoff_ordinals(
+    rows: tuple[tuple[EntityId, ...], ...], wanted: EntityId
+) -> list[int]:
+    """The 1-based ordinals whose row of ids holds the wanted id."""
+    return [i + 1 for i, ids in enumerate(rows) if wanted in ids]
+
+
+def test_a_split_edge_refusal_names_the_handoff_route_that_reaches_one_piece() -> None:
+    """The message names the handoff ordinals; that route gives one piece's bounds."""
+    s = _fragmented_overlapping_boxes()
+    edge = _split_id(s, EntityKind.EDGE)
+
+    with pytest.raises(ps.PysmeshError) as info:
+        s.edge_parameter_bounds([edge])
+    handoff = s.export_handoff(allow_aliases=True)
+    ordinals = _handoff_ordinals(handoff.edge_ids_of, edge)
+    pieces = [ps.load_brep(handoff.brep).edges()[k - 1] for k in ordinals]
+
+    message = str(info.value)
+    assert "export_handoff(allow_aliases=True).edge_ids_of" in message
+    assert "load_brep(handoff.brep).edges()" in message
+    assert "new Session" in message
+    assert len(ordinals) == s.shape_count(edge) == 2
+    first, last = pieces[0].t_bounds
+    assert last - first == pytest.approx(1.0, rel=1e-12)
+    assert [p.length for p in pieces] == pytest.approx([1.0, 1.0], rel=1e-9)
+
+
+def test_a_split_face_refusal_names_routes_that_reach_one_piece() -> None:
+    """Both routes the message names reach the same 1 x 2 piece of a split wall."""
+    s = _fragmented_overlapping_boxes()
+    face = _split_id(s, EntityKind.FACE)
+
+    with pytest.raises(ps.PysmeshError) as info:
+        s.face_frame(face)
+    handoff = s.export_handoff(allow_aliases=True)
+    ordinals = _handoff_ordinals(handoff.face_ids_of, face)
+    pieces = [ps.load_brep(handoff.brep).faces()[k - 1] for k in ordinals]
+    fresh = Session()
+    fresh.add_brep(s.brep())
+    origins = [fresh.face_frame(f).origin for f in fresh.entities(EntityKind.FACE)]
+
+    message = str(info.value)
+    assert "export_handoff(allow_aliases=True).face_ids_of" in message
+    assert "load_brep(handoff.brep).faces()" in message
+    assert "new Session" in message
+    assert len(ordinals) == s.shape_count(face) == 2
+    assert [p.area for p in pieces] == pytest.approx([2.0, 2.0], rel=1e-9)
+    hits = [o for o in origins if np.allclose(o, pieces[0].centroid, atol=1e-9)]
+    assert len(hits) == 1

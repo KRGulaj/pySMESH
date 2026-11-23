@@ -52,6 +52,10 @@ per-kind id array carries a mesh cell all the way back to the model it came from
 
 Thread contract: a :class:`Mesher` is **not** thread-safe. Use one per thread. Meshing
 releases the GIL, and the progress and cancel hooks are called from a helper thread.
+SMESH and NETGEN compute on a thread of their own with a 256 MB stack reservation, and
+the call waits for it: a compute needs more stack than the 2 MB main thread of
+``python.exe`` reserves. The same holds for :func:`~pysmesh.compute_viscous_layers` and
+for :meth:`Mesher.shrink_geometry` and :meth:`Mesher.add_layers`.
 
 **Layout.**
 
@@ -238,6 +242,10 @@ from ._mesh import _MeshOps
 # The hook aliases belong to the session, which defines them; the mesher shares them
 # rather than declaring a second pair that means the same thing.
 from ..session import CancelPredicate, ProgressCallback
+
+# ViscousLayers.method takes this enum, so the package of ViscousLayers exports it too. It
+# is the enum of pysmesh.viscous, re-exported: both names are the same object.
+from ..viscous import ExtrusionMethod
 from ._types import (
     GMF_REQUIRED_MARKER,
     GMF_WRITABLE_TYPES,
@@ -290,7 +298,8 @@ class Mesher(
     :meth:`remove_elements` / :meth:`remove_nodes` cut pieces out of it.
 
     Thread contract: **not thread-safe**. One mesher per thread. :meth:`compute` releases the
-    GIL and calls its hooks from a helper thread.
+    GIL and calls its hooks from a helper thread. SMESH computes on a thread of its own
+    with a 256 MB stack reservation, so the caller's stack size does not matter.
 
     Example:
         >>> m = Mesher(load_brep(data))                     # doctest: +SKIP
@@ -434,6 +443,7 @@ __all__ = [
     "ElementsAtPoints",
     "ElementsOnShape",
     "EqualTo",
+    "ExtrusionMethod",
     "FacePatches",
     "Fineness",
     "FixedPoints1D",

@@ -31,6 +31,7 @@ Fixture sizing follows the project rule: a 3 x 7 x 11 box, never a unit cube.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 
 import numpy as np
@@ -185,9 +186,13 @@ def l_prism_session() -> tuple[Session, EntityId]:
     s.add_box(1.0, 3.0, 1.0)
     a, b = (EntityId(int(i)) for i in s.entities(EntityKind.SOLID))
     s.fuse([a], [b], parallel=False)
-    solids = s.entities(EntityKind.SOLID)
+    # The fuse keeps both box ids on the L. A fresh session over its BREP gives the L
+    # one id, which is the target these tests name.
+    one = Session()
+    one.add_brep(s.brep())
+    solids = one.entities(EntityKind.SOLID)
     assert solids.size == 1
-    return s, EntityId(int(solids[0]))
+    return one, EntityId(int(solids[0]))
 
 
 def free_face_at_x(s: Session, x: float) -> EntityId:
@@ -657,6 +662,27 @@ def test_split_by_faces_refuses_a_face_that_misses_the_target() -> None:
         s.split_by_faces([box], [tool])
 
 
+def test_split_by_faces_refuses_a_face_that_ends_inside_the_target() -> None:
+    """A face that crosses one wall and ends inside divides nothing: the documented refusal.
+
+    The splitter keeps the part inside as an INTERNAL face of the solid. Its edges inside
+    the box bound no hole, so the refusal is "divide none", not a leak.
+    """
+    s, box = box_session()
+    d = s.add_rectangle((-1.0, 2.0, BOX_C / 2.0), (0.0, 0.0, 1.0), 2.0, 3.0)
+    tool = next(e for e in d.created if s.entity_kind(e) is EntityKind.FACE)
+    before = s.brep()
+
+    with pytest.raises(
+        ps.PysmeshError,
+        match=rf"split_by_faces: face {int(tool)} divide none of the solid {int(box)}; "
+        "nothing to split",
+    ):
+        s.split_by_faces([box], [tool])
+
+    assert s.brep() == before
+
+
 @pytest.mark.parametrize("op", ["split_by_faces", "split_by_plane", "keep_half_space"])
 def test_a_refused_split_leaves_the_session_exactly_as_it_was(op: str) -> None:
     s, box = box_session()
@@ -721,3 +747,103 @@ def test_split_by_a_solid_keeps_the_target_id_on_both_pieces_as_before() -> None
     assert s.mass_properties([box]).measure[0] == pytest.approx(
         BOX_A * BOX_B * BOX_C, rel=EXACT_RTOL
     )
+
+
+# ---- A tool inside the target, and remove after split ------------------------------- #
+
+# A 4 x 4 x 4 box split by a cylinder of radius 0.5 on its axis x = y = 2: wholly inside
+# the box (from z = 1, height 2), or crossing its top and bottom faces (from z = -1,
+# height 6). The box keeps the part of the cylinder inside it as its second piece.
+SPLIT_BOX: float = 4.0
+SPLIT_RADIUS: float = 0.5
+_SPLIT_TOOLS: dict[str, tuple[float, float, float]] = {
+    # base z, height, height of the part inside the box
+    "inside": (1.0, 2.0, 2.0),
+    "crossing": (-1.0, 6.0, 4.0),
+}
+
+
+def _cylinder_volume(height: float) -> float:
+    """pi r^2 h of the split cylinder."""
+    return math.pi * SPLIT_RADIUS**2 * height
+
+
+def _box_split_by_a_cylinder(case: str) -> tuple[Session, EntityId, EntityId]:
+    """The box split by the cylinder of one case; the box id and the cylinder id."""
+    z0, height, _ = _SPLIT_TOOLS[case]
+    s = Session()
+    s.add_box(SPLIT_BOX, SPLIT_BOX, SPLIT_BOX)
+    s.add_cylinder(SPLIT_RADIUS, height, (SPLIT_BOX / 2.0, SPLIT_BOX / 2.0, z0))
+    box, tool = (EntityId(int(i)) for i in s.entities(EntityKind.SOLID))
+    s.split([box], [tool])
+    return s, box, tool
+
+
+def _solid_volumes_of(s: Session, entity: EntityId) -> list[float]:
+    """The volume of each solid the id denotes, at precision 1e-12, ascending.
+
+    The handoff rows give the ordinals of the id's solids. A fresh session over the
+    handoff BREP has one id per ordinal, which its own handoff names.
+    """
+    handoff = s.export_handoff(allow_aliases=True)
+    rows = [k for k, ids in enumerate(handoff.solid_ids_of) if entity in ids]
+    fresh = Session()
+    fresh.add_brep(handoff.brep)
+    ids = [EntityId(int(fresh.export_handoff().solid_id[k])) for k in rows]
+    return sorted(fresh.mass_properties(ids, precision=1e-12).measure.tolist())
+
+
+def _model_volume(s: Session) -> float:
+    """The volume of every solid shape of the model, each counted once."""
+    fresh = Session()
+    fresh.add_brep(s.brep())
+    ids = [EntityId(int(i)) for i in fresh.entities(EntityKind.SOLID)]
+    return float(fresh.mass_properties(ids, precision=1e-12).measure.sum())
+
+
+@pytest.mark.parametrize("case", sorted(_SPLIT_TOOLS))
+def test_split_by_a_cylinder_gives_the_box_two_pieces_and_keeps_the_tool(
+    case: str,
+) -> None:
+    """The box id denotes the cylinder part inside it and the rest; the tool is intact."""
+    s, box, tool = _box_split_by_a_cylinder(case)
+    _, height, inside = _SPLIT_TOOLS[case]
+    piece = _cylinder_volume(inside)
+
+    box_pieces = _solid_volumes_of(s, box)
+    tool_solids = _solid_volumes_of(s, tool)
+
+    assert box_pieces == pytest.approx([piece, SPLIT_BOX**3 - piece], rel=1e-9)
+    assert tool_solids == pytest.approx([_cylinder_volume(height)], rel=1e-9)
+
+
+@pytest.mark.parametrize("case", sorted(_SPLIT_TOOLS))
+def test_removing_the_tool_after_split_keeps_both_pieces_of_the_box(case: str) -> None:
+    """remove(tool) drops the tool body only: the box keeps its two pieces."""
+    s, box, tool = _box_split_by_a_cylinder(case)
+    piece = _cylinder_volume(_SPLIT_TOOLS[case][2])
+
+    delta = s.remove([tool])
+
+    assert not s.is_alive(tool)
+    assert int(tool) in delta.deleted.tolist()
+    assert _solid_volumes_of(s, box) == pytest.approx(
+        [piece, SPLIT_BOX**3 - piece], rel=1e-9
+    )
+    assert _model_volume(s) == pytest.approx(SPLIT_BOX**3, rel=1e-9)
+
+
+@pytest.mark.parametrize("case", sorted(_SPLIT_TOOLS))
+def test_removing_the_box_after_split_drops_its_pieces_and_keeps_the_tool(
+    case: str,
+) -> None:
+    """remove(box) drops both pieces of the box; the whole cylinder stays."""
+    s, box, tool = _box_split_by_a_cylinder(case)
+    tool_volume = _cylinder_volume(_SPLIT_TOOLS[case][1])
+
+    s.remove([box])
+
+    assert not s.is_alive(box)
+    assert s.is_alive(tool)
+    assert _solid_volumes_of(s, tool) == pytest.approx([tool_volume], rel=1e-9)
+    assert _model_volume(s) == pytest.approx(tool_volume, rel=1e-9)

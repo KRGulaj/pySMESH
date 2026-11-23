@@ -54,6 +54,11 @@ class _BooleanOps(_SessionBase):
     ) -> HistoryDelta:
         """Boolean-union solids, carrying every input entity's id through the history.
 
+        The ids of all the input solids that one union solid holds survive on it, as
+        ``merged``: the union is denoted by every id that contributed to it, as after
+        :meth:`common`. Use ``entities(SOLID, distinct=True)`` to count the solids. An
+        input solid that touches no other keeps its id on its own solid.
+
         Args:
             targets: Solid entity ids used as boolean arguments. At least one.
             tools: Solid entity ids used as boolean tools. At least one.
@@ -213,6 +218,11 @@ class _BooleanOps(_SessionBase):
 
         A split target's id survives on **all** of its pieces, so its name resolves as
         :attr:`ResolutionStatus.AMBIGUOUS`. The tools are left in the model untouched.
+
+        A tool that lies inside a target makes the part of the target it covers a piece
+        of its own. That piece and the tool are two solids that share their faces, so
+        :meth:`remove` of the tool keeps the piece, and :meth:`remove` of the target
+        keeps the tool.
 
         Args:
             targets: Solid entity ids to split. At least one.

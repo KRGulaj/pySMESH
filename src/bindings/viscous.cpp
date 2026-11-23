@@ -49,6 +49,7 @@
 #include <TopoDS_Shape.hxx>
 
 #include "common.hpp"
+#include "compute_thread.hpp"
 
 namespace pysmesh {
 namespace {
@@ -193,7 +194,8 @@ py::dict compute_viscous_layers(const py::object& mesh_obj, const std::vector<in
   SMESH_ProxyMesh::Ptr proxy;
   {
     py::gil_scoped_release release;
-    proxy = vl->Compute(mesh, shape, /*toMakeN2NMap=*/false);
+    run_on_compute_thread(
+        [&] { proxy = vl->Compute(mesh, shape, /*toMakeN2NMap=*/false); });
   }
 
   // Per-solid error walk (text is on the sub-mesh, not on the returned Ptr).

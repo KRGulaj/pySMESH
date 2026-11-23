@@ -354,6 +354,12 @@ class _HealOps(_SessionBase):
         changing its shape. Unlike :meth:`split` the tools may be of any dimension, so a
         plane, a face or a wire is a legitimate tool.
 
+        A wire that crosses a face from boundary to boundary splits the face. The split
+        face keeps one id, on every piece, so ``entities(FACE)`` keeps its count. An open
+        wire that lies inside a face, touching no boundary, cannot split it. OCCT keeps it
+        in the face as an INTERNAL edge, the face keeps its one shape, and the solid stays
+        valid and closed.
+
         The tools are **not** consumed. Use :meth:`remove` to get rid of one afterwards.
 
         Args:
@@ -391,7 +397,9 @@ class _HealOps(_SessionBase):
         Every id inside a removed body dies and is never reused, so a stale reference
         resolves to :attr:`ResolutionStatus.LOST` rather than to whatever now occupies that
         position. An id on a sub-shape that a surviving body also owns stays **alive**,
-        because that shape is still in the model.
+        because that shape is still in the model. Two solids that share their faces,
+        as a :meth:`split` target's piece and the tool inside it do, are two bodies:
+        removing one keeps the other, and the ids of the shared faces stay alive.
 
         Args:
             entities: Entities whose owning bodies are removed. At least one.

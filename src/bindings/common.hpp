@@ -47,12 +47,18 @@ class PysmeshError : public std::runtime_error {
  public:
   std::string details;
   std::vector<int> face_ids;
+  // The centroids of the elements a failed mesh compute names as bad, x y z per element,
+  // in model coordinates. Python sees them as the (k, 3) float64 array
+  // .bad_element_centroids; every other failure leaves it empty, (0, 3).
+  std::vector<double> bad_element_centroids;
 
   explicit PysmeshError(const std::string& message, std::string details_ = std::string(),
-                         std::vector<int> face_ids_ = std::vector<int>())
+                         std::vector<int> face_ids_ = std::vector<int>(),
+                         std::vector<double> bad_element_centroids_ = std::vector<double>())
       : std::runtime_error(message),
         details(std::move(details_)),
-        face_ids(std::move(face_ids_)) {}
+        face_ids(std::move(face_ids_)),
+        bad_element_centroids(std::move(bad_element_centroids_)) {}
 };
 
 // An operation the caller stopped, surfaced as pysmesh._core.PysmeshCancelled — a SUBCLASS

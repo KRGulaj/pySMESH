@@ -82,7 +82,10 @@ def free_boundary_edges(brep: bytes) -> NDArray[np.int32]:
     Returns every edge bordered by exactly one face — the open boundary of a shell. A
     watertight solid returns an empty array; a non-empty result localises a leak. Degenerate
     edges (sphere poles, cone apices) and edges with no face parent (bare wireframe input)
-    are excluded. Uses OCCT's edge->face ancestor map (no GUI, no SMESH).
+    are excluded. So is an edge that its one face holds only as INTERNAL or EXTERNAL (with
+    the face's own orientation composed in): it lies in the face and bounds no hole, as an
+    open wire imprinted inside a face does. Uses OCCT's edge->face ancestor map (no GUI,
+    no SMESH).
 
     Args:
         brep: Input shape as BREP bytes.

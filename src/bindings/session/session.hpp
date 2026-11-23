@@ -253,6 +253,37 @@ inline const char* kind_name(TopAbs_ShapeEnum k) {
   }
 }
 
+// The end of a refusal that names a split id: the sentences after "(it was split)". No
+// session id names one piece of a split entity, so the text says how to reach one: by its
+// ordinal in the handoff, or by its own id in a new session over the same BREP.
+inline std::string split_remedy(std::int64_t id, TopAbs_ShapeEnum kind) {
+  const char* noun = "shape";
+  switch (kind) {
+    case TopAbs_SOLID:
+      noun = "solid";
+      break;
+    case TopAbs_FACE:
+      noun = "face";
+      break;
+    case TopAbs_EDGE:
+      noun = "edge";
+      break;
+    case TopAbs_VERTEX:
+      noun = "vertex";
+      break;
+    default:
+      break;
+  }
+  const std::string n(noun);
+  const std::string plural = kind == TopAbs_VERTEX ? std::string("vertices") : n + "s";
+  return ". No session id names one of its " + plural +
+         ". To reach one, use its ordinal: the rows of export_handoff(allow_aliases=True)." +
+         n + "_ids_of that hold " + std::to_string(id) +
+         " give the ordinals (row i is ordinal i + 1), and load_brep(handoff.brep)." + plural +
+         "()[ordinal - 1] is that " + n + ". Or add brep() to a new Session, where each " + n +
+         " has its own id.";
+}
+
 inline TopAbs_ShapeEnum kind_from_name(const std::string& name) {
   if (name == "SOLID") return TopAbs_SOLID;
   if (name == "FACE") return TopAbs_FACE;
@@ -271,12 +302,25 @@ struct EntityRecord {
   TopAbs_ShapeEnum kind = TopAbs_SHAPE;
 };
 
+// The ids one operation killed, linked to the deaths of the operations before it. Each
+// registry shares its predecessor's chain and adds one link only when ids die, so carrying
+// the deaths costs O(1) per operation. A snapshot holds its registry, so a restored state
+// sees the deaths of its own history and of no abandoned branch. The chain is read only to
+// word a refusal of a dead id, so a walk of it is never on a hot path.
+struct DeathLog {
+  std::int64_t op_index = 0;
+  std::string op_name;
+  std::vector<EntityId> ids;  // ascending
+  std::shared_ptr<const DeathLog> earlier;
+};
+
 // The id registry at one point in the session's history. Immutable once published: every
 // operation builds a fresh RegistryState and swaps it in, which is what makes a snapshot a
 // shared_ptr copy rather than a deep copy of the map.
 struct RegistryState {
   std::unordered_map<EntityId, EntityRecord> alive;
   ShapeKeyed<std::vector<EntityId>> by_shape;
+  std::shared_ptr<const DeathLog> deaths;
 };
 using RegistryPtr = std::shared_ptr<const RegistryState>;
 
@@ -1891,7 +1935,8 @@ class Session {
                                    const Handle(BRepTools_History) & hist) const;
 
   Delta carry_registry(const TopoDS_Shape& new_root, const Handle(BRepTools_History) & hist,
-                       std::int64_t op_index, PieceRule pieces = PieceRule::keep_id());
+                       std::int64_t op_index, const char* op_name,
+                       PieceRule pieces = PieceRule::keep_id());
 
   // A rigid transform applied with Copy = false changes only a shape's Location: the TShape,
   // and with it every sub-shape identity, is preserved. Such an operation therefore needs no

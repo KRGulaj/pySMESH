@@ -31,6 +31,7 @@ Fixture sizing follows the project rule: a 3 x 7 x 11 box, never a unit cube.
 from __future__ import annotations
 
 import math
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -1264,6 +1265,156 @@ def test_imprinting_rejects_an_empty_tool_list(two_boxes: Session) -> None:
 
     with pytest.raises(ps.PysmeshError, match="tools must name"):
         two_boxes.imprint([first], [])
+
+
+def _solid_volume(s: Session) -> float:
+    """The volume of the session's one solid shape, integrated adaptively at 1e-12."""
+    solids = [EntityId(int(i)) for i in s.entities(EntityKind.SOLID, distinct=True)]
+    return float(s.mass_properties(solids, precision=1e-12).measure.sum())
+
+
+def _imprint_open_curve(s: Session, solid: EntityId, curve: EntityId) -> float:
+    """Imprint one open curve on a solid; assert the result is a valid closed solid.
+
+    The oracle is OCCT alone (probe p11_splitter_internal_edge.cpp): BRepAlgoAPI_Splitter
+    keeps an open curve inside a face as an INTERNAL edge, and BRepCheck accepts the
+    result. Returns the volume before the imprint.
+    """
+    volume = _solid_volume(s)
+    faces = len(ps.load_brep(s.brep()).faces())
+
+    delta = s.imprint([solid], [curve])
+
+    assert delta.valid is True
+    assert len(ps.load_brep(s.brep()).faces()) == faces
+    assert ps.free_boundary_edges(s.brep()).size == 0
+    assert s.is_alive(curve), "an imprint must not consume its tool"
+    return volume
+
+
+def test_imprinting_an_open_segment_inside_a_box_face_keeps_the_solid() -> None:
+    """The segment cannot split the top face: it stays in it, and the volume is exact."""
+    s = Session()
+    s.add_box(BOX_DX, BOX_DY, BOX_DZ)
+    box = ids_of(s, EntityKind.SOLID)[0]
+    created = s.add_line((1.0, 2.0, BOX_DZ), (2.0, 5.0, BOX_DZ)).created
+    segment = next(e for e in created if s.entity_kind(e) is EntityKind.EDGE)
+
+    volume = _imprint_open_curve(s, box, segment)
+
+    assert volume == pytest.approx(BOX_VOLUME, rel=1e-12)
+    assert _solid_volume(s) == pytest.approx(BOX_VOLUME, rel=1e-12)
+
+
+def test_imprinting_an_open_curve_inside_a_bspline_face_keeps_the_solid() -> None:
+    """A curve fitted to points of a lofted B-spline face, away from its boundary."""
+    s = Session()
+    sections = []
+    for z, radius in ((0.0, 1.0), (1.0, 1.3), (2.0, 0.9)):
+        created = s.add_circle((0.0, 0.0, z), (0.0, 0.0, 1.0), radius).created
+        sections.append([e for e in created if s.entity_kind(e) is EntityKind.EDGE])
+    s.thru_sections(sections, solid=True, ruled=False)
+    solid = ids_of(s, EntityKind.SOLID)[0]
+    types = s.entity_types(EntityKind.FACE)
+    skin = EntityId(int(types.ids[list(types.types).index("BSpline")]))
+    u0, u1, v0, v1 = s.face_parameter_bounds([skin])[0]
+    uv = np.column_stack(
+        [
+            np.linspace(u0 + 0.2 * (u1 - u0), u0 + 0.4 * (u1 - u0), 41),
+            np.linspace(v0 + 0.3 * (v1 - v0), v0 + 0.6 * (v1 - v0), 41),
+        ]
+    )
+    points = s.surface_at(skin, uv).points
+    created = s.add_spline(points, tol=1e-7).created
+    curve = next(e for e in created if s.entity_kind(e) is EntityKind.EDGE)
+
+    volume = _imprint_open_curve(s, solid, curve)
+
+    assert _solid_volume(s) == pytest.approx(volume, rel=1e-12)
+
+
+def _box_without_one_face() -> bytes:
+    """A unit box whose shell lists 5 of its 6 faces: a solid with a real hole."""
+    s = Session()
+    s.add_box(1.0, 1.0, 1.0)
+    text = s.brep().decode()
+    shell = re.search(r"Sh\n\n\d+\n((?:[+-]\d+ \d+ )+)\*", text)
+    assert shell is not None
+    kept = " ".join(shell.group(1).split(" ")[2:])
+    return (text[: shell.start(1)] + kept + text[shell.end(1) :]).encode()
+
+
+def test_imprinting_a_box_with_a_removed_face_is_still_refused_as_a_leak() -> None:
+    """The 4 edges round the hole are free; the imprinted segment is not a fifth."""
+    s = Session(validate=False)
+    s.add_brep(_box_without_one_face())
+    box = ids_of(s, EntityKind.SOLID)[0]
+    created = s.add_line((0.3, 0.0, 0.3), (0.6, 0.0, 0.7)).created
+    segment = next(e for e in created if s.entity_kind(e) is EntityKind.EDGE)
+    before = s.brep()
+
+    with pytest.raises(ps.PysmeshError) as info:
+        s.imprint([box], [segment])
+
+    assert "the result has 4 free boundary edge(s)" in str(info.value)
+    assert "already had 4 free boundary edge(s)" in info.value.details
+    assert s.brep() == before
+
+
+# The segment imprinted inside the top face of the 3 x 7 x 11 box, of length sqrt(10).
+SEGMENT_START: tuple[float, float, float] = (1.0, 2.0, BOX_DZ)
+SEGMENT_END: tuple[float, float, float] = (2.0, 5.0, BOX_DZ)
+SEGMENT_LENGTH: float = math.sqrt(10.0)
+
+
+def _box_with_an_internal_segment() -> tuple[Session, EntityId]:
+    """The box, imprinted with the segment: the top face holds it as an INTERNAL edge."""
+    s = Session()
+    s.add_box(BOX_DX, BOX_DY, BOX_DZ)
+    box = ids_of(s, EntityKind.SOLID)[0]
+    created = s.add_line(SEGMENT_START, SEGMENT_END).created
+    segment = next(e for e in created if s.entity_kind(e) is EntityKind.EDGE)
+    s.imprint([box], [segment])
+    return s, box
+
+
+def _solid_holds_the_segment(s: Session, solid: EntityId) -> bool:
+    """Whether one of the solid's edges is the segment, by its length."""
+    pairs = s.adjacency(EntityKind.SOLID, EntityKind.EDGE)
+    edges = [EntityId(int(e)) for e in pairs.related[pairs.ids == int(solid)]]
+    lengths = s.mass_properties(edges, precision=1e-12).measure
+    return bool(np.any(np.abs(lengths - SEGMENT_LENGTH) <= 1e-9 * SEGMENT_LENGTH))
+
+
+# The second box of each boolean, and the volume of the result in closed form. The corner
+# box [-1, 1]^3 takes the unit cube at the origin from the box; the far box touches
+# nothing; the top box [0.5, 2.5] x [1.5, 5.5] x [10, 12] holds the segment.
+_CORNER = ((-1.0, -1.0, -1.0), (2.0, 2.0, 2.0))
+_FAR = ((10.0, 0.0, 0.0), (1.0, 1.0, 1.0))
+_TOP = ((0.5, 1.5, BOX_DZ - 1.0), (2.0, 4.0, 2.0))
+_BOOLEANS_ON_THE_IMPRINTED_BOX = {
+    "cut_corner": ("cut", _CORNER, BOX_VOLUME - 1.0),
+    "fuse_far": ("fuse", _FAR, BOX_VOLUME + 1.0),
+    "fuse_corner": ("fuse", _CORNER, BOX_VOLUME + 8.0 - 1.0),
+    "common_top": ("common", _TOP, 2.0 * 4.0 * 1.0),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_BOOLEANS_ON_THE_IMPRINTED_BOX))
+def test_a_boolean_on_a_box_with_an_internal_edge_keeps_the_edge(case: str) -> None:
+    """The INTERNAL edge came with the input, so cut, fuse and common accept it."""
+    op, (origin, size), volume = _BOOLEANS_ON_THE_IMPRINTED_BOX[case]
+    s, box = _box_with_an_internal_segment()
+    before = set(ids_of(s, EntityKind.SOLID))
+    s.add_box(size[0], size[1], size[2], origin=origin)
+    other = next(e for e in ids_of(s, EntityKind.SOLID) if e not in before)
+
+    delta = getattr(s, op)([box], [other])
+
+    survivor = box if s.is_alive(box) else other
+    assert delta.valid is True
+    assert _solid_holds_the_segment(s, survivor)
+    assert _solid_volume(s) == pytest.approx(volume, rel=1e-12)
 
 
 # ============================================================================== Removal ==

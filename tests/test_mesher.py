@@ -50,6 +50,8 @@ from pysmesh import (
     Mefisto2D,
     Mesher,
     MeshData,
+    Netgen1D2D3D,
+    NetgenParameters,
     NumberOfSegments,
     PolyhedronPerSolid3D,
     PysmeshCancelled,
@@ -724,6 +726,34 @@ def test_reading_a_mesh_never_advances_anything(box_mesher: Mesher) -> None:
 
     assert np.array_equal(first.node_coords, second.node_coords)
     assert np.array_equal(first.element_nodes, second.element_nodes)
+
+
+def test_tetrahedra_in_the_documented_vtk_order_have_positive_volume() -> None:
+    """MeshData tetrahedra in the documented VTK order are positive VTK cells.
+
+    VTK's linear tetrahedron has the shape functions 1 - r - s - t, r, s, t
+    (vtkTetra). So its Jacobian has the columns x1 - x0, x2 - x0, x3 - x0, and its
+    signed volume is det / 6. That formula reads only coordinates. A positive value for
+    every cell, and a sum equal to the box volume dx * dy * dz, pin the permutation
+    (0, 2, 1, 3) that the MeshData docstring gives from SMDS order to VTK order.
+    """
+    with Mesher(_box_shape()) as mesher:
+        mesher.assign(Netgen1D2D3D())
+        mesher.assign(NetgenParameters(max_size=2.0, threads=4))
+        mesher.compute()
+        mesh = mesher.mesh()
+    tets = np.flatnonzero(mesh.element_type == int(ElementType.TETRAHEDRON))
+    smds = np.stack([mesh.nodes_of(int(i)) for i in tets])
+
+    vtk = smds[:, [0, 2, 1, 3]]
+    p = mesh.node_coords[vtk]
+    edges = [p[:, 1] - p[:, 0], p[:, 2] - p[:, 0], p[:, 3] - p[:, 0]]
+    jacobian = np.stack(edges, axis=2)
+    volume = np.linalg.det(jacobian) / 6.0
+
+    assert tets.size > 0
+    assert int(np.count_nonzero(volume <= 0.0)) == 0
+    assert math.isclose(float(volume.sum()), BOX_DX * BOX_DY * BOX_DZ, rel_tol=1e-9)
 
 
 # ---- Lifetime ---------------------------------------------------------------------------- #

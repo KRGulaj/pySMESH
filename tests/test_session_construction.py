@@ -440,6 +440,60 @@ def test_a_section_named_again_other_than_first_as_last_is_refused(repeat: int) 
         s.thru_sections(sections, solid=True, ruled=True)
 
 
+def _unit_square_halves(s: Session, z: float) -> list[EntityId]:
+    """The edges of a unit square at height z, as two open polylines (two bodies)."""
+    first = np.array([[0.0, 0.0, z], [1.0, 0.0, z], [1.0, 1.0, z]], dtype=np.float64)
+    second = np.array([[1.0, 1.0, z], [0.0, 1.0, z], [0.0, 0.0, z]], dtype=np.float64)
+    edges: list[EntityId] = []
+    for points in (first, second):
+        created = s.add_polyline(points, closed=False).created
+        edges.extend(e for e in created if s.entity_kind(e) is EntityKind.EDGE)
+    return edges
+
+
+def _unit_square_wire(s: Session, z: float) -> list[EntityId]:
+    """One edge of a closed unit-square polyline at height z: a one-body section."""
+    corners = [[0.0, 0.0, z], [1.0, 0.0, z], [1.0, 1.0, z], [0.0, 1.0, z]]
+    created = s.add_polyline(np.array(corners, dtype=np.float64), closed=True).created
+    return [next(e for e in created if s.entity_kind(e) is EntityKind.EDGE)]
+
+
+def test_a_section_of_two_open_edges_is_refused_naming_it_and_make_wire() -> None:
+    """The refusal names the section, its body count and make_wire; nothing changes."""
+    s = Session()
+    sections = [
+        _unit_square_wire(s, 0.0),
+        _unit_square_halves(s, 1.0),
+        _unit_square_wire(s, 2.0),
+    ]
+    before = _state(s)
+
+    with pytest.raises(PysmeshError) as info:
+        s.thru_sections(sections, solid=True, ruled=True)
+
+    message = str(info.value)
+    assert "section 2 of 3" in message
+    assert "2 different bodies" in message
+    assert "make_wire" in message
+    assert _state(s) == before
+
+
+def test_a_section_of_two_open_edges_joined_by_make_wire_lofts() -> None:
+    """After make_wire the same loft builds the 1 x 1 x 2 prism, of volume 2."""
+    s = Session()
+    halves = _unit_square_halves(s, 1.0)
+    joined = s.make_wire(halves)
+    wire_edges = [e for e in [*halves, *joined.created] if s.is_alive(e)]
+    wire_edges = [e for e in wire_edges if s.entity_kind(e) is EntityKind.EDGE]
+    sections = [_unit_square_wire(s, 0.0), wire_edges[:1], _unit_square_wire(s, 2.0)]
+
+    s.thru_sections(sections, solid=True, ruled=True)
+
+    solids = list(s.entities(EntityKind.SOLID))
+    assert len(solids) == 1
+    assert _volume(s) == pytest.approx(2.0, rel=1e-9)
+
+
 # ---- V4: a loft closed by a copy of its first section ------------------------------ #
 
 

@@ -17,6 +17,7 @@
 
 #include "session/session.hpp"
 
+#include <BOPAlgo_Builder.hxx>
 #include <BRepFilletAPI_MakeFillet2d.hxx>
 #include <ChFi2d_ConstructionError.hxx>
 
@@ -43,6 +44,183 @@ std::vector<TopoDS_Shape> tools_of(BRepAlgoAPI_BuilderAlgo& op) {
     }
   }
   return out;
+}
+
+// Give each input solid of a fuse the union solid as its modified shape (report #41).
+//
+// BOPAlgo_BOP::BuildSolid builds every solid of a fuse anew, from the faces of the splits
+// of the input solids. No split of an input solid is then in the result, so
+// BOPAlgo_Builder::PrepareHistory reports each input solid as removed, and the session
+// would kill every input solid id. A common keeps the splits themselves, so its history
+// relates each input solid to the result. Every split of an input solid of a fuse is
+// material of the union, so the solid is in fact modified into the result solid that holds
+// its splits. This adds that relation to `hist`, and the identity rule for a merge then
+// keeps the ids of all the fused solids on the union.
+//
+// A split reaches its result solid through a face of that solid, or through other splits:
+// two splits that share a face lie in one result solid, because a fuse keeps no face
+// between two pieces of its material. So a solid wholly inside another one, whose own
+// faces all vanish, still reaches the union. An input solid that the result holds itself,
+// or as a modified shape, is left alone.
+void add_fused_solids(BRepAlgoAPI_BuilderAlgo& op, const TopoDS_Shape& result,
+                      const Handle(BRepTools_History) & hist) {
+  ShapeSet result_solids;
+  TopExp::MapShapes(result, TopAbs_SOLID, result_solids);
+  std::vector<TopoDS_Shape> inputs;
+  for (const TopoDS_Shape& s : op.Arguments()) {
+    inputs.push_back(s);
+  }
+  for (const TopoDS_Shape& s : tools_of(op)) {
+    inputs.push_back(s);
+  }
+  std::vector<TopoDS_Shape> solids;
+  std::vector<TopoDS_Shape> lost;
+  for (const TopoDS_Shape& input : inputs) {
+    for (TopExp_Explorer ex(input, TopAbs_SOLID); ex.More(); ex.Next()) {
+      const TopoDS_Shape& s = ex.Current();
+      solids.push_back(s);
+      bool kept = result_solids.Contains(s);
+      for (const TopoDS_Shape& m : hist->Modified(s)) {
+        kept = kept || result_solids.Contains(m);
+      }
+      if (!kept) {
+        lost.push_back(s);
+      }
+    }
+  }
+  if (lost.empty()) {
+    return;
+  }
+
+  // The splits of every input solid (the solid itself when it has none), 1-based.
+  const auto& images = op.Builder()->Images();
+  ShapeSet pieces;
+  const auto pieces_of = [&](const TopoDS_Shape& s) {
+    std::vector<int> out;
+    const NCollection_List<TopoDS_Shape>* split = images.Seek(s);
+    if (split == nullptr || split->IsEmpty()) {
+      out.push_back(pieces.Add(s));
+      return out;
+    }
+    for (const TopoDS_Shape& p : *split) {
+      out.push_back(pieces.Add(p));
+    }
+    return out;
+  };
+  std::vector<std::vector<int>> pieces_of_solid;
+  for (const TopoDS_Shape& s : solids) {
+    pieces_of_solid.push_back(pieces_of(s));
+  }
+
+  // Union-find over the pieces, joined by the faces they share.
+  std::vector<int> parent(static_cast<std::size_t>(pieces.Extent()) + 1);
+  for (std::size_t i = 0; i < parent.size(); ++i) {
+    parent[i] = static_cast<int>(i);
+  }
+  const auto root = [&](int i) {
+    while (parent[static_cast<std::size_t>(i)] != i) {
+      parent[static_cast<std::size_t>(i)] =
+          parent[static_cast<std::size_t>(parent[static_cast<std::size_t>(i)])];
+      i = parent[static_cast<std::size_t>(i)];
+    }
+    return i;
+  };
+  ShapeKeyed<int> piece_of_face;
+  for (int p = 1; p <= pieces.Extent(); ++p) {
+    for (TopExp_Explorer ex(pieces.FindKey(p), TopAbs_FACE); ex.More(); ex.Next()) {
+      const auto [it, added] = piece_of_face.emplace(ex.Current(), p);
+      if (!added) {
+        parent[static_cast<std::size_t>(root(p))] = root(it->second);
+      }
+    }
+  }
+
+  // The result solids each group of pieces reaches through a face.
+  std::unordered_map<int, std::vector<int>> reached;
+  for (int r = 1; r <= result_solids.Extent(); ++r) {
+    for (TopExp_Explorer ex(result_solids.FindKey(r), TopAbs_FACE); ex.More(); ex.Next()) {
+      const auto it = piece_of_face.find(ex.Current());
+      if (it == piece_of_face.end()) {
+        continue;
+      }
+      std::vector<int>& to = reached[root(it->second)];
+      if (std::find(to.begin(), to.end(), r) == to.end()) {
+        to.push_back(r);
+      }
+    }
+  }
+
+  for (const TopoDS_Shape& s : lost) {
+    const auto at = std::find_if(solids.begin(), solids.end(),
+                                 [&](const TopoDS_Shape& x) { return x.IsSame(s); });
+    std::vector<int> targets;
+    for (int p : pieces_of_solid[static_cast<std::size_t>(at - solids.begin())]) {
+      const auto it = reached.find(root(p));
+      if (it == reached.end()) {
+        continue;
+      }
+      for (int r : it->second) {
+        if (std::find(targets.begin(), targets.end(), r) == targets.end()) {
+          targets.push_back(r);
+        }
+      }
+    }
+    std::sort(targets.begin(), targets.end());
+    for (int r : targets) {
+      TopoDS_Shape union_solid = result_solids.FindKey(r);
+      union_solid.Orientation(s.Orientation());
+      hist->AddModified(s, union_solid);
+    }
+  }
+}
+
+// The shape to add to the model: the result, with each solid that is also the solid of a
+// body the operation keeps rebuilt as a solid of its own (report #6).
+//
+// A splitter that keeps its tools returns a tool that lies inside a target, uncut, as a
+// piece of the target, and that piece is the tool's own TShape. Added as it is, the root
+// would hold that solid twice, as the kept tool body and as the target's piece, and
+// remove() of either body would drop both, since it drops every root body IsSame the
+// doomed one. Each such piece becomes a new TShape over the same shells. The target's
+// piece and the tool are then two solids that share their faces, as they are when the
+// tool crosses the target's boundary. `hist` maps the piece to its copy, so the target's
+// id moves onto the copy and the tool's id stays on the tool. A result that shares no
+// solid with a kept body is returned as it is.
+TopoDS_Shape apart_from_kept(const std::vector<TopoDS_Shape>& survivors,
+                             const TopoDS_Shape& added, const Handle(BRepTools_History) & hist) {
+  if (hist.IsNull()) {
+    return added;
+  }
+  ShapeSet added_solids;
+  TopExp::MapShapes(added, TopAbs_SOLID, added_solids);
+  ShapeSet shared;
+  for (const TopoDS_Shape& body : survivors) {
+    for (TopExp_Explorer ex(body, TopAbs_SOLID); ex.More(); ex.Next()) {
+      if (added_solids.Contains(ex.Current())) {
+        shared.Add(ex.Current());
+      }
+    }
+  }
+  if (shared.IsEmpty()) {
+    return added;
+  }
+  Handle(BRepTools_History) apart = new BRepTools_History();
+  BRep_Builder builder;
+  std::vector<TopoDS_Shape> bodies;
+  for (const TopoDS_Shape& body : root_bodies(added)) {
+    if (body.ShapeType() != TopAbs_SOLID || !shared.Contains(body)) {
+      bodies.push_back(body);
+      continue;
+    }
+    TopoDS_Shape copy = body.EmptyCopied();
+    for (TopoDS_Iterator it(body, /*cumOri=*/false, /*cumLoc=*/false); it.More(); it.Next()) {
+      builder.Add(copy, it.Value());
+    }
+    apart->AddModified(body, copy);
+    bodies.push_back(copy);
+  }
+  hist->Merge(apart);
+  return make_root(bodies);
 }
 
 // Why a result with no solid is wrong, or an empty string when it may be right.
@@ -97,18 +275,78 @@ std::string empty_result_refusal(const std::string& op, BRepAlgoAPI_BuilderAlgo&
   return std::string();
 }
 
+// The edges an operation did not create: every edge of its operands, each Modified image
+// of one in the operation's history, and every edge of a tool face or of its Modified
+// image. The history is the one commit() carries the ids with.
+ShapeSet edges_not_created(BRepAlgoAPI_BuilderAlgo& builder) {
+  const Handle(BRepTools_History) hist = builder.History();
+  std::vector<TopoDS_Shape> operands;
+  for (const TopoDS_Shape& s : builder.Arguments()) {
+    operands.push_back(s);
+  }
+  const std::vector<TopoDS_Shape> tools = tools_of(builder);
+  operands.insert(operands.end(), tools.begin(), tools.end());
+  ShapeSet out;
+  for (const TopoDS_Shape& operand : operands) {
+    ShapeSet edges;
+    TopExp::MapShapes(operand, TopAbs_EDGE, edges);
+    for (int i = 1; i <= edges.Extent(); ++i) {
+      out.Add(edges(i));
+      if (!hist.IsNull()) {
+        for (const TopoDS_Shape& m : hist->Modified(edges(i))) {
+          out.Add(m);
+        }
+      }
+    }
+  }
+  for (const TopoDS_Shape& tool : tools) {
+    ShapeSet faces;
+    TopExp::MapShapes(tool, TopAbs_FACE, faces);
+    for (int i = 1; i <= faces.Extent(); ++i) {
+      std::vector<TopoDS_Shape> images = {faces(i)};
+      if (!hist.IsNull()) {
+        for (const TopoDS_Shape& m : hist->Modified(faces(i))) {
+          images.push_back(m);
+        }
+      }
+      for (const TopoDS_Shape& face : images) {
+        TopExp::MapShapes(face, TopAbs_EDGE, out);
+      }
+    }
+  }
+  return out;
+}
+
 // Why a result solid that is not watertight is refused, with the details that name its
 // free edges; an empty message when every solid of the result is closed.
 //
 // Each solid is checked on its own, so an edge shared by two solids of one result (two
 // fragments meeting along it) still needs two faces in each. If the operands already had
 // free edges, the details say so: then the leak may have come in with the input.
+//
+// An edge that its one face holds only as INTERNAL or EXTERNAL bounds no hole, and
+// free_boundary_edges skips it: an open wire imprinted inside a face is such an edge. A
+// cut, a common and a fuse trim faces along their section edges, so for them a section
+// edge of their own that is INTERNAL in one face marks a face they did not trim: a cut of
+// a wing grazed at fuzzy 1e-4 returned the uncut wing with two of those, and passed
+// BRepCheck. For these three operations such an edge counts as free when the operation
+// created it (edges_not_created). An INTERNAL edge an operand already had does not count.
 std::pair<std::string, std::string> leaky_solid_refusal(const std::string& op,
                                                         BRepAlgoAPI_BuilderAlgo& builder,
                                                         const TopoDS_Shape& result) {
+  std::optional<ShapeSet> not_created;
+  std::function<bool(const TopoDS_Shape&)> created;
+  if (op == "cut" || op == "common" || op == "fuse") {
+    created = [&](const TopoDS_Shape& edge) {
+      if (!not_created) {
+        not_created = edges_not_created(builder);
+      }
+      return !not_created->Contains(edge);
+    };
+  }
   std::vector<TopoDS_Shape> leaks;
   for (const TopoDS_Shape& solid : shape_checks::solids_of({result})) {
-    for (const TopoDS_Shape& e : shape_checks::free_boundary_edges(solid)) {
+    for (const TopoDS_Shape& e : shape_checks::free_boundary_edges(solid, created)) {
       leaks.push_back(e);
     }
   }
@@ -678,7 +916,8 @@ py::dict Session::chamfer(const std::vector<EntityId>& edge_ids, double distance
     }
     if (rec.shapes.size() != 1) {
       throw PysmeshError("Session.chamfer: face " + std::to_string(*face_id) +
-                         " was split and denotes several faces; name one of them.");
+                         " denotes " + std::to_string(rec.shapes.size()) +
+                         " faces (it was split)" + split_remedy(*face_id, TopAbs_FACE));
     }
     reference = TopoDS::Face(rec.shapes.front());
   }
@@ -1021,6 +1260,15 @@ py::dict Session::run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
     } else {
       result = op.Shape();
       hist = op.History();
+      if (dynamic_cast<BRepAlgoAPI_Fuse*>(&op) != nullptr && !hist.IsNull()) {
+        try {
+          add_fused_solids(op, result, hist);
+        } catch (const std::exception& e) {
+          py::gil_scoped_acquire acquire;
+          throw PysmeshError(std::string("Session.") + op_name +
+                             ": relating the input solids to the union threw: " + e.what());
+        }
+      }
       std::ostringstream w;
       op.DumpWarnings(w);
       warnings = w.str();
@@ -1067,11 +1315,12 @@ py::dict Session::run_bop(const char* op_name, BRepAlgoAPI_BuilderAlgo& op,
     throw PysmeshError(leak.first, leak.second, {});
   }
   if (pieces != nullptr) {
-    const TopoDS_Shape kept = pieces->refine(result, hist);
+    const TopoDS_Shape kept = apart_from_kept(survivors, pieces->refine(result, hist), hist);
     return commit(concat(survivors, kept), hist, op_name, kept, Validation::Strict,
                   warning_list, PieceRule::new_piece_ids(TopAbs_SOLID));
   }
-  return commit(concat(survivors, result), hist, op_name, result, Validation::Strict,
+  const TopoDS_Shape added = apart_from_kept(survivors, result, hist);
+  return commit(concat(survivors, added), hist, op_name, added, Validation::Strict,
                 warning_list);
 }
 

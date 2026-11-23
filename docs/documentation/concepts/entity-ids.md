@@ -101,6 +101,22 @@ A piece is a solid in its own right, so it gets a name of its own that resolves 
 `RESOLVED`. Under `split` the pieces share the target's id instead, and a caller cannot
 address one of them without the stateless ordinals.
 
+A query that takes one shape refuses an id that denotes several. Its message names two
+routes to one piece:
+
+- **The handoff ordinals.** `export_handoff(allow_aliases=True)` returns one row of ids per
+  ordinal in `edge_ids_of` (and `face_ids_of`, `solid_ids_of`, `vertex_ids_of`). Row `i` is
+  ordinal `i + 1`. The rows that hold the split id are its pieces. `load_brep(handoff.brep)`
+  gives each piece by its ordinal: `.edges()[ordinal - 1]`.
+- **A new session.** `Session().add_brep(s.brep())` gives each piece its own id.
+
+```python
+handoff = s.export_handoff(allow_aliases=True)
+ordinals = [i + 1 for i, ids in enumerate(handoff.edge_ids_of) if split_edge in ids]
+shape = load_brep(handoff.brep)
+bounds = [shape.edges()[k - 1].t_bounds for k in ordinals]   # one row per piece
+```
+
 ### The sixth rule for edges: pieces of a divided edge
 
 `divide_edge` applies the sixth rule to edges. It is the only operation that does.

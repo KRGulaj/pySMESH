@@ -249,6 +249,21 @@ std::optional<gp_Pnt> inside_any(std::vector<Solid>& from, std::vector<Solid>& a
   return std::nullopt;
 }
 
+// Whether `edge` bounds `face`: it occurs in the face as FORWARD or REVERSED, with the
+// face's own orientation composed in. An edge that occurs only as INTERNAL or EXTERNAL
+// lies inside the face (an open wire that a splitter could not close into a cut), or in
+// a face that is itself INTERNAL in its solid. It is no edge of the boundary, so it is no
+// leak however many faces hold it.
+bool bounds_face(const TopoDS_Shape& edge, const TopoDS_Shape& face) {
+  for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+    const TopAbs_Orientation o = ex.Current().Orientation();
+    if (ex.Current().IsSame(edge) && (o == TopAbs_FORWARD || o == TopAbs_REVERSED)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 }  // namespace
 
 double max_tolerance(const std::vector<TopoDS_Shape>& shapes) {
@@ -318,7 +333,8 @@ std::string point_text(const gp_Pnt& p) {
   return buf;
 }
 
-std::vector<TopoDS_Shape> free_boundary_edges(const TopoDS_Shape& shape) {
+std::vector<TopoDS_Shape> free_boundary_edges(
+    const TopoDS_Shape& shape, const std::function<bool(const TopoDS_Shape&)>& count_internal) {
   ShapeMap edges;
   TopExp::MapShapes(shape, TopAbs_EDGE, edges);
   NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>,
@@ -331,7 +347,11 @@ std::vector<TopoDS_Shape> free_boundary_edges(const TopoDS_Shape& shape) {
     if (BRep_Tool::Degenerated(e) || !edge_faces.Contains(e)) {
       continue;
     }
-    if (edge_faces.FindFromKey(e).Extent() == 1) {
+    const NCollection_List<TopoDS_Shape>& faces = edge_faces.FindFromKey(e);
+    if (faces.Extent() != 1) {
+      continue;
+    }
+    if (bounds_face(e, faces.First()) || (count_internal && count_internal(e))) {
       out.push_back(e);
     }
   }

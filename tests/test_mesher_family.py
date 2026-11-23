@@ -1472,6 +1472,48 @@ def test_viscous_layers_grow_from_the_named_walls_into_a_group() -> None:
     assert named[0].element_ids.size > 0
 
 
+def test_extrusion_method_from_the_mesher_package_is_the_top_level_enum() -> None:
+    """ViscousLayers.method takes an ExtrusionMethod, so the package of ViscousLayers has it.
+
+    The import sits in the test body: on a build without the re-export the import fails
+    here, in this test, rather than at collection of the whole file.
+    """
+    import pysmesh.mesher as mesher_module
+    from pysmesh.mesher import ExtrusionMethod
+
+    assert ExtrusionMethod is ps.ExtrusionMethod
+    assert "ExtrusionMethod" in mesher_module.__all__
+
+
+@pytest.mark.parametrize("method", ["FACE_OFFSET", "NODE_OFFSET"])
+def test_viscous_layers_take_the_mesher_package_extrusion_method(method: str) -> None:
+    """A layer stack built with the mesher package's enum grows layers into its group."""
+    from pysmesh.mesher import ExtrusionMethod
+
+    with Mesher(_box_shape()) as mesher:
+        mesher.assign(Regular1D())
+        mesher.assign(NumberOfSegments(count=3))
+        mesher.assign(Quadrangle2D())
+        mesher.assign(Hexa3D())
+        mesher.assign(
+            ViscousLayers(
+                total_thickness=0.4,
+                layer_count=2,
+                stretch_factor=1.2,
+                boundary=(1,),
+                group_name="wall_layers",
+                method=ExtrusionMethod[method],
+            )
+        )
+        report = mesher.compute()
+        groups = mesher.groups()
+
+    assert report.volumes > 0
+    named = [g for g in groups if g.name == "wall_layers"]
+    assert named, [g.name for g in groups]
+    assert named[0].element_ids.size > 0
+
+
 def test_the_composite_segment_mesher_treats_a_split_edge_chain_as_one() -> None:
     """An import that split one curve into pieces must still take one segment count."""
     with Mesher(_box_shape()) as mesher:

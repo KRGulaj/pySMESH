@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import math
 import threading
+from typing import TypeAlias
 
 import numpy as np
 import pytest
@@ -232,7 +233,7 @@ def test_naming_a_face_translates_the_whole_body_that_owns_it(
 ) -> None:
     solids = _ids(two_box_session, EntityKind.SOLID)
     two_box_session.fuse([EntityId(solids[0])], [EntityId(solids[1])])
-    fused = _sole(two_box_session, EntityKind.SOLID)
+    fused = EntityId(int(two_box_session.entities(EntityKind.SOLID, distinct=True)[0]))
     face = EntityId(_ids(two_box_session, EntityKind.FACE)[0])
     small = two_box_session.add_box(1.0, 1.0, 1.0, origin=(50.0, 0.0, 0.0))
     small_solid = int(
@@ -263,9 +264,11 @@ def test_fuse_of_two_touching_boxes_yields_the_summed_volume(
 
     two_box_session.fuse([EntityId(solids[0])], [EntityId(solids[1])])
 
+    # Both input ids survive on the one union solid (a merge), so the table has a row
+    # per id and the distinct list has one.
     fused = two_box_session.entity_table(EntityKind.SOLID)
-    assert fused.ids.size == 1
-    assert fused.measure[0] == pytest.approx(2.0 * BOX_VOLUME)
+    assert two_box_session.entities(EntityKind.SOLID, distinct=True).size == 1
+    assert fused.measure.tolist() == pytest.approx([2.0 * BOX_VOLUME] * fused.ids.size)
 
 
 def test_fuse_kills_exactly_the_two_seam_faces_and_keeps_the_rest(
@@ -322,6 +325,57 @@ def test_fuse_merges_seam_vertex_ids_many_to_one(two_box_session: Session) -> No
         i for i in delta.merged.tolist() if two_box_session.entity_kind(EntityId(i)) == EntityKind.VERTEX
     ]
     assert len(merged_vertices) == 8
+
+
+# A 2 x 2 x 2 box at the origin, and the boxes fused with it: origin, size, union volume.
+# The post (1 x 1 x 3 at (0.5, 0.5, -0.5)) crosses the box: the union is 8 + 3 - 2 = 9.
+# The inner box (1 x 1 x 1 at (0.5, 0.5, 0.5)) lies inside it: the union is the box, 8.
+_Vec3: TypeAlias = tuple[float, float, float]
+_FUSED_WITH_THE_BOX: dict[str, tuple[_Vec3, _Vec3, float]] = {
+    "crossing": ((0.5, 0.5, -0.5), (1.0, 1.0, 3.0), 9.0),
+    "inside": ((0.5, 0.5, 0.5), (1.0, 1.0, 1.0), 8.0),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_FUSED_WITH_THE_BOX))
+def test_fuse_keeps_both_solid_ids_on_the_union(case: str) -> None:
+    """Several solids modified onto one output: all their ids survive on it (a merge).
+
+    The union volume is the closed form of the two boxes less their overlap.
+    """
+    origin, size, union = _FUSED_WITH_THE_BOX[case]
+    s = Session()
+    s.add_box(2.0, 2.0, 2.0)
+    s.add_box(size[0], size[1], size[2], origin=origin)
+    box, other = (EntityId(i) for i in _ids(s, EntityKind.SOLID))
+
+    delta = s.fuse([box], [other])
+
+    distinct = s.entities(EntityKind.SOLID, distinct=True)
+    groups = [g.tolist() for g in s.alias_groups(EntityKind.SOLID)]
+    volumes = s.mass_properties([box, other], precision=1e-12).measure
+    assert s.is_alive(box) and s.is_alive(other)
+    assert distinct.size == 1
+    assert groups == [[int(box), int(other)]]
+    assert s.shape_count(box) == s.shape_count(other) == 1
+    assert volumes.tolist() == pytest.approx([union, union], rel=1e-9)
+    assert {int(box), int(other)} <= set(delta.merged.tolist())
+    assert not {int(box), int(other)} & set(delta.deleted.tolist())
+
+
+def test_fuse_of_disjoint_boxes_keeps_each_id_on_its_own_solid() -> None:
+    """Two boxes 3 apart: the fuse holds both, each with its own id and volume."""
+    s = Session()
+    s.add_box(2.0, 2.0, 2.0)
+    s.add_box(1.0, 1.0, 1.0, origin=(5.0, 0.0, 0.0))
+    box, other = (EntityId(i) for i in _ids(s, EntityKind.SOLID))
+
+    s.fuse([box], [other])
+
+    volumes = s.mass_properties([box, other], precision=1e-12).measure
+    assert s.entities(EntityKind.SOLID, distinct=True).tolist() == [box, other]
+    assert s.alias_groups(EntityKind.SOLID) == ()
+    assert volumes.tolist() == pytest.approx([8.0, 1.0], rel=1e-9)
 
 
 def test_a_face_cut_in_two_keeps_its_id_on_both_pieces() -> None:

@@ -39,6 +39,35 @@ unless a measured hot path needs it off. Every operation but the healing family 
 rather than committing an invalid result; the healing family reports a verdict on
 `HistoryDelta.valid` instead, because its input is invalid by assumption.
 
+## What an operation costs
+
+Each operation commits a new root and carries every live id into a new registry. So the
+time of one operation is linear in the live entity count, and the time of a long build is
+quadratic in it. The table gives the time per unit square, for one `add_polyline` and one
+`make_face`. Each square adds 9 live ids (1 face, 4 edges, 4 vertices).
+
+| Squares already in the session | Live ids | ms per square | ms per square, `validate=False` |
+|---|---|---|---|
+| 0 to 250 | 0 to 2 250 | 1.9 | 1.8 |
+| 1 000 to 1 250 | 9 000 to 11 250 | 20.2 | 20.2 |
+| 1 750 to 2 000 | 15 750 to 18 000 | 48.0 | 40.8 |
+
+Validation is not the cause: the two columns grow at the same rate. To build thousands of
+bodies, build them in sessions of a few hundred bodies each. Then merge the BREPs into one
+session with `add_brep`:
+
+```python
+merged = Session()
+for chunk in chunks:                 # a few hundred bodies per chunk
+    part = Session()
+    for square in chunk:
+        edges = [int(e) for e in part.add_polyline(square, closed=True).created]
+        part.make_face([e for e in edges if part.entity_kind(e) == EntityKind.EDGE])
+    merged.add_brep(part.brep())
+```
+
+The same 2 000 squares took 4.4 s in 8 sessions of 250, against 41.3 s in one session.
+
 ## Snapshot and restore
 
 ```python
@@ -92,6 +121,39 @@ Every mutating operation returns a `HistoryDelta`: which ids it created, deleted
 split and merged, plus the `BRepCheck_Analyzer` verdict on the shape it built. See
 [Entity IDs and ordinals](entity-ids.md#identity-rules-across-an-edit) for what each of
 those five arrays means.
+
+### What a boolean does with its operands
+
+An operation that consumes a body removes it from the model. The ids of the body then
+follow the rules of [Entity IDs and ordinals](entity-ids.md#identity-rules-across-an-edit):
+an id lives on where the result holds its shape or a modified copy of it, and dies
+elsewhere. A kept body stays in the model unchanged, with every id it had.
+
+| Operation | Targets | Tools | Solid ids after the operation |
+|---|---|---|---|
+| `fuse` | consumed | consumed | The target and tool solid ids all survive on the union (`merged`). A solid that touches no other keeps its id on its own solid. |
+| `cut` | consumed | consumed | A target solid keeps its id on what remains of it. The tool solid ids die. |
+| `common` | consumed | consumed | The target and tool solid ids all survive on the intersection (`merged`). |
+| `section` | kept | kept | Every operand id survives. The section edges and vertices get new ids. |
+| `split` | consumed | kept | A target's id survives on all its pieces (`split`). The tools are unchanged. |
+| `fragment` | consumed (one group) | none | Each input id survives on all its pieces. A piece of two inputs has both ids. |
+| `split_by_faces` | consumed | kept | A target cut into pieces loses its id. Each piece gets a new id. |
+| `split_by_plane` | consumed | a plane, not in the model | As `split_by_faces`. |
+| `keep_half_space` | consumed | a plane, not in the model | As `split_by_faces`; the pieces on the other side are removed. |
+| `imprint` | consumed | kept | A target that the tools cut through keeps its id on every piece. |
+
+A later call that names a dead id raises `PysmeshError`. The message names the operation
+that consumed the id, by the `op_index` and the `op` of its `HistoryDelta`:
+
+```python
+s = Session()
+s.add_box(4.0, 4.0, 4.0)                              # operation 1
+s.add_box(2.0, 2.0, 2.0, origin=(1.0, 1.0, 3.0))      # operation 2
+box, tool = s.entities(EntityKind.SOLID)              # 1, 28
+d = s.cut([box], [tool])                              # d.op_index == 3, d.op == "cut"
+s.remove([tool])
+# PysmeshError: Session.remove: entity 28 is dead (consumed by operation 3, cut).
+```
 
 ### Splits with piece ids
 
@@ -475,7 +537,7 @@ came from. By default `export_handoff` verifies the id-to-sub-shape map is a bij
 before it returns, and raises rather than handing back a map that has quietly lost some of
 the caller's names. Three causes make the pairing ambiguous: a same-domain merge leaves
 several live ids on one face, a boolean leaves both operands' ids on every sub-shape they
-share (every `common`, and a `fuse` with coincident sub-shapes), and a split leaves one live
+share (every `common` and every `fuse` of solids that meet), and a split leaves one live
 id on several.
 
 `export_handoff(allow_aliases=True)` returns a many-to-one map instead. Each ordinal
