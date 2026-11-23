@@ -70,7 +70,7 @@ const TopoDS_Shape& sole_shape_of(const char* op, const char* argname, EntityId 
     throw PysmeshError(std::string("Session.") + op + ": " + argname + " entity " +
                        std::to_string(id) + " denotes " +
                        std::to_string(rec.shapes.size()) +
-                       " shapes (it was split); name one of them instead.");
+                       " shapes (it was split)" + split_remedy(id, rec.kind));
   }
   return rec.shapes.front();
 }
@@ -1498,7 +1498,8 @@ py::array_t<bool> Session::contains(const std::vector<EntityId>& solid_ids,
     }
     if (rec.shapes.size() != 1) {
       throw PysmeshError("Session.contains: solid " + std::to_string(id) +
-                         " was split and denotes several solids; name one of them.");
+                         " denotes " + std::to_string(rec.shapes.size()) +
+                         " solids (it was split)" + split_remedy(id, TopAbs_SOLID));
     }
     solids.push_back(rec.shapes.front());
   }

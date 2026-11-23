@@ -502,7 +502,7 @@ std::vector<TopoDS_Shape> Session::edges_of(const char* op, const std::vector<En
     if (rec.shapes.size() != 1) {
       throw PysmeshError(std::string("Session.") + op + ": entity " + std::to_string(id) +
                          " denotes " + std::to_string(rec.shapes.size()) +
-                         " edges (it was split); name one of them instead.");
+                         " edges (it was split)" + split_remedy(id, TopAbs_EDGE));
     }
     const std::size_t before = out.size();
     append_unique(out, rec.shapes.front());
@@ -1147,7 +1147,7 @@ std::vector<TopoDS_Shape> Session::faces_of(const char* op,
     if (rec.shapes.size() != 1) {
       throw PysmeshError(std::string("Session.") + op + ": entity " + std::to_string(id) +
                          " denotes " + std::to_string(rec.shapes.size()) +
-                         " faces (it was split); name one of them instead.");
+                         " faces (it was split)" + split_remedy(id, TopAbs_FACE));
     }
     append_unique(out, rec.shapes.front());
   }
@@ -1179,7 +1179,8 @@ TopoDS_Face Session::sole_face(const char* op, EntityId id, const ShapeSet& face
   }
   if (rec.shapes.size() != 1) {
     throw PysmeshError(std::string("Session.") + op + ": face " + std::to_string(id) +
-                       " was split and denotes several faces; name one of them.");
+                       " denotes " + std::to_string(rec.shapes.size()) +
+                       " faces (it was split)" + split_remedy(id, TopAbs_FACE));
   }
   // The root's own copy, for its orientation — see the declaration. The map is keyed with
   // IsSame, so this can only ever swap the orientation, never the surface or the trimming.
@@ -1217,7 +1218,8 @@ TopoDS_Edge Session::sole_edge(const char* op, EntityId id, const ShapeSet& edge
   }
   if (rec.shapes.size() != 1) {
     throw PysmeshError(std::string("Session.") + op + ": edge " + std::to_string(id) +
-                       " was split and denotes several edges; name one of them.");
+                       " denotes " + std::to_string(rec.shapes.size()) +
+                       " edges (it was split)" + split_remedy(id, TopAbs_EDGE));
   }
   const int i = edges.FindIndex(rec.shapes.front());
   if (i == 0) {

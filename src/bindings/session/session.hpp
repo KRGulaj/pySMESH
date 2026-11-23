@@ -253,6 +253,37 @@ inline const char* kind_name(TopAbs_ShapeEnum k) {
   }
 }
 
+// The end of a refusal that names a split id: the sentences after "(it was split)". No
+// session id names one piece of a split entity, so the text says how to reach one: by its
+// ordinal in the handoff, or by its own id in a new session over the same BREP.
+inline std::string split_remedy(std::int64_t id, TopAbs_ShapeEnum kind) {
+  const char* noun = "shape";
+  switch (kind) {
+    case TopAbs_SOLID:
+      noun = "solid";
+      break;
+    case TopAbs_FACE:
+      noun = "face";
+      break;
+    case TopAbs_EDGE:
+      noun = "edge";
+      break;
+    case TopAbs_VERTEX:
+      noun = "vertex";
+      break;
+    default:
+      break;
+  }
+  const std::string n(noun);
+  const std::string plural = kind == TopAbs_VERTEX ? std::string("vertices") : n + "s";
+  return ". No session id names one of its " + plural +
+         ". To reach one, use its ordinal: the rows of export_handoff(allow_aliases=True)." +
+         n + "_ids_of that hold " + std::to_string(id) +
+         " give the ordinals (row i is ordinal i + 1), and load_brep(handoff.brep)." + plural +
+         "()[ordinal - 1] is that " + n + ". Or add brep() to a new Session, where each " + n +
+         " has its own id.";
+}
+
 inline TopAbs_ShapeEnum kind_from_name(const std::string& name) {
   if (name == "SOLID") return TopAbs_SOLID;
   if (name == "FACE") return TopAbs_FACE;

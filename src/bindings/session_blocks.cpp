@@ -1558,7 +1558,7 @@ EntityId Session::opposite_face(EntityId block_id, EntityId face_id) const {
   if (block.shapes.size() != 1) {
     throw PysmeshError("Session.opposite_face: solid " + std::to_string(block_id) +
                            " denotes " + std::to_string(block.shapes.size()) +
-                           " solids (it was split); name one of them instead.",
+                           " solids (it was split)" + split_remedy(block_id, TopAbs_SOLID),
                        "", {static_cast<int>(block_id)});
   }
   const TopoDS_Face face = sole_face(op, face_id);

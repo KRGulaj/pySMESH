@@ -678,7 +678,8 @@ py::dict Session::chamfer(const std::vector<EntityId>& edge_ids, double distance
     }
     if (rec.shapes.size() != 1) {
       throw PysmeshError("Session.chamfer: face " + std::to_string(*face_id) +
-                         " was split and denotes several faces; name one of them.");
+                         " denotes " + std::to_string(rec.shapes.size()) +
+                         " faces (it was split)" + split_remedy(*face_id, TopAbs_FACE));
     }
     reference = TopoDS::Face(rec.shapes.front());
   }
