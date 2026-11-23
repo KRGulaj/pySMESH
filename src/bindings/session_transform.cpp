@@ -402,6 +402,8 @@ py::dict Session::relocate(const gp_Trsf& trsf,
   const std::int64_t op_index = next_op_;
   auto next = std::make_shared<RegistryState>();
   const RegistryState& prev = *state_.registry;
+  // A relocation kills no id, so the deaths are those of the state before it.
+  next->deaths = prev.deaths;
   Delta delta;
 
   for (const auto& [id, rec] : prev.alive) {

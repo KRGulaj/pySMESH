@@ -122,6 +122,39 @@ split and merged, plus the `BRepCheck_Analyzer` verdict on the shape it built. S
 [Entity IDs and ordinals](entity-ids.md#identity-rules-across-an-edit) for what each of
 those five arrays means.
 
+### What a boolean does with its operands
+
+An operation that consumes a body removes it from the model. The ids of the body then
+follow the rules of [Entity IDs and ordinals](entity-ids.md#identity-rules-across-an-edit):
+an id lives on where the result holds its shape or a modified copy of it, and dies
+elsewhere. A kept body stays in the model unchanged, with every id it had.
+
+| Operation | Targets | Tools | Solid ids after the operation |
+|---|---|---|---|
+| `fuse` | consumed | consumed | The union is a new solid with a new id. The target and tool solid ids die. |
+| `cut` | consumed | consumed | A target solid keeps its id on what remains of it. The tool solid ids die. |
+| `common` | consumed | consumed | The target and tool solid ids all survive on the intersection (`merged`). |
+| `section` | kept | kept | Every operand id survives. The section edges and vertices get new ids. |
+| `split` | consumed | kept | A target's id survives on all its pieces (`split`). The tools are unchanged. |
+| `fragment` | consumed (one group) | none | Each input id survives on all its pieces. A piece of two inputs has both ids. |
+| `split_by_faces` | consumed | kept | A target cut into pieces loses its id. Each piece gets a new id. |
+| `split_by_plane` | consumed | a plane, not in the model | As `split_by_faces`. |
+| `keep_half_space` | consumed | a plane, not in the model | As `split_by_faces`; the pieces on the other side are removed. |
+| `imprint` | consumed | kept | A target that the tools cut through keeps its id on every piece. |
+
+A later call that names a dead id raises `PysmeshError`. The message names the operation
+that consumed the id, by the `op_index` and the `op` of its `HistoryDelta`:
+
+```python
+s = Session()
+s.add_box(4.0, 4.0, 4.0)                              # operation 1
+s.add_box(2.0, 2.0, 2.0, origin=(1.0, 1.0, 3.0))      # operation 2
+box, tool = s.entities(EntityKind.SOLID)              # 1, 28
+d = s.cut([box], [tool])                              # d.op_index == 3, d.op == "cut"
+s.remove([tool])
+# PysmeshError: Session.remove: entity 28 is dead (consumed by operation 3, cut).
+```
+
 ### Splits with piece ids
 
 `split_by_faces`, `split_by_plane` and `keep_half_space` cut solids by faces or by a

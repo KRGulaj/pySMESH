@@ -377,8 +377,19 @@ const EntityRecord& Session::require_alive(const char* op, EntityId id) const {
   require_issued(op, id);
   const auto it = state_.registry->alive.find(id);
   if (it == state_.registry->alive.end()) {
+    // An id that is not alive died at one operation of this state's history, or was
+    // issued on a branch that a restore left: then no operation of this history killed it.
+    for (const DeathLog* link = state_.registry->deaths.get(); link != nullptr;
+         link = link->earlier.get()) {
+      if (std::binary_search(link->ids.begin(), link->ids.end(), id)) {
+        throw PysmeshError(std::string("Session.") + op + ": entity " + std::to_string(id) +
+                           " is dead (consumed by operation " +
+                           std::to_string(link->op_index) + ", " + link->op_name + ").");
+      }
+    }
     throw PysmeshError(std::string("Session.") + op + ": entity " + std::to_string(id) +
-                       " is dead (it was removed by an earlier operation).");
+                       " is dead in this state (no operation of its history consumed it, so "
+                       "it was issued on a branch that restore left).");
   }
   return it->second;
 }
@@ -705,7 +716,7 @@ py::dict Session::commit(const std::vector<TopoDS_Shape>& bodies,
   const TopoDS_Shape new_root = make_root(bodies);
 
   const std::int64_t op_index = next_op_;
-  Delta delta = carry_registry(new_root, hist, op_index, pieces);
+  Delta delta = carry_registry(new_root, hist, op_index, op_name, pieces);
   delta.valid = verdict;
   delta.warnings = warnings;
 
@@ -843,6 +854,7 @@ void Session::relabel_body(const TopoDS_Shape& body, const TopoDS_Shape& twin,
   }
 
   auto next = std::make_shared<RegistryState>();
+  next->deaths = state_.registry->deaths;
   for (const auto& [id, rec] : state_.registry->alive) {
     EntityRecord out;
     out.kind = rec.kind;
@@ -865,7 +877,7 @@ void Session::relabel_body(const TopoDS_Shape& body, const TopoDS_Shape& twin,
 
 Delta Session::carry_registry(const TopoDS_Shape& new_root,
                               const Handle(BRepTools_History) & hist, std::int64_t op_index,
-                              PieceRule pieces) {
+                              const char* op_name, PieceRule pieces) {
   const std::vector<TopoDS_Shape> new_order = registered_subshapes(new_root);
   ShapeKeyed<TopAbs_ShapeEnum> members;
   members.reserve(new_order.size());
@@ -1048,8 +1060,19 @@ Delta Session::carry_registry(const TopoDS_Shape& new_root,
     }
   }
 
-  state_.registry = std::move(next);
   finalise(delta);
+  // The deaths of this operation, for require_alive to name it. finalise sorted them.
+  if (delta.deleted.empty()) {
+    next->deaths = prev.deaths;
+  } else {
+    auto link = std::make_shared<DeathLog>();
+    link->op_index = op_index;
+    link->op_name = op_name;
+    link->ids = delta.deleted;
+    link->earlier = prev.deaths;
+    next->deaths = std::move(link);
+  }
+  state_.registry = std::move(next);
   return delta;
 }
 

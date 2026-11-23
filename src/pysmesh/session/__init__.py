@@ -202,7 +202,9 @@ class Session(
       :attr:`ResolutionStatus.AMBIGUOUS` rather than picking one;
     * several entities merged onto one output — **all** their ids survive on it;
     * an output with no input correspondence gets a **new** id;
-    * a removed entity's id is marked **dead** and is never reused.
+    * a removed entity's id is marked **dead** and is never reused. A later call that
+      names it raises :class:`PysmeshError` with the ``op_index`` and the ``op`` of the
+      :class:`HistoryDelta` of the operation that consumed it.
 
     Cost: each operation commits a new root and carries every live id into a new
     registry. So the time of one operation is linear in the live entity count, and the
