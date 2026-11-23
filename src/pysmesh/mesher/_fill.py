@@ -142,6 +142,12 @@ class _FillOps(_MesherBase):
     ) -> NDArray[np.int64]:
         """Insert linear triangles.
 
+        Triangles on a face of a solid that :class:`~pysmesh.Netgen3D` fills must point
+        out of that solid: the order of their nodes turns about the outward normal by the
+        right-hand rule. :meth:`~pysmesh.Mesher.compute` refuses a face whose triangles
+        point into the solid or mix both orientations, before NETGEN runs (see
+        :class:`~pysmesh.UseExisting2D`).
+
         Args:
             connectivity: (M, 3) integer — the three node ids of each triangle.
             on: The sub-shape to bind them to, or None (see :meth:`add_elements`).

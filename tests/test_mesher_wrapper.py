@@ -14,6 +14,7 @@ about by hand. The native paths behind them keep their own tests in
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from itertools import pairwise
 
 import numpy as np
@@ -585,6 +586,179 @@ def test_an_element_bound_to_a_sub_shape_of_another_dimension_is_refused() -> No
 
         with pytest.raises(PysmeshError, match="dimensions differ"):
             mesher.add_segments(nodes[None, :], on=SubShape(SubShapeKind.FACE, 1))
+
+
+# ---- #32 the orientation of existing faces under NETGEN 3D ----------------------- #
+
+# NETGEN 2D writes each triangle of a box face pointing out of the box (measured: 222 of
+# 222 at size 0.25). The injected copy is moved 1e-4 off the CAD surface, outward.
+INJECTED_SIZE: float = 0.25
+INJECTED_OFFSET: float = 1e-4
+
+
+def _box_unit() -> ps.Shape:
+    """The unit box."""
+    session = Session()
+    session.add_box(1.0, 1.0, 1.0)
+    return ps.load_brep(session.brep())
+
+
+def _harvested_surface(shape: ps.Shape) -> ps.MeshData:
+    """The NETGEN 2D surface mesh of ``shape`` at size 0.25."""
+    with Mesher(shape) as surface:
+        surface.assign(ps.Netgen1D2D())
+        surface.assign(ps.NetgenParameters2D(max_size=INJECTED_SIZE, threads=4))
+        surface.compute()
+        return surface.mesh()
+
+
+def _inject_into_netgen_3d(
+    shape: ps.Shape,
+    md: ps.MeshData,
+    flip: Callable[[int, NDArray[np.int32]], NDArray[np.int32]],
+) -> Mesher:
+    """UseExisting1D/2D + Netgen3D over the harvested surface; ``flip`` edits each face.
+
+    Every node on the boundary of the shape's box moves ``INJECTED_OFFSET`` outward.
+    """
+    xyz = md.node_coords
+    low, high = xyz.min(axis=0), xyz.max(axis=0)
+    out = np.where(np.abs(xyz - low) < TOL, -1.0, 0.0) + np.where(
+        np.abs(xyz - high) < TOL, 1.0, 0.0
+    )
+    m = Mesher(shape)
+    m.assign(UseExisting1D())
+    m.assign(UseExisting2D())
+    m.assign(ps.Netgen3D())
+    m.assign(ps.NetgenParameters(max_size=INJECTED_SIZE, threads=4))
+    ids = m.add_nodes(xyz + INJECTED_OFFSET * out)
+    for etype, kind in (
+        (ElementType.EDGE, SubShapeKind.EDGE),
+        (ElementType.TRIANGLE, SubShapeKind.FACE),
+    ):
+        rows = np.flatnonzero(md.element_type == int(etype))
+        for ordinal in np.unique(md.element_ordinal[rows]):
+            sel = rows[md.element_ordinal[rows] == ordinal]
+            nodes = np.stack([md.nodes_of(int(i)) for i in sel])
+            on = SubShape(kind, int(ordinal))
+            if etype == ElementType.EDGE:
+                m.add_segments(ids[nodes], on=on)
+            else:
+                m.add_triangles(ids[flip(int(ordinal), nodes)], on=on)
+    return m
+
+
+def _as_harvested(ordinal: int, nodes: NDArray[np.int32]) -> NDArray[np.int32]:
+    """Every face as NETGEN 2D wrote it."""
+    return nodes
+
+
+def _reverse_face_1(ordinal: int, nodes: NDArray[np.int32]) -> NDArray[np.int32]:
+    """Face 1 reversed, the others as harvested."""
+    return nodes[:, ::-1] if ordinal == 1 else nodes
+
+
+def _reverse_every_face(ordinal: int, nodes: NDArray[np.int32]) -> NDArray[np.int32]:
+    """Every face reversed."""
+    return nodes[:, ::-1]
+
+
+def _reverse_half_of_face_1(
+    ordinal: int, nodes: NDArray[np.int32]
+) -> NDArray[np.int32]:
+    """The first half of face 1's triangles reversed: face 1 mixes orientations."""
+    if ordinal != 1:
+        return nodes
+    out = nodes.copy()
+    out[: len(out) // 2] = out[: len(out) // 2, ::-1]
+    return out
+
+
+def _tetra_volume(mesh: ps.MeshData) -> float:
+    """The total volume of the mesh's tetrahedra."""
+    tets = np.flatnonzero(mesh.element_type == int(ElementType.TETRAHEDRON))
+    c = mesh.node_coords[
+        mesh.element_nodes[mesh.element_offsets[tets][:, None] + np.arange(4)]
+    ]
+    det = np.einsum(
+        "ij,ij->i", np.cross(c[:, 1] - c[:, 0], c[:, 2] - c[:, 0]), c[:, 3] - c[:, 0]
+    )
+    return float(np.abs(det).sum()) / 6.0
+
+
+@pytest.mark.parametrize(
+    ("flip", "faces", "why"),
+    [
+        (_reverse_face_1, [1], "reversed"),
+        (_reverse_every_face, [1, 2, 3, 4, 5, 6], "reversed"),
+        (_reverse_half_of_face_1, [1], "mixed"),
+    ],
+    ids=["face_1_reversed", "every_face_reversed", "face_1_mixed"],
+)
+def test_existing_faces_that_do_not_point_out_of_the_solid_are_refused(
+    flip: Callable[[int, NDArray[np.int32]], NDArray[np.int32]],
+    faces: list[int],
+    why: str,
+) -> None:
+    """Injected box faces reversed or mixed: refused before NETGEN, each face named.
+
+    NETGEN 3D needs every boundary triangle to point out of the solid, and
+    NETGENPlugin_NETGEN_3D passes the triangles of a solid's own face as they are
+    (``NETGENPlugin_NETGEN_3D.cxx:227-239``, ``:380``). Before this check NETGEN failed
+    with "Some edges multiple times in surface mesh" or "too many attempts". The oracle
+    is the set of faces the test reversed.
+    """
+    shape = _box_unit()
+    m = _inject_into_netgen_3d(shape, _harvested_surface(shape), flip)
+
+    with m, pytest.raises(PysmeshError) as caught:
+        m.compute()
+
+    assert "do not all point out of their solid" in str(caught.value)
+    assert sorted(caught.value.face_ids) == faces
+    for face in faces:
+        assert f"FACE {face} of SOLID 1 ({why}" in str(caught.value)
+
+
+def test_existing_faces_as_netgen_2d_wrote_them_still_mesh() -> None:
+    """The harvested surface, every triangle outward: NETGEN 3D fills the unit box.
+
+    The oracle is the closed-form volume of the box the moved nodes span, (1 + 2e-4)^3.
+    """
+    shape = _box_unit()
+    m = _inject_into_netgen_3d(shape, _harvested_surface(shape), _as_harvested)
+
+    with m:
+        report = m.compute()
+        volume = _tetra_volume(m.mesh())
+
+    assert report.volumes > 0
+    assert volume == pytest.approx((1.0 + 2.0 * INJECTED_OFFSET) ** 3, rel=1e-9)
+
+
+def test_a_face_two_solids_of_a_compound_share_needs_one_orientation_only() -> None:
+    """Two fragmented boxes: the shared face's triangles point out of one box only.
+
+    NETGENPlugin reverses a face shared by two solids of a compound for one of them
+    (``NETGENPlugin_NETGEN_3D.cxx:227-239``), so the check must accept it. The oracle is
+    the closed-form volume of the 2 x 1 x 1 box the moved nodes span:
+    (2 + 2e-4) (1 + 2e-4)^2.
+    """
+    s = Session()
+    s.add_box(1.0, 1.0, 1.0)
+    s.add_box(1.0, 1.0, 1.0, origin=(1.0, 0.0, 0.0))
+    s.fragment([int(i) for i in s.entities(ps.EntityKind.SOLID)])
+    shape = ps.load_brep(s.brep())
+    m = _inject_into_netgen_3d(shape, _harvested_surface(shape), _as_harvested)
+
+    with m:
+        report = m.compute()
+        volume = _tetra_volume(m.mesh())
+
+    solids = sorted(c.ordinal for c in report.meshed if c.kind == SubShapeKind.SOLID)
+    expected = (2.0 + 2.0 * INJECTED_OFFSET) * (1.0 + 2.0 * INJECTED_OFFSET) ** 2
+    assert solids == [1, 2]
+    assert volume == pytest.approx(expected, rel=1e-9)
 
 
 # ---- W2.1 Distribution.BETA_LAW and NumberOfSegments.beta ------------------------- #

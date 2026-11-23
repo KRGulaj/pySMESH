@@ -82,6 +82,7 @@ class SMESH_Gen;
 class SMESH_Hypothesis;
 class SMESH_Mesh;
 class StdMeshers_ViscousLayerBuilder;
+class TopoDS_Face;
 
 namespace pysmesh {
 namespace mesher {
@@ -480,6 +481,17 @@ class Mesher {
   // a second one where it reads one, or face sets that SMESH's layer check rejects. All
   // before anything is computed.
   void refuse_unread_layers() const;
+
+  // Raise naming each face of a NETGEN_3D solid whose existing elements (injected, or kept
+  // by UseExisting_2D) do not all point out of that solid, before anything is computed.
+  // NETGENPlugin's own rule is followed: a face that two solids of a compound share needs
+  // one orientation only, and an internal face is not checked.
+  void refuse_misoriented_injected_faces() const;
+
+  // Why the existing elements of `face` (oriented as in its solid) are not outward: "mixed:
+  // ..." when two elements run an inner edge the same way or connected parts disagree,
+  // "reversed: ..." when they all point into the solid. Empty when they point out.
+  std::string injected_face_orientation(const TopoDS_Face& face) const;
 
   // Whether a NETGEN algorithm is assigned anywhere, so that a compute must hold the
   // process-wide NETGEN lock (mesher_netgen.cpp).

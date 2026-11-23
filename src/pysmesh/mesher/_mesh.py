@@ -174,6 +174,10 @@ class _MeshOps(_MesherBase):
                 names the solid and its open front, and gives the compute's warnings; the
                 front's centroids are in ``.bad_element_centroids``, and the mesh is
                 kept.
+                Also before anything is meshed, if a face of a solid that
+                :class:`Netgen3D` meshes holds elements whose node order does not point
+                out of that solid, all of them or some (see :class:`UseExisting2D`); the
+                message names each such face, and ``.face_ids`` holds it.
                 Also before anything is meshed, if a :class:`ViscousLayers` or
                 :class:`ViscousLayers2D` reaches a solid or a face whose algorithm does
                 not build layers; the message names the sub-shape and the algorithm. A

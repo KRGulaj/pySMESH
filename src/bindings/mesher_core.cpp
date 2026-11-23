@@ -21,8 +21,13 @@
 #include <set>
 #include <utility>
 
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
+#include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
+#include <GeomAPI_ProjectPointOnSurf.hxx>
+#include <GeomLProp_SLProps.hxx>
+#include <Geom_Surface.hxx>
 #include <Precision.hxx>
 #include <SMDS_ElemIterator.hxx>
 #include <SMDS_MeshNode.hxx>
@@ -43,7 +48,11 @@
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Face.hxx>
+#include <gp_Dir.hxx>
+#include <gp_Pln.hxx>
 #include <gp_Pnt.hxx>
+#include <gp_XYZ.hxx>
 
 namespace pysmesh {
 
@@ -866,6 +875,186 @@ std::string Mesher::with_ordinals(const std::string& text) const {
   return out;
 }
 
+std::string Mesher::injected_face_orientation(const TopoDS_Face& face) const {
+  const SMESHDS_SubMesh* held = meshDS_->MeshElements(face);
+  if (held == nullptr || held->NbElements() == 0) {
+    return std::string();
+  }
+  std::vector<const SMDS_MeshElement*> elements;
+  for (SMDS_ElemIteratorPtr it = held->GetElements(); it->more();) {
+    const SMDS_MeshElement* e = it->next();
+    if (e->GetType() == SMDSAbs_Face && e->NbCornerNodes() >= 3) {
+      elements.push_back(e);
+    }
+  }
+  // Orientation is consistent when the two elements at an inner edge run it in opposite
+  // directions. Edge key: (smaller id, larger id); value: the first direction and the
+  // first element's index, so that elements joined by an edge form connected parts.
+  std::map<std::pair<smIdType, smIdType>, std::pair<bool, std::size_t>> runs;
+  std::vector<std::size_t> part(elements.size());
+  for (std::size_t i = 0; i < part.size(); ++i) {
+    part[i] = i;
+  }
+  const auto find = [&part](std::size_t a) {
+    while (part[a] != a) {
+      part[a] = part[part[a]];
+      a = part[a];
+    }
+    return a;
+  };
+  std::size_t same_way = 0;
+  for (std::size_t i = 0; i < elements.size(); ++i) {
+    const SMDS_MeshElement* e = elements[i];
+    const int n = e->NbCornerNodes();
+    for (int k = 0; k < n; ++k) {
+      const smIdType a = e->GetNode(k)->GetID();
+      const smIdType b = e->GetNode((k + 1) % n)->GetID();
+      const auto key = std::make_pair(std::min(a, b), std::max(a, b));
+      const auto found = runs.emplace(key, std::make_pair(a < b, i));
+      if (found.second) {
+        continue;
+      }
+      same_way += found.first->second.first == (a < b) ? 1 : 0;
+      const std::size_t p = find(i);
+      const std::size_t q = find(found.first->second.second);
+      if (p != q) {
+        part[p] = q;
+      }
+    }
+  }
+  if (same_way > 0) {
+    return "mixed: " + std::to_string(same_way) +
+           " of its inner edges are run the same way by both of their elements";
+  }
+
+  // Each connected part has one orientation; its sign is the area-weighted vote of its
+  // elements' normals against the face's outward normal at their centroids. A vote, not
+  // one element, so that a few folded elements do not decide it. On a curved face the
+  // normal needs a projection, so up to kSampled elements per part vote there.
+  constexpr std::size_t kSampled = 64;
+  const BRepAdaptor_Surface surface(face, /*Restriction=*/false);
+  const bool planar = surface.GetType() == GeomAbs_Plane;
+  const bool reversed_face = face.Orientation() == TopAbs_REVERSED;
+  const Handle(Geom_Surface) geometry = BRep_Tool::Surface(face);
+  std::map<std::size_t, std::vector<std::size_t>> parts;
+  for (std::size_t i = 0; i < elements.size(); ++i) {
+    parts[find(i)].push_back(i);
+  }
+  std::size_t inward = 0;
+  for (const auto& p : parts) {
+    const std::vector<std::size_t>& members = p.second;
+    const std::size_t step = std::max<std::size_t>(1, members.size() / kSampled);
+    double vote = 0.0;
+    for (std::size_t j = 0; j < members.size(); j += planar ? 1 : step) {
+      const SMDS_MeshElement* e = elements[members[j]];
+      const int n = e->NbCornerNodes();
+      gp_XYZ area(0.0, 0.0, 0.0);
+      gp_XYZ centre(0.0, 0.0, 0.0);
+      for (int k = 0; k < n; ++k) {
+        const SMDS_MeshNode* a = e->GetNode(k);
+        const SMDS_MeshNode* b = e->GetNode((k + 1) % n);
+        area += gp_XYZ(a->X(), a->Y(), a->Z()).Crossed(gp_XYZ(b->X(), b->Y(), b->Z()));
+        centre += gp_XYZ(a->X(), a->Y(), a->Z());
+      }
+      gp_Dir normal;
+      if (planar) {
+        normal = surface.Plane().Axis().Direction();
+      } else {
+        GeomAPI_ProjectPointOnSurf projection(gp_Pnt(centre / n), geometry);
+        if (projection.NbPoints() == 0) {
+          continue;
+        }
+        double u = 0.0, v = 0.0;
+        projection.LowerDistanceParameters(u, v);
+        GeomLProp_SLProps props(geometry, u, v, 1, Precision::Confusion());
+        if (!props.IsNormalDefined()) {
+          continue;
+        }
+        normal = props.Normal();
+      }
+      vote += 0.5 * area.Dot(normal.XYZ()) * (reversed_face ? -1.0 : 1.0);
+    }
+    inward += vote < 0.0 ? 1 : 0;
+  }
+  if (inward == 0) {
+    return std::string();
+  }
+  if (inward < parts.size()) {
+    return "mixed: " + std::to_string(inward) + " of its " + std::to_string(parts.size()) +
+           " connected parts point into the solid";
+  }
+  return "reversed: its elements point into the solid";
+}
+
+void Mesher::refuse_misoriented_injected_faces() const {
+  // NETGENPlugin_NETGEN_3D passes the elements on the faces of a solid to NETGEN as they
+  // are (NETGENPlugin_NETGEN_3D.cxx:380), and NETGEN needs each to point out of the solid.
+  // It reverses a face itself only when the meshed shape is a compound or a compsolid and
+  // the face is not internal and bounds more than one solid (:227-239); such a face must
+  // only be consistent. An internal face goes to NETGEN in both orientations. A face
+  // reversed whole gave "Some edges multiple times in surface mesh", every face reversed
+  // "Stop meshing since too many attempts". A face that holds elements before the compute
+  // keeps them, as UseExisting_2D does, so every such face of a NETGEN_3D solid is checked.
+  const TopAbs_ShapeEnum main_type = mesh_->GetShapeToMesh().ShapeType();
+  const bool shared_may_flip = main_type == TopAbs_COMPOUND || main_type == TopAbs_COMPSOLID;
+  std::vector<std::string> named;
+  std::vector<int> faces;
+  std::set<std::pair<int, int>> checked;
+  for (TopExp_Explorer solid(data_->shape, TopAbs_SOLID); solid.More(); solid.Next()) {
+    SMESH_subMesh* sub = mesh_->GetSubMeshContaining(solid.Current());
+    const SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
+    if (algo == nullptr || algo->GetName() == nullptr ||
+        std::string(algo->GetName()) != "NETGEN_3D") {
+      continue;
+    }
+    const int solid_ordinal =
+        ordinal_of_shape_index(meshDS_->ShapeToIndex(solid.Current())).second;
+    for (TopExp_Explorer ex(solid.Current(), TopAbs_FACE); ex.More(); ex.Next()) {
+      const TopoDS_Face& face = TopoDS::Face(ex.Current());
+      const int ordinal = ordinal_of_shape_index(meshDS_->ShapeToIndex(face)).second;
+      if (face.Orientation() == TopAbs_INTERNAL || ordinal <= 0 ||
+          !checked.insert({solid_ordinal, ordinal}).second) {
+        continue;
+      }
+      std::string why = injected_face_orientation(face);
+      int solids_around = 0;
+      for (const TopoDS_Shape& above : mesh_->GetAncestors(face)) {
+        solids_around += above.ShapeType() == TopAbs_SOLID ? 1 : 0;
+      }
+      if (shared_may_flip && solids_around > 1 && why.rfind("reversed", 0) == 0) {
+        continue;  // NETGENPlugin reverses this face for this solid itself
+      }
+      if (why.empty()) {
+        continue;
+      }
+      named.push_back("FACE " + std::to_string(ordinal) + " of SOLID " +
+                      std::to_string(solid_ordinal) + " (" + why + ")");
+      if (std::find(faces.begin(), faces.end(), ordinal) == faces.end()) {
+        faces.push_back(ordinal);
+      }
+    }
+  }
+  if (named.empty()) {
+    return;
+  }
+  std::string list;
+  for (const std::string& n : named) {
+    list += (list.empty() ? "" : ", ") + n;
+  }
+  throw PysmeshError(
+      "Mesher.compute: NETGEN_3D would read " + std::to_string(named.size()) +
+          " face(s) whose existing elements do not all point out of their solid: " + list +
+          ". Nothing was computed.",
+      "NETGEN_3D passes the elements on a face to NETGEN as they are, and NETGEN needs each "
+      "boundary element to point out of the solid: its node order turns about the outward "
+      "normal by the right-hand rule. A reversed face makes NETGEN fail with \"Some edges "
+      "multiple times in surface mesh\", every face reversed with \"Stop meshing since too "
+      "many attempts\". Reverse the node order of the elements of the named faces, or of "
+      "their reversed part. A face that two solids of a compound share needs one "
+      "orientation only: NETGENPlugin reverses it for one of them.",
+      faces);
+}
+
 Mesher::OpenFront Mesher::open_front(const TopoDS_Shape& solid) const {
   // A face is keyed by its corner node ids, sorted, so that the face of one volume and the
   // same face of its neighbour, or of a boundary element, compare equal whatever their node
@@ -1477,6 +1666,7 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
 
   if (!shape_free) {
     refuse_unread_layers();
+    refuse_misoriented_injected_faces();
   }
 
   ProgressHooks hooks;

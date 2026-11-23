@@ -201,6 +201,16 @@ class UseExisting2D(Algorithm):
     The 2-D counterpart of :class:`UseExisting1D`: it creates nothing and counts as
     computed, so a 3-D algorithm meshes the solid from the script's faces. Bind the
     script's nodes and faces to the face with ``on``.
+
+    Under :class:`Netgen3D` the faces must point out of the solid: the node order of each
+    turns about the outward normal by the right-hand rule. NETGEN_3D passes them to
+    NETGEN as they are, and NETGEN fails on a reversed face ("Some edges multiple times
+    in surface mesh") or on every face reversed ("Stop meshing since too many
+    attempts"). So :meth:`~pysmesh.Mesher.compute` checks every face of a Netgen3D solid
+    that holds elements before the compute, and refuses a face whose elements point into
+    the solid or mix both orientations, naming it in ``.face_ids``. A face that two
+    solids of a compound share needs one orientation only, as NETGENPlugin reverses it
+    for one of them. The surface that :class:`Netgen1D2D` writes points out already.
     """
 
     native_name: ClassVar[str] = "UseExisting_2D"
