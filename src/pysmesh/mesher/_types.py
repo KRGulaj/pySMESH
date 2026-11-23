@@ -241,6 +241,29 @@ class MeshData:
     element's share of them begins. Every other type contributes an empty span, because its
     faces follow from its type.
 
+    **Node order.** ``element_nodes`` lists the nodes of each cell in SMDS order, which
+    is the MED order that SMESH uses. VTK numbers the linear 3-D cells differently. To
+    get the VTK order, take the nodes of a cell at these positions
+    (``nodes[list(permutation)]``):
+
+    ===============  ==========================
+    ``TETRAHEDRON``  (0, 2, 1, 3)
+    ``PYRAMID``      (0, 3, 2, 1, 4)
+    ``PENTAHEDRON``  (0, 2, 1, 3, 5, 4)
+    ``HEXAHEDRON``   (0, 3, 2, 1, 4, 7, 6, 5)
+    ===============  ==========================
+
+    The tetrahedron, pyramid and hexahedron rows are SMESH's own conversion
+    (``SMDS_MeshCell::toVtkOrder``). For the pentahedron that table is the identity.
+    But in SMDS order the triangle (0, 1, 2) faces away from the triangle (3, 4, 5),
+    and the shape functions of VTK's wedge need it to face (3, 4, 5). So the row
+    reverses both triangles. After the permutation, every cell of these four types has
+    a positive Jacobian under VTK's shape functions. ``vtkMeshQuality`` uses the
+    opposite sign for a wedge: it gives VTK's own reference wedge a negative volume.
+    Triangles and quadrangles have the same order in SMDS and VTK.
+    :func:`~pysmesh.compute_viscous_layers` applies the pentahedron row itself: its
+    ``prism_connectivity`` is in VTK order already.
+
     Attributes:
         node_coords: (N, 3) float64 — model-space position of every node.
         node_id: (N,) int64 — the mesh's own node ids, in the same row order.

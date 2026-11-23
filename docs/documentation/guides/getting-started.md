@@ -117,6 +117,20 @@ each node and element is bound to. Nothing here is a VTK object; see
 [VTK privacy](../concepts/vtk-privacy.md) for why that is a load-bearing guarantee, not an
 implementation detail.
 
+`element_nodes` lists the nodes of each cell in SMDS (MED) order, which is not VTK's order
+for the linear 3-D cells. To build VTK cells from it, reorder the nodes of each cell:
+
+| Cell | Positions in VTK order |
+|---|---|
+| `TETRAHEDRON` | (0, 2, 1, 3) |
+| `PYRAMID` | (0, 3, 2, 1, 4) |
+| `PENTAHEDRON` | (0, 2, 1, 3, 5, 4) |
+| `HEXAHEDRON` | (0, 3, 2, 1, 4, 7, 6, 5) |
+
+After the reorder, every cell has a positive Jacobian under VTK's shape functions. Triangles
+and quadrangles need no reorder. `compute_viscous_layers` returns its prisms in VTK order
+already. The `MeshData` docstring gives the source of each row.
+
 ## Step 7: check quality
 
 ```python
