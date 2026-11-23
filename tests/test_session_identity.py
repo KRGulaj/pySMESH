@@ -930,7 +930,7 @@ def test_a_tool_consumed_by_cut_is_refused_naming_the_cut_and_its_op_index() -> 
 
 def test_an_id_that_remove_killed_is_refused_naming_the_remove() -> None:
     """A query of a removed body's solid names "remove" and the remove's op_index."""
-    s, box, tool = _box_and_tool()
+    s, _, tool = _box_and_tool()
     removed = s.remove([tool])
 
     with pytest.raises(ps.PysmeshError) as info:
