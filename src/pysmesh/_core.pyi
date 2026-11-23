@@ -21,10 +21,15 @@ class PysmeshError(RuntimeError):
     Attributes:
         details: SMESH ``SMESH_ComputeError`` text / OCCT message, when available.
         face_ids: The offending face ids, where applicable (empty otherwise).
+        bad_element_centroids: (k, 3) float64 — the centroid of each element that a
+            failed mesh compute names as bad (NETGEN's intersecting triangles, its edges
+            found several times in a surface mesh), in model coordinates. ``(0, 3)``
+            when there is none.
     """
 
     details: str
     face_ids: list[int]
+    bad_element_centroids: NDArray[np.float64]
 
 class PysmeshCancelled(PysmeshError):
     """An operation the caller stopped through its ``cancel`` predicate.

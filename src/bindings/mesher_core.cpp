@@ -12,12 +12,14 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <cstdio>
 #include <list>
 #include <map>
 #include <set>
 #include <utility>
 
 #include <SMDS_ElemIterator.hxx>
+#include <SMDS_MeshNode.hxx>
 #include <SMDS_MeshElement.hxx>
 #include <SMESHDS_Mesh.hxx>
 #include <SMESH_Algo.hxx>
@@ -162,6 +164,63 @@ class EntryCallUp : public SMESH_Mesh::TCallUp {
  private:
   std::shared_ptr<ShapeData> data_;
 };
+
+// The elements a compute error names as bad, as text for its line, with each element's
+// centroid appended to `centroids` (x y z per element, model coordinates).
+//
+// NETGENPlugin_Mesher::ReadErrors stores the triangles NETGEN reports as intersecting, and
+// the edges it finds several times in a surface mesh, as SMESH_BadInputElements of the
+// failed sub-mesh. Each is a free element over mesh nodes, so the mean of its nodes is a
+// point in the model where the failure is. NETGEN reports one pair of triangles once per
+// front element that meets it, so an element over the same nodes as an earlier one is
+// skipped. The text gives the count and the centroids of the first kListed; an error
+// with no bad element gives an empty text.
+std::string bad_elements_text(const SMESH_ComputeError& err, std::vector<double>& centroids) {
+  constexpr std::size_t kListed = 5;
+  const auto* bad = dynamic_cast<const SMESH_BadInputElements*>(&err);
+  if (bad == nullptr || !bad->HasBadElems()) {
+    return std::string();
+  }
+  std::size_t count = 0;
+  std::string listed;
+  std::set<std::vector<smIdType>> seen;
+  for (const SMDS_MeshElement* elem : bad->myBadElements) {
+    const int n = elem != nullptr ? elem->NbNodes() : 0;
+    if (n == 0) {
+      continue;
+    }
+    std::vector<smIdType> key;
+    for (int i = 0; i < n; ++i) {
+      key.push_back(elem->GetNode(i)->GetID());
+    }
+    std::sort(key.begin(), key.end());
+    if (!seen.insert(key).second) {
+      continue;
+    }
+    double c[3] = {0.0, 0.0, 0.0};
+    for (int i = 0; i < n; ++i) {
+      const SMDS_MeshNode* node = elem->GetNode(i);
+      c[0] += node->X();
+      c[1] += node->Y();
+      c[2] += node->Z();
+    }
+    for (double& v : c) {
+      v /= n;
+    }
+    centroids.insert(centroids.end(), c, c + 3);
+    if (count < kListed) {
+      char buf[96];
+      std::snprintf(buf, sizeof(buf), "(%.6g, %.6g, %.6g)", c[0], c[1], c[2]);
+      listed += std::string(count == 0 ? "" : ", ") + buf;
+    }
+    ++count;
+  }
+  if (count == 0) {
+    return std::string();
+  }
+  return "; " + std::to_string(count) + " bad element(s), centroid(s) of the first " +
+         std::to_string(std::min(count, kListed)) + ": " + listed;
+}
 
 }  // namespace
 
@@ -1097,6 +1156,9 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
   // so IsKO() decides, and a warning goes on the report instead (report A1).
   std::vector<std::string> failures;
   std::vector<int> failed_faces;
+  // A shared face is explored once per solid, so its error is read once, by its address.
+  std::set<const SMESH_ComputeError*> read_bad;
+  std::vector<double> bad_centroids;
   py::list warnings;
   for (std::size_t k = 0; k < 4; ++k) {
     for (TopExp_Explorer ex(data_->shape, kKindTypes[k]); ex.More(); ex.Next()) {
@@ -1125,6 +1187,9 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
       // actionable, because the failure is nearly always the algorithm rather than the shape.
       if (algorithm[0] != '\0') {
         line += std::string(" (algorithm ") + algorithm + ")";
+      }
+      if (read_bad.insert(err.get()).second) {
+        line += bad_elements_text(*err, bad_centroids);
       }
       bool seen = false;
       for (const std::string& s : failures) {
@@ -1204,7 +1269,7 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
     }
     throw PysmeshError("Mesher.compute: meshing failed on " +
                            std::to_string(failures.size()) + " sub-shape(s).",
-                       details, failed_faces);
+                       details, failed_faces, bad_centroids);
   }
 
   return success_report(warnings);

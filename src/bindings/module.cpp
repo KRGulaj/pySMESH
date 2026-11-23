@@ -6,8 +6,11 @@
 // viscous prism layers (compute_viscous_layers), and same-domain healing (unify_same_domain).
 //
 // Aggregates the per-file binders (bind_shape, bind_mesh, bind_viscous, bind_unify) and
-// installs the typed exception (PysmeshError) with its .details / .face_ids attributes.
+// installs the typed exception (PysmeshError) with its .details / .face_ids /
+// .bad_element_centroids attributes.
 
+#include <algorithm>
+#include <cstddef>
 #include <exception>
 #include <string>
 
@@ -44,11 +47,18 @@ namespace {
 py::handle g_error_type;      // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 py::handle g_cancelled_type;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 
-// Raise `type` carrying the message and PysmeshError's two attributes.
+// Raise `type` carrying the message and PysmeshError's three attributes. The centroids
+// leave as a (k, 3) float64 NumPy array, (0, 3) when there are none.
 void raise_as(py::handle type, const PysmeshError& e) {
   py::object exc = py::reinterpret_borrow<py::object>(type)(py::str(e.what()));
   exc.attr("details") = py::str(e.details);
   exc.attr("face_ids") = py::cast(e.face_ids);
+  const py::ssize_t rows = static_cast<py::ssize_t>(e.bad_element_centroids.size() / 3);
+  py::array_t<double> centroids({rows, py::ssize_t(3)});
+  std::copy(e.bad_element_centroids.begin(),
+            e.bad_element_centroids.begin() + static_cast<std::ptrdiff_t>(rows * 3),
+            centroids.mutable_data());
+  exc.attr("bad_element_centroids") = centroids;
   PyErr_SetObject(type.ptr(), exc.ptr());
 }
 
@@ -64,8 +74,9 @@ void register_error_type(py::module_& m) {
       "pysmesh._core.PysmeshError",
       "Every failure of the library: a refused input, an error of OCCT or SMESH, or an "
       "invalid result. The message names the operation, the entity and the reason; details "
-      "holds the per-sub-shape text of a failed mesh compute and face_ids the faces that "
-      "failed. A subclass of RuntimeError.",
+      "holds the per-sub-shape text of a failed mesh compute, face_ids the faces that "
+      "failed, and bad_element_centroids the (k, 3) centroids of the elements a failed "
+      "compute names as bad. A subclass of RuntimeError.",
       PyExc_RuntimeError, nullptr));
   m.add_object("PysmeshError", error_type);  // module now owns a reference
   g_error_type = error_type;                  // borrowed handle for the translator

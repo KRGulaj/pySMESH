@@ -490,3 +490,91 @@ def test_an_edge_shorter_than_adaptive_min_size_is_reported_as_a_warning() -> No
     ]
     assert f"{SHORT_EDGE:.6g}" in report.warnings[0].text
     assert "min size" in report.warnings[0].text
+
+
+# ---- A failure that names bad elements says where they are -------------------------- #
+
+# The surface of a unit box from NETGEN 2D at size 0.25, injected with one node of face 1
+# moved 0.15 into the box and 0.05 across the neighbouring face: its triangles then cut
+# that face's triangles, and NETGEN 3D fails with "Intersecting triangles".
+INJECTED_SIZE: float = 0.25
+
+
+def _box_surface_with_a_crossing_node() -> tuple[Mesher, tuple[tuple[int, float], ...]]:
+    """A mesher holding the crossed surface, NETGEN 3D assigned; the two face planes.
+
+    The planes are (axis, value) of face 1 and of the face its moved node crosses.
+    """
+    s = Session()
+    s.add_box(1.0, 1.0, 1.0)
+    shape = ps.load_brep(s.brep())
+    with Mesher(shape) as surface:
+        surface.assign(ps.Netgen1D2D())
+        surface.assign(ps.NetgenParameters2D(max_size=INJECTED_SIZE, threads=4))
+        surface.compute()
+        md = surface.mesh()
+    xyz = md.node_coords.copy()
+    on_face_1 = np.flatnonzero(
+        (md.node_kind == int(SubShapeKind.FACE)) & (md.node_ordinal == 1)
+    )
+    c = xyz[on_face_1]
+    normal_axis = int(np.argmin(np.ptp(c, axis=0)))
+    side = float(np.round(c[0, normal_axis]))
+    other = (normal_axis + 1) % 3
+    k = on_face_1[int(np.argmin(c[:, other]))]
+    xyz[k, normal_axis] = 0.15 if side == 0.0 else 0.85
+    xyz[k, other] = -0.05
+
+    m = Mesher(shape)
+    m.assign(ps.UseExisting1D())
+    m.assign(ps.UseExisting2D())
+    m.assign(ps.Netgen3D())
+    m.assign(ps.NetgenParameters(max_size=INJECTED_SIZE, threads=4))
+    ids = m.add_nodes(xyz)
+    for kind, code, add in (
+        (SubShapeKind.EDGE, ps.ElementType.EDGE, m.add_segments),
+        (SubShapeKind.FACE, ps.ElementType.TRIANGLE, m.add_triangles),
+    ):
+        rows = np.flatnonzero(md.element_type == int(code))
+        for ordinal in np.unique(md.element_ordinal[rows]):
+            sel = rows[md.element_ordinal[rows] == ordinal]
+            nodes = np.stack([md.nodes_of(int(i)) for i in sel])
+            add(ids[nodes], on=SubShape(kind, int(ordinal)))
+    return m, ((normal_axis, side), (other, 0.0))
+
+
+def test_intersecting_triangles_are_located_by_their_centroids() -> None:
+    """Each centroid is in the box, within one element size of a face that crosses."""
+    m, planes = _box_surface_with_a_crossing_node()
+
+    with m, pytest.raises(ps.PysmeshError) as info:
+        m.compute()
+
+    centroids = info.value.bad_element_centroids
+    assert "Intersecting triangles" in info.value.details
+    assert "bad element(s), centroid(s) of the first" in info.value.details
+    assert isinstance(centroids, np.ndarray)
+    assert centroids.dtype == np.float64
+    assert centroids.ndim == 2 and centroids.shape[0] > 0 and centroids.shape[1] == 3
+    assert bool(np.all((centroids >= 0.0) & (centroids <= 1.0)))
+    distance = np.min(
+        np.stack([np.abs(centroids[:, axis] - value) for axis, value in planes]), axis=0
+    )
+    assert bool(np.all(distance <= INJECTED_SIZE))
+
+
+def test_a_failure_with_no_bad_element_has_an_empty_centroid_array() -> None:
+    """A missing hypothesis names no element: the array is (0, 3) float64."""
+    box = _box()
+    with Mesher(box) as m:
+        m.assign(Regular1D())
+        m.assign(Quadrangle2D())
+        m.assign(Hexa3D())
+
+        with pytest.raises(ps.PysmeshError) as info:
+            m.compute()
+
+    centroids = info.value.bad_element_centroids
+    assert isinstance(centroids, np.ndarray)
+    assert centroids.dtype == np.float64
+    assert centroids.shape == (0, 3)

@@ -140,7 +140,11 @@ class _MeshOps(_MesherBase):
                 cleared.
             PysmeshError: If any sub-mesh failed. The message names every failed sub-shape
                 with SMESH's own reason and the algorithm that reported it, and ``.face_ids``
-                carries the ordinals of the failed faces. The partial mesh is **kept** here
+                carries the ordinals of the failed faces. Where the failed algorithm names
+                bad elements (NETGEN's intersecting triangles), the line of that
+                sub-shape gives their count and the centroids of the first 5, and
+                ``.bad_element_centroids`` is the (k, 3) float64 array of every one; it
+                is (0, 3) otherwise. The partial mesh is **kept** here
                 rather than cleared, because how far the assignment got is the diagnostic.
                 Also if an algorithm misses a hypothesis it needs (algorithm state
                 ``MISSING_HYP``), even where SMESH reports the compute as done: the

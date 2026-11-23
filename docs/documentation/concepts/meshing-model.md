@@ -313,8 +313,18 @@ try:
 except pysmesh.PysmeshError as exc:
     print(exc.details)     # SMESH's own error text
     print(exc.face_ids)    # which faces failed
+    print(exc.bad_element_centroids)  # (k, 3): where the failed algorithm saw bad elements
     partial = mesher.mesh()  # whatever was built before the failure
 ```
+
+**A failure that names bad elements says where they are.** NETGEN names the elements that
+defeat it: the two triangles of an "Intersecting triangles" failure, and the edges of
+"Some edges multiple times in surface mesh". The line of that sub-shape in `.details` then
+gives the count of bad elements and the centroids of the first 5, in model coordinates.
+NETGEN can name one element several times; it is counted once.
+`.bad_element_centroids` is a `(k, 3)` float64 NumPy array of the centroid of every bad
+element of every failed sub-shape, in the order of `.details`. It is a `(0, 3)` array when
+no failure names a bad element, and on every other `PysmeshError`.
 
 **A missing algorithm or hypothesis is named by its state.** A sub-shape without an
 algorithm, where an enclosing algorithm needs its mesh, holds the algorithm state
