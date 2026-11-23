@@ -19,7 +19,7 @@ the source is correct; open an issue against the page.
 |---|---|
 | `pysmesh` | The top-level namespace. Re-exports every public name below, so `import pysmesh` is enough for almost everything. |
 | [`pysmesh.session`](session.md) | `Session`, `EntityId`, `EntityKind`, and every dataclass an operation or a query returns. See also [Session](../concepts/session.md) and [Entity IDs and ordinals](../concepts/entity-ids.md). |
-| [`pysmesh.mesher`](mesher.md) | `Mesher`, the algorithm and hypothesis catalogue, quality controls and predicates, groups, the editor, the search surface, the medial axis, block decomposition and pattern mapping, and Inria GMF interchange. See also [Meshing model](../concepts/meshing-model.md). |
+| [`pysmesh.mesher`](mesher.md) | `Mesher`, the algorithm and hypothesis catalogue, quality controls and predicates, groups, the editor, the search surface, the medial axis, block decomposition and pattern mapping, and Inria GMF interchange. It also exports `ExtrusionMethod`, the type of `ViscousLayers.method`: the same enum as `pysmesh.viscous.ExtrusionMethod`. See also [Meshing model](../concepts/meshing-model.md). |
 | [`pysmesh.sketch`](sketch.md) | `solve`, `SketchSolution`, the kind codes (`SketchEntityKind`, `SketchConstraintKind`, `SketchInternalRole`), `SketchStatus`, and the builders (`SketchBuilder`, `SketchArrays`, `Point`, `Line`, `Circle`, `Arc`, `Ellipse`, `EllipticArc`, `BSpline`). Not re-exported by `pysmesh`: import `pysmesh.sketch`. See also [Sketch arrays](../concepts/sketch.md). |
 | [`pysmesh.step`](geometry.md#step) | `read_step_xde`, `write_step_xde`, `StepImport`, `EntityLabel`. |
 | [`pysmesh.iges`](geometry.md#iges) | `read_iges`, `write_iges`, `IgesImport`, `IGES_UNITS`. |
@@ -28,7 +28,7 @@ the source is correct; open an issue against the page.
 | [`pysmesh.distance`](geometry.md#distance-and-leaks) | `shape_distance`, `free_boundary_edges`, `ShapeDistanceResult`. |
 | [`pysmesh.classify`](geometry.md#point-classification) | `point_in_solid`. |
 | [`pysmesh.unify`](geometry.md#same-domain-healing) | `unify_same_domain` (the stateless form; `Session.unify_same_domain` carries session identity across the same operation). |
-| [`pysmesh.viscous`](geometry.md#viscous-layers) | `compute_viscous_layers`, `VLParams`, `VLResult`, `ExtrusionMethod`. |
+| [`pysmesh.viscous`](geometry.md#viscous-layers) | `compute_viscous_layers`, `VLParams`, `VLResult`, `ExtrusionMethod` (also exported by `pysmesh.mesher`). |
 | [`pysmesh._core`](geometry.md#the-native-extension) | The native extension. `Shape`, `FaceInfo`, `EdgeInfo`, `SolidInfo`, `VertexInfo`, `Mesh`, `load_brep`, `PysmeshError`, `PysmeshCancelled`. Documented from its typed stub, `src/pysmesh/_core.pyi`, since the module itself is a compiled `.pyd` with no Python source to read. |
 
 ## Reading a generated entry

@@ -238,6 +238,10 @@ from ._mesh import _MeshOps
 # The hook aliases belong to the session, which defines them; the mesher shares them
 # rather than declaring a second pair that means the same thing.
 from ..session import CancelPredicate, ProgressCallback
+
+# ViscousLayers.method takes this enum, so the package of ViscousLayers exports it too. It
+# is the enum of pysmesh.viscous, re-exported: both names are the same object.
+from ..viscous import ExtrusionMethod
 from ._types import (
     GMF_REQUIRED_MARKER,
     GMF_WRITABLE_TYPES,
@@ -434,6 +438,7 @@ __all__ = [
     "ElementsAtPoints",
     "ElementsOnShape",
     "EqualTo",
+    "ExtrusionMethod",
     "FacePatches",
     "Fineness",
     "FixedPoints1D",
