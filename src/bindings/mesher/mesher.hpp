@@ -488,6 +488,11 @@ class Mesher {
   // one orientation only, and an internal face is not checked.
   void refuse_misoriented_injected_faces() const;
 
+  // Raise naming a face meshed by NETGEN_2D or NETGEN_2D_ONLY that has a degenerate edge
+  // with no mesh and no 1-D algorithm while another of its edges has a 1-D algorithm: the
+  // mix on which NETGENPlugin read invalid memory. Before anything is computed.
+  void refuse_netgen_faces_with_unmeshed_degenerate_edges() const;
+
   // Why the existing elements of `face` (oriented as in its solid) are not outward: "mixed:
   // ..." when two elements run an inner edge the same way or connected parts disagree,
   // "reversed: ..." when they all point into the solid. Empty when they point out.

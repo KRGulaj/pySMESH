@@ -15,6 +15,11 @@ that only imported pySMESH ended with an access violation (0xC0000005) in
 ``Archive::IsRegistered``, called from ``~RegisterClassForArchive`` during
 ``DLL_PROCESS_DETACH``. netgen fixed it upstream by not unregistering at all (e1d71a78,
 "no need to remove archive type infos", in 6.2.2105).
+
+The cases that can end a process run in a child interpreter, and the test reads the
+child's exit code and output: a NETGEN compute that needs more than the 2 MB main-thread
+stack, and a face of revolution whose seam has a 1-D algorithm while its degenerate pole
+edges have none (#3), on which NETGENPlugin read invalid memory.
 """
 
 from __future__ import annotations
@@ -23,6 +28,8 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+import pytest
 
 import pysmesh as ps
 
@@ -163,3 +170,117 @@ def test_a_netgen_compute_that_needs_more_than_2_mb_of_stack_ends_normally() -> 
     # The line of a failed NETGEN 2-D face goes on with its sizes (#24).
     assert len(result) == 1
     assert result[0].startswith(expected + "; longest segment on its edges ")
+
+
+# ---- A face of revolution with unmeshed degenerate edges (#3) ------------------------- #
+
+# A spline profile from (0, 0, 0) to (1, 0, 0) revolved a full turn about the x axis: one
+# face with a seam edge and two degenerate pole edges. Netgen1D2D (max_size 0.1) meshes
+# the face; the variant decides which edges get a 1-D algorithm of their own. With the
+# seam meshed by Regular1D and the poles left to NETGEN, NETGENPlugin read invalid
+# memory: 0xC0000005 in 2 to 3 of 3 to 5 runs.
+_POLE_EDGES_CHILD: str = """
+import os, sys
+occt = os.environ.get("PYSMESH_OCCT_BIN")
+if occt:
+    os.add_dll_directory(occt)
+lib = os.path.join(sys.prefix, "Library", "bin")
+if os.path.isdir(lib):
+    os.add_dll_directory(lib)
+sys.path.insert(0, sys.argv[1])
+import numpy as np
+import pysmesh as ps
+from pysmesh.session import EntityKind
+from pysmesh.mesher import (Adaptive1D, LocalLength, Mesher, Netgen1D2D, NetgenParameters2D,
+                            Regular1D, SubShape, SubShapeKind)
+
+variant = sys.argv[2]
+s = ps.Session()
+x = np.linspace(0.0, 1.0, 11)
+d = s.add_spline(np.column_stack([x, np.zeros(11), 1.2 * x * (1.0 - x)]))
+e = [int(i) for i in d.created if s.entity_kind(int(i)) == EntityKind.EDGE][0]
+s.revolve([e], (0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+shape = ps.load_brep(s.brep())
+poles = [ed.id for ed in shape.edges() if ed.length < 1e-9]
+seam = [ed.id for ed in shape.edges() if ed.length >= 1e-9]
+print("POLE-CHILD edges " + repr(poles) + " " + repr(seam), flush=True)
+m = Mesher(shape)
+m.assign(Netgen1D2D())
+m.assign(NetgenParameters2D(max_size=0.1, threads=4))
+adaptive = Adaptive1D(min_size=0.01, max_size=0.1, deflection=0.001)
+if variant in ("seam_adaptive", "poles_locallength"):
+    for i in seam:
+        m.assign(Regular1D(), on=SubShape(SubShapeKind.EDGE, i))
+        m.assign(adaptive, on=SubShape(SubShapeKind.EDGE, i))
+if variant == "poles_locallength":
+    for i in poles:
+        m.assign(Regular1D(), on=SubShape(SubShapeKind.EDGE, i))
+        m.assign(LocalLength(length=0.05), on=SubShape(SubShapeKind.EDGE, i))
+if variant == "seam_locallength":
+    for i in seam:
+        m.assign(Regular1D(), on=SubShape(SubShapeKind.EDGE, i))
+        m.assign(LocalLength(length=0.05), on=SubShape(SubShapeKind.EDGE, i))
+if variant == "poles_adaptive":
+    m.assign(Regular1D())
+    m.assign(adaptive)
+try:
+    report = m.compute()
+    print("POLE-CHILD ok " + str(report.faces), flush=True)
+except ps.PysmeshError as exc:
+    print("POLE-CHILD error " + str(exc) + " | " + exc.details + " | face_ids "
+          + repr(list(exc.face_ids)), flush=True)
+"""
+
+
+def _pole_child(variant: str) -> tuple[int, list[str]]:
+    """Run the face-of-revolution compute in a child; its exit code and its lines."""
+    package_root = str(Path(ps.__file__).resolve().parent.parent)
+    proc = subprocess.run(
+        [sys.executable, "-c", _POLE_EDGES_CHILD, package_root, variant],
+        capture_output=True,
+        text=True,
+        timeout=600.0,
+        env=dict(os.environ),
+        check=False,
+    )
+    return proc.returncode, [
+        line for line in proc.stdout.splitlines() if line.startswith("POLE-CHILD")
+    ]
+
+
+@pytest.mark.parametrize("variant", ["seam_adaptive", "seam_locallength"])
+def test_a_netgen_face_with_a_meshed_seam_and_bare_poles_is_refused(
+    variant: str,
+) -> None:
+    """The seam has a 1-D algorithm, the degenerate poles none: refused, the child lives.
+
+    The child exits 0 and prints the refusal, which names FACE 1 and both pole edges
+    (ordinals 1 and 2 of this shape, the two edges of length 0) and the remedy. Before
+    the guard the child ended with 0xC0000005, or meshed, by the stack layout.
+    """
+    code, lines = _pole_child(variant)
+
+    assert code == 0, (code, lines)
+    assert lines[0] == "POLE-CHILD edges [1, 2] [3]"
+    assert len(lines) == 2
+    assert lines[1].startswith(
+        "POLE-CHILD error Mesher.compute: FACE 1, meshed by NETGEN_2D"
+    )
+    assert "has degenerate EDGE 1, 2 with no mesh and no 1-D algorithm" in lines[1]
+    assert "while its EDGE 3 has a 1-D algorithm of its own (Regular_1D)" in lines[1]
+    assert "Give the degenerate EDGE 1, 2 a 1-D algorithm" in lines[1]
+    assert lines[1].endswith("| face_ids [1]")
+
+
+@pytest.mark.parametrize("variant", ["poles_locallength", "no_1d", "poles_adaptive"])
+def test_a_netgen_face_whose_edges_are_meshed_alike_still_meshes(variant: str) -> None:
+    """Poles meshed by a 1-D algorithm too, or no 1-D algorithm at all: the face meshes.
+
+    The oracle is the child's own report: exit 0 and a positive triangle count.
+    """
+    code, lines = _pole_child(variant)
+
+    assert code == 0, (code, lines)
+    assert len(lines) == 2
+    assert lines[1].startswith("POLE-CHILD ok ")
+    assert int(lines[1].split()[-1]) > 0

@@ -334,6 +334,14 @@ class Netgen1D2D(Algorithm):
     :class:`NetgenParameters2D` or :class:`NetgenSimpleParameters2D`, and
     :class:`ViscousLayers2D`. An edge that another 1-D algorithm meshes, assigned on the
     edge, keeps that mesh: NETGEN builds the faces on its nodes.
+
+    A face with degenerate edges, such as the poles of a face of revolution, needs one
+    rule: either every edge of the face has a 1-D algorithm, the degenerate ones too, or
+    none has. A seam meshed by :class:`Regular1D` beside poles left to NETGEN made
+    NETGENPlugin read invalid memory and end the process. So
+    :meth:`~pysmesh.Mesher.compute` refuses that mix on a face of this algorithm or of
+    :class:`Netgen2D` before anything is meshed, and names the face and its degenerate
+    edges.
     """
 
     native_name: ClassVar[str] = "NETGEN_2D"

@@ -875,6 +875,76 @@ std::string Mesher::with_ordinals(const std::string& text) const {
   return out;
 }
 
+void Mesher::refuse_netgen_faces_with_unmeshed_degenerate_edges() const {
+  // NETGENPlugin builds NETGEN's input from the edges SMESH meshed before it
+  // (NETGENPlugin_Mesher.cxx, FillNgMesh), and skips degenerate edges there. A face of
+  // revolution whose seam a 1-D algorithm meshed and whose degenerate pole edges were left
+  // to NETGEN ended the process with an access violation inside NETGENPlugin, in 2 to 3
+  // runs of 3 to 5; the outcome moved with the stack layout, so it is a read of invalid
+  // memory. With the poles meshed by a 1-D algorithm too, or with no 1-D algorithm on any
+  // edge, the face meshed every time. So that one mix is refused before SMESH runs.
+  const auto edge_algorithm = [this](const TopoDS_Shape& edge) -> const SMESH_Algo* {
+    SMESH_subMesh* sub = mesh_->GetSubMeshContaining(edge);
+    const SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
+    return algo != nullptr && algo->GetDim() == 1 ? algo : nullptr;
+  };
+  const auto list_of = [](const std::vector<int>& ordinals) {
+    std::string text;
+    for (const int o : ordinals) {
+      text += (text.empty() ? "" : ", ") + std::to_string(o);
+    }
+    return text;
+  };
+  std::set<int> checked;
+  for (TopExp_Explorer ex(data_->shape, TopAbs_FACE); ex.More(); ex.Next()) {
+    const int face = ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current())).second;
+    SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
+    const SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
+    const std::string name = algo != nullptr && algo->GetName() != nullptr ? algo->GetName()
+                                                                            : "";
+    if ((name != "NETGEN_2D" && name != "NETGEN_2D_ONLY") || face <= 0 ||
+        !checked.insert(face).second) {
+      continue;
+    }
+    std::vector<int> bare_poles;
+    std::vector<int> meshed_by_1d;
+    std::string one_d;
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(ex.Current(), TopAbs_EDGE, edges);
+    for (int i = 1; i <= edges.Extent(); ++i) {
+      const TopoDS_Edge& edge = TopoDS::Edge(edges.FindKey(i));
+      const int ordinal = ordinal_of_shape_index(meshDS_->ShapeToIndex(edge)).second;
+      const SMESH_Algo* own = edge_algorithm(edge);
+      if (BRep_Tool::Degenerated(edge)) {
+        const SMESHDS_SubMesh* held = meshDS_->MeshElements(edge);
+        const bool has_mesh = held != nullptr && (held->NbElements() > 0 || held->NbNodes() > 0);
+        if (own == nullptr && !has_mesh) {
+          bare_poles.push_back(ordinal);
+        }
+      } else if (own != nullptr) {
+        meshed_by_1d.push_back(ordinal);
+        one_d = own->GetName() != nullptr ? own->GetName() : "";
+      }
+    }
+    if (bare_poles.empty() || meshed_by_1d.empty()) {
+      continue;
+    }
+    throw PysmeshError(
+        "Mesher.compute: FACE " + std::to_string(face) + ", meshed by " + name +
+            ", has degenerate EDGE " + list_of(bare_poles) +
+            " with no mesh and no 1-D algorithm, while its EDGE " + list_of(meshed_by_1d) +
+            " has a 1-D algorithm of its own (" + one_d +
+            "). NETGENPlugin reads invalid memory on such a face and can end the process, "
+            "so nothing was computed.",
+        "Give the degenerate EDGE " + list_of(bare_poles) +
+            " a 1-D algorithm as well (Regular1D with a 1-D hypothesis on them), or remove "
+            "the 1-D algorithm from EDGE " + list_of(meshed_by_1d) +
+            " so that NETGEN meshes every edge of FACE " + std::to_string(face) +
+            ". Either way the face meshes; only this mix fails.",
+        {face});
+  }
+}
+
 std::string Mesher::injected_face_orientation(const TopoDS_Face& face) const {
   const SMESHDS_SubMesh* held = meshDS_->MeshElements(face);
   if (held == nullptr || held->NbElements() == 0) {
@@ -1667,6 +1737,7 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
   if (!shape_free) {
     refuse_unread_layers();
     refuse_misoriented_injected_faces();
+    refuse_netgen_faces_with_unmeshed_degenerate_edges();
   }
 
   ProgressHooks hooks;
