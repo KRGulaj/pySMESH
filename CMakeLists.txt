@@ -202,6 +202,7 @@ pybind11_add_module(_core
     src/bindings/session_progress.cpp
     src/bindings/session_bind.cpp
     src/bindings/shape_checks.cpp
+    src/bindings/compute_thread.cpp
     src/bindings/mesher_core.cpp
     src/bindings/mesher_catalog.cpp
     src/bindings/mesher_harvest.cpp

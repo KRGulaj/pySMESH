@@ -9,6 +9,8 @@
 
 #include "mesher/mesher.hpp"
 
+#include "compute_thread.hpp"
+
 #include <algorithm>
 #include <cctype>
 #include <chrono>
@@ -1108,7 +1110,7 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
   bool ok = false;
   if (!driver.cancelled()) {
     py::gil_scoped_release release;
-    ok = gen_->Compute(*mesh_, target);
+    run_on_compute_thread([&] { ok = gen_->Compute(*mesh_, target); });
   }
   // finish() re-raises an exception a hook threw, with its own type. A raising hook is a
   // cancel, so the mesh is cleared first: a cancel leaves no partial mesh, and before this

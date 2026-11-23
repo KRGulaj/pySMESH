@@ -27,6 +27,8 @@
 
 #include "mesher/mesher.hpp"
 
+#include "compute_thread.hpp"
+
 #include <string>
 #include <vector>
 
@@ -153,7 +155,8 @@ py::object Mesher::shrink_geometry(const py::dict& values) {
   {
     py::gil_scoped_release release;
     try {
-      shrunk = vl_builder_->GetShrinkGeometry(*mesh_, target);
+      run_on_compute_thread(
+          [&] { shrunk = vl_builder_->GetShrinkGeometry(*mesh_, target); });
     } catch (const std::exception& e) {
       error = e.what() != nullptr ? e.what() : "unknown error";
     }
@@ -202,7 +205,8 @@ py::dict Mesher::add_layers(const py::dict& values, Mesher& inner) {
   {
     py::gil_scoped_release release;
     try {
-      vl_builder_->AddLayers(*inner.mesh_, *mesh_, target);
+      run_on_compute_thread(
+          [&] { vl_builder_->AddLayers(*inner.mesh_, *mesh_, target); });
     } catch (const std::exception& e) {
       error = e.what() != nullptr ? e.what() : "unknown error";
     }
