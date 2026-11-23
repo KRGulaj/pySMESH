@@ -675,13 +675,21 @@ def _filled_volume(md: MeshData) -> float:
     return total
 
 
+def _gap_wall_distance(points: NDArray[np.float64]) -> NDArray[np.float64]:
+    """The distance of each point from the nearer layer wall: y = 0 or the cylinder."""
+    radial = np.hypot(points[:, 0] - 2.0, points[:, 1] - (_GAP_RADIUS + _GAP))
+    return np.minimum(points[:, 1], np.abs(radial - _GAP_RADIUS))
+
+
 def test_a_netgen_2d3d_run_that_leaves_the_solid_unfilled_is_refused() -> None:
     """Netgen1D2D3D after layers that stopped early: refused, naming the solid.
 
     With a 0.6 stack in the 0.3 gap the layers stop at an average of 0.12, and NETGEN
     2D3D returned the prisms alone as a success: 0.904 of the fluid's 11.215 filled.
-    The refusal names SOLID 1 and its open front; the front lies on the layer tops, so
-    each centroid is in the fluid's box [0, 4] x [0, 3] x [0, 1]. The kept mesh is the
+    The refusal names SOLID 1 and its open front. The prisms are volume elements, so
+    the front is the top of the layer, not the whole boundary: every centroid lies off
+    the walls by more than 0 and by at most the reached layer height (the farthest
+    prism node from its wall) plus one wall element size, 0.05. The kept mesh is the
     prisms, short of the closed-form fluid volume 12 - pi 0.25.
     """
     shape, walls = _gap_model()
@@ -690,17 +698,24 @@ def test_a_netgen_2d3d_run_that_leaves_the_solid_unfilled_is_refused() -> None:
     with m:
         with pytest.raises(PysmeshError) as info:
             m.compute()
-        kept = _filled_volume(m.mesh())
+        md = m.mesh()
 
+    prisms = np.flatnonzero(md.element_type == int(ElementType.PENTAHEDRON))
+    prism_nodes = np.unique(
+        md.element_nodes[md.element_offsets[prisms][:, None] + np.arange(6)]
+    )
+    reached = float(_gap_wall_distance(md.node_coords[prism_nodes]).max())
     centroids = info.value.bad_element_centroids
+    off_wall = _gap_wall_distance(centroids)
     assert "SOLID 1: its volume mesh does not fill it (algorithm NETGEN_2D3D)" in (
         info.value.details
     )
     assert "open front of the kept mesh" in info.value.details
+    assert "the whole boundary is open" not in info.value.details
     assert centroids.ndim == 2 and centroids.shape[0] > 0
-    assert bool(np.all(centroids >= np.array([0.0, 0.0, 0.0]) - 1e-9))
-    assert bool(np.all(centroids <= np.array([4.0, 3.0, 1.0]) + 1e-9))
-    assert kept < 0.5 * _GAP_FLUID
+    assert bool(np.all(off_wall > 1e-9))
+    assert bool(np.all(off_wall <= reached + 0.05))
+    assert _filled_volume(md) < 0.5 * _GAP_FLUID
 
 
 @pytest.mark.parametrize(
