@@ -39,6 +39,35 @@ unless a measured hot path needs it off. Every operation but the healing family 
 rather than committing an invalid result; the healing family reports a verdict on
 `HistoryDelta.valid` instead, because its input is invalid by assumption.
 
+## What an operation costs
+
+Each operation commits a new root and carries every live id into a new registry. So the
+time of one operation is linear in the live entity count, and the time of a long build is
+quadratic in it. The table gives the time per unit square, for one `add_polyline` and one
+`make_face`. Each square adds 9 live ids (1 face, 4 edges, 4 vertices).
+
+| Squares already in the session | Live ids | ms per square | ms per square, `validate=False` |
+|---|---|---|---|
+| 0 to 250 | 0 to 2 250 | 1.9 | 1.8 |
+| 1 000 to 1 250 | 9 000 to 11 250 | 20.2 | 20.2 |
+| 1 750 to 2 000 | 15 750 to 18 000 | 48.0 | 40.8 |
+
+Validation is not the cause: the two columns grow at the same rate. To build thousands of
+bodies, build them in sessions of a few hundred bodies each. Then merge the BREPs into one
+session with `add_brep`:
+
+```python
+merged = Session()
+for chunk in chunks:                 # a few hundred bodies per chunk
+    part = Session()
+    for square in chunk:
+        edges = [int(e) for e in part.add_polyline(square, closed=True).created]
+        part.make_face([e for e in edges if part.entity_kind(e) == EntityKind.EDGE])
+    merged.add_brep(part.brep())
+```
+
+The same 2 000 squares took 4.4 s in 8 sessions of 250, against 41.3 s in one session.
+
 ## Snapshot and restore
 
 ```python
