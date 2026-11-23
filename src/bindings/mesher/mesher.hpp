@@ -503,6 +503,13 @@ class Mesher {
   // its failure line that names those faces and the remedy. Empty otherwise.
   std::string prism_side_face_cause(const TopoDS_Shape& solid) const;
 
+  // For a FACE (ordinal `ordinal`) that a NETGEN 2-D algorithm `algo` failed on: a text for
+  // its failure line with the longest segment already on its edges, the smallest extent of
+  // its box and the size its hypothesis asks for, and a sentence on the cause when that
+  // segment is longer than the extent.
+  std::string netgen_face_sizes(const TopoDS_Shape& face, int ordinal,
+                                const SMESH_Algo& algo) const;
+
   // The sub-shape where `hyp`, just assigned on `target`, met two different similar
   // hypotheses (HYP_CONCURRENT), and those hypotheses with where they are assigned.
   std::string describe_concurrency(const TopoDS_Shape& target, SMESH_Hypothesis* hyp) const;
@@ -651,6 +658,13 @@ SMESH_Hypothesis* make_netgen(const std::string& name, Params& p, SMESH_Gen& gen
 
 // Whether `name` is a NETGEN algorithm: a compute that runs one holds netgen_mutex().
 bool is_netgen_algorithm(const std::string& name);
+
+// The element size that the hypothesis of the NETGEN algorithm `algo` asks for on `face`:
+// the local size of NetgenParameters under `entry` ("FACE:<ordinal>") when it has one, else
+// its max_size; the local length of NetgenSimpleParameters2D. Negative when no hypothesis
+// that `algo` reads there gives a size.
+double netgen_size_asked(SMESH_Mesh& mesh, const SMESH_Algo& algo, const TopoDS_Shape& face,
+                         const std::string& entry);
 
 // Whether `name` may be assigned on a mesher with no shape: NETGEN_Remesher_2D and its
 // NETGEN_RemesherParameters_2D, which remesh the triangles of the mesh itself.

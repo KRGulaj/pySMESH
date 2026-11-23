@@ -35,6 +35,7 @@
 #include <SMESHDS_GroupBase.hxx>
 #include <SMESHDS_Hypothesis.hxx>
 #include <SMESHDS_Mesh.hxx>
+#include <SMESH_Algo.hxx>
 #include <SMESH_Gen.hxx>
 #include <SMESH_Group.hxx>
 #include <SMESH_Hypothesis.hxx>
@@ -296,6 +297,21 @@ std::mutex& netgen_mutex() {
 bool is_netgen_algorithm(const std::string& name) {
   return name == "NETGEN_3D" || name == "NETGEN_2D" || name == "NETGEN_2D3D" ||
          name == "NETGEN_2D_ONLY" || name == "NETGEN_Remesher_2D";
+}
+
+double netgen_size_asked(SMESH_Mesh& mesh, const SMESH_Algo& algo, const TopoDS_Shape& face,
+                         const std::string& entry) {
+  for (const SMESHDS_Hypothesis* used : algo.GetUsedHypothesis(mesh, face, true)) {
+    if (const auto* h = dynamic_cast<const NETGENPlugin_Hypothesis*>(used)) {
+      const NETGENPlugin_Hypothesis::TLocalSize& local = h->GetLocalSizesAndEntries();
+      const auto it = local.find(entry);
+      return it != local.end() ? it->second : h->GetMaxSize();
+    }
+    if (const auto* h = dynamic_cast<const NETGENPlugin_SimpleHypothesis_2D*>(used)) {
+      return h->GetLocalLength() > 0.0 ? h->GetLocalLength() : -1.0;
+    }
+  }
+  return -1.0;
 }
 
 bool works_without_shape(const std::string& name) {

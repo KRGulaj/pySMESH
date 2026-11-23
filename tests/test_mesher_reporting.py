@@ -42,6 +42,11 @@ Each claim is asserted against an oracle the report itself does not produce (rep
   "More than 2 faces with not quadrangle elements"; in the other it says nothing. Both
   must name the solid, its triangle faces and Quadrangle2D. The oracle is the face set
   of the solid, found by geometry.
+* **#24, a failed NETGEN 2-D face gives its sizes.** NETGEN says only "Problem in
+  Surface mesh generation". The line must give the longest segment on the face's edges,
+  the smallest extent of its box and the size asked, and name the coarse edges when the
+  segment is longer than the face is wide. The oracles are the mesh nodes, the Session
+  box and the assigned size; a face that fails for another reason gets no such cause.
 """
 
 from __future__ import annotations
@@ -736,3 +741,132 @@ def test_a_prism_with_quadrangle_side_faces_meshes_in_either_order(prism: int) -
     assert report.volumes > 0
     assert int(in_prism.sum()) > 0
     assert bool(np.all(np.isin(md.element_type[in_prism], swept)))
+
+
+NUMBER: str = r"([0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)"
+SIZES_PATTERN: str = (
+    rf"FACE (\d+): .*longest segment on its edges {NUMBER}, smallest extent of its "
+    rf"box {NUMBER}, size its hypothesis asks for {NUMBER}"
+)
+COARSE_EDGES_SENTENCE: str = "The edges of this face were meshed coarser than the face"
+
+
+def _smallest_extent(box: np.ndarray) -> float:
+    """The smallest extent of an (xmin..zmax) box above 1e-7 (a plane face has one 0)."""
+    extents = np.asarray(box[3:], dtype=np.float64) - np.asarray(
+        box[:3], dtype=np.float64
+    )
+    return float(extents[extents > 1e-7].min())
+
+
+def _failure_and_mesh(m: Mesher) -> tuple[ps.PysmeshError, ps.MeshData]:
+    """Run a compute that must fail; return its error and the partial mesh it keeps."""
+    with pytest.raises(ps.PysmeshError) as info:
+        m.compute()
+    return info.value, m.mesh()
+
+
+def _longest_segment_on_face_edges(
+    shape: ps.Shape, md: ps.MeshData, face: int
+) -> float:
+    """The longest mesh segment on an edge of ``face`` (edges inside the face's box)."""
+    box = np.asarray(shape.faces()[face - 1].bbox)
+    edges = [
+        e.id
+        for e in shape.edges()
+        if bool(np.all(np.asarray(e.bbox)[:3] >= box[:3] - 1e-9))
+        and bool(np.all(np.asarray(e.bbox)[3:] <= box[3:] + 1e-9))
+    ]
+    on_edges = (
+        (md.element_type == int(ps.ElementType.EDGE))
+        & (md.element_kind == int(SubShapeKind.EDGE))
+        & np.isin(md.element_ordinal, edges)
+    )
+    ends = md.node_coords[
+        np.stack([md.nodes_of(int(i)) for i in np.flatnonzero(on_edges)])
+    ]
+    return float(np.linalg.norm(ends[:, 1] - ends[:, 0], axis=1).max())
+
+
+def test_a_narrow_face_after_coarse_neighbours_gives_its_sizes_and_the_cause() -> None:
+    """A 74 mm face whose long edges a 0.5 neighbour meshed first: three numbers, a cause.
+
+    Each face of a 2 x 0.074 x 1 slab gets its own Netgen1D2D: max_size 0.5 on the big
+    faces, 0.01 on the narrow ones. A narrow face meshed after its big neighbours finds
+    its long edges in segments longer than it is wide, and NETGEN says only "Problem in
+    Surface mesh generation". The oracles: the longest segment from the mesh nodes on the
+    face's edges, the smallest extent of the face's box from Session.bounding_boxes, and
+    the 0.01 the test assigned.
+    """
+    s = Session()
+    s.add_box(2.0, 0.074, 1.0)
+    handoff = s.export_handoff()
+    boxes = s.bounding_boxes(ps.EntityKind.FACE)
+    shape = ps.load_brep(handoff.brep)
+    narrow = {
+        f.id for f in shape.faces() if _smallest_extent(np.asarray(f.bbox)) < 0.08
+    }
+    m = Mesher(shape)
+    for face in shape.faces():
+        on = SubShape(SubShapeKind.FACE, face.id)
+        m.assign(ps.Netgen1D2D(), on=on)
+        size = 0.01 if face.id in narrow else 0.5
+        m.assign(ps.NetgenParameters2D(max_size=size, threads=4), on=on)
+
+    with m:
+        error, md = _failure_and_mesh(m)
+
+    found = [
+        (line, re.search(SIZES_PATTERN, line))
+        for line in error.details.splitlines()
+        if "Problem in Surface mesh generation" in line
+    ]
+    assert len(found) >= 1
+    for line, match in found:
+        assert match is not None
+        face, longest, extent, asked = (
+            int(match.group(1)),
+            float(match.group(2)),
+            float(match.group(3)),
+            float(match.group(4)),
+        )
+        row = int(np.flatnonzero(boxes.ids == handoff.face_id[face - 1])[0])
+        assert face in narrow
+        assert longest == pytest.approx(
+            _longest_segment_on_face_edges(shape, md, face), rel=1e-5
+        )
+        assert extent == pytest.approx(_smallest_extent(boxes.bbox[row]), rel=1e-5)
+        assert asked == pytest.approx(0.01, rel=1e-12)
+        assert longest > extent
+        assert COARSE_EDGES_SENTENCE in line
+
+
+def test_a_netgen_face_that_fails_for_another_reason_gets_no_coarse_edge_sentence() -> (
+    None
+):
+    """A disk whose circle has one segment: NETGEN 2D refuses it, and no cause is guessed.
+
+    Netgen2D reads the circle's one Regular1D segment ("Too few segments: 1"). That one
+    segment starts and ends at the circle's vertex, so its length is 0: shorter than the
+    disk's diameter 2, the closed-form smallest extent of its box.
+    """
+    s = Session()
+    circle = s.add_circle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 1.0)
+    s.make_face(
+        [int(i) for i in circle.created if s.entity_kind(int(i)) == ps.EntityKind.EDGE]
+    )
+    m = Mesher(ps.load_brep(s.brep()))
+    m.assign(Regular1D())
+    m.assign(NumberOfSegments(count=1))
+    m.assign(ps.Netgen2D())
+    m.assign(ps.NetgenParameters2D(max_size=0.1, threads=4))
+
+    with m, pytest.raises(ps.PysmeshError) as info:
+        m.compute()
+
+    match = re.search(SIZES_PATTERN, info.value.details)
+    assert match is not None
+    assert float(match.group(2)) == pytest.approx(0.0, abs=1e-12)
+    assert float(match.group(3)) == pytest.approx(2.0, rel=1e-6)
+    assert float(match.group(4)) == pytest.approx(0.1, rel=1e-12)
+    assert COARSE_EDGES_SENTENCE not in info.value.details

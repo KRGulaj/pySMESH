@@ -20,6 +20,9 @@
 #include <set>
 #include <utility>
 
+#include <BRepBndLib.hxx>
+#include <Bnd_Box.hxx>
+#include <Precision.hxx>
 #include <SMDS_ElemIterator.hxx>
 #include <SMDS_MeshNode.hxx>
 #include <SMDS_MeshElement.hxx>
@@ -38,6 +41,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
+#include <gp_Pnt.hxx>
 
 namespace pysmesh {
 
@@ -860,6 +864,70 @@ std::string Mesher::with_ordinals(const std::string& text) const {
   return out;
 }
 
+std::string Mesher::netgen_face_sizes(const TopoDS_Shape& face, int ordinal,
+                                      const SMESH_Algo& algo) const {
+  // NETGEN's surface mesher throws "Problem in Surface mesh generation" and drops the
+  // reason (occgenmesh.cpp:935-957). The usual one: the face's edges were meshed before it,
+  // by a neighbour with a coarser size, and their segments are longer than the face is
+  // wide, so the 2-D front cannot grade down from them inside the face. Three numbers show
+  // it: the longest segment already on the face's edges, the smallest extent of the face's
+  // box, and the size the face's hypothesis asks for.
+  double longest = 0.0;
+  std::size_t segments = 0;
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(face, TopAbs_EDGE, edges);
+  for (int i = 1; i <= edges.Extent(); ++i) {
+    const SMESHDS_SubMesh* held = meshDS_->MeshElements(edges.FindKey(i));
+    if (held == nullptr) {
+      continue;
+    }
+    for (SMDS_ElemIteratorPtr it = held->GetElements(); it->more();) {
+      const SMDS_MeshElement* segment = it->next();
+      if (segment->GetType() != SMDSAbs_Edge || segment->NbCornerNodes() != 2) {
+        continue;
+      }
+      const SMDS_MeshNode* a = segment->GetNode(0);
+      const SMDS_MeshNode* b = segment->GetNode(1);
+      longest = std::max(longest, gp_Pnt(a->X(), a->Y(), a->Z())
+                                      .Distance(gp_Pnt(b->X(), b->Y(), b->Z())));
+      ++segments;
+    }
+  }
+  // The box of the geometry, as Session.bounding_boxes computes it. A plane face along an
+  // axis has an extent of zero across itself, so only extents above the confusion count.
+  Bnd_Box box;
+  BRepBndLib::AddOptimal(face, box, /*useTriangulation=*/false, /*useShapeTolerance=*/false);
+  double extent = RealLast();
+  if (!box.IsVoid()) {
+    double lo[3], hi[3];
+    box.Get(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+    for (int d = 0; d < 3; ++d) {
+      if (hi[d] - lo[d] > Precision::Confusion()) {
+        extent = std::min(extent, hi[d] - lo[d]);
+      }
+    }
+  }
+  const double asked =
+      netgen_size_asked(*mesh_, algo, face, "FACE:" + std::to_string(ordinal));
+  const auto number = [](double v) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.6g", v);
+    return std::string(buf);
+  };
+  std::string text = "; longest segment on its edges ";
+  text += segments == 0 ? std::string("none (no edge was meshed)") : number(longest);
+  text += ", smallest extent of its box " +
+          (extent < RealLast() ? number(extent) : std::string("none"));
+  text += ", size its hypothesis asks for " +
+          (asked > 0.0 ? number(asked) : std::string("none (NETGEN's default)"));
+  if (segments > 0 && extent < RealLast() && longest > extent) {
+    text += ". The edges of this face were meshed coarser than the face can take, before "
+            "it: explicit segment counts on its edges (Regular1D with NumberOfSegments) "
+            "avoid it";
+  }
+  return text;
+}
+
 std::string Mesher::prism_side_face_cause(const TopoDS_Shape& solid) const {
   // Prism_3D sweeps quadrangles through the side faces of its solid, and refuses a solid
   // with more than two faces that hold anything else: "More than 2 faces with not
@@ -1299,6 +1367,11 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
       }
       if (kKindTypes[k] == TopAbs_SOLID) {
         line += prism_side_face_cause(ex.Current());
+      }
+      const std::string algorithm_name = algorithm;
+      if (kKindTypes[k] == TopAbs_FACE && err->myAlgo != nullptr &&
+          (algorithm_name == "NETGEN_2D" || algorithm_name == "NETGEN_2D_ONLY")) {
+        line += netgen_face_sizes(ex.Current(), at.second, *err->myAlgo);
       }
       bool seen = false;
       for (const std::string& s : failures) {
