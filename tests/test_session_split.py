@@ -661,6 +661,27 @@ def test_split_by_faces_refuses_a_face_that_misses_the_target() -> None:
         s.split_by_faces([box], [tool])
 
 
+def test_split_by_faces_refuses_a_face_that_ends_inside_the_target() -> None:
+    """A face that crosses one wall and ends inside divides nothing: the documented refusal.
+
+    The splitter keeps the part inside as an INTERNAL face of the solid. Its edges inside
+    the box bound no hole, so the refusal is "divide none", not a leak.
+    """
+    s, box = box_session()
+    d = s.add_rectangle((-1.0, 2.0, BOX_C / 2.0), (0.0, 0.0, 1.0), 2.0, 3.0)
+    tool = next(e for e in d.created if s.entity_kind(e) is EntityKind.FACE)
+    before = s.brep()
+
+    with pytest.raises(
+        ps.PysmeshError,
+        match=rf"split_by_faces: face {int(tool)} divide none of the solid {int(box)}; "
+        "nothing to split",
+    ):
+        s.split_by_faces([box], [tool])
+
+    assert s.brep() == before
+
+
 @pytest.mark.parametrize("op", ["split_by_faces", "split_by_plane", "keep_half_space"])
 def test_a_refused_split_leaves_the_session_exactly_as_it_was(op: str) -> None:
     s, box = box_session()

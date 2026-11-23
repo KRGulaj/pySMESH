@@ -354,6 +354,12 @@ class _HealOps(_SessionBase):
         changing its shape. Unlike :meth:`split` the tools may be of any dimension, so a
         plane, a face or a wire is a legitimate tool.
 
+        A wire that crosses a face from boundary to boundary splits the face. The split
+        face keeps one id, on every piece, so ``entities(FACE)`` keeps its count. An open
+        wire that lies inside a face, touching no boundary, cannot split it. OCCT keeps it
+        in the face as an INTERNAL edge, the face keeps its one shape, and the solid stays
+        valid and closed.
+
         The tools are **not** consumed. Use :meth:`remove` to get rid of one afterwards.
 
         Args:

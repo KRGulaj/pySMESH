@@ -142,7 +142,9 @@ result.point_b
 
 `free_boundary_edges` returns the 1-based ids of every edge bordered by exactly one face,
 the naked boundary of an open shell. A watertight solid returns an empty array; a non-empty
-result localises a leak:
+result localises a leak. An edge that its one face holds only as INTERNAL or EXTERNAL is
+not listed: it lies in the face and bounds no hole. An open wire imprinted inside a face is
+such an edge.
 
 ```python
 from pysmesh import free_boundary_edges

@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -65,7 +66,15 @@ std::string point_text(const gp_Pnt& p);
 // is taken with repetition (TopExp::MapShapesAndAncestors), so a periodic seam, listed twice
 // by its one face, counts two and is not free. A degenerated edge (a pole, an apex) bounds
 // nothing and is skipped, and so is an edge with no face, which is not a surface boundary.
-std::vector<TopoDS_Shape> free_boundary_edges(const TopoDS_Shape& shape);
+// So is an edge whose one face holds it only as INTERNAL or EXTERNAL (face orientation
+// composed in): an open wire imprinted inside a face, or the edge of an INTERNAL face that
+// a splitter left inside a solid. It lies in the face and bounds no hole. When
+// `count_internal` is given and returns true for such an edge, the edge is listed all the
+// same: a cut, common or fuse that leaves a section edge of its own INTERNAL in one face
+// has not trimmed that face (see leaky_solid_refusal).
+std::vector<TopoDS_Shape> free_boundary_edges(
+    const TopoDS_Shape& shape,
+    const std::function<bool(const TopoDS_Shape&)>& count_internal = {});
 
 // One edge in words: "from (x, y, z) to (x, y, z), length L".
 std::string edge_text(const TopoDS_Shape& edge);

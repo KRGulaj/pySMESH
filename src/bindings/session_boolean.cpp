@@ -226,18 +226,78 @@ std::string empty_result_refusal(const std::string& op, BRepAlgoAPI_BuilderAlgo&
   return std::string();
 }
 
+// The edges an operation did not create: every edge of its operands, each Modified image
+// of one in the operation's history, and every edge of a tool face or of its Modified
+// image. The history is the one commit() carries the ids with.
+ShapeSet edges_not_created(BRepAlgoAPI_BuilderAlgo& builder) {
+  const Handle(BRepTools_History) hist = builder.History();
+  std::vector<TopoDS_Shape> operands;
+  for (const TopoDS_Shape& s : builder.Arguments()) {
+    operands.push_back(s);
+  }
+  const std::vector<TopoDS_Shape> tools = tools_of(builder);
+  operands.insert(operands.end(), tools.begin(), tools.end());
+  ShapeSet out;
+  for (const TopoDS_Shape& operand : operands) {
+    ShapeSet edges;
+    TopExp::MapShapes(operand, TopAbs_EDGE, edges);
+    for (int i = 1; i <= edges.Extent(); ++i) {
+      out.Add(edges(i));
+      if (!hist.IsNull()) {
+        for (const TopoDS_Shape& m : hist->Modified(edges(i))) {
+          out.Add(m);
+        }
+      }
+    }
+  }
+  for (const TopoDS_Shape& tool : tools) {
+    ShapeSet faces;
+    TopExp::MapShapes(tool, TopAbs_FACE, faces);
+    for (int i = 1; i <= faces.Extent(); ++i) {
+      std::vector<TopoDS_Shape> images = {faces(i)};
+      if (!hist.IsNull()) {
+        for (const TopoDS_Shape& m : hist->Modified(faces(i))) {
+          images.push_back(m);
+        }
+      }
+      for (const TopoDS_Shape& face : images) {
+        TopExp::MapShapes(face, TopAbs_EDGE, out);
+      }
+    }
+  }
+  return out;
+}
+
 // Why a result solid that is not watertight is refused, with the details that name its
 // free edges; an empty message when every solid of the result is closed.
 //
 // Each solid is checked on its own, so an edge shared by two solids of one result (two
 // fragments meeting along it) still needs two faces in each. If the operands already had
 // free edges, the details say so: then the leak may have come in with the input.
+//
+// An edge that its one face holds only as INTERNAL or EXTERNAL bounds no hole, and
+// free_boundary_edges skips it: an open wire imprinted inside a face is such an edge. A
+// cut, a common and a fuse trim faces along their section edges, so for them a section
+// edge of their own that is INTERNAL in one face marks a face they did not trim: a cut of
+// a wing grazed at fuzzy 1e-4 returned the uncut wing with two of those, and passed
+// BRepCheck. For these three operations such an edge counts as free when the operation
+// created it (edges_not_created). An INTERNAL edge an operand already had does not count.
 std::pair<std::string, std::string> leaky_solid_refusal(const std::string& op,
                                                         BRepAlgoAPI_BuilderAlgo& builder,
                                                         const TopoDS_Shape& result) {
+  std::optional<ShapeSet> not_created;
+  std::function<bool(const TopoDS_Shape&)> created;
+  if (op == "cut" || op == "common" || op == "fuse") {
+    created = [&](const TopoDS_Shape& edge) {
+      if (!not_created) {
+        not_created = edges_not_created(builder);
+      }
+      return !not_created->Contains(edge);
+    };
+  }
   std::vector<TopoDS_Shape> leaks;
   for (const TopoDS_Shape& solid : shape_checks::solids_of({result})) {
-    for (const TopoDS_Shape& e : shape_checks::free_boundary_edges(solid)) {
+    for (const TopoDS_Shape& e : shape_checks::free_boundary_edges(solid, created)) {
       leaks.push_back(e);
     }
   }
