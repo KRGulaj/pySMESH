@@ -160,4 +160,6 @@ def test_a_netgen_compute_that_needs_more_than_2_mb_of_stack_ends_normally() -> 
         "FACE 7: NgException at Surface meshing: Problem in Surface mesh generation "
         "(algorithm NETGEN_2D)"
     )
-    assert result == [expected]
+    # The line of a failed NETGEN 2-D face goes on with its sizes (#24).
+    assert len(result) == 1
+    assert result[0].startswith(expected + "; longest segment on its edges ")
