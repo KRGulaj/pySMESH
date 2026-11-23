@@ -869,8 +869,8 @@ std::string Mesher::with_ordinals(const std::string& text) const {
 Mesher::OpenFront Mesher::open_front(const TopoDS_Shape& solid) const {
   // A face is keyed by its corner node ids, sorted, so that the face of one volume and the
   // same face of its neighbour, or of a boundary element, compare equal whatever their node
-  // order. Up to 4 corners fit an array; a polyhedron face with more is padded no further
-  // and goes to a map of its own.
+  // order. Up to 4 corners fit an array, padded with -1; a face with more corners (of a
+  // polyhedron or a polygon) goes to a map of its own.
   using Key = std::array<smIdType, 4>;
   const auto key_of = [](const std::vector<smIdType>& ids) {
     Key key{-1, -1, -1, -1};
@@ -879,15 +879,6 @@ Mesher::OpenFront Mesher::open_front(const TopoDS_Shape& solid) const {
     return key;
   };
   std::vector<smIdType> ids;
-  const auto corners = [&ids](const SMDS_MeshElement* owner, const SMDS_MeshNode* const* nodes,
-                              int count) {
-    ids.clear();
-    for (int i = 0; i < count; ++i) {
-      if (!owner->IsMediumNode(nodes[i])) {
-        ids.push_back(nodes[i]->GetID());
-      }
-    }
-  };
 
   // The boundary: every 2-D element on a face of the solid.
   std::vector<Key> boundary;
@@ -905,8 +896,10 @@ Mesher::OpenFront Mesher::open_front(const TopoDS_Shape& solid) const {
       if (e->GetType() != SMDSAbs_Face) {
         continue;
       }
-      std::vector<const SMDS_MeshNode*> nodes(e->begin_nodes(), e->end_nodes());
-      corners(e, nodes.data(), static_cast<int>(nodes.size()));
+      ids.clear();
+      for (int k = 0; k < e->NbCornerNodes(); ++k) {
+        ids.push_back(e->GetNode(k)->GetID());
+      }
       boundary_elements.push_back(e);
       if (ids.size() <= 4) {
         boundary.push_back(key_of(ids));
@@ -928,16 +921,63 @@ Mesher::OpenFront Mesher::open_front(const TopoDS_Shape& solid) const {
   std::vector<VolumeFace> volume_faces;
   std::map<std::vector<smIdType>, std::pair<int, VolumeFace>> wide_faces;
   std::size_t volumes = 0;
+  // The corner nodes of face `f` of volume `v`, whose corners load_corners(v) read. SMDS
+  // stores the corner nodes of a quadratic cell first, so the face table of its linear
+  // type indexes them. Each node read asks the VTK grid for the whole cell, so the corners
+  // are read once per volume; only a polyhedron needs the volume tool. Measured on 207 632
+  // tetrahedra, the whole search: 0.52 s with the volume tool on every cell, 0.30 s with
+  // the tables.
   SMDS_VolumeTool tool;
+  std::vector<const SMDS_MeshNode*> corner;
+  std::vector<const SMDS_MeshNode*> face_nodes;
+  const auto load_corners = [&corner](const SMDS_MeshElement* v) {
+    corner.clear();
+    const std::size_t count = static_cast<std::size_t>(v->NbCornerNodes());
+    for (SMDS_NodeIteratorPtr it = v->nodeIterator(); it->more() && corner.size() < count;) {
+      corner.push_back(it->next());
+    }
+  };
+  const auto face_of = [&](const SMDS_MeshElement* v, int f) {
+    face_nodes.clear();
+    if (v->IsPoly()) {
+      tool.Set(v);
+      const SMDS_MeshNode* const* nodes = tool.GetFaceNodes(f);
+      for (int i = 0; i < tool.NbFaceNodes(f); ++i) {
+        if (!v->IsMediumNode(nodes[i])) {
+          face_nodes.push_back(nodes[i]);
+        }
+      }
+      return;
+    }
+    const SMDS_VolumeTool::VolumeType type = SMDS_VolumeTool::GetType(v->NbCornerNodes());
+    const int* index = SMDS_VolumeTool::GetFaceNodesIndices(type, f, /*external=*/false);
+    for (int i = 0; i < SMDS_VolumeTool::NbFaceNodes(type, f); ++i) {
+      face_nodes.push_back(corner[static_cast<std::size_t>(index[i])]);
+    }
+  };
+  const auto face_count = [&tool](const SMDS_MeshElement* v) {
+    if (v->IsPoly()) {
+      return tool.Set(v) ? tool.NbFaces() : 0;
+    }
+    const SMDS_VolumeTool::VolumeType type = SMDS_VolumeTool::GetType(v->NbCornerNodes());
+    return type == SMDS_VolumeTool::UNKNOWN ? 0 : SMDS_VolumeTool::NbFaces(type);
+  };
   if (const SMESHDS_SubMesh* held = meshDS_->MeshElements(solid)) {
+    volume_faces.reserve(4 * static_cast<std::size_t>(held->NbElements()));
     for (SMDS_ElemIteratorPtr it = held->GetElements(); it->more();) {
       const SMDS_MeshElement* v = it->next();
-      if (v->GetType() != SMDSAbs_Volume || !tool.Set(v)) {
+      const int nb_faces = v->GetType() == SMDSAbs_Volume ? face_count(v) : 0;
+      if (nb_faces == 0) {
         continue;
       }
       ++volumes;
-      for (int f = 0; f < tool.NbFaces(); ++f) {
-        corners(v, tool.GetFaceNodes(f), tool.NbFaceNodes(f));
+      load_corners(v);
+      for (int f = 0; f < nb_faces; ++f) {
+        face_of(v, f);
+        ids.clear();
+        for (const SMDS_MeshNode* n : face_nodes) {
+          ids.push_back(n->GetID());
+        }
         if (ids.size() <= 4) {
           volume_faces.push_back({key_of(ids), v, f});
         } else {
@@ -955,15 +995,9 @@ Mesher::OpenFront Mesher::open_front(const TopoDS_Shape& solid) const {
   // The open faces, each as its corner nodes.
   std::vector<std::vector<const SMDS_MeshNode*>> open;
   const auto add_volume_face = [&](const VolumeFace& vf) {
-    tool.Set(vf.volume);
-    const SMDS_MeshNode* const* nodes = tool.GetFaceNodes(vf.face);
-    std::vector<const SMDS_MeshNode*> face;
-    for (int i = 0; i < tool.NbFaceNodes(vf.face); ++i) {
-      if (!vf.volume->IsMediumNode(nodes[i])) {
-        face.push_back(nodes[i]);
-      }
-    }
-    open.push_back(face);
+    load_corners(vf.volume);
+    face_of(vf.volume, vf.face);
+    open.push_back(face_nodes);
   };
   OpenFront front;
   if (volumes == 0) {
@@ -1701,7 +1735,59 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
                        details, failed_faces, bad_centroids);
   }
 
+  refuse_unfilled_netgen_solids(warnings);
   return success_report(warnings);
+}
+
+void Mesher::refuse_unfilled_netgen_solids(const py::list& warnings) const {
+  // NETGEN_2D3D counts its result good when it holds any volume element
+  // (NETGENPlugin_Mesher.cxx:3770). After viscous layers that stopped early it returned the
+  // prisms alone, with 0.904 of 11.215 of the solid filled, and SMESH reported success.
+  // So every solid that a NETGEN 3-D algorithm meshed must have a closed volume mesh.
+  std::vector<std::string> lines;
+  std::vector<double> centroids;
+  std::set<int> checked;
+  for (TopExp_Explorer ex(data_->shape, TopAbs_SOLID); ex.More(); ex.Next()) {
+    SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
+    const SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
+    const std::string name = algo != nullptr && algo->GetName() != nullptr ? algo->GetName()
+                                                                            : "";
+    const int ordinal = ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current())).second;
+    if ((name != "NETGEN_3D" && name != "NETGEN_2D3D") || ordinal <= 0 ||
+        !checked.insert(ordinal).second) {
+      continue;
+    }
+    const OpenFront front = open_front(ex.Current());
+    if (front.faces == 0) {
+      continue;
+    }
+    lines.push_back("SOLID " + std::to_string(ordinal) +
+                    ": its volume mesh does not fill it (algorithm " + name + ")" +
+                    open_front_text(front));
+    centroids.insert(centroids.end(), front.centroids.begin(), front.centroids.end());
+  }
+  if (lines.empty()) {
+    return;
+  }
+  std::string details;
+  for (const std::string& line : lines) {
+    details += (details.empty() ? "" : "\n") + line;
+  }
+  std::string reported;
+  for (const py::handle w : warnings) {
+    const py::tuple t = w.cast<py::tuple>();
+    reported += "\n" + t[0].cast<std::string>() + " " + std::to_string(t[1].cast<int>()) +
+                " warned (algorithm " + t[2].cast<std::string>() +
+                "): " + t[3].cast<std::string>();
+  }
+  details += reported;
+  details += "\nNETGEN reported success, but the volume mesh of each solid named above has "
+             "an open front, so part of the solid is empty. NETGEN_2D3D after viscous "
+             "layers that stopped early (\"Thickness ... of viscous layers not reached\") "
+             "returns the layers alone; Netgen1D2D with Netgen3D fills the same layers.";
+  throw PysmeshError("Mesher.compute: " + std::to_string(lines.size()) +
+                         " solid(s) meshed by NETGEN are not filled.",
+                     details, {}, centroids);
 }
 
 py::dict Mesher::success_report(const py::list& warnings) const {

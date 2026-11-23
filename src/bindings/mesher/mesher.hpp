@@ -550,6 +550,11 @@ class Mesher {
 
   void clear_mesh();
 
+  // Raise naming each solid meshed by NETGEN_3D or NETGEN_2D3D whose volume mesh has an
+  // open front (open_front), after a compute that SMESH reports as done. The details give
+  // each such solid's front and the compute's `warnings`; the mesh is kept.
+  void refuse_unfilled_netgen_solids(const py::list& warnings) const;
+
   // The counts and the meshed sub-shapes of a successful compute, as compute() returns
   // them (mesher_core.cpp).
   py::dict success_report(const py::list& warnings) const;

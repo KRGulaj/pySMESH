@@ -15,6 +15,10 @@ one of these planes.
 Each mesh is also checked for conformity (every face of a cell is shared by exactly two
 cells, or lies on the shape's boundary and belongs to one) and for inverted cells (every
 cell has a positive volume by the divergence theorem over its outward-wound faces).
+
+A NETGEN volume mesh must fill its solid (#37): NETGEN_2D3D after layers that stopped
+early returned the prisms alone as a success. The oracle is the closed-form volume of
+the fluid, against the volume of the cells.
 """
 
 from __future__ import annotations
@@ -592,3 +596,132 @@ def test_netgen_grows_two_stacks_on_their_own_faces() -> None:
         [0.0, 0.2 / 3.0, 0.4 / 3.0, 0.2], abs=_TOL
     )
     assert total == pytest.approx(24.0, rel=1e-12)
+
+
+# The gap model: the box [0, 4] x [0, 3] x [0, 1] minus a cylinder of radius 0.5 (axis z)
+# that stands 0.3 from the wall y = 0. Layers grow on the cylinder and on that wall.
+_GAP: float = 0.3
+_GAP_RADIUS: float = 0.5
+_GAP_FLUID: float = 12.0 - math.pi * _GAP_RADIUS**2
+
+
+def _gap_model() -> tuple[ps.Shape, tuple[int, ...]]:
+    """The gap model and its layer walls (the cylinder face and the wall y = 0)."""
+    s = Session()
+    s.add_box(4.0, 3.0, 1.0)
+    box = int(s.entities(EntityKind.SOLID)[0])
+    s.add_cylinder(_GAP_RADIUS, 1.0, origin=(2.0, _GAP_RADIUS + _GAP, 0.0))
+    cylinder = int(max(s.entities(EntityKind.SOLID)))
+    s.cut([box], [cylinder])
+    shape = ps.load_brep(s.brep())
+    walls = tuple(
+        f.id
+        for f in shape.faces()
+        if f.surface_type == "Cylinder" or float(np.asarray(f.bbox)[4]) < 1e-9
+    )
+    return shape, walls
+
+
+def _gap_mesher(
+    shape: ps.Shape, walls: tuple[int, ...], thickness: float, split: bool
+) -> Mesher:
+    """Netgen1D2D3D (or Netgen1D2D + Netgen3D), size 0.05 on the walls, 5 layers."""
+    sizes = tuple((ps.SubShape(SubShapeKind.FACE, f), 0.05) for f in walls)
+    m = Mesher(shape)
+    if split:
+        m.assign(Netgen1D2D())
+        m.assign(NetgenParameters2D(max_size=0.3, threads=8, local_sizes=sizes))
+        m.assign(Netgen3D())
+        m.assign(NetgenParameters(max_size=0.3, threads=8))
+    else:
+        m.assign(Netgen1D2D3D())
+        m.assign(NetgenParameters(max_size=0.3, threads=8, local_sizes=sizes))
+    m.assign(
+        ViscousLayers(
+            total_thickness=thickness,
+            layer_count=5,
+            stretch_factor=1.2,
+            boundary=walls,
+            group_name="BL",
+        )
+    )
+    return m
+
+
+def _filled_volume(md: MeshData) -> float:
+    """The volume of every cell, by the divergence theorem over its faces.
+
+    The vectorised form of :func:`_cell_volume`, summed over every cell of each type.
+    """
+
+    def flux(p: NDArray[np.float64], i: int, j: int, k: int) -> NDArray[np.float64]:
+        return np.einsum("ij,ij->i", p[:, i], np.cross(p[:, j], p[:, k])) / 6.0
+
+    total = 0.0
+    for t, faces in _CELL_FACES.items():
+        rows = np.flatnonzero(md.element_type == t)
+        if rows.size == 0:
+            continue
+        width = max(max(face) for face in faces) + 1
+        nodes = md.element_nodes[md.element_offsets[rows][:, None] + np.arange(width)]
+        for face in faces:
+            p = md.node_coords[nodes[:, list(face)]]
+            if len(face) == 3:
+                total += float(flux(p, 0, 1, 2).sum())
+            else:
+                first = flux(p, 0, 1, 2) + flux(p, 0, 2, 3)
+                second = flux(p, 0, 1, 3) + flux(p, 1, 2, 3)
+                total += float((0.5 * (first + second)).sum())
+    return total
+
+
+def test_a_netgen_2d3d_run_that_leaves_the_solid_unfilled_is_refused() -> None:
+    """Netgen1D2D3D after layers that stopped early: refused, naming the solid.
+
+    With a 0.6 stack in the 0.3 gap the layers stop at an average of 0.12, and NETGEN
+    2D3D returned the prisms alone as a success: 0.904 of the fluid's 11.215 filled.
+    The refusal names SOLID 1 and its open front; the front lies on the layer tops, so
+    each centroid is in the fluid's box [0, 4] x [0, 3] x [0, 1]. The kept mesh is the
+    prisms, short of the closed-form fluid volume 12 - pi 0.25.
+    """
+    shape, walls = _gap_model()
+    m = _gap_mesher(shape, walls, 0.6, split=False)
+
+    with m:
+        with pytest.raises(PysmeshError) as info:
+            m.compute()
+        kept = _filled_volume(m.mesh())
+
+    centroids = info.value.bad_element_centroids
+    assert "SOLID 1: its volume mesh does not fill it (algorithm NETGEN_2D3D)" in (
+        info.value.details
+    )
+    assert "open front of the kept mesh" in info.value.details
+    assert centroids.ndim == 2 and centroids.shape[0] > 0
+    assert bool(np.all(centroids >= np.array([0.0, 0.0, 0.0]) - 1e-9))
+    assert bool(np.all(centroids <= np.array([4.0, 3.0, 1.0]) + 1e-9))
+    assert kept < 0.5 * _GAP_FLUID
+
+
+@pytest.mark.parametrize(
+    ("thickness", "split"),
+    [(0.6, True), (0.1, False)],
+    ids=["netgen_1d2d_then_3d_T0.6", "netgen_1d2d3d_T0.1"],
+)
+def test_the_same_layers_that_fill_the_solid_still_mesh(
+    thickness: float, split: bool
+) -> None:
+    """Netgen1D2D + Netgen3D at T 0.6, and Netgen1D2D3D at T 0.1, fill the fluid.
+
+    The oracle is the closed-form fluid volume 12 - pi 0.25; the mesh's chords of the
+    cylinder leave it 1e-4 larger, inside the 1e-3 relative bound.
+    """
+    shape, walls = _gap_model()
+    m = _gap_mesher(shape, walls, thickness, split=split)
+
+    with m:
+        report = m.compute()
+        filled = _filled_volume(m.mesh())
+
+    assert report.volumes > 0
+    assert filled == pytest.approx(_GAP_FLUID, rel=1e-3)

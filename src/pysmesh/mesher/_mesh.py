@@ -167,6 +167,13 @@ class _MeshOps(_MesherBase):
                 sub-shape with no algorithm of its own is no error where an enclosing
                 algorithm meshes it, or where nothing needs its mesh (a solid under a
                 surface mesh).
+                Also after a compute that NETGEN reports as done, if the volume mesh of a
+                solid that :class:`Netgen3D` or :class:`Netgen1D2D3D` meshed has an open
+                front: then part of the solid is empty. :class:`Netgen1D2D3D` after
+                viscous layers that stopped early returned the layers alone. The message
+                names the solid and its open front, and gives the compute's warnings; the
+                front's centroids are in ``.bad_element_centroids``, and the mesh is
+                kept.
                 Also before anything is meshed, if a :class:`ViscousLayers` or
                 :class:`ViscousLayers2D` reaches a solid or a face whose algorithm does
                 not build layers; the message names the sub-shape and the algorithm. A

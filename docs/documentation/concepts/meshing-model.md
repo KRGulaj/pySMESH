@@ -337,6 +337,14 @@ and the centroid of every open face goes to `.bad_element_centroids`. The front 
 place where NETGEN stopped and also every region that it had not reached yet. The cause is
 the patch that stays open when you repeat the run with the other patches fixed.
 
+**A NETGEN volume mesh must fill its solid.** NETGEN_2D3D counts its result good when it
+holds any volume element. After viscous layers that stopped early ("Thickness ... of
+viscous layers not reached") it returned the layers alone, with 8 % of the solid filled,
+and SMESH reported success. So after every compute, each solid that `Netgen3D` or
+`Netgen1D2D3D` meshed is checked for an open front, as above. A solid with one makes
+`compute()` raise: the message names the solid and its front, and gives the compute's
+warnings. The mesh is kept. `Netgen1D2D` with `Netgen3D` fills the same layers.
+
 **A missing algorithm or hypothesis is named by its state.** A sub-shape without an
 algorithm, where an enclosing algorithm needs its mesh, holds the algorithm state
 `NO_ALGO`; an algorithm without a hypothesis it needs holds `MISSING_HYP`. Neither is a
