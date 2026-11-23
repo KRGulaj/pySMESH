@@ -494,6 +494,10 @@ class Mesher {
   // that an upstream message names the sub-shape the way the caller does.
   std::string with_ordinals(const std::string& text) const;
 
+  // `text` with "2D mesh on face <SMESHDS index>" of the viscous-layer shrink failures
+  // written as "2D mesh on FACE <ordinal>"; each such face's ordinal is appended to `faces`.
+  std::string with_shrink_face_ordinals(const std::string& text, std::vector<int>& faces) const;
+
   // The sub-shape where `hyp`, just assigned on `target`, met two different similar
   // hypotheses (HYP_CONCURRENT), and those hypotheses with where they are assigned.
   std::string describe_concurrency(const TopoDS_Shape& target, SMESH_Hypothesis* hyp) const;

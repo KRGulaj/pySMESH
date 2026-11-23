@@ -857,6 +857,37 @@ std::string Mesher::with_ordinals(const std::string& text) const {
   return out;
 }
 
+std::string Mesher::with_shrink_face_ordinals(const std::string& text,
+                                              std::vector<int>& faces) const {
+  // StdMeshers_ViscousLayers names the face it could not shrink by its SMESHDS shape index:
+  // "Can't shrink 2D mesh on face <index>" and "Infinite loop at shrinking 2D mesh on face
+  // <index>" (StdMeshers_ViscousLayers.cxx:11644-11647). That index counts every sub-shape
+  // of every kind, so it reads as a face ordinal that the model does not have.
+  static const std::string kPhrase = "2D mesh on face ";
+  std::string out;
+  std::size_t from = 0;
+  for (std::size_t at = text.find(kPhrase); at != std::string::npos;
+       at = text.find(kPhrase, from)) {
+    const std::size_t digits = at + kPhrase.size();
+    std::size_t end = digits;
+    while (end < text.size() && std::isdigit(static_cast<unsigned char>(text[end]))) {
+      ++end;
+    }
+    const std::pair<const char*, int> face =
+        end > digits && end - digits <= 9
+            ? ordinal_of_shape_index(std::stoi(text.substr(digits, end - digits)))
+            : std::pair<const char*, int>{"", 0};
+    if (std::string(face.first) == "FACE") {
+      out += text.substr(from, at - from) + "2D mesh on FACE " + std::to_string(face.second);
+      faces.push_back(face.second);
+    } else {
+      out += text.substr(from, end - from);
+    }
+    from = end;
+  }
+  return out + text.substr(from);
+}
+
 std::pair<const char*, int> Mesher::ordinal_of_shape_index(int shape_index) const {
   if (shape_index <= 0 ||
       static_cast<std::size_t>(shape_index) >= index_to_ordinal_.size()) {
@@ -1184,7 +1215,14 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
         continue;
       }
       std::string line = kind + " " + std::to_string(at.second) + ": ";
-      line += err->myComment.empty() ? std::string("no message") : err->myComment;
+      std::vector<int> shrink_faces;
+      line += err->myComment.empty() ? std::string("no message")
+                                     : with_shrink_face_ordinals(err->myComment, shrink_faces);
+      for (const int face : shrink_faces) {
+        if (std::find(failed_faces.begin(), failed_faces.end(), face) == failed_faces.end()) {
+          failed_faces.push_back(face);
+        }
+      }
       // myAlgo is the algorithm object, not its name — naming it is what makes the message
       // actionable, because the failure is nearly always the algorithm rather than the shape.
       if (algorithm[0] != '\0') {

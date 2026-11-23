@@ -34,9 +34,14 @@ Each claim is asserted against an oracle the report itself does not produce (rep
 * **R1, an edge too short for Adaptive1D is reported.** An edge shorter than the min
   size keeps one segment shorter than the min size, against the hypothesis's bounds.
   The compute must report it as a warning on that edge. The oracle is the edge length.
+* **#39, a layer shrink failure names its face.** SMESH writes its own shape index into
+  "Can't shrink 2D mesh on face <index>". The line must give the face ordinal, and
+  ``.face_ids`` must hold it. The oracle is the face found by its area.
 """
 
 from __future__ import annotations
+
+import re
 
 import numpy as np
 import pytest
@@ -578,3 +583,58 @@ def test_a_failure_with_no_bad_element_has_an_empty_centroid_array() -> None:
     assert isinstance(centroids, np.ndarray)
     assert centroids.dtype == np.float64
     assert centroids.shape == (0, 3)
+
+
+# The strip of the top face that carries no layer: 0.05 wide across the 2 x 2 box.
+STRIP_LOW: float = 0.975
+STRIP_HIGH: float = 1.025
+STRIP_AREA: float = 2.0 * (STRIP_HIGH - STRIP_LOW)
+
+
+def _box_with_a_narrow_top_strip() -> ps.Shape:
+    """A 2 x 2 x 1 box whose top face is split into three strips at y 0.975 and 1.025."""
+    s = Session()
+    s.add_box(2.0, 2.0, 1.0)
+    solid = int(s.entities(ps.EntityKind.SOLID)[0])
+    for y in (STRIP_LOW, STRIP_HIGH):
+        delta = s.add_line((0.0, y, 1.0), (2.0, y, 1.0))
+        edge = [
+            int(i) for i in delta.created if s.entity_kind(int(i)) == ps.EntityKind.EDGE
+        ]
+        s.imprint([solid], edge)
+        s.remove(edge)
+    return ps.load_brep(s.brep())
+
+
+def test_a_viscous_layer_shrink_failure_names_the_face_by_its_ordinal() -> None:
+    """The face the layers cannot shrink into is named as FACE <ordinal>, in face_ids.
+
+    A 0.3 stack grows on every face but the 0.05-wide strip of the top face. The strip
+    must shrink by 0.3 from both sides, which it cannot. SMESH writes its own shape index
+    into the text (StdMeshers_ViscousLayers.cxx, "shrinking 2D mesh on face <index>").
+    The oracle is the strip itself, found by its area: 2 x 0.05.
+    """
+    shape = _box_with_a_narrow_top_strip()
+    strip = [f.id for f in shape.faces() if abs(f.area - STRIP_AREA) < 1e-9]
+    walls = tuple(f.id for f in shape.faces() if f.id not in strip)
+    with Mesher(shape) as m:
+        m.assign(ps.Netgen1D2D3D())
+        m.assign(ps.NetgenParameters(max_size=0.2, threads=4))
+        m.assign(
+            ps.ViscousLayers(
+                total_thickness=0.3,
+                layer_count=3,
+                stretch_factor=1.2,
+                boundary=walls,
+                group_name="BL",
+            )
+        )
+
+        with pytest.raises(ps.PysmeshError) as info:
+            m.compute()
+
+    named = re.findall(r"2D mesh on FACE (\d+)", info.value.details)
+    ordinals = {int(n) for n in named}
+    assert len(strip) == 1
+    assert ordinals == set(strip)
+    assert strip[0] in list(info.value.face_ids)

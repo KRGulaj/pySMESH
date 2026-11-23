@@ -140,7 +140,9 @@ class _MeshOps(_MesherBase):
                 cleared.
             PysmeshError: If any sub-mesh failed. The message names every failed sub-shape
                 with SMESH's own reason and the algorithm that reported it, and ``.face_ids``
-                carries the ordinals of the failed faces. Where the failed algorithm names
+                carries the ordinals of the failed faces. A face that viscous layers could
+                not shrink into ("Can't shrink 2D mesh on FACE k") is named by its ordinal
+                and is in ``.face_ids`` too. Where the failed algorithm names
                 bad elements (NETGEN's intersecting triangles), the line of that
                 sub-shape gives their count and the centroids of the first 5, and
                 ``.bad_element_centroids`` is the (k, 3) float64 array of every one; it
