@@ -1459,6 +1459,24 @@ class ViscousLayers(Hypothesis):
     reason before it meshes anything. To detach one of several, pass
     :meth:`~pysmesh.Mesher.unassign` an instance equal to it.
 
+    The stack is grown per solid, and its stop conditions act on the whole solid.
+    SMESH grows every layer edge of the solid one step at a time, and three rules end
+    the growth for all of them: the step ends when the nearest intersection is closer
+    than the stack still to grow; a failed smoothing step is undone for every edge;
+    each next step is limited by the smallest distance to an intersection in the solid
+    (``StdMeshers_ViscousLayers.cxx:4935-4996``). So one tight spot, such as a gap of
+    0.3 between a cylinder and a wall under a stack of 0.6, limits the stack everywhere
+    in that solid: 0.12 on average, 0.117 on the far side of the cylinder, 1.5 away. The
+    compute then succeeds with the warning "Thickness ... of viscous layers not
+    reached, average reached thickness is ...", on
+    :attr:`~pysmesh.ComputeReport.warnings`.
+    pySMESH appends to it the 5 layered faces with the lowest stack reached, each with
+    that height and the wall point where it is: the first is where to look. Splitting
+    the fluid into solids keeps a tight spot to its own solid. After such a stop,
+    :class:`Netgen1D2D3D` returned the layers alone, and
+    :meth:`~pysmesh.Mesher.compute` raises for the empty part of the solid, with the
+    same warning in the message; :class:`Netgen1D2D` with :class:`Netgen3D` fills it.
+
     Attributes:
         total_thickness: Total height of the layer stack.
         layer_count: Number of layers.

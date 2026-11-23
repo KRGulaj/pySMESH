@@ -875,6 +875,140 @@ std::string Mesher::with_ordinals(const std::string& text) const {
   return out;
 }
 
+std::string Mesher::layer_heights_text(const TopoDS_Shape& solid) const {
+  // StdMeshers_ViscousLayers stops the stack of the whole solid when it cannot grow at one
+  // place (_ViscousBuilder::inflate, StdMeshers_ViscousLayers.cxx:4986-4992) and only warns
+  // "Thickness ... of viscous layers not reached, average reached thickness is ...". The
+  // average names no place. The stack height reached at each wall node is the length of
+  // its column of layer elements: the lateral edges of the prisms (hexahedra on a quad
+  // wall) that start at the node, followed for the layer count. The lowest per wall face
+  // shows where the stack stopped.
+  SMESH_HypoFilter filter(SMESH_HypoFilter::HasName("ViscousLayers"));
+  std::list<const SMESHDS_Hypothesis*> found;
+  mesh_->GetHypotheses(solid, filter, found, /*andAncestors=*/true);
+  TopTools_IndexedMapOfShape faces;
+  TopExp::MapShapes(solid, TopAbs_FACE, faces);
+  std::set<int> walls;  // SMESHDS indices of the faces that carry layers
+  int layers = 0;
+  for (const SMESHDS_Hypothesis* h : found) {
+    const auto* vl = dynamic_cast<const StdMeshers_ViscousLayers*>(h);
+    if (vl == nullptr) {
+      continue;
+    }
+    layers = std::max(layers, vl->GetNumberLayers());
+    const std::vector<int> listed = vl->GetBndShapes();
+    for (int i = 1; i <= faces.Extent(); ++i) {
+      const int index = meshDS_->ShapeToIndex(faces.FindKey(i));
+      const bool named = std::find(listed.begin(), listed.end(), index) != listed.end();
+      if (named != vl->IsToIgnoreShapes()) {
+        walls.insert(index);
+      }
+    }
+  }
+  if (walls.empty() || layers <= 0) {
+    return std::string();
+  }
+  // Each wall node with the wall faces it lies on (on a face, or on its edges and vertices).
+  std::map<const SMDS_MeshNode*, std::set<int>> wall_nodes;
+  for (const int wall : walls) {
+    TopTools_IndexedMapOfShape parts;
+    TopExp::MapShapes(meshDS_->IndexToShape(wall), parts);
+    for (int i = 1; i <= parts.Extent(); ++i) {
+      const SMESHDS_SubMesh* held = meshDS_->MeshElements(parts.FindKey(i));
+      if (held == nullptr) {
+        continue;
+      }
+      for (SMDS_NodeIteratorPtr it = held->GetNodes(); it->more();) {
+        wall_nodes[it->next()].insert(wall);
+      }
+    }
+  }
+  // The lateral edges of the layer elements: prism (0,3) (1,4) (2,5), hexahedron (0,4)
+  // (1,5) (2,6) (3,7), corner nodes in SMDS order.
+  std::map<const SMDS_MeshNode*, std::vector<const SMDS_MeshNode*>> lateral;
+  if (const SMESHDS_SubMesh* held = meshDS_->MeshElements(solid)) {
+    std::vector<const SMDS_MeshNode*> corner;
+    for (SMDS_ElemIteratorPtr it = held->GetElements(); it->more();) {
+      const SMDS_MeshElement* v = it->next();
+      const int n = v->GetType() == SMDSAbs_Volume && !v->IsPoly() ? v->NbCornerNodes() : 0;
+      if (n != 6 && n != 8) {
+        continue;
+      }
+      corner.clear();
+      for (SMDS_NodeIteratorPtr nodes = v->nodeIterator();
+           nodes->more() && static_cast<int>(corner.size()) < n;) {
+        corner.push_back(nodes->next());
+      }
+      for (int i = 0; i < n / 2; ++i) {
+        lateral[corner[i]].push_back(corner[i + n / 2]);
+        lateral[corner[i + n / 2]].push_back(corner[i]);
+      }
+    }
+  }
+  struct Lowest {
+    double height;
+    const SMDS_MeshNode* at;
+  };
+  std::map<int, Lowest> lowest;  // wall face index -> its lowest stack
+  const auto xyz = [](const SMDS_MeshNode* n) { return gp_Pnt(n->X(), n->Y(), n->Z()); };
+  for (const auto& wall_node : wall_nodes) {
+    const SMDS_MeshNode* start = wall_node.first;
+    if (lateral.count(start) == 0) {
+      continue;
+    }
+    // Up the column: from each node to a lateral neighbour that is not the one below and
+    // not a wall node, for the layer count.
+    double height = 0.0;
+    const SMDS_MeshNode* below = nullptr;
+    const SMDS_MeshNode* here = start;
+    for (int step = 0; step < layers; ++step) {
+      const SMDS_MeshNode* next = nullptr;
+      for (const SMDS_MeshNode* candidate : lateral[here]) {
+        if (candidate != below && wall_nodes.count(candidate) == 0) {
+          next = candidate;
+          break;
+        }
+      }
+      if (next == nullptr) {
+        break;
+      }
+      height += xyz(here).Distance(xyz(next));
+      below = here;
+      here = next;
+    }
+    if (here == start) {
+      continue;
+    }
+    for (const int wall : wall_node.second) {
+      const auto at = lowest.find(wall);
+      if (at == lowest.end() || height < at->second.height) {
+        lowest[wall] = {height, start};
+      }
+    }
+  }
+  if (lowest.empty()) {
+    return std::string();
+  }
+  std::vector<std::pair<double, int>> order;
+  for (const auto& l : lowest) {
+    order.push_back({l.second.height, l.first});
+  }
+  std::sort(order.begin(), order.end());
+  constexpr std::size_t kListed = 5;
+  std::string text = "; the stack reached its least height on ";
+  for (std::size_t i = 0; i < order.size() && i < kListed; ++i) {
+    const Lowest& l = lowest[order[i].second];
+    char buf[160];
+    std::snprintf(buf, sizeof(buf), "FACE %d: %.6g at (%.6g, %.6g, %.6g)",
+                  ordinal_of_shape_index(order[i].second).second, l.height, l.at->X(),
+                  l.at->Y(), l.at->Z());
+    text += std::string(i == 0 ? "" : "; ") + buf;
+  }
+  return text + " (the lowest stack per layered face, lowest first, at most 5). The stack "
+                "stops for the whole solid when it cannot grow at one place, so the "
+                "lowest face is where to look";
+}
+
 void Mesher::refuse_netgen_faces_with_unmeshed_degenerate_edges() const {
   // NETGENPlugin builds NETGEN's input from the edges SMESH meshed before it
   // (NETGENPlugin_Mesher.cxx, FillNgMesh), and skips degenerate edges there. A face of
@@ -1853,8 +1987,12 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
                                   : "";
       const std::string kind = at.first[0] ? at.first : kKindNames[k];
       if (!err->IsKO()) {
-        warnings.append(py::make_tuple(kind, at.second, std::string(algorithm),
-                                       err->myComment));
+        std::string text = err->myComment;
+        if (kKindTypes[k] == TopAbs_SOLID &&
+            text.find("of viscous layers not reached") != std::string::npos) {
+          text += layer_heights_text(ex.Current());
+        }
+        warnings.append(py::make_tuple(kind, at.second, std::string(algorithm), text));
         continue;
       }
       std::string line = kind + " " + std::to_string(at.second) + ": ";

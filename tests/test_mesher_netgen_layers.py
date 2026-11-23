@@ -19,6 +19,10 @@ cell has a positive volume by the divergence theorem over its outward-wound face
 A NETGEN volume mesh must fill its solid (#37): NETGEN_2D3D after layers that stopped
 early returned the prisms alone as a success. The oracle is the closed-form volume of
 the fluid, against the volume of the cells.
+
+A stack stopped short names its place (#35): the "not reached" warning goes on with the
+layered faces of the lowest stack, the height and the wall point. The oracles are the
+gap the stack stopped in and the average thickness SMESH reports.
 """
 
 from __future__ import annotations
@@ -605,12 +609,12 @@ _GAP_RADIUS: float = 0.5
 _GAP_FLUID: float = 12.0 - math.pi * _GAP_RADIUS**2
 
 
-def _gap_model() -> tuple[ps.Shape, tuple[int, ...]]:
+def _gap_model(gap: float = _GAP) -> tuple[ps.Shape, tuple[int, ...]]:
     """The gap model and its layer walls (the cylinder face and the wall y = 0)."""
     s = Session()
     s.add_box(4.0, 3.0, 1.0)
     box = int(s.entities(EntityKind.SOLID)[0])
-    s.add_cylinder(_GAP_RADIUS, 1.0, origin=(2.0, _GAP_RADIUS + _GAP, 0.0))
+    s.add_cylinder(_GAP_RADIUS, 1.0, origin=(2.0, _GAP_RADIUS + gap, 0.0))
     cylinder = int(max(s.entities(EntityKind.SOLID)))
     s.cut([box], [cylinder])
     shape = ps.load_brep(s.brep())
@@ -740,3 +744,57 @@ def test_the_same_layers_that_fill_the_solid_still_mesh(
 
     assert report.volumes > 0
     assert filled == pytest.approx(_GAP_FLUID, rel=1e-3)
+
+
+_NUMBER: str = r"([-+]?[0-9]+(?:\.[0-9]+)?(?:e[-+]?[0-9]+)?)"
+_LOWEST: str = (
+    rf"the stack reached its least height on FACE (\d+): {_NUMBER} at "
+    rf"\({_NUMBER}, {_NUMBER}, {_NUMBER}\)"
+)
+
+
+def test_a_layer_stop_names_the_face_and_the_place_of_the_lowest_stack() -> None:
+    """Gap 0.3, stack 0.6: the warning names a gap face, its lowest stack and where.
+
+    SMESH stops the stack of the whole solid when it cannot grow in the gap, and says
+    only "Thickness 0.6 of viscous layers not reached, average reached thickness is
+    ...". Netgen1D2D + Netgen3D fills the solid, so the compute succeeds with the
+    warning. The oracles: the face is a layer wall, the height lies below 0.6 and at or
+    below the average SMESH reports, and the point lies within 0.3 of the gap, the
+    segment x = 2, 0 <= y <= 0.3.
+    """
+    shape, walls = _gap_model()
+    m = _gap_mesher(shape, walls, 0.6, split=True)
+
+    with m:
+        report = m.compute()
+
+    texts = [w.text for w in report.warnings if "not reached" in w.text]
+    assert len(texts) == 1
+    lowest = re.search(_LOWEST, texts[0])
+    average = re.search(r"average reached thickness is " + _NUMBER, texts[0])
+    assert lowest is not None and average is not None
+    face, height = int(lowest.group(1)), float(lowest.group(2))
+    x, y = float(lowest.group(3)), float(lowest.group(4))
+    off_gap = math.hypot(x - 2.0, y - min(max(y, 0.0), _GAP))
+    assert face in walls
+    assert 0.0 < height < 0.6
+    assert height <= float(average.group(1))
+    assert off_gap <= 0.3
+
+
+def test_a_stack_that_reaches_its_thickness_gets_no_lowest_stack_text() -> None:
+    """Gap 1.0, stack 0.1: the layers reach their thickness, and no warning names a face.
+
+    The oracle is the requested stack: on the far side of the cylinder, 0.85 + 1.0 from
+    the wall, the five layers add up to 0.1 within 2 % (the stack of
+    ``issues_1123/repro/i35_gap_halt.py``: 0.10131).
+    """
+    shape, walls = _gap_model(gap=1.0)
+    m = _gap_mesher(shape, walls, 0.1, split=True)
+
+    with m:
+        report = m.compute()
+
+    assert all("least height" not in w.text for w in report.warnings)
+    assert all("not reached" not in w.text for w in report.warnings)

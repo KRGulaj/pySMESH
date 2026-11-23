@@ -493,6 +493,11 @@ class Mesher {
   // mix on which NETGENPlugin read invalid memory. Before anything is computed.
   void refuse_netgen_faces_with_unmeshed_degenerate_edges() const;
 
+  // For the "viscous layers not reached" warning of `solid`: the 5 layered faces with the
+  // lowest stack reached, each with that height and the wall node where it is, as a text
+  // to append to the warning. Empty when no layer element is found.
+  std::string layer_heights_text(const TopoDS_Shape& solid) const;
+
   // Why the existing elements of `face` (oriented as in its solid) are not outward: "mixed:
   // ..." when two elements run an inner edge the same way or connected parts disagree,
   // "reversed: ..." when they all point into the solid. Empty when they point out.
