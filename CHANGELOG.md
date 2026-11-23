@@ -1,5 +1,83 @@
 # Changelog
 
+## 5.2.1
+
+5.2.1 fixes eleven defects found in field use of 5.2.0. It changes one id rule: a `fuse` now
+keeps the ids of its input solids, as `common` does (see "Migration" below). No public name is
+removed and no default changes. One name and one exception attribute are added. Every other
+result is unchanged: the golden capture matches 5.2.0 at rtol 0, except the two `fuse` id
+counts.
+
+### Defect fixes
+
+- **A mesh compute could end the process with a stack overflow.** `Mesher.compute` ran SMESH
+  and NETGEN on the caller's thread. The main thread of `python.exe` has a 2 MB stack. A
+  NETGEN 1D-2D compute of a 10-face model needed between 2 MB and 4 MB, and the process ended
+  with `0xC00000FD` and no Python exception. Every SMESH and NETGEN compute now runs on a
+  thread of its own with a 256 MB stack reservation. This covers `Mesher.compute`,
+  `compute_viscous_layers` and the layer steps of the mesher. A failure still reaches Python
+  as `PysmeshError`. Progress and cancel work as before.
+- **`Session.remove` after `split` could drop a piece of the target.** If a tool lay inside
+  the target, the target's inner piece was the tool's own solid. `remove(tool)` then removed
+  that piece too, and the target lost material with no message. The piece is now a solid of
+  its own over the same faces. `remove(tool)` keeps the target's pieces, and
+  `remove(target)` keeps the tool.
+- **`imprint` and `split_by_faces` refused valid results.** An open wire inside a face does not
+  split the face. OCCT keeps it as an INTERNAL edge, and the result is valid. The leak check
+  counted that edge as a free boundary edge and refused the result as "not watertight". An
+  INTERNAL edge now counts as free only in a `cut`, `common` or `fuse` that created it: there
+  it marks a face that the operation did not trim. A failed cut is still refused with the
+  same message.
+- **`fuse` killed the ids of its input solids.** OCCT builds a fused solid anew, and its
+  history reports each input solid as removed. The session now relates each input solid to
+  the union. Both ids stay alive on it, as after `common`.
+
+### Migration: `fuse` and solid ids
+
+After a `fuse` of solids that touch or overlap, the result carries every input solid id.
+
+- `entities(SOLID)` lists each of these ids. Use `entities(SOLID, distinct=True)` to count
+  solids.
+- `export_handoff()` refuses a session in which one solid has several ids. Pass
+  `allow_aliases=True`, as after `common`.
+- A fuse of solids that do not touch keeps one id on each solid, as before.
+
+### Messages
+
+- A dead id's refusal names the operation that consumed the id: "consumed by operation K,
+  `<op>`". K is the `op_index` of that operation's `HistoryDelta`.
+- A refusal of a split id ("denotes 2 edges") names two ways to reach one piece: the
+  `export_handoff` ordinals with `load_brep`, or a new `Session` over `brep()`.
+- `thru_sections` names the section that has several bodies and its body count, and says to
+  join the edges with `make_wire`.
+- A mesh compute failure that names bad elements (for example NETGEN's "Intersecting
+  triangles") gives their count and the centroids of the first 5 in its line.
+
+### Additions
+
+- `PysmeshError.bad_element_centroids`: a `(k, 3)` float64 NumPy array of the centroids of
+  every bad element that a failed compute names, in model coordinates. It is `(0, 3)` for
+  every other failure.
+- `pysmesh.mesher.ExtrusionMethod`, the type of `ViscousLayers.method`. It is the same enum as
+  `pysmesh.ExtrusionMethod`.
+
+### Documentation
+
+- `MeshData` states that `element_nodes` is in SMDS (MED) node order, and gives the
+  permutation to VTK order for the tetrahedron, pyramid, prism and hexahedron.
+- `Session` states that the time of each operation grows linearly with the number of live
+  entities: 1.9 ms per square at 0 to 250 squares, 48 ms at 1 750 to 2 000. It recommends
+  sessions of a few hundred bodies, merged with `add_brep`.
+- `concepts/session.md` has a table of what each boolean does with its operands.
+
+### Wheel
+
+| | 5.2.0 | 5.2.1 |
+|---|---|---|
+| Wheel (cp313) | 42 298 174 bytes (40.3 MiB) | 42 324 216 bytes (40.4 MiB) |
+| Bundled DLLs | 52 | 52 |
+| Tests | 3 138 passed | 3 169 passed |
+
 ## 5.2.0
 
 5.2.0 brings SALOME GEOM's modelling, healing and block operations to `Session`. It also adds
