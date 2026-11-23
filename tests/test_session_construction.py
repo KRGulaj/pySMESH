@@ -27,6 +27,9 @@ Each claim is asserted against an oracle the operation under test does not produ
 * **M2, a face that depends on the process.** ``make_face`` joined two ends 1.8e-16
   apart at either end, run to run. The oracle is five fresh processes and the stated
   rule.
+* **#16, a spline that leaves the plane of its points.** 121 coplanar points at tol
+  1e-7 gave a curve 1e-3 off their plane. It must be refused with the drift. The oracle
+  is an OCCT probe that calls the fit alone.
 """
 
 from __future__ import annotations
@@ -685,3 +688,102 @@ def test_a_pipe_whose_sweep_builds_no_face_is_refused_and_does_not_crash() -> No
 
     assert result.startswith("F2-RESULT refused same"), result
     assert "Session.pipe" in result
+
+
+# ---- #16 add_spline through coplanar points must stay in their plane ----------------- #
+
+
+def _naca_open_te(stations: int, z: float) -> np.ndarray:
+    """A NACA 0012 polygon of 2 x stations - 1 points, chord 1, open TE, in z = const.
+
+    The polygon of ``issues_1123/repro/i16_spline_drift_matrix.py``.
+    """
+    beta = np.linspace(0.0, np.pi, stations)
+    x = 0.5 * (1.0 - np.cos(beta))
+    yt = 0.6 * (
+        0.2969 * np.sqrt(x) - 0.1260 * x - 0.3516 * x**2 + 0.2843 * x**3 - 0.1015 * x**4
+    )
+    pts = np.vstack(
+        [np.column_stack([x[::-1], yt[::-1]]), np.column_stack([x[1:], -yt[1:]])]
+    )
+    return np.column_stack([pts, np.full(len(pts), z)])
+
+
+def test_a_spline_that_leaves_the_plane_of_its_points_is_refused_with_the_drift() -> (
+    None
+):
+    """121 coplanar points at tol 1e-7: OCCT's fit leaves z = 2 by 1e-3; refused.
+
+    GeomAPI_PointsToBSpline falls back to an interpolation here
+    (``Approx_BSplComputeLine.gxx:952``). The oracle is the OCCT probe of
+    ``issues_1123/occt.md`` #16, which calls OCCT alone with the same arguments: its
+    curve spreads 2.036e-3 across z (20 001 samples), its poles stand up to 2.518e-3
+    off z = 2. The curve passes through the points, which lie in the plane, so its
+    largest distance from the plane is between half that spread and the spread. The
+    session gains nothing.
+    """
+    points = _naca_open_te(61, 2.0)
+    s = Session()
+    before = s.brep()
+
+    with pytest.raises(PysmeshError) as caught:
+        s.add_spline(points, tol=1e-7)
+
+    message = str(caught.value)
+    curve = re.search(
+        r"leaves that plane by ([0-9.e+-]+) \(its poles by up to ([0-9.e+-]+)\)",
+        message,
+    )
+    assert "the 121 points lie in one plane within tol 1e-07" in message
+    assert curve is not None
+    assert 0.5 * 2.036e-3 * (1.0 - 1e-3) <= float(curve.group(1)) <= 2.036e-3
+    assert float(curve.group(2)) == pytest.approx(2.518e-3, rel=1e-3)
+    assert "add_bspline" in caught.value.details
+    assert "add_polyline" in caught.value.details
+    assert s.brep() == before
+
+
+def _spline_edge(s: Session, points: np.ndarray, **tol: float) -> int:
+    """Add a spline through ``points``; the id of its one edge."""
+    delta = s.add_spline(points, **tol)
+    (edge,) = [
+        int(i) for i in delta.created if s.entity_kind(int(i)) == EntityKind.EDGE
+    ]
+    return edge
+
+
+def test_a_spline_through_41_coplanar_points_at_the_default_tol_keeps_its_plane() -> (
+    None
+):
+    """41 points in z = 2 at the default tol: accepted, as before the check.
+
+    The oracle is the curve itself, sampled at 2001 points: it spreads less than 1e-9
+    across z = 2.
+    """
+    s = Session()
+
+    edge = _spline_edge(s, _naca_open_te(21, 2.0))
+
+    lo, hi = s.edge_parameter_bounds([edge])[0]
+    sample = s.curve_at(edge, np.linspace(float(lo), float(hi), 2001)).points
+    assert float(np.ptp(sample[:, 2])) < 1e-9
+
+
+def test_a_spline_through_points_off_any_plane_is_not_checked() -> None:
+    """121 points of a helix at tol 1e-7: no plane is theirs, so the fit is kept.
+
+    The oracle is the fit's contract, at the resolution of a sampled curve: every input
+    point lies within 1e-3 of the curve sampled at 20 001 points, 1.6e-4 apart.
+    """
+    t = np.linspace(0.0, 3.0, 121)
+    points = np.column_stack([np.cos(t), np.sin(t), 0.2 * t])
+    s = Session()
+
+    edge = _spline_edge(s, points, tol=1e-7)
+
+    lo, hi = s.edge_parameter_bounds([edge])[0]
+    sample = s.curve_at(edge, np.linspace(float(lo), float(hi), 20001)).points
+    gap = np.min(
+        np.linalg.norm(sample[None, :, :] - points[:, None, :], axis=2), axis=1
+    )
+    assert float(gap.max()) < 1e-3

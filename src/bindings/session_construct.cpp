@@ -18,7 +18,9 @@
 
 #include <BRepBuilderAPI_FindPlane.hxx>
 #include <BRepOffsetAPI_MakeEvolved.hxx>
+#include <GProp_PEquation.hxx>
 #include <GeomLib.hxx>
+#include <Geom_BSplineCurve.hxx>
 #include <Geom_BoundedCurve.hxx>
 #include <Geom_BoundedSurface.hxx>
 #include <Geom_RectangularTrimmedSurface.hxx>
@@ -28,6 +30,45 @@
 namespace pysmesh {
 namespace session {
 namespace {
+
+// How far a B-spline fitted through coplanar points leaves their plane.
+struct SplineDrift {
+  double curve;  // the largest distance of the curve from the plane
+  double poles;  // the largest distance of a pole from the plane
+};
+
+// The drift of `curve` from the plane of `points`, or nothing when the points are not
+// coplanar within `tol` (GProp_PEquation: their spread across the plane), or lie on one
+// line or at one point, so that no plane is theirs.
+//
+// The curve, not its poles, decides. BRepBuilderAPI_MakeFace finds the plane of a wire with
+// BRepLib_FindSurface, which samples each B-spline edge at its knots and degree - 1 points
+// between them and compares those points with the plane (BRepLib_FindSurface.cxx:388-391,
+// :558-560). It never reads a pole. A pole can stand off the plane by more than the curve
+// does (the curve is a convex combination of its poles), so a test of the poles would
+// refuse curves that make_face accepts. The curve is sampled more densely than
+// FindSurface does: 8 x degree points per knot span.
+std::optional<SplineDrift> spline_drift(const NCollection_Array1<gp_Pnt>& points,
+                                        const Geom_BSplineCurve& curve, double tol) {
+  const GProp_PEquation fit(points, tol);
+  if (!fit.IsPlanar()) {
+    return std::nullopt;
+  }
+  const gp_Pln plane = fit.Plane();
+  SplineDrift drift{0.0, 0.0};
+  for (int i = 1; i <= curve.NbPoles(); ++i) {
+    drift.poles = std::max(drift.poles, plane.Distance(curve.Pole(i)));
+  }
+  const int steps = 8 * curve.Degree();
+  for (int k = 1; k < curve.NbKnots(); ++k) {
+    const double a = curve.Knot(k);
+    const double b = curve.Knot(k + 1);
+    for (int s = 0; s <= steps; ++s) {
+      drift.curve = std::max(drift.curve, plane.Distance(curve.Value(a + (b - a) * s / steps)));
+    }
+  }
+  return drift;
+}
 
 // Throw the self-interference refusal of a swept or lofted result, if there is one. The
 // message is the first line of the refusal; the details are the pairs it names and `hint`.
@@ -512,6 +553,7 @@ py::dict Session::add_spline(const PointArray& points, int degree_min, int degre
                        std::to_string(degree_min) + ", " + std::to_string(degree_max) +
                        ").");
   }
+  std::optional<SplineDrift> drift;
   const TopoDS_Shape edge = try_build("add_spline", [&]() -> TopoDS_Shape {
     NCollection_Array1<gp_Pnt> arr(1, static_cast<int>(pts.size()));
     for (std::size_t i = 0; i < pts.size(); ++i) {
@@ -521,12 +563,33 @@ py::dict Session::add_spline(const PointArray& points, int degree_min, int degre
     if (!fit.IsDone()) {
       return TopoDS_Shape();
     }
+    drift = spline_drift(arr, *fit.Curve(), tol);
     return BRepBuilderAPI_MakeEdge(fit.Curve()).Edge();
   });
   if (edge.IsNull()) {
     throw PysmeshError(
         "Session.add_spline: GeomAPI_PointsToBSpline could not approximate the points "
         "to the requested tolerance.");
+  }
+  // When the fit needs more poles than there are points, OCCT gives up the approximation
+  // and interpolates (Approx_BSplComputeLine.gxx:952-956). That interpolation took its end
+  // tangents from separate fits and put poles of 121 coplanar points 2.5e-3 off their
+  // plane at tol 1e-7, so make_face on the edge failed. A curve that leaves the plane of
+  // its coplanar points by more than tol is refused rather than kept.
+  if (drift.has_value() && drift->curve > tol) {
+    std::ostringstream s;
+    s << "Session.add_spline: the " << pts.size() << " points lie in one plane within tol "
+      << tol << ", but the fitted curve leaves that plane by " << drift->curve
+      << " (its poles by up to " << drift->poles
+      << "), more than tol, so a face or a loft cap on it would not be planar. Nothing "
+         "is committed; the session is unchanged.";
+    throw PysmeshError(
+        s.str(),
+        "GeomAPI_PointsToBSpline interpolates the points when it needs more poles than "
+        "there are points, and that interpolation can leave their plane. Use add_bspline "
+        "with poles of your own in the plane, add_polyline, a different point count, or a "
+        "looser tol.",
+        {});
   }
   return add_bodies(edge, "add_spline");
 }

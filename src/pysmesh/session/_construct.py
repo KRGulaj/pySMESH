@@ -400,6 +400,14 @@ class _ConstructOps(_SessionBase):
     ) -> HistoryDelta:
         """Add a B-spline edge approximating a sequence of points.
 
+        Points that lie in one plane within ``tol`` must give a curve in that plane: a
+        face or a loft cap on the edge needs it. When OCCT's fit needs more poles than
+        there are points, it interpolates the points instead, and that interpolation can
+        leave their plane: 121 points of an aerofoil in z = 2 at ``tol=1e-7`` gave a
+        curve 1.1e-3 off the plane, with poles 2.5e-3 off. Such a curve is refused, not
+        kept. The curve decides, not its poles, because ``make_face`` finds the plane of
+        an edge from points on the curve.
+
         Args:
             points: (N, 3) points the curve passes through to within ``tol``, N >= 2.
             degree_min: Lowest degree OCCT may use (>= 1).
@@ -411,7 +419,11 @@ class _ConstructOps(_SessionBase):
 
         Raises:
             PysmeshError: On fewer than two points, an invalid degree band, a non-positive
-                tolerance, or a fit that does not converge.
+                tolerance, or a fit that does not converge. Also when the points lie in
+                one plane within ``tol`` and the fitted curve leaves that plane by more
+                than ``tol``; the message gives the point count, ``tol`` and both
+                distances. Then use :meth:`add_bspline` with poles of your own,
+                :meth:`add_polyline`, a different point count, or a looser ``tol``.
         """
         return _delta(
             self._s.add_spline(_points("points", points), degree_min, degree_max, tol)
