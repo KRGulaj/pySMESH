@@ -498,6 +498,11 @@ class Mesher {
   // written as "2D mesh on FACE <ordinal>"; each such face's ordinal is appended to `faces`.
   std::string with_shrink_face_ordinals(const std::string& text, std::vector<int>& faces) const;
 
+  // For a SOLID meshed by Prism_3D with more than two faces that take triangles (they hold
+  // elements that are not quadrangles, or their 2-D algorithm makes triangles): a text for
+  // its failure line that names those faces and the remedy. Empty otherwise.
+  std::string prism_side_face_cause(const TopoDS_Shape& solid) const;
+
   // The sub-shape where `hyp`, just assigned on `target`, met two different similar
   // hypotheses (HYP_CONCURRENT), and those hypotheses with where they are assigned.
   std::string describe_concurrency(const TopoDS_Shape& target, SMESH_Hypothesis* hyp) const;

@@ -24,6 +24,7 @@
 #include <SMDS_MeshNode.hxx>
 #include <SMDS_MeshElement.hxx>
 #include <SMESHDS_Mesh.hxx>
+#include <SMESHDS_SubMesh.hxx>
 #include <SMESH_Algo.hxx>
 #include <SMESH_ComputeError.hxx>
 #include <SMESH_Gen.hxx>
@@ -33,7 +34,9 @@
 #include <SMESH_subMesh.hxx>
 #include <StdMeshers_ViscousLayers.hxx>
 #include <StdMeshers_ViscousLayers2D.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 
 namespace pysmesh {
@@ -857,6 +860,69 @@ std::string Mesher::with_ordinals(const std::string& text) const {
   return out;
 }
 
+std::string Mesher::prism_side_face_cause(const TopoDS_Shape& solid) const {
+  // Prism_3D sweeps quadrangles through the side faces of its solid, and refuses a solid
+  // with more than two faces that hold anything else: "More than 2 faces with not
+  // quadrangle elements" (StdMeshers_Prism_3D.cxx). A 2-D algorithm that reaches a side
+  // face, a global one included, meshes that face with triangles before Prism_3D runs.
+  // When the Prism_3D solid is computed after a solid that shares a face with it, SMESH
+  // cleans those triangles and the error text again, and the compute fails with no text.
+  // So a face counts when it holds an element that is not a quadrangle, or when its 2-D
+  // algorithm makes triangles.
+  SMESH_subMesh* sub = mesh_->GetSubMeshContaining(solid);
+  const SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
+  if (algo == nullptr || algo->GetName() == nullptr ||
+      std::string(algo->GetName()) != "Prism_3D") {
+    return std::string();
+  }
+  static const std::set<std::string> kTriangleMakers = {"NETGEN_2D", "NETGEN_2D_ONLY",
+                                                        "MEFISTO_2D"};
+  std::set<int> faces;
+  std::set<std::string> makers;
+  TopTools_IndexedMapOfShape solid_faces;
+  TopExp::MapShapes(solid, TopAbs_FACE, solid_faces);
+  for (int i = 1; i <= solid_faces.Extent(); ++i) {
+    const TopoDS_Shape& face = solid_faces.FindKey(i);
+    SMESH_subMesh* face_sub = mesh_->GetSubMeshContaining(face);
+    const SMESH_Algo* face_algo = face_sub != nullptr ? face_sub->GetAlgo() : nullptr;
+    const std::string maker =
+        face_algo != nullptr && face_algo->GetName() != nullptr ? face_algo->GetName() : "";
+    bool not_quadrangles = false;
+    if (const SMESHDS_SubMesh* held = meshDS_->MeshElements(face)) {
+      for (SMDS_ElemIteratorPtr it = held->GetElements(); it->more() && !not_quadrangles;) {
+        not_quadrangles = it->next()->NbCornerNodes() != 4;
+      }
+    }
+    if (!not_quadrangles && kTriangleMakers.count(maker) == 0) {
+      continue;
+    }
+    const int ordinal = ordinal_of_shape_index(meshDS_->ShapeToIndex(face)).second;
+    if (ordinal > 0) {
+      faces.insert(ordinal);
+    }
+    if (!maker.empty()) {
+      makers.insert(maker);
+    }
+  }
+  if (faces.size() <= 2) {
+    return std::string();
+  }
+  std::string face_list;
+  for (const int f : faces) {
+    face_list += (face_list.empty() ? "" : ", ") + std::to_string(f);
+  }
+  std::string maker_list;
+  for (const std::string& m : makers) {
+    maker_list += (maker_list.empty() ? "" : " and ") + m;
+  }
+  return ". Prism_3D needs quadrangles on every face but its source and its target, and " +
+         std::to_string(faces.size()) + " faces of this solid (FACE " + face_list +
+         ") take triangles" + (maker_list.empty() ? "" : " from " + maker_list) +
+         ": a 2-D algorithm that reaches a side face, a global one included, meshes it "
+         "before Prism_3D runs. Assign Quadrangle2D on the side faces, with Regular1D and a "
+         "1-D hypothesis on their edges";
+}
+
 std::string Mesher::with_shrink_face_ordinals(const std::string& text,
                                               std::vector<int>& faces) const {
   // StdMeshers_ViscousLayers names the face it could not shrink by its SMESHDS shape index:
@@ -1231,6 +1297,9 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
       if (read_bad.insert(err.get()).second) {
         line += bad_elements_text(*err, bad_centroids);
       }
+      if (kKindTypes[k] == TopAbs_SOLID) {
+        line += prism_side_face_cause(ex.Current());
+      }
       bool seen = false;
       for (const std::string& s : failures) {
         seen = seen || s == line;
@@ -1297,6 +1366,25 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
       failures.push_back(s.second);
       if (kKindTypes[s.first.first] == TopAbs_FACE) {
         failed_faces.push_back(s.first.second);
+      }
+    }
+    // SMESH can fail with no error text anywhere: a solid that failed first is reset by a
+    // later sub-mesh event, which clears its error (a Prism_3D solid computed after a
+    // NETGEN solid that shares a face with it). Each solid with an algorithm and no mesh
+    // is then named.
+    if (failures.empty()) {
+      std::set<int> named;
+      for (TopExp_Explorer ex(data_->shape, TopAbs_SOLID); ex.More(); ex.Next()) {
+        SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
+        const SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
+        const int ordinal = ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current())).second;
+        if (algo == nullptr || algo->GetName() == nullptr || sub->IsMeshComputed() ||
+            ordinal <= 0 || !named.insert(ordinal).second) {
+          continue;
+        }
+        failures.push_back("SOLID " + std::to_string(ordinal) +
+                           ": not meshed, and its algorithm left no error text (algorithm " +
+                           algo->GetName() + ")" + prism_side_face_cause(ex.Current()));
       }
     }
     std::string details;

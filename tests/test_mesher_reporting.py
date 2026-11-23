@@ -37,6 +37,11 @@ Each claim is asserted against an oracle the report itself does not produce (rep
 * **#39, a layer shrink failure names its face.** SMESH writes its own shape index into
   "Can't shrink 2D mesh on face <index>". The line must give the face ordinal, and
   ``.face_ids`` must hold it. The oracle is the face found by its area.
+* **#25, a prism under a global 2-D algorithm names its cause.** A global Netgen1D2D
+  puts triangles on the side faces of a Prism3D solid. In one solid order SMESH says
+  "More than 2 faces with not quadrangle elements"; in the other it says nothing. Both
+  must name the solid, its triangle faces and Quadrangle2D. The oracle is the face set
+  of the solid, found by geometry.
 """
 
 from __future__ import annotations
@@ -638,3 +643,96 @@ def test_a_viscous_layer_shrink_failure_names_the_face_by_its_ordinal() -> None:
     assert len(strip) == 1
     assert ordinals == set(strip)
     assert strip[0] in list(info.value.face_ids)
+
+
+def _two_boxes_sharing_a_face() -> ps.Shape:
+    """Two unit boxes side by side, fragmented: they share the face x = 1."""
+    s = Session()
+    s.add_box(1.0, 1.0, 1.0)
+    s.add_box(1.0, 1.0, 1.0, origin=(1.0, 0.0, 0.0))
+    s.fragment([int(i) for i in s.entities(ps.EntityKind.SOLID)])
+    return ps.load_brep(s.brep())
+
+
+def _faces_of_solid(shape: ps.Shape, solid: int) -> set[int]:
+    """The faces whose centroid lies in the bounding box of ``solid``."""
+    box = np.asarray(shape.solids()[solid - 1].bbox)
+    return {
+        f.id
+        for f in shape.faces()
+        if bool(np.all(np.asarray(f.centroid) >= box[:3] - 1e-9))
+        and bool(np.all(np.asarray(f.centroid) <= box[3:] + 1e-9))
+    }
+
+
+def _prism_in_a_netgen_region(shape: ps.Shape, prism: int, quad_sides: bool) -> Mesher:
+    """Global Netgen1D2D + Netgen3D, Prism3D on one solid; optionally quadrangle sides."""
+    m = Mesher(shape)
+    m.assign(ps.Netgen1D2D())
+    m.assign(ps.NetgenParameters2D(max_size=0.25, threads=4))
+    m.assign(ps.Netgen3D())
+    m.assign(ps.NetgenParameters(max_size=0.25, threads=4))
+    on = SubShape(SubShapeKind.SOLID, prism)
+    m.assign(ps.Prism3D(), on=on)
+    if quad_sides:
+        for face in _faces_of_solid(shape, prism):
+            box = shape.faces()[face - 1].bbox
+            if abs(box[5] - box[2]) > 1e-9:  # a side face: not z = const
+                m.assign(Quadrangle2D(), on=SubShape(SubShapeKind.FACE, face))
+        m.assign(Regular1D(), on=on)
+        m.assign(NumberOfSegments(count=4), on=on)
+    return m
+
+
+@pytest.mark.parametrize("prism", [1, 2])
+def test_a_prism_whose_side_faces_take_triangles_is_named_with_the_cause(
+    prism: int,
+) -> None:
+    """Both solid orders name the Prism_3D solid, its triangle faces and Quadrangle2D.
+
+    The global Netgen1D2D reaches every face of the prism solid. As the first solid,
+    Prism_3D refuses it ("More than 2 faces with not quadrangle elements: 6"). As the
+    second, SMESH left no error text at all ("failed on 0 sub-shape(s)"). The oracle is
+    the face set of the prism solid, found by geometry: the global algorithm reaches all
+    six of its faces.
+    """
+    shape = _two_boxes_sharing_a_face()
+    expected = _faces_of_solid(shape, prism)
+    m = _prism_in_a_netgen_region(shape, prism, quad_sides=False)
+
+    with m, pytest.raises(ps.PysmeshError) as info:
+        m.compute()
+
+    lines = [
+        line
+        for line in info.value.details.splitlines()
+        if line.startswith(f"SOLID {prism}:")
+    ]
+    assert len(lines) == 1
+    assert "(algorithm Prism_3D)" in lines[0]
+    assert "Assign Quadrangle2D on the side faces" in lines[0]
+    named = re.search(r"\(FACE ([0-9, ]+)\) take triangles", lines[0])
+    assert named is not None
+    assert {int(f) for f in named.group(1).split(", ")} == expected
+    assert len(expected) == 6
+
+
+@pytest.mark.parametrize("prism", [1, 2])
+def test_a_prism_with_quadrangle_side_faces_meshes_in_either_order(prism: int) -> None:
+    """Quadrangle2D on the side faces, Regular1D + 4 segments on the prism solid: no error.
+
+    Prism3D sweeps a source face through the solid, so the prism solid holds swept cells
+    only: every element there is a pentahedron or a hexahedron, and none a tetrahedron.
+    """
+    shape = _two_boxes_sharing_a_face()
+    with _prism_in_a_netgen_region(shape, prism, quad_sides=True) as m:
+        report = m.compute()
+        md = m.mesh()
+
+    in_prism = (md.element_kind == int(SubShapeKind.SOLID)) & (
+        md.element_ordinal == prism
+    )
+    swept = (int(ps.ElementType.PENTAHEDRON), int(ps.ElementType.HEXAHEDRON))
+    assert report.volumes > 0
+    assert int(in_prism.sum()) > 0
+    assert bool(np.all(np.isin(md.element_type[in_prism], swept)))

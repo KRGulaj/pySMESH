@@ -450,6 +450,14 @@ class Prism3D(Algorithm):
     global 2-D algorithm only, a face that is not a quadrangle marks the source. If
     every face reads as a quadrangle, Prism3D tries the faces in turn.
 
+    A 2-D algorithm that reaches a side face meshes that face before Prism3D runs, and a
+    global one reaches every face. So a global :class:`Netgen1D2D` puts triangles on the
+    side faces, and Prism3D refuses the solid: "More than 2 faces with not quadrangle
+    elements". If the prism solid is meshed after a solid that shares a face with it,
+    SMESH leaves no error text at all. In both cases :meth:`~pysmesh.Mesher.compute`
+    names the solid and the faces that take triangles. Assign :class:`Quadrangle2D` on
+    the side faces, with :class:`Regular1D` and a 1-D hypothesis on their edges.
+
     A side face whose bottom or top side has more than one edge has a composite side,
     for example where a cap edge is split under a whole one. Prism3D projects the
     opposite side onto it as a whole. It sweeps through that face only if the edges of
