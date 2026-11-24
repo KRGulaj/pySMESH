@@ -508,7 +508,11 @@ bodies and returns one finding per invalid sub-shape, with its id, its kind and 
 body at a time, because OCCT gives its analyzer no progress range. `small_edges` lists
 the edges shorter than a length, `is_closed_shell` says per entity whether its body is
 bounded by closed, consistently oriented shells, and `tolerances` gives the stored
-tolerance of each face, edge or vertex. An empty finding list means no problem.
+tolerance of each face, edge or vertex. An empty finding list means no problem that
+these checks look for. `BRepCheck_Analyzer` does not test a face for
+self-intersection, so a face that folds through itself gives no finding. A loft whose
+stations go back along the loft, and a solid sewn from it, can pass `check_shape`.
+Give a `tessellate` of such a model a `cancel`.
 
 ## Reaching a mesher
 

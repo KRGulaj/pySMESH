@@ -15,6 +15,14 @@ one of these planes.
 Each mesh is also checked for conformity (every face of a cell is shared by exactly two
 cells, or lies on the shape's boundary and belongs to one) and for inverted cells (every
 cell has a positive volume by the divergence theorem over its outward-wound faces).
+
+A NETGEN volume mesh must fill its solid (#37): NETGEN_2D3D after layers that stopped
+early returned the prisms alone as a success. The oracle is the closed-form volume of
+the fluid, against the volume of the cells.
+
+A stack stopped short names its place (#35): the "not reached" warning goes on with the
+layered faces of the lowest stack, the height and the wall point. The oracles are the
+gap the stack stopped in and the average thickness SMESH reports.
 """
 
 from __future__ import annotations
@@ -592,3 +600,202 @@ def test_netgen_grows_two_stacks_on_their_own_faces() -> None:
         [0.0, 0.2 / 3.0, 0.4 / 3.0, 0.2], abs=_TOL
     )
     assert total == pytest.approx(24.0, rel=1e-12)
+
+
+# The gap model: the box [0, 4] x [0, 3] x [0, 1] minus a cylinder of radius 0.5 (axis z)
+# that stands 0.3 from the wall y = 0. Layers grow on the cylinder and on that wall.
+_GAP: float = 0.3
+_GAP_RADIUS: float = 0.5
+_GAP_FLUID: float = 12.0 - math.pi * _GAP_RADIUS**2
+
+
+def _gap_model(gap: float = _GAP) -> tuple[ps.Shape, tuple[int, ...]]:
+    """The gap model and its layer walls (the cylinder face and the wall y = 0)."""
+    s = Session()
+    s.add_box(4.0, 3.0, 1.0)
+    box = int(s.entities(EntityKind.SOLID)[0])
+    s.add_cylinder(_GAP_RADIUS, 1.0, origin=(2.0, _GAP_RADIUS + gap, 0.0))
+    cylinder = int(max(s.entities(EntityKind.SOLID)))
+    s.cut([box], [cylinder])
+    shape = ps.load_brep(s.brep())
+    walls = tuple(
+        f.id
+        for f in shape.faces()
+        if f.surface_type == "Cylinder" or float(np.asarray(f.bbox)[4]) < 1e-9
+    )
+    return shape, walls
+
+
+def _gap_mesher(
+    shape: ps.Shape, walls: tuple[int, ...], thickness: float, split: bool
+) -> Mesher:
+    """Netgen1D2D3D (or Netgen1D2D + Netgen3D), size 0.05 on the walls, 5 layers."""
+    sizes = tuple((ps.SubShape(SubShapeKind.FACE, f), 0.05) for f in walls)
+    m = Mesher(shape)
+    if split:
+        m.assign(Netgen1D2D())
+        m.assign(NetgenParameters2D(max_size=0.3, threads=8, local_sizes=sizes))
+        m.assign(Netgen3D())
+        m.assign(NetgenParameters(max_size=0.3, threads=8))
+    else:
+        m.assign(Netgen1D2D3D())
+        m.assign(NetgenParameters(max_size=0.3, threads=8, local_sizes=sizes))
+    m.assign(
+        ViscousLayers(
+            total_thickness=thickness,
+            layer_count=5,
+            stretch_factor=1.2,
+            boundary=walls,
+            group_name="BL",
+        )
+    )
+    return m
+
+
+def _filled_volume(md: MeshData) -> float:
+    """The volume of every cell, by the divergence theorem over its faces.
+
+    The vectorised form of :func:`_cell_volume`, summed over every cell of each type.
+    """
+
+    def term(p: NDArray[np.float64], i: int, j: int, k: int) -> NDArray[np.float64]:
+        """Signed volume term of the triangle (i, j, k) of each cell face, as above."""
+        return np.einsum("ij,ij->i", p[:, i], np.cross(p[:, j], p[:, k])) / 6.0
+
+    total = 0.0
+    for t, faces in _CELL_FACES.items():
+        rows = np.flatnonzero(md.element_type == t)
+        if rows.size == 0:
+            continue
+        width = max(max(face) for face in faces) + 1
+        nodes = md.element_nodes[md.element_offsets[rows][:, None] + np.arange(width)]
+        for face in faces:
+            p = md.node_coords[nodes[:, list(face)]]
+            if len(face) == 3:
+                total += float(term(p, 0, 1, 2).sum())
+            else:
+                first = term(p, 0, 1, 2) + term(p, 0, 2, 3)
+                second = term(p, 0, 1, 3) + term(p, 1, 2, 3)
+                total += float((0.5 * (first + second)).sum())
+    return total
+
+
+def _gap_wall_distance(points: NDArray[np.float64]) -> NDArray[np.float64]:
+    """The distance of each point from the nearer layer wall: y = 0 or the cylinder."""
+    radial = np.hypot(points[:, 0] - 2.0, points[:, 1] - (_GAP_RADIUS + _GAP))
+    return np.minimum(points[:, 1], np.abs(radial - _GAP_RADIUS))
+
+
+def test_a_netgen_2d3d_run_that_leaves_the_solid_unfilled_is_refused() -> None:
+    """Netgen1D2D3D after layers that stopped early: refused, naming the solid.
+
+    With a 0.6 stack in the 0.3 gap the layers stop at an average of 0.12, and NETGEN
+    2D3D returned the prisms alone as a success: 0.904 of the fluid's 11.215 filled.
+    The refusal names SOLID 1 and its open front. The prisms are volume elements, so
+    the front is the top of the layer, not the whole boundary: every centroid lies off
+    the walls by more than 0 and by at most the reached layer height (the farthest
+    prism node from its wall) plus one wall element size, 0.05. The kept mesh is the
+    prisms, short of the closed-form fluid volume 12 - pi 0.25.
+    """
+    shape, walls = _gap_model()
+    m = _gap_mesher(shape, walls, 0.6, split=False)
+
+    with m:
+        with pytest.raises(PysmeshError) as info:
+            m.compute()
+        md = m.mesh()
+
+    prisms = np.flatnonzero(md.element_type == int(ElementType.PENTAHEDRON))
+    prism_nodes = np.unique(
+        md.element_nodes[md.element_offsets[prisms][:, None] + np.arange(6)]
+    )
+    reached = float(_gap_wall_distance(md.node_coords[prism_nodes]).max())
+    centroids = info.value.bad_element_centroids
+    off_wall = _gap_wall_distance(centroids)
+    assert "SOLID 1: its volume mesh does not fill it (algorithm NETGEN_2D3D)" in (
+        info.value.details
+    )
+    assert "open front of the kept mesh" in info.value.details
+    assert "the whole boundary is open" not in info.value.details
+    assert centroids.ndim == 2 and centroids.shape[0] > 0
+    assert bool(np.all(off_wall > 1e-9))
+    assert bool(np.all(off_wall <= reached + 0.05))
+    assert _filled_volume(md) < 0.5 * _GAP_FLUID
+
+
+@pytest.mark.parametrize(
+    ("thickness", "split"),
+    [(0.6, True), (0.1, False)],
+    ids=["netgen_1d2d_then_3d_T0.6", "netgen_1d2d3d_T0.1"],
+)
+def test_the_same_layers_that_fill_the_solid_still_mesh(
+    thickness: float, split: bool
+) -> None:
+    """Netgen1D2D + Netgen3D at T 0.6, and Netgen1D2D3D at T 0.1, fill the fluid.
+
+    The oracle is the closed-form fluid volume 12 - pi 0.25; the mesh's chords of the
+    cylinder leave it 1e-4 larger, inside the 1e-3 relative bound.
+    """
+    shape, walls = _gap_model()
+    m = _gap_mesher(shape, walls, thickness, split=split)
+
+    with m:
+        report = m.compute()
+        filled = _filled_volume(m.mesh())
+
+    assert report.volumes > 0
+    assert filled == pytest.approx(_GAP_FLUID, rel=1e-3)
+
+
+_NUMBER: str = r"([-+]?[0-9]+(?:\.[0-9]+)?(?:e[-+]?[0-9]+)?)"
+_LOWEST: str = (
+    rf"the stack reached its least height on FACE (\d+): {_NUMBER} at "
+    rf"\({_NUMBER}, {_NUMBER}, {_NUMBER}\)"
+)
+
+
+def test_a_layer_stop_names_the_face_and_the_place_of_the_lowest_stack() -> None:
+    """Gap 0.3, stack 0.6: the warning names a gap face, its lowest stack and where.
+
+    SMESH stops the stack of the whole solid when it cannot grow in the gap, and says
+    only "Thickness 0.6 of viscous layers not reached, average reached thickness is
+    ...". Netgen1D2D + Netgen3D fills the solid, so the compute succeeds with the
+    warning. The oracles: the face is a layer wall, the height lies below 0.6 and at or
+    below the average SMESH reports, and the point lies within 0.3 of the gap, the
+    segment x = 2, 0 <= y <= 0.3.
+    """
+    shape, walls = _gap_model()
+    m = _gap_mesher(shape, walls, 0.6, split=True)
+
+    with m:
+        report = m.compute()
+
+    texts = [w.text for w in report.warnings if "not reached" in w.text]
+    assert len(texts) == 1
+    lowest = re.search(_LOWEST, texts[0])
+    average = re.search(r"average reached thickness is " + _NUMBER, texts[0])
+    assert lowest is not None and average is not None
+    face, height = int(lowest.group(1)), float(lowest.group(2))
+    x, y = float(lowest.group(3)), float(lowest.group(4))
+    off_gap = math.hypot(x - 2.0, y - min(max(y, 0.0), _GAP))
+    assert face in walls
+    assert 0.0 < height < 0.6
+    assert height <= float(average.group(1))
+    assert off_gap <= 0.3
+
+
+def test_a_stack_that_reaches_its_thickness_gets_no_lowest_stack_text() -> None:
+    """Gap 1.0, stack 0.1: the layers reach their thickness, and no warning names a face.
+
+    The oracle is the requested stack: on the far side of the cylinder, 0.85 + 1.0 from
+    the wall, the five layers add up to 0.1 within 2 % (the stack of
+    ``issues_1123/repro/i35_gap_halt.py``: 0.10131).
+    """
+    shape, walls = _gap_model(gap=1.0)
+    m = _gap_mesher(shape, walls, 0.1, split=True)
+
+    with m:
+        report = m.compute()
+
+    assert all("least height" not in w.text for w in report.warnings)
+    assert all("not reached" not in w.text for w in report.warnings)

@@ -1397,6 +1397,14 @@ def test_smoothed_layers_on_two_adjacent_walls_keep_the_closed_form_on_each(
     assert report.warnings == ()
 
 
+def _reached_thickness(text: str) -> float:
+    """The average thickness that a "not reached" warning states.
+
+    The text goes on after that number with the lowest stack of each layered face.
+    """
+    return float(text.split("average reached thickness is ", 1)[1].split(";", 1)[0])
+
+
 @pytest.mark.parametrize("algorithm", ["Hexa3D", "PolyhedronPerSolid3D"])
 @pytest.mark.parametrize(
     "method", [ExtrusionMethod.FACE_OFFSET, ExtrusionMethod.NODE_OFFSET]
@@ -1419,7 +1427,7 @@ def test_unsmoothed_layers_on_two_adjacent_walls_stop_short_with_a_warning(
     assert (warning.kind, warning.ordinal) == (ps.SubShapeKind.SOLID, 1)
     head = f"Thickness {total:g} of viscous layers not reached, "
     assert warning.text.startswith(head + "average reached thickness is ")
-    reached = float(warning.text.rsplit(" ", 1)[1])
+    reached = _reached_thickness(warning.text)
     assert 0.0 < reached < total
     depth = np.minimum(layer_xyz[:, 0], layer_xyz[:, 1])
     assert float(depth.max()) <= total + TOL
@@ -1466,7 +1474,7 @@ def test_layers_in_a_narrow_gap_stop_at_half_of_it_with_a_warning(
     assert (warning.kind, warning.ordinal) == (ps.SubShapeKind.SOLID, 1)
     head = f"Thickness {total:g} of viscous layers not reached, "
     assert warning.text.startswith(head + "average reached thickness is ")
-    assert 0.0 < float(warning.text.rsplit(" ", 1)[1]) <= gap / 2
+    assert 0.0 < _reached_thickness(warning.text) <= gap / 2
     rows = [
         r for r in range(mesh.element_count) if int(mesh.element_id[r]) in layer_ids
     ]

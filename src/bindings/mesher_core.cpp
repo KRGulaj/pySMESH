@@ -12,6 +12,7 @@
 #include "compute_thread.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <chrono>
 #include <cstdio>
@@ -20,10 +21,20 @@
 #include <set>
 #include <utility>
 
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepBndLib.hxx>
+#include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
+#include <GeomAPI_ProjectPointOnSurf.hxx>
+#include <GeomLProp_SLProps.hxx>
+#include <Geom_Surface.hxx>
+#include <Precision.hxx>
 #include <SMDS_ElemIterator.hxx>
 #include <SMDS_MeshNode.hxx>
 #include <SMDS_MeshElement.hxx>
+#include <SMDS_VolumeTool.hxx>
 #include <SMESHDS_Mesh.hxx>
+#include <SMESHDS_SubMesh.hxx>
 #include <SMESH_Algo.hxx>
 #include <SMESH_ComputeError.hxx>
 #include <SMESH_Gen.hxx>
@@ -33,8 +44,15 @@
 #include <SMESH_subMesh.hxx>
 #include <StdMeshers_ViscousLayers.hxx>
 #include <StdMeshers_ViscousLayers2D.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Face.hxx>
+#include <gp_Dir.hxx>
+#include <gp_Pln.hxx>
+#include <gp_Pnt.hxx>
+#include <gp_XYZ.hxx>
 
 namespace pysmesh {
 
@@ -857,6 +875,794 @@ std::string Mesher::with_ordinals(const std::string& text) const {
   return out;
 }
 
+std::string Mesher::layer_heights_text(const TopoDS_Shape& solid) const {
+  // StdMeshers_ViscousLayers stops the stack of the whole solid when it cannot grow at one
+  // place (_ViscousBuilder::inflate, StdMeshers_ViscousLayers.cxx:4986-4992) and only warns
+  // "Thickness ... of viscous layers not reached, average reached thickness is ...". The
+  // average names no place. The stack height reached at each wall node is the length of
+  // its column of layer elements: the lateral edges of the prisms (hexahedra on a quad
+  // wall) that start at the node, followed for the layer count. The lowest per wall face
+  // shows where the stack stopped.
+  SMESH_HypoFilter filter(SMESH_HypoFilter::HasName("ViscousLayers"));
+  std::list<const SMESHDS_Hypothesis*> found;
+  mesh_->GetHypotheses(solid, filter, found, /*andAncestors=*/true);
+  TopTools_IndexedMapOfShape faces;
+  TopExp::MapShapes(solid, TopAbs_FACE, faces);
+  std::set<int> walls;  // SMESHDS indices of the faces that carry layers
+  int layers = 0;
+  for (const SMESHDS_Hypothesis* h : found) {
+    const auto* vl = dynamic_cast<const StdMeshers_ViscousLayers*>(h);
+    if (vl == nullptr) {
+      continue;
+    }
+    layers = std::max(layers, vl->GetNumberLayers());
+    const std::vector<int> listed = vl->GetBndShapes();
+    for (int i = 1; i <= faces.Extent(); ++i) {
+      const int index = meshDS_->ShapeToIndex(faces.FindKey(i));
+      const bool named = std::find(listed.begin(), listed.end(), index) != listed.end();
+      if (named != vl->IsToIgnoreShapes()) {
+        walls.insert(index);
+      }
+    }
+  }
+  if (walls.empty() || layers <= 0) {
+    return std::string();
+  }
+  // Each wall node with the wall faces it lies on (on a face, or on its edges and vertices).
+  std::map<const SMDS_MeshNode*, std::set<int>> wall_nodes;
+  for (const int wall : walls) {
+    TopTools_IndexedMapOfShape parts;
+    TopExp::MapShapes(meshDS_->IndexToShape(wall), parts);
+    for (int i = 1; i <= parts.Extent(); ++i) {
+      const SMESHDS_SubMesh* held = meshDS_->MeshElements(parts.FindKey(i));
+      if (held == nullptr) {
+        continue;
+      }
+      for (SMDS_NodeIteratorPtr it = held->GetNodes(); it->more();) {
+        wall_nodes[it->next()].insert(wall);
+      }
+    }
+  }
+  // The lateral edges of the layer elements: prism (0,3) (1,4) (2,5), hexahedron (0,4)
+  // (1,5) (2,6) (3,7), corner nodes in SMDS order.
+  std::map<const SMDS_MeshNode*, std::vector<const SMDS_MeshNode*>> lateral;
+  if (const SMESHDS_SubMesh* held = meshDS_->MeshElements(solid)) {
+    std::vector<const SMDS_MeshNode*> corner;
+    for (SMDS_ElemIteratorPtr it = held->GetElements(); it->more();) {
+      const SMDS_MeshElement* v = it->next();
+      const int n = v->GetType() == SMDSAbs_Volume && !v->IsPoly() ? v->NbCornerNodes() : 0;
+      if (n != 6 && n != 8) {
+        continue;
+      }
+      corner.clear();
+      for (SMDS_NodeIteratorPtr nodes = v->nodeIterator();
+           nodes->more() && static_cast<int>(corner.size()) < n;) {
+        corner.push_back(nodes->next());
+      }
+      for (int i = 0; i < n / 2; ++i) {
+        lateral[corner[i]].push_back(corner[i + n / 2]);
+        lateral[corner[i + n / 2]].push_back(corner[i]);
+      }
+    }
+  }
+  struct Lowest {
+    double height;
+    const SMDS_MeshNode* at;
+  };
+  std::map<int, Lowest> lowest;  // wall face index -> its lowest stack
+  const auto xyz = [](const SMDS_MeshNode* n) { return gp_Pnt(n->X(), n->Y(), n->Z()); };
+  for (const auto& wall_node : wall_nodes) {
+    const SMDS_MeshNode* start = wall_node.first;
+    if (lateral.count(start) == 0) {
+      continue;
+    }
+    // Up the column: from each node to a lateral neighbour that is not the one below and
+    // not a wall node, for the layer count.
+    double height = 0.0;
+    const SMDS_MeshNode* below = nullptr;
+    const SMDS_MeshNode* here = start;
+    for (int step = 0; step < layers; ++step) {
+      const SMDS_MeshNode* next = nullptr;
+      for (const SMDS_MeshNode* candidate : lateral[here]) {
+        if (candidate != below && wall_nodes.count(candidate) == 0) {
+          next = candidate;
+          break;
+        }
+      }
+      if (next == nullptr) {
+        break;
+      }
+      height += xyz(here).Distance(xyz(next));
+      below = here;
+      here = next;
+    }
+    if (here == start) {
+      continue;
+    }
+    for (const int wall : wall_node.second) {
+      const auto at = lowest.find(wall);
+      if (at == lowest.end() || height < at->second.height) {
+        lowest[wall] = {height, start};
+      }
+    }
+  }
+  if (lowest.empty()) {
+    return std::string();
+  }
+  std::vector<std::pair<double, int>> order;
+  for (const auto& l : lowest) {
+    order.push_back({l.second.height, l.first});
+  }
+  std::sort(order.begin(), order.end());
+  constexpr std::size_t kListed = 5;
+  std::string text = "; the stack reached its least height on ";
+  for (std::size_t i = 0; i < order.size() && i < kListed; ++i) {
+    const Lowest& l = lowest[order[i].second];
+    char buf[160];
+    std::snprintf(buf, sizeof(buf), "FACE %d: %.6g at (%.6g, %.6g, %.6g)",
+                  ordinal_of_shape_index(order[i].second).second, l.height, l.at->X(),
+                  l.at->Y(), l.at->Z());
+    text += std::string(i == 0 ? "" : "; ") + buf;
+  }
+  return text + " (the lowest stack per layered face, lowest first, at most 5). The stack "
+                "stops for the whole solid when it cannot grow at one place, so the "
+                "lowest face is where to look";
+}
+
+void Mesher::refuse_netgen_faces_with_unmeshed_degenerate_edges() const {
+  // NETGENPlugin builds NETGEN's input from the edges SMESH meshed before it
+  // (NETGENPlugin_Mesher.cxx, FillNgMesh), and skips degenerate edges there. A face of
+  // revolution whose seam a 1-D algorithm meshed and whose degenerate pole edges were left
+  // to NETGEN ended the process with an access violation inside NETGENPlugin, in 2 to 3
+  // runs of 3 to 5; the outcome moved with the stack layout, so it is a read of invalid
+  // memory. With the poles meshed by a 1-D algorithm too, or with no 1-D algorithm on any
+  // edge, the face meshed every time. So that one mix is refused before SMESH runs.
+  const auto edge_algorithm = [this](const TopoDS_Shape& edge) -> const SMESH_Algo* {
+    SMESH_subMesh* sub = mesh_->GetSubMeshContaining(edge);
+    const SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
+    return algo != nullptr && algo->GetDim() == 1 ? algo : nullptr;
+  };
+  const auto list_of = [](const std::vector<int>& ordinals) {
+    std::string text;
+    for (const int o : ordinals) {
+      text += (text.empty() ? "" : ", ") + std::to_string(o);
+    }
+    return text;
+  };
+  std::set<int> checked;
+  for (TopExp_Explorer ex(data_->shape, TopAbs_FACE); ex.More(); ex.Next()) {
+    const int face = ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current())).second;
+    SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
+    const SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
+    const std::string name = algo != nullptr && algo->GetName() != nullptr ? algo->GetName()
+                                                                            : "";
+    if ((name != "NETGEN_2D" && name != "NETGEN_2D_ONLY") || face <= 0 ||
+        !checked.insert(face).second) {
+      continue;
+    }
+    std::vector<int> bare_poles;
+    std::vector<int> meshed_by_1d;
+    std::string one_d;
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(ex.Current(), TopAbs_EDGE, edges);
+    for (int i = 1; i <= edges.Extent(); ++i) {
+      const TopoDS_Edge& edge = TopoDS::Edge(edges.FindKey(i));
+      const int ordinal = ordinal_of_shape_index(meshDS_->ShapeToIndex(edge)).second;
+      const SMESH_Algo* own = edge_algorithm(edge);
+      if (BRep_Tool::Degenerated(edge)) {
+        const SMESHDS_SubMesh* held = meshDS_->MeshElements(edge);
+        const bool has_mesh = held != nullptr && (held->NbElements() > 0 || held->NbNodes() > 0);
+        if (own == nullptr && !has_mesh) {
+          bare_poles.push_back(ordinal);
+        }
+      } else if (own != nullptr) {
+        meshed_by_1d.push_back(ordinal);
+        one_d = own->GetName() != nullptr ? own->GetName() : "";
+      }
+    }
+    if (bare_poles.empty() || meshed_by_1d.empty()) {
+      continue;
+    }
+    throw PysmeshError(
+        "Mesher.compute: FACE " + std::to_string(face) + ", meshed by " + name +
+            ", has degenerate EDGE " + list_of(bare_poles) +
+            " with no mesh and no 1-D algorithm, while its EDGE " + list_of(meshed_by_1d) +
+            " has a 1-D algorithm of its own (" + one_d +
+            "). NETGENPlugin reads invalid memory on such a face and can end the process, "
+            "so nothing was computed.",
+        "Give the degenerate EDGE " + list_of(bare_poles) +
+            " a 1-D algorithm as well (Regular1D with a 1-D hypothesis on them), or remove "
+            "the 1-D algorithm from EDGE " + list_of(meshed_by_1d) +
+            " so that NETGEN meshes every edge of FACE " + std::to_string(face) +
+            ". Either way the face meshes; only this mix fails.",
+        {face});
+  }
+}
+
+std::string Mesher::injected_face_orientation(const TopoDS_Face& face) const {
+  const SMESHDS_SubMesh* held = meshDS_->MeshElements(face);
+  if (held == nullptr || held->NbElements() == 0) {
+    return std::string();
+  }
+  std::vector<const SMDS_MeshElement*> elements;
+  for (SMDS_ElemIteratorPtr it = held->GetElements(); it->more();) {
+    const SMDS_MeshElement* e = it->next();
+    if (e->GetType() == SMDSAbs_Face && e->NbCornerNodes() >= 3) {
+      elements.push_back(e);
+    }
+  }
+  // Orientation is consistent when the two elements at an inner edge run it in opposite
+  // directions. Edge key: (smaller id, larger id); value: the first direction and the
+  // first element's index, so that elements joined by an edge form connected parts.
+  std::map<std::pair<smIdType, smIdType>, std::pair<bool, std::size_t>> runs;
+  std::vector<std::size_t> part(elements.size());
+  for (std::size_t i = 0; i < part.size(); ++i) {
+    part[i] = i;
+  }
+  const auto find = [&part](std::size_t a) {
+    while (part[a] != a) {
+      part[a] = part[part[a]];
+      a = part[a];
+    }
+    return a;
+  };
+  std::size_t same_way = 0;
+  for (std::size_t i = 0; i < elements.size(); ++i) {
+    const SMDS_MeshElement* e = elements[i];
+    const int n = e->NbCornerNodes();
+    for (int k = 0; k < n; ++k) {
+      const smIdType a = e->GetNode(k)->GetID();
+      const smIdType b = e->GetNode((k + 1) % n)->GetID();
+      const auto key = std::make_pair(std::min(a, b), std::max(a, b));
+      const auto found = runs.emplace(key, std::make_pair(a < b, i));
+      if (found.second) {
+        continue;
+      }
+      same_way += found.first->second.first == (a < b) ? 1 : 0;
+      const std::size_t p = find(i);
+      const std::size_t q = find(found.first->second.second);
+      if (p != q) {
+        part[p] = q;
+      }
+    }
+  }
+  if (same_way > 0) {
+    return "mixed: " + std::to_string(same_way) +
+           " of its inner edges are run the same way by both of their elements";
+  }
+
+  // Each connected part has one orientation; its sign is the area-weighted vote of its
+  // elements' normals against the face's outward normal at their centroids. A vote, not
+  // one element, so that a few folded elements do not decide it. On a curved face the
+  // normal needs a projection, so up to kSampled elements per part vote there.
+  constexpr std::size_t kSampled = 64;
+  const BRepAdaptor_Surface surface(face, /*Restriction=*/false);
+  const bool planar = surface.GetType() == GeomAbs_Plane;
+  const bool reversed_face = face.Orientation() == TopAbs_REVERSED;
+  const Handle(Geom_Surface) geometry = BRep_Tool::Surface(face);
+  std::map<std::size_t, std::vector<std::size_t>> parts;
+  for (std::size_t i = 0; i < elements.size(); ++i) {
+    parts[find(i)].push_back(i);
+  }
+  std::size_t inward = 0;
+  for (const auto& p : parts) {
+    const std::vector<std::size_t>& members = p.second;
+    const std::size_t step = std::max<std::size_t>(1, members.size() / kSampled);
+    double vote = 0.0;
+    for (std::size_t j = 0; j < members.size(); j += planar ? 1 : step) {
+      const SMDS_MeshElement* e = elements[members[j]];
+      const int n = e->NbCornerNodes();
+      gp_XYZ area(0.0, 0.0, 0.0);
+      gp_XYZ centre(0.0, 0.0, 0.0);
+      for (int k = 0; k < n; ++k) {
+        const SMDS_MeshNode* a = e->GetNode(k);
+        const SMDS_MeshNode* b = e->GetNode((k + 1) % n);
+        area += gp_XYZ(a->X(), a->Y(), a->Z()).Crossed(gp_XYZ(b->X(), b->Y(), b->Z()));
+        centre += gp_XYZ(a->X(), a->Y(), a->Z());
+      }
+      gp_Dir normal;
+      if (planar) {
+        normal = surface.Plane().Axis().Direction();
+      } else {
+        GeomAPI_ProjectPointOnSurf projection(gp_Pnt(centre / n), geometry);
+        if (projection.NbPoints() == 0) {
+          continue;
+        }
+        double u = 0.0, v = 0.0;
+        projection.LowerDistanceParameters(u, v);
+        GeomLProp_SLProps props(geometry, u, v, 1, Precision::Confusion());
+        if (!props.IsNormalDefined()) {
+          continue;
+        }
+        normal = props.Normal();
+      }
+      vote += 0.5 * area.Dot(normal.XYZ()) * (reversed_face ? -1.0 : 1.0);
+    }
+    inward += vote < 0.0 ? 1 : 0;
+  }
+  if (inward == 0) {
+    return std::string();
+  }
+  if (inward < parts.size()) {
+    return "mixed: " + std::to_string(inward) + " of its " + std::to_string(parts.size()) +
+           " connected parts point into the solid";
+  }
+  return "reversed: its elements point into the solid";
+}
+
+void Mesher::refuse_misoriented_injected_faces() const {
+  // NETGENPlugin_NETGEN_3D passes the elements on the faces of a solid to NETGEN as they
+  // are (NETGENPlugin_NETGEN_3D.cxx:380), and NETGEN needs each to point out of the solid.
+  // It reverses a face itself only when the meshed shape is a compound or a compsolid and
+  // the face is not internal and bounds more than one solid (:227-239); such a face must
+  // only be consistent. An internal face goes to NETGEN in both orientations. A face
+  // reversed whole gave "Some edges multiple times in surface mesh", every face reversed
+  // "Stop meshing since too many attempts". A face that holds elements before the compute
+  // keeps them, as UseExisting_2D does, so every such face of a NETGEN_3D solid is checked.
+  const TopAbs_ShapeEnum main_type = mesh_->GetShapeToMesh().ShapeType();
+  const bool shared_may_flip = main_type == TopAbs_COMPOUND || main_type == TopAbs_COMPSOLID;
+  std::vector<std::string> named;
+  std::vector<int> faces;
+  std::set<std::pair<int, int>> checked;
+  for (TopExp_Explorer solid(data_->shape, TopAbs_SOLID); solid.More(); solid.Next()) {
+    SMESH_subMesh* sub = mesh_->GetSubMeshContaining(solid.Current());
+    const SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
+    if (algo == nullptr || algo->GetName() == nullptr ||
+        std::string(algo->GetName()) != "NETGEN_3D") {
+      continue;
+    }
+    const int solid_ordinal =
+        ordinal_of_shape_index(meshDS_->ShapeToIndex(solid.Current())).second;
+    for (TopExp_Explorer ex(solid.Current(), TopAbs_FACE); ex.More(); ex.Next()) {
+      const TopoDS_Face& face = TopoDS::Face(ex.Current());
+      const int ordinal = ordinal_of_shape_index(meshDS_->ShapeToIndex(face)).second;
+      if (face.Orientation() == TopAbs_INTERNAL || ordinal <= 0 ||
+          !checked.insert({solid_ordinal, ordinal}).second) {
+        continue;
+      }
+      std::string why = injected_face_orientation(face);
+      int solids_around = 0;
+      for (const TopoDS_Shape& above : mesh_->GetAncestors(face)) {
+        solids_around += above.ShapeType() == TopAbs_SOLID ? 1 : 0;
+      }
+      if (shared_may_flip && solids_around > 1 && why.rfind("reversed", 0) == 0) {
+        continue;  // NETGENPlugin reverses this face for this solid itself
+      }
+      if (why.empty()) {
+        continue;
+      }
+      named.push_back("FACE " + std::to_string(ordinal) + " of SOLID " +
+                      std::to_string(solid_ordinal) + " (" + why + ")");
+      if (std::find(faces.begin(), faces.end(), ordinal) == faces.end()) {
+        faces.push_back(ordinal);
+      }
+    }
+  }
+  if (named.empty()) {
+    return;
+  }
+  std::string list;
+  for (const std::string& n : named) {
+    list += (list.empty() ? "" : ", ") + n;
+  }
+  throw PysmeshError(
+      "Mesher.compute: NETGEN_3D would read " + std::to_string(named.size()) +
+          " face(s) whose existing elements do not all point out of their solid: " + list +
+          ". Nothing was computed.",
+      "NETGEN_3D passes the elements on a face to NETGEN as they are, and NETGEN needs each "
+      "boundary element to point out of the solid: its node order turns about the outward "
+      "normal by the right-hand rule. A reversed face makes NETGEN fail with \"Some edges "
+      "multiple times in surface mesh\", every face reversed with \"Stop meshing since too "
+      "many attempts\". Reverse the node order of the elements of the named faces, or of "
+      "their reversed part. A face that two solids of a compound share needs one "
+      "orientation only: NETGENPlugin reverses it for one of them.",
+      faces);
+}
+
+Mesher::OpenFront Mesher::open_front(const TopoDS_Shape& solid) const {
+  // A face is keyed by its corner node ids, sorted, so that the face of one volume and the
+  // same face of its neighbour, or of a boundary element, compare equal whatever their node
+  // order. Up to 4 corners fit an array, padded with -1; a face with more corners (of a
+  // polyhedron or a polygon) goes to a map of its own.
+  using Key = std::array<smIdType, 4>;
+  const auto key_of = [](const std::vector<smIdType>& ids) {
+    Key key{-1, -1, -1, -1};
+    std::copy(ids.begin(), ids.end(), key.begin());
+    std::sort(key.begin(), key.begin() + static_cast<std::ptrdiff_t>(ids.size()));
+    return key;
+  };
+  std::vector<smIdType> ids;
+
+  // The boundary: every 2-D element on a face of the solid.
+  std::vector<Key> boundary;
+  std::set<std::vector<smIdType>> boundary_wide;
+  std::vector<const SMDS_MeshElement*> boundary_elements;
+  TopTools_IndexedMapOfShape faces;
+  TopExp::MapShapes(solid, TopAbs_FACE, faces);
+  for (int i = 1; i <= faces.Extent(); ++i) {
+    const SMESHDS_SubMesh* held = meshDS_->MeshElements(faces.FindKey(i));
+    if (held == nullptr) {
+      continue;
+    }
+    for (SMDS_ElemIteratorPtr it = held->GetElements(); it->more();) {
+      const SMDS_MeshElement* e = it->next();
+      if (e->GetType() != SMDSAbs_Face) {
+        continue;
+      }
+      ids.clear();
+      for (int k = 0; k < e->NbCornerNodes(); ++k) {
+        ids.push_back(e->GetNode(k)->GetID());
+      }
+      boundary_elements.push_back(e);
+      if (ids.size() <= 4) {
+        boundary.push_back(key_of(ids));
+      } else {
+        std::sort(ids.begin(), ids.end());
+        boundary_wide.insert(ids);
+      }
+    }
+  }
+  std::sort(boundary.begin(), boundary.end());
+
+  // Every face of every volume element of the solid, with the element and the face index
+  // that give its nodes back.
+  struct VolumeFace {
+    Key key;
+    const SMDS_MeshElement* volume;
+    int face;
+  };
+  std::vector<VolumeFace> volume_faces;
+  std::map<std::vector<smIdType>, std::pair<int, VolumeFace>> wide_faces;
+  std::size_t volumes = 0;
+  // The corner nodes of face `f` of volume `v`, whose corners load_corners(v) read. SMDS
+  // stores the corner nodes of a quadratic cell first, so the face table of its linear
+  // type indexes them. Each node read asks the VTK grid for the whole cell, so the corners
+  // are read once per volume; only a polyhedron needs the volume tool. Measured on 207 632
+  // tetrahedra, the whole search: 0.52 s with the volume tool on every cell, 0.30 s with
+  // the tables.
+  SMDS_VolumeTool tool;
+  std::vector<const SMDS_MeshNode*> corner;
+  std::vector<const SMDS_MeshNode*> face_nodes;
+  const auto load_corners = [&corner](const SMDS_MeshElement* v) {
+    corner.clear();
+    const std::size_t count = static_cast<std::size_t>(v->NbCornerNodes());
+    for (SMDS_NodeIteratorPtr it = v->nodeIterator(); it->more() && corner.size() < count;) {
+      corner.push_back(it->next());
+    }
+  };
+  const auto face_of = [&](const SMDS_MeshElement* v, int f) {
+    face_nodes.clear();
+    if (v->IsPoly()) {
+      tool.Set(v);
+      const SMDS_MeshNode* const* nodes = tool.GetFaceNodes(f);
+      for (int i = 0; i < tool.NbFaceNodes(f); ++i) {
+        if (!v->IsMediumNode(nodes[i])) {
+          face_nodes.push_back(nodes[i]);
+        }
+      }
+      return;
+    }
+    const SMDS_VolumeTool::VolumeType type = SMDS_VolumeTool::GetType(v->NbCornerNodes());
+    const int* index = SMDS_VolumeTool::GetFaceNodesIndices(type, f, /*external=*/false);
+    for (int i = 0; i < SMDS_VolumeTool::NbFaceNodes(type, f); ++i) {
+      face_nodes.push_back(corner[static_cast<std::size_t>(index[i])]);
+    }
+  };
+  const auto face_count = [&tool](const SMDS_MeshElement* v) {
+    if (v->IsPoly()) {
+      return tool.Set(v) ? tool.NbFaces() : 0;
+    }
+    const SMDS_VolumeTool::VolumeType type = SMDS_VolumeTool::GetType(v->NbCornerNodes());
+    return type == SMDS_VolumeTool::UNKNOWN ? 0 : SMDS_VolumeTool::NbFaces(type);
+  };
+  if (const SMESHDS_SubMesh* held = meshDS_->MeshElements(solid)) {
+    volume_faces.reserve(4 * static_cast<std::size_t>(held->NbElements()));
+    for (SMDS_ElemIteratorPtr it = held->GetElements(); it->more();) {
+      const SMDS_MeshElement* v = it->next();
+      const int nb_faces = v->GetType() == SMDSAbs_Volume ? face_count(v) : 0;
+      if (nb_faces == 0) {
+        continue;
+      }
+      ++volumes;
+      load_corners(v);
+      for (int f = 0; f < nb_faces; ++f) {
+        face_of(v, f);
+        ids.clear();
+        for (const SMDS_MeshNode* n : face_nodes) {
+          ids.push_back(n->GetID());
+        }
+        if (ids.size() <= 4) {
+          volume_faces.push_back({key_of(ids), v, f});
+        } else {
+          std::sort(ids.begin(), ids.end());
+          auto& seen = wide_faces[ids];
+          seen.first += 1;
+          seen.second = {Key{}, v, f};
+        }
+      }
+    }
+  }
+  std::sort(volume_faces.begin(), volume_faces.end(),
+            [](const VolumeFace& a, const VolumeFace& b) { return a.key < b.key; });
+
+  // The open faces, each as its corner nodes.
+  std::vector<std::vector<const SMDS_MeshNode*>> open;
+  const auto add_volume_face = [&](const VolumeFace& vf) {
+    load_corners(vf.volume);
+    face_of(vf.volume, vf.face);
+    open.push_back(face_nodes);
+  };
+  OpenFront front;
+  if (volumes == 0) {
+    // NETGEN kept no volume element, so its front at the stop is the whole boundary.
+    front.no_volume = true;
+    std::set<std::vector<smIdType>> seen;
+    for (const SMDS_MeshElement* e : boundary_elements) {
+      std::vector<const SMDS_MeshNode*> face;
+      std::vector<smIdType> key;
+      for (int i = 0; i < e->NbCornerNodes(); ++i) {
+        face.push_back(e->GetNode(i));
+        key.push_back(e->GetNode(i)->GetID());
+      }
+      std::sort(key.begin(), key.end());
+      if (seen.insert(key).second) {
+        open.push_back(face);
+      }
+    }
+  } else {
+    for (std::size_t i = 0; i < volume_faces.size();) {
+      std::size_t j = i + 1;
+      while (j < volume_faces.size() && volume_faces[j].key == volume_faces[i].key) {
+        ++j;
+      }
+      if (j == i + 1 &&
+          !std::binary_search(boundary.begin(), boundary.end(), volume_faces[i].key)) {
+        add_volume_face(volume_faces[i]);
+      }
+      i = j;
+    }
+    for (const auto& wide : wide_faces) {
+      if (wide.second.first == 1 && boundary_wide.count(wide.first) == 0) {
+        add_volume_face(wide.second.second);
+      }
+    }
+  }
+  front.faces = open.size();
+  if (open.empty()) {
+    return front;
+  }
+
+  // Patches: open faces joined by a shared node (union-find over the faces).
+  std::vector<std::size_t> parent(open.size());
+  for (std::size_t i = 0; i < parent.size(); ++i) {
+    parent[i] = i;
+  }
+  const auto find = [&parent](std::size_t a) {
+    while (parent[a] != a) {
+      parent[a] = parent[parent[a]];
+      a = parent[a];
+    }
+    return a;
+  };
+  std::map<const SMDS_MeshNode*, std::size_t> first_face;
+  for (std::size_t i = 0; i < open.size(); ++i) {
+    double c[3] = {0.0, 0.0, 0.0};
+    for (const SMDS_MeshNode* n : open[i]) {
+      c[0] += n->X();
+      c[1] += n->Y();
+      c[2] += n->Z();
+      const auto at = first_face.emplace(n, i).first;
+      const std::size_t a = find(i);
+      const std::size_t b = find(at->second);
+      if (a != b) {
+        parent[a] = b;
+      }
+    }
+    for (double& v : c) {
+      v /= static_cast<double>(open[i].size());
+    }
+    front.centroids.insert(front.centroids.end(), c, c + 3);
+  }
+  std::map<std::size_t, Patch> patches;
+  for (std::size_t i = 0; i < open.size(); ++i) {
+    Patch& p = patches[find(i)];
+    p.faces += 1;
+    for (const SMDS_MeshNode* n : open[i]) {
+      const double xyz[3] = {n->X(), n->Y(), n->Z()};
+      for (int d = 0; d < 3; ++d) {
+        p.low[d] = std::min(p.low[d], xyz[d]);
+        p.high[d] = std::max(p.high[d], xyz[d]);
+      }
+    }
+  }
+  for (const auto& p : patches) {
+    front.patches.push_back(p.second);
+  }
+  std::stable_sort(front.patches.begin(), front.patches.end(),
+                   [](const Patch& a, const Patch& b) { return a.faces > b.faces; });
+  return front;
+}
+
+std::string Mesher::open_front_text(const OpenFront& front) {
+  constexpr std::size_t kListed = 5;
+  const auto point = [](const double* xyz) {
+    char buf[96];
+    std::snprintf(buf, sizeof(buf), "(%.6g, %.6g, %.6g)", xyz[0], xyz[1], xyz[2]);
+    return std::string(buf);
+  };
+  std::string text = "; open front of the kept mesh: " + std::to_string(front.faces) +
+                     " face(s) in " + std::to_string(front.patches.size()) + " patch(es)";
+  if (front.no_volume) {
+    text += " (NETGEN kept no volume element, so the whole boundary is open)";
+  }
+  text += ", the box of the " + std::to_string(std::min(front.patches.size(), kListed)) +
+          " largest: ";
+  for (std::size_t i = 0; i < front.patches.size() && i < kListed; ++i) {
+    const Patch& p = front.patches[i];
+    text += std::string(i == 0 ? "" : ", ") + std::to_string(p.faces) + " face(s) in " +
+            point(p.low) + " to " + point(p.high);
+  }
+  return text;
+}
+
+std::string Mesher::netgen_face_sizes(const TopoDS_Shape& face, int ordinal,
+                                      const SMESH_Algo& algo) const {
+  // NETGEN's surface mesher throws "Problem in Surface mesh generation" and drops the
+  // reason (occgenmesh.cpp:935-957). The usual one: the face's edges were meshed before it,
+  // by a neighbour with a coarser size, and their segments are longer than the face is
+  // wide, so the 2-D front cannot grade down from them inside the face. Three numbers show
+  // it: the longest segment already on the face's edges, the smallest extent of the face's
+  // box, and the size the face's hypothesis asks for.
+  double longest = 0.0;
+  std::size_t segments = 0;
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(face, TopAbs_EDGE, edges);
+  for (int i = 1; i <= edges.Extent(); ++i) {
+    const SMESHDS_SubMesh* held = meshDS_->MeshElements(edges.FindKey(i));
+    if (held == nullptr) {
+      continue;
+    }
+    for (SMDS_ElemIteratorPtr it = held->GetElements(); it->more();) {
+      const SMDS_MeshElement* segment = it->next();
+      if (segment->GetType() != SMDSAbs_Edge || segment->NbCornerNodes() != 2) {
+        continue;
+      }
+      const SMDS_MeshNode* a = segment->GetNode(0);
+      const SMDS_MeshNode* b = segment->GetNode(1);
+      longest = std::max(longest, gp_Pnt(a->X(), a->Y(), a->Z())
+                                      .Distance(gp_Pnt(b->X(), b->Y(), b->Z())));
+      ++segments;
+    }
+  }
+  // The box of the geometry, as Session.bounding_boxes computes it. A plane face along an
+  // axis has an extent of zero across itself, so only extents above the confusion count.
+  Bnd_Box box;
+  BRepBndLib::AddOptimal(face, box, /*useTriangulation=*/false, /*useShapeTolerance=*/false);
+  double extent = RealLast();
+  if (!box.IsVoid()) {
+    double lo[3], hi[3];
+    box.Get(lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]);
+    for (int d = 0; d < 3; ++d) {
+      if (hi[d] - lo[d] > Precision::Confusion()) {
+        extent = std::min(extent, hi[d] - lo[d]);
+      }
+    }
+  }
+  const double asked =
+      netgen_size_asked(*mesh_, algo, face, "FACE:" + std::to_string(ordinal));
+  const auto number = [](double v) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.6g", v);
+    return std::string(buf);
+  };
+  std::string text = "; longest segment on its edges ";
+  text += segments == 0 ? std::string("none (no edge was meshed)") : number(longest);
+  text += ", smallest extent of its box " +
+          (extent < RealLast() ? number(extent) : std::string("none"));
+  text += ", size its hypothesis asks for " +
+          (asked > 0.0 ? number(asked) : std::string("none (NETGEN's default)"));
+  if (segments > 0 && extent < RealLast() && longest > extent) {
+    text += ". The edges of this face were meshed coarser than the face can take, before "
+            "it: explicit segment counts on its edges (Regular1D with NumberOfSegments) "
+            "avoid it";
+  }
+  return text;
+}
+
+std::string Mesher::prism_side_face_cause(const TopoDS_Shape& solid) const {
+  // Prism_3D sweeps quadrangles through the side faces of its solid, and refuses a solid
+  // with more than two faces that hold anything else: "More than 2 faces with not
+  // quadrangle elements" (StdMeshers_Prism_3D.cxx). A 2-D algorithm that reaches a side
+  // face, a global one included, meshes that face with triangles before Prism_3D runs.
+  // When the Prism_3D solid is computed after a solid that shares a face with it, SMESH
+  // cleans those triangles and the error text again, and the compute fails with no text.
+  // So a face counts when it holds an element that is not a quadrangle, or when its 2-D
+  // algorithm makes triangles.
+  SMESH_subMesh* sub = mesh_->GetSubMeshContaining(solid);
+  const SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
+  if (algo == nullptr || algo->GetName() == nullptr ||
+      std::string(algo->GetName()) != "Prism_3D") {
+    return std::string();
+  }
+  static const std::set<std::string> kTriangleMakers = {"NETGEN_2D", "NETGEN_2D_ONLY",
+                                                        "MEFISTO_2D"};
+  std::set<int> faces;
+  std::set<std::string> makers;
+  TopTools_IndexedMapOfShape solid_faces;
+  TopExp::MapShapes(solid, TopAbs_FACE, solid_faces);
+  for (int i = 1; i <= solid_faces.Extent(); ++i) {
+    const TopoDS_Shape& face = solid_faces.FindKey(i);
+    SMESH_subMesh* face_sub = mesh_->GetSubMeshContaining(face);
+    const SMESH_Algo* face_algo = face_sub != nullptr ? face_sub->GetAlgo() : nullptr;
+    const std::string maker =
+        face_algo != nullptr && face_algo->GetName() != nullptr ? face_algo->GetName() : "";
+    bool not_quadrangles = false;
+    if (const SMESHDS_SubMesh* held = meshDS_->MeshElements(face)) {
+      for (SMDS_ElemIteratorPtr it = held->GetElements(); it->more() && !not_quadrangles;) {
+        not_quadrangles = it->next()->NbCornerNodes() != 4;
+      }
+    }
+    if (!not_quadrangles && kTriangleMakers.count(maker) == 0) {
+      continue;
+    }
+    const int ordinal = ordinal_of_shape_index(meshDS_->ShapeToIndex(face)).second;
+    if (ordinal > 0) {
+      faces.insert(ordinal);
+    }
+    if (!maker.empty()) {
+      makers.insert(maker);
+    }
+  }
+  if (faces.size() <= 2) {
+    return std::string();
+  }
+  std::string face_list;
+  for (const int f : faces) {
+    face_list += (face_list.empty() ? "" : ", ") + std::to_string(f);
+  }
+  std::string maker_list;
+  for (const std::string& m : makers) {
+    maker_list += (maker_list.empty() ? "" : " and ") + m;
+  }
+  return ". Prism_3D needs quadrangles on every face but its source and its target, and " +
+         std::to_string(faces.size()) + " faces of this solid (FACE " + face_list +
+         ") take triangles" + (maker_list.empty() ? "" : " from " + maker_list) +
+         ": a 2-D algorithm that reaches a side face, a global one included, meshes it "
+         "before Prism_3D runs. Assign Quadrangle2D on the side faces, with Regular1D and a "
+         "1-D hypothesis on their edges";
+}
+
+std::string Mesher::with_shrink_face_ordinals(const std::string& text,
+                                              std::vector<int>& faces) const {
+  // StdMeshers_ViscousLayers names the face it could not shrink by its SMESHDS shape index:
+  // "Can't shrink 2D mesh on face <index>" and "Infinite loop at shrinking 2D mesh on face
+  // <index>" (StdMeshers_ViscousLayers.cxx:11644-11647). That index counts every sub-shape
+  // of every kind, so it reads as a face ordinal that the model does not have.
+  static const std::string kPhrase = "2D mesh on face ";
+  std::string out;
+  std::size_t from = 0;
+  for (std::size_t at = text.find(kPhrase); at != std::string::npos;
+       at = text.find(kPhrase, from)) {
+    const std::size_t digits = at + kPhrase.size();
+    std::size_t end = digits;
+    while (end < text.size() && std::isdigit(static_cast<unsigned char>(text[end]))) {
+      ++end;
+    }
+    const std::pair<const char*, int> face =
+        end > digits && end - digits <= 9
+            ? ordinal_of_shape_index(std::stoi(text.substr(digits, end - digits)))
+            : std::pair<const char*, int>{"", 0};
+    if (std::string(face.first) == "FACE") {
+      out += text.substr(from, at - from) + "2D mesh on FACE " + std::to_string(face.second);
+      faces.push_back(face.second);
+    } else {
+      out += text.substr(from, end - from);
+    }
+    from = end;
+  }
+  return out + text.substr(from);
+}
+
 std::pair<const char*, int> Mesher::ordinal_of_shape_index(int shape_index) const {
   if (shape_index <= 0 ||
       static_cast<std::size_t>(shape_index) >= index_to_ordinal_.size()) {
@@ -1064,6 +1870,8 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
 
   if (!shape_free) {
     refuse_unread_layers();
+    refuse_misoriented_injected_faces();
+    refuse_netgen_faces_with_unmeshed_degenerate_edges();
   }
 
   ProgressHooks hooks;
@@ -1179,12 +1987,23 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
                                   : "";
       const std::string kind = at.first[0] ? at.first : kKindNames[k];
       if (!err->IsKO()) {
-        warnings.append(py::make_tuple(kind, at.second, std::string(algorithm),
-                                       err->myComment));
+        std::string text = err->myComment;
+        if (kKindTypes[k] == TopAbs_SOLID &&
+            text.find("of viscous layers not reached") != std::string::npos) {
+          text += layer_heights_text(ex.Current());
+        }
+        warnings.append(py::make_tuple(kind, at.second, std::string(algorithm), text));
         continue;
       }
       std::string line = kind + " " + std::to_string(at.second) + ": ";
-      line += err->myComment.empty() ? std::string("no message") : err->myComment;
+      std::vector<int> shrink_faces;
+      line += err->myComment.empty() ? std::string("no message")
+                                     : with_shrink_face_ordinals(err->myComment, shrink_faces);
+      for (const int face : shrink_faces) {
+        if (std::find(failed_faces.begin(), failed_faces.end(), face) == failed_faces.end()) {
+          failed_faces.push_back(face);
+        }
+      }
       // myAlgo is the algorithm object, not its name — naming it is what makes the message
       // actionable, because the failure is nearly always the algorithm rather than the shape.
       if (algorithm[0] != '\0') {
@@ -1192,6 +2011,28 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
       }
       if (read_bad.insert(err.get()).second) {
         line += bad_elements_text(*err, bad_centroids);
+      }
+      if (kKindTypes[k] == TopAbs_SOLID) {
+        line += prism_side_face_cause(ex.Current());
+      }
+      const std::string algorithm_name = algorithm;
+      if (kKindTypes[k] == TopAbs_FACE && err->myAlgo != nullptr &&
+          (algorithm_name == "NETGEN_2D" || algorithm_name == "NETGEN_2D_ONLY")) {
+        line += netgen_face_sizes(ex.Current(), at.second, *err->myAlgo);
+      }
+      // NETGEN 3-D stops a whole subdomain with no location ("Stop meshing since too many
+      // attempts", meshfunc.cpp:218-234). Where it names no bad element, the open front of
+      // the mesh it kept shows where the volume mesh ends.
+      const auto* bad = dynamic_cast<const SMESH_BadInputElements*>(err.get());
+      if (kKindTypes[k] == TopAbs_SOLID &&
+          (algorithm_name == "NETGEN_3D" || algorithm_name == "NETGEN_2D3D") &&
+          (bad == nullptr || !bad->HasBadElems())) {
+        const OpenFront front = open_front(ex.Current());
+        if (front.faces > 0) {
+          line += open_front_text(front);
+          bad_centroids.insert(bad_centroids.end(), front.centroids.begin(),
+                               front.centroids.end());
+        }
       }
       bool seen = false;
       for (const std::string& s : failures) {
@@ -1261,6 +2102,25 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
         failed_faces.push_back(s.first.second);
       }
     }
+    // SMESH can fail with no error text anywhere: a solid that failed first is reset by a
+    // later sub-mesh event, which clears its error (a Prism_3D solid computed after a
+    // NETGEN solid that shares a face with it). Each solid with an algorithm and no mesh
+    // is then named.
+    if (failures.empty()) {
+      std::set<int> named;
+      for (TopExp_Explorer ex(data_->shape, TopAbs_SOLID); ex.More(); ex.Next()) {
+        SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
+        const SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
+        const int ordinal = ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current())).second;
+        if (algo == nullptr || algo->GetName() == nullptr || sub->IsMeshComputed() ||
+            ordinal <= 0 || !named.insert(ordinal).second) {
+          continue;
+        }
+        failures.push_back("SOLID " + std::to_string(ordinal) +
+                           ": not meshed, and its algorithm left no error text (algorithm " +
+                           algo->GetName() + ")" + prism_side_face_cause(ex.Current()));
+      }
+    }
     std::string details;
     for (std::size_t i = 0; i < failures.size(); ++i) {
       details += (i ? "\n" : "") + failures[i];
@@ -1274,7 +2134,59 @@ py::dict Mesher::compute(const py::object& progress, const py::object& cancel) {
                        details, failed_faces, bad_centroids);
   }
 
+  refuse_unfilled_netgen_solids(warnings);
   return success_report(warnings);
+}
+
+void Mesher::refuse_unfilled_netgen_solids(const py::list& warnings) const {
+  // NETGEN_2D3D counts its result good when it holds any volume element
+  // (NETGENPlugin_Mesher.cxx:3770). After viscous layers that stopped early it returned the
+  // prisms alone, with 0.904 of 11.215 of the solid filled, and SMESH reported success.
+  // So every solid that a NETGEN 3-D algorithm meshed must have a closed volume mesh.
+  std::vector<std::string> lines;
+  std::vector<double> centroids;
+  std::set<int> checked;
+  for (TopExp_Explorer ex(data_->shape, TopAbs_SOLID); ex.More(); ex.Next()) {
+    SMESH_subMesh* sub = mesh_->GetSubMeshContaining(ex.Current());
+    const SMESH_Algo* algo = sub != nullptr ? sub->GetAlgo() : nullptr;
+    const std::string name = algo != nullptr && algo->GetName() != nullptr ? algo->GetName()
+                                                                            : "";
+    const int ordinal = ordinal_of_shape_index(meshDS_->ShapeToIndex(ex.Current())).second;
+    if ((name != "NETGEN_3D" && name != "NETGEN_2D3D") || ordinal <= 0 ||
+        !checked.insert(ordinal).second) {
+      continue;
+    }
+    const OpenFront front = open_front(ex.Current());
+    if (front.faces == 0) {
+      continue;
+    }
+    lines.push_back("SOLID " + std::to_string(ordinal) +
+                    ": its volume mesh does not fill it (algorithm " + name + ")" +
+                    open_front_text(front));
+    centroids.insert(centroids.end(), front.centroids.begin(), front.centroids.end());
+  }
+  if (lines.empty()) {
+    return;
+  }
+  std::string details;
+  for (const std::string& line : lines) {
+    details += (details.empty() ? "" : "\n") + line;
+  }
+  std::string reported;
+  for (const py::handle w : warnings) {
+    const py::tuple t = w.cast<py::tuple>();
+    reported += "\n" + t[0].cast<std::string>() + " " + std::to_string(t[1].cast<int>()) +
+                " warned (algorithm " + t[2].cast<std::string>() +
+                "): " + t[3].cast<std::string>();
+  }
+  details += reported;
+  details += "\nNETGEN reported success, but the volume mesh of each solid named above has "
+             "an open front, so part of the solid is empty. NETGEN_2D3D after viscous "
+             "layers that stopped early (\"Thickness ... of viscous layers not reached\") "
+             "returns the layers alone; Netgen1D2D with Netgen3D fills the same layers.";
+  throw PysmeshError("Mesher.compute: " + std::to_string(lines.size()) +
+                         " solid(s) meshed by NETGEN are not filled.",
+                     details, {}, centroids);
 }
 
 py::dict Mesher::success_report(const py::list& warnings) const {

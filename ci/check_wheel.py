@@ -22,9 +22,8 @@ one interpreter version, not the stable ABI.
 
 It also reads the import tables. ``_core.pyd`` must import exactly the Python DLL of the
 wheel's own tag (``python315.dll`` for ``cp315``), and no bundled DLL may import a Python
-DLL at all. A leg whose CPython has no conda-forge VTK takes VTK from an env of another
-CPython (``VTK_SIDE_ENV`` in ``ci/lock_envs.py``). This is the check that the VTK it
-bundles is the plain C++ library and brings no second interpreter into the process.
+DLL at all. This is the check that the VTK it bundles is the plain C++ library and brings
+no second interpreter into the process.
 
 Usage:
     python ci/check_wheel.py <wheel-or-glob> [...]

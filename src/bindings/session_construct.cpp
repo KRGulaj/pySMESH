@@ -18,7 +18,9 @@
 
 #include <BRepBuilderAPI_FindPlane.hxx>
 #include <BRepOffsetAPI_MakeEvolved.hxx>
+#include <GProp_PEquation.hxx>
 #include <GeomLib.hxx>
+#include <Geom_BSplineCurve.hxx>
 #include <Geom_BoundedCurve.hxx>
 #include <Geom_BoundedSurface.hxx>
 #include <Geom_RectangularTrimmedSurface.hxx>
@@ -28,6 +30,45 @@
 namespace pysmesh {
 namespace session {
 namespace {
+
+// How far a B-spline fitted through coplanar points leaves their plane.
+struct SplineDrift {
+  double curve;  // the largest distance of the curve from the plane
+  double poles;  // the largest distance of a pole from the plane
+};
+
+// The drift of `curve` from the plane of `points`, or nothing when the points are not
+// coplanar within `tol` (GProp_PEquation: their spread across the plane), or lie on one
+// line or at one point, so that no plane is theirs.
+//
+// The curve, not its poles, decides. BRepBuilderAPI_MakeFace finds the plane of a wire with
+// BRepLib_FindSurface, which samples each B-spline edge at its knots and degree - 1 points
+// between them and compares those points with the plane (BRepLib_FindSurface.cxx:388-391,
+// :558-560). It never reads a pole. A pole can stand off the plane by more than the curve
+// does (the curve is a convex combination of its poles), so a test of the poles would
+// refuse curves that make_face accepts. The curve is sampled more densely than
+// FindSurface does: 8 x degree points per knot span.
+std::optional<SplineDrift> spline_drift(const NCollection_Array1<gp_Pnt>& points,
+                                        const Geom_BSplineCurve& curve, double tol) {
+  const GProp_PEquation fit(points, tol);
+  if (!fit.IsPlanar()) {
+    return std::nullopt;
+  }
+  const gp_Pln plane = fit.Plane();
+  SplineDrift drift{0.0, 0.0};
+  for (int i = 1; i <= curve.NbPoles(); ++i) {
+    drift.poles = std::max(drift.poles, plane.Distance(curve.Pole(i)));
+  }
+  const int steps = 8 * curve.Degree();
+  for (int k = 1; k < curve.NbKnots(); ++k) {
+    const double a = curve.Knot(k);
+    const double b = curve.Knot(k + 1);
+    for (int s = 0; s <= steps; ++s) {
+      drift.curve = std::max(drift.curve, plane.Distance(curve.Value(a + (b - a) * s / steps)));
+    }
+  }
+  return drift;
+}
 
 // Throw the self-interference refusal of a swept or lofted result, if there is one. The
 // message is the first line of the refusal; the details are the pairs it names and `hint`.
@@ -174,6 +215,357 @@ std::string coincident_caps_refusal(const TopoDS_Shape& first_cap, const TopoDS_
 constexpr const char* kSlitHint =
     "To close a loft round onto itself, name the first section again as the last: that is a "
     "closed loft, with no caps. A copy of the first section makes two caps.";
+
+// One lateral face of a loft, with its loft parameter: 0 at the first section, k at
+// section k + 1, linear in the face's v, which runs across the sections. A ruled face spans
+// one section interval, a smooth face all of them.
+struct LoftFace {
+  TopoDS_Face face;
+  BRepAdaptor_Surface surface;
+  double u0 = 0.0, u1 = 0.0, v0 = 0.0, v1 = 0.0;
+  double g0 = 0.0, g1 = 0.0;  // the loft parameter at v0 and at v1
+
+  double loft_parameter(double v) const { return g0 + (g1 - g0) * (v - v0) / (v1 - v0); }
+};
+
+// A point that the loft covers twice, at loft parameters half a section interval or more
+// apart.
+struct LoftFold {
+  int face_a = 0;  // 1-based ordinals in the loft, TopExp::MapShapes order
+  int face_b = 0;
+  double g_a = 0.0;
+  double g_b = 0.0;
+  gp_Pnt point;
+};
+
+// How far apart two loft parameters are, in section intervals. A closed loft (the first
+// section named again as the last) is cyclic over its `spans` intervals.
+double loft_gap(double a, double b, int spans, bool closed) {
+  const double d = std::abs(a - b);
+  return closed ? std::min(d, spans - d) : d;
+}
+
+// Whether every point of wire `b` lies on wire `a` within `tol`: 9 points per edge of `b`,
+// after a test of the two bounding boxes.
+bool wire_lies_on(const TopoDS_Wire& b, const TopoDS_Wire& a, double tol) {
+  Bnd_Box ba, bb;
+  BRepBndLib::Add(a, ba);
+  BRepBndLib::Add(b, bb);
+  if (ba.IsVoid() || bb.IsVoid() || bb.CornerMin().Distance(ba.CornerMin()) > 2.0 * tol ||
+      bb.CornerMax().Distance(ba.CornerMax()) > 2.0 * tol) {
+    return false;
+  }
+  for (TopExp_Explorer ex(b, TopAbs_EDGE); ex.More(); ex.Next()) {
+    const TopoDS_Edge& edge = TopoDS::Edge(ex.Current());
+    if (BRep_Tool::Degenerated(edge)) {
+      continue;
+    }
+    const BRepAdaptor_Curve curve(edge);
+    for (int k = 0; k <= 8; ++k) {
+      const double t =
+          curve.FirstParameter() + (curve.LastParameter() - curve.FirstParameter()) * k / 8;
+      BRepExtrema_DistShapeShape d(BRepBuilderAPI_MakeVertex(curve.Value(t)).Vertex(), a);
+      if (!d.IsDone() || d.Value() > tol) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+// Gauss-Newton on S_a(ua, va) - S_b(ub, vb) = 0 from x = (ua, va, ub, vb): the minimum-norm
+// step over the free parameters, each kept inside its face's parameter box. A parameter at
+// its bound whose step leaves the box is held there for that step. Returns the distance
+// |S_a - S_b| at the final x.
+double refine_loft_pair(const LoftFace& a, const LoftFace& b, std::array<double, 4>& x,
+                        double tol) {
+  const std::array<double, 4> lo = {a.u0, a.v0, b.u0, b.v0};
+  const std::array<double, 4> hi = {a.u1, a.v1, b.u1, b.v1};
+  double dist = std::numeric_limits<double>::infinity();
+  for (int it = 0; it < 30; ++it) {
+    gp_Pnt pa, pb;
+    gp_Vec dua, dva, dub, dvb;
+    a.surface.D1(x[0], x[1], pa, dua, dva);
+    b.surface.D1(x[2], x[3], pb, dub, dvb);
+    const gp_Vec f(pb, pa);
+    dist = f.Magnitude();
+    if (dist <= tol) {
+      return dist;
+    }
+    const std::array<gp_Vec, 4> col = {dua, dva, -dub, -dvb};
+    std::array<bool, 4> free = {true, true, true, true};
+    std::array<double, 4> step = {0.0, 0.0, 0.0, 0.0};
+    for (int pass = 0; pass < 4; ++pass) {
+      // (J J^T) y = -f over the free columns; the step is J^T y.
+      double m[3][3] = {{0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}, {0.0, 0.0, 0.0}};
+      for (int k = 0; k < 4; ++k) {
+        if (!free[k]) {
+          continue;
+        }
+        for (int i = 0; i < 3; ++i) {
+          for (int j = 0; j < 3; ++j) {
+            m[i][j] += col[k].Coord(i + 1) * col[k].Coord(j + 1);
+          }
+        }
+      }
+      const double mu = 1.0e-12 * (m[0][0] + m[1][1] + m[2][2]) + 1.0e-300;
+      for (int i = 0; i < 3; ++i) {
+        m[i][i] += mu;
+      }
+      const double det = m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+                         m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+                         m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+      if (!(std::abs(det) > 0.0)) {
+        return dist;
+      }
+      const double r[3] = {-f.X(), -f.Y(), -f.Z()};
+      double y[3];
+      for (int c = 0; c < 3; ++c) {  // Cramer's rule, column c replaced by r
+        double n[3][3];
+        for (int i = 0; i < 3; ++i) {
+          for (int j = 0; j < 3; ++j) {
+            n[i][j] = (j == c) ? r[i] : m[i][j];
+          }
+        }
+        y[c] = (n[0][0] * (n[1][1] * n[2][2] - n[1][2] * n[2][1]) -
+                n[0][1] * (n[1][0] * n[2][2] - n[1][2] * n[2][0]) +
+                n[0][2] * (n[1][0] * n[2][1] - n[1][1] * n[2][0])) /
+               det;
+      }
+      bool held = false;
+      for (int k = 0; k < 4; ++k) {
+        step[k] = free[k] ? col[k].X() * y[0] + col[k].Y() * y[1] + col[k].Z() * y[2] : 0.0;
+        if (free[k] && ((x[k] <= lo[k] && step[k] < 0.0) || (x[k] >= hi[k] && step[k] > 0.0))) {
+          free[k] = false;
+          held = true;
+        }
+      }
+      if (!held) {
+        break;
+      }
+    }
+    for (int k = 0; k < 4; ++k) {
+      x[k] = std::clamp(x[k] + step[k], lo[k], hi[k]);
+    }
+  }
+  return dist;
+}
+
+// A point of the loft `result` that two of its lateral faces, or one face twice, cover at
+// loft parameters half a section interval or more apart, or nothing. Such a point is a fold:
+// the surface comes back through a place it passed before. The two sides of a seam, of a
+// closed section or of a closed loft, have the same loft parameter and do not count.
+//
+// A grid of samples on each lateral face finds candidate pairs: two samples closer than the
+// sum of their grid spacings, with loft parameters half an interval less one sample step
+// or more apart. The candidates are refined by refine_loft_pair, closest first, at most 2
+// for each pair of faces and half-interval cells of their loft parameters, 64 in all. A
+// fold is reported only when the refined points are within kLoftPres3d of each other and
+// their loft parameters are still half an interval or more apart.
+//
+// `wires` are the sections in loft order, the first repeated as the last for a closed loft.
+// The loft parameter is cyclic for a closed loft, and also when the last section lies where
+// the first does (a copy of it): the loft then closes too, through two coincident edges.
+// A ruled loft has one face per section edge per interval, interval by interval in
+// TopExp_Explorer order (BRepOffsetAPI_ThruSections::Generated relies on the same order);
+// the end of a ruled face's v-range that lies on the earlier section is found by distance.
+std::optional<LoftFold> loft_fold(const TopoDS_Shape& result, const TopoDS_Shape& first,
+                                  const TopoDS_Shape& last, const std::vector<TopoDS_Wire>& wires,
+                                  bool ruled, bool closed) {
+  if (!closed && wires.size() > 2) {
+    const double tol = std::max(
+        shape_checks::max_tolerance({wires.front(), wires.back()}), kLoftPres3d);
+    closed = wire_lies_on(wires.back(), wires.front(), tol) &&
+             wire_lies_on(wires.front(), wires.back(), tol);
+  }
+  ShapeSet caps;
+  TopExp::MapShapes(first, TopAbs_FACE, caps);
+  TopExp::MapShapes(last, TopAbs_FACE, caps);
+  std::vector<TopoDS_Face> lateral;
+  for (TopExp_Explorer ex(result, TopAbs_FACE); ex.More(); ex.Next()) {
+    if (!caps.Contains(ex.Current())) {
+      lateral.push_back(TopoDS::Face(ex.Current()));
+    }
+  }
+  const int spans = static_cast<int>(wires.size()) - 1;
+  if (lateral.empty() || spans < 1) {
+    return std::nullopt;
+  }
+  if (ruled && lateral.size() % static_cast<std::size_t>(spans) != 0) {
+    throw std::runtime_error("the ruled loft has " + std::to_string(lateral.size()) +
+                             " lateral faces, not a multiple of its " +
+                             std::to_string(spans) + " section intervals");
+  }
+  const std::size_t per_span = lateral.size() / static_cast<std::size_t>(spans);
+
+  std::vector<LoftFace> faces;
+  faces.reserve(lateral.size());
+  for (std::size_t i = 0; i < lateral.size(); ++i) {
+    LoftFace lf{lateral[i], BRepAdaptor_Surface(lateral[i])};
+    BRepTools::UVBounds(lf.face, lf.u0, lf.u1, lf.v0, lf.v1);
+    if (!(lf.v1 > lf.v0) || !(lf.u1 > lf.u0)) {
+      continue;
+    }
+    if (ruled) {
+      const int s = static_cast<int>(i / per_span);
+      const TopoDS_Vertex at_v0 = BRepBuilderAPI_MakeVertex(
+          lf.surface.Value(0.5 * (lf.u0 + lf.u1), lf.v0));
+      BRepExtrema_DistShapeShape to_earlier(at_v0, wires[s]);
+      BRepExtrema_DistShapeShape to_later(at_v0, wires[s + 1]);
+      const bool forward = !to_earlier.IsDone() || !to_later.IsDone() ||
+                           to_earlier.Value() <= to_later.Value();
+      lf.g0 = forward ? s : s + 1;
+      lf.g1 = forward ? s + 1 : s;
+    } else {
+      lf.g0 = 0.0;
+      lf.g1 = spans;
+    }
+    faces.push_back(lf);
+  }
+
+  // The samples, each with its grid spacing: the distance to its farthest grid neighbour.
+  constexpr int kNu = 33;
+  const int nv = ruled ? 9 : 8 * spans + 1;
+  const double g_step = 1.0 / 8.0;  // the loft parameter between two samples along v
+  struct Sample {
+    gp_Pnt point;
+    double u, v, g, reach;
+    int face;
+  };
+  std::vector<Sample> samples;
+  samples.reserve(faces.size() * kNu * nv);
+  double h = 0.0;
+  for (std::size_t fi = 0; fi < faces.size(); ++fi) {
+    const LoftFace& lf = faces[fi];
+    const std::size_t base = samples.size();
+    for (int i = 0; i < kNu; ++i) {
+      const double u = lf.u0 + (lf.u1 - lf.u0) * i / (kNu - 1);
+      for (int j = 0; j < nv; ++j) {
+        const double v = lf.v0 + (lf.v1 - lf.v0) * j / (nv - 1);
+        samples.push_back(
+            {lf.surface.Value(u, v), u, v, lf.loft_parameter(v), 0.0, static_cast<int>(fi)});
+      }
+    }
+    for (int i = 0; i < kNu; ++i) {
+      for (int j = 0; j < nv; ++j) {
+        Sample& s = samples[base + i * nv + j];
+        if (i + 1 < kNu) {
+          const double d = s.point.Distance(samples[base + (i + 1) * nv + j].point);
+          s.reach = std::max(s.reach, d);
+          samples[base + (i + 1) * nv + j].reach =
+              std::max(samples[base + (i + 1) * nv + j].reach, d);
+        }
+        if (j + 1 < nv) {
+          const double d = s.point.Distance(samples[base + i * nv + j + 1].point);
+          s.reach = std::max(s.reach, d);
+          samples[base + i * nv + j + 1].reach =
+              std::max(samples[base + i * nv + j + 1].reach, d);
+        }
+        h = std::max(h, s.reach);
+      }
+    }
+  }
+  if (!(h > 0.0)) {
+    return std::nullopt;
+  }
+
+  // Candidate pairs through a hash of cells of side h, the largest grid spacing.
+  const auto cell = [h](double c) { return static_cast<std::int64_t>(std::floor(c / h)); };
+  const auto key = [](std::int64_t i, std::int64_t j, std::int64_t k) {
+    return ((i & 0x1FFFFF) << 42) | ((j & 0x1FFFFF) << 21) | (k & 0x1FFFFF);
+  };
+  std::unordered_map<std::int64_t, std::vector<int>> cells;
+  for (int n = 0; n < static_cast<int>(samples.size()); ++n) {
+    const gp_Pnt& p = samples[n].point;
+    cells[key(cell(p.X()), cell(p.Y()), cell(p.Z()))].push_back(n);
+  }
+  struct Candidate {
+    double distance;
+    int a, b;
+  };
+  std::vector<Candidate> candidates;
+  for (int n = 0; n < static_cast<int>(samples.size()); ++n) {
+    const Sample& s = samples[n];
+    const std::int64_t ci = cell(s.point.X()), cj = cell(s.point.Y()), ck = cell(s.point.Z());
+    for (std::int64_t di = -1; di <= 1; ++di) {
+      for (std::int64_t dj = -1; dj <= 1; ++dj) {
+        for (std::int64_t dk = -1; dk <= 1; ++dk) {
+          const auto found = cells.find(key(ci + di, cj + dj, ck + dk));
+          if (found == cells.end()) {
+            continue;
+          }
+          for (const int m : found->second) {
+            if (m <= n) {
+              continue;
+            }
+            const Sample& t = samples[m];
+            const double d = s.point.Distance(t.point);
+            if (d <= s.reach + t.reach && loft_gap(s.g, t.g, spans, closed) >= 0.5 - g_step) {
+              candidates.push_back({d, n, m});
+            }
+          }
+        }
+      }
+    }
+  }
+  std::sort(candidates.begin(), candidates.end(),
+            [](const Candidate& p, const Candidate& q) { return p.distance < q.distance; });
+
+  ShapeSet ordinals;
+  TopExp::MapShapes(result, TopAbs_FACE, ordinals);
+  std::map<std::array<int, 4>, int> tried;
+  int refinements = 0;
+  for (const Candidate& c : candidates) {
+    if (refinements >= 64) {
+      break;
+    }
+    const Sample& s = samples[c.a];
+    const Sample& t = samples[c.b];
+    const Sample& lower = s.face <= t.face ? s : t;
+    const Sample& upper = s.face <= t.face ? t : s;
+    int& per_cell = tried[{lower.face, upper.face, static_cast<int>(std::floor(2.0 * lower.g)),
+                           static_cast<int>(std::floor(2.0 * upper.g))}];
+    if (per_cell >= 2) {
+      continue;
+    }
+    ++per_cell;
+    ++refinements;
+    const LoftFace& fa = faces[s.face];
+    const LoftFace& fb = faces[t.face];
+    std::array<double, 4> x = {s.u, s.v, t.u, t.v};
+    if (refine_loft_pair(fa, fb, x, kLoftPres3d) > kLoftPres3d) {
+      continue;
+    }
+    const double ga = fa.loft_parameter(x[1]);
+    const double gb = fb.loft_parameter(x[3]);
+    if (loft_gap(ga, gb, spans, closed) < 0.5) {
+      continue;
+    }
+    LoftFold fold;
+    fold.face_a = ordinals.FindIndex(fa.face);
+    fold.face_b = ordinals.FindIndex(fb.face);
+    fold.g_a = ga;
+    fold.g_b = gb;
+    const gp_Pnt pa = fa.surface.Value(x[0], x[1]);
+    const gp_Pnt pb = fb.surface.Value(x[2], x[3]);
+    fold.point = gp_Pnt(0.5 * (pa.XYZ() + pb.XYZ()));
+    return fold;
+  }
+  return std::nullopt;
+}
+
+// The section interval of loft parameter `g`, in words: "between sections k and k + 1",
+// 1-based, as the caller named them.
+std::string loft_interval_text(double g, int spans) {
+  const int k = std::clamp(static_cast<int>(std::floor(g)), 0, spans - 1);
+  return "between sections " + std::to_string(k + 1) + " and " + std::to_string(k + 2);
+}
+
+constexpr const char* kFoldHint =
+    "The loft covers this point twice, from places half a section interval or more apart "
+    "along it. Stations that go back along the loft do this, such as sections at z = 0, 1, "
+    "0.6, 1.6. Keep the sections in order along the loft, or space them so that the surface "
+    "between them does not turn back.";
 
 }  // namespace
 
@@ -512,6 +904,7 @@ py::dict Session::add_spline(const PointArray& points, int degree_min, int degre
                        std::to_string(degree_min) + ", " + std::to_string(degree_max) +
                        ").");
   }
+  std::optional<SplineDrift> drift;
   const TopoDS_Shape edge = try_build("add_spline", [&]() -> TopoDS_Shape {
     NCollection_Array1<gp_Pnt> arr(1, static_cast<int>(pts.size()));
     for (std::size_t i = 0; i < pts.size(); ++i) {
@@ -521,12 +914,33 @@ py::dict Session::add_spline(const PointArray& points, int degree_min, int degre
     if (!fit.IsDone()) {
       return TopoDS_Shape();
     }
+    drift = spline_drift(arr, *fit.Curve(), tol);
     return BRepBuilderAPI_MakeEdge(fit.Curve()).Edge();
   });
   if (edge.IsNull()) {
     throw PysmeshError(
         "Session.add_spline: GeomAPI_PointsToBSpline could not approximate the points "
         "to the requested tolerance.");
+  }
+  // When the fit needs more poles than there are points, OCCT gives up the approximation
+  // and interpolates (Approx_BSplComputeLine.gxx:952-956). That interpolation took its end
+  // tangents from separate fits and put poles of 121 coplanar points 2.5e-3 off their
+  // plane at tol 1e-7, so make_face on the edge failed. A curve that leaves the plane of
+  // its coplanar points by more than tol is refused rather than kept.
+  if (drift.has_value() && drift->curve > tol) {
+    std::ostringstream s;
+    s << "Session.add_spline: the " << pts.size() << " points lie in one plane within tol "
+      << tol << ", but the fitted curve leaves that plane by " << drift->curve
+      << " (its poles by up to " << drift->poles
+      << "), more than tol, so a face or a loft cap on it would not be planar. Nothing "
+         "is committed; the session is unchanged.";
+    throw PysmeshError(
+        s.str(),
+        "GeomAPI_PointsToBSpline interpolates the points when it needs more poles than "
+        "there are points, and that interpolation can leave their plane. Use add_bspline "
+        "with poles of your own in the plane, add_polyline, a different point count, or a "
+        "looser tol.",
+        {});
   }
   return add_bodies(edge, "add_spline");
 }
@@ -1679,6 +2093,7 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
   std::string cap_refusal;
   std::string slit_refusal;
   std::string interference;
+  std::optional<LoftFold> fold;
   {
     py::gil_scoped_release release;
     // The history query once threw here outside the try (report A2, through O1), and a raw
@@ -1750,6 +2165,15 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
           interference =
               shape_checks::self_interference_refusal("Session.thru_sections", result);
         }
+        // BRepCheck does not test a face for self-intersection, and the check above leaves
+        // out the points near a face's own edges and seams, so sheets of a loft that meet
+        // only along a seam, or a shell that is not a solid, pass both. The loft parameter
+        // tells such a fold from a seam (loft_fold).
+        if (cap_refusal.empty() && slit_refusal.empty() && !hollow.has_value() &&
+            interference.empty()) {
+          stage = "checking the loft for a fold failed";
+          fold = loft_fold(result, mk.FirstShape(), mk.LastShape(), wires, ruled, closed);
+        }
       }
     } catch (const PysmeshError&) {
       // A lofted solid the measure rule cannot measure is refused by name, with no stage.
@@ -1790,6 +2214,16 @@ py::dict Session::thru_sections(const std::vector<std::vector<EntityId>>& sectio
     throw PysmeshError(slit_refusal, kSlitHint, {});
   }
   refuse_self_interference(interference, kLoftHint);
+  if (fold.has_value()) {
+    const int spans = static_cast<int>(wires.size()) - 1;
+    std::ostringstream s;
+    s << "Session.thru_sections: the loft folds back through itself: FACE " << fold->face_a
+      << " " << loft_interval_text(fold->g_a, spans) << " and FACE " << fold->face_b << " "
+      << loft_interval_text(fold->g_b, spans) << " meet at (" << fold->point.X() << ", "
+      << fold->point.Y() << ", " << fold->point.Z()
+      << "). Nothing is committed; the session is unchanged.";
+    throw PysmeshError(s.str(), kFoldHint, {});
+  }
   return commit(concat(survivors, result), hist, "thru_sections", result);
 }
 

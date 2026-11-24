@@ -130,16 +130,6 @@ jobs:
           # thrash, each restoring an env built for a different Python.
           cache-environment-key: env-py${{ matrix.python }}-${{ hashFiles(format('ci/locks/build-py{0}-win-64.txt', matrix.python)) }}
 
-      - name: VTK side env (a CPython that conda-forge has no VTK build for yet)
-        # VTK_SIDE_ENV in ci/lock_envs.py. _core links only VTK's C++ libraries, which load
-        # no Python DLL, so the VTK of a py3.14 env serves a py3.15 build. ci/check_wheel.py
-        # asserts that no bundled DLL imports a Python DLL.
-        if: matrix.python == '3.15'
-        run: |
-          VTK_PREFIX="$(cygpath -m "$RUNNER_TEMP")/vtk-env"
-          "${MAMBA_EXE:-micromamba}" create -y -p "$VTK_PREFIX" -f ci/locks/vtk-win-64.txt
-          echo "VTK_PREFIX=$VTK_PREFIX" >> "$GITHUB_ENV"
-
       - name: OCCT location
         run: echo "OCCT_ROOT=$(cygpath -m "$RUNNER_TEMP")/occt-8.0.1" >> "$GITHUB_ENV"
 
@@ -176,15 +166,8 @@ jobs:
         # ngcore, nglib, zlib and NETGENPlugin build here too, as static parts of _core
         # (cmake/Netgen, cmake/NETGENPlugin), from the trees prepare.py staged.
         run: |
-          VTK_ARGS=()
-          if [ -n "${VTK_PREFIX:-}" ]; then
-            # VTK_DIR names the side env's VTK; the prefix path lets VTK's own config find
-            # the libraries it was built with (TBB, fmt, pugixml, ...) in the same env.
-            VTK_ARGS=(-C cmake.define.VTK_DIR="$VTK_PREFIX/Library/lib/cmake/vtk-9.6"
-                      -C cmake.define.CMAKE_PREFIX_PATH="$VTK_PREFIX/Library")
-          fi
           pip wheel . --no-build-isolation --no-deps -w dist \
-            -C cmake.define.PYSMESH_OCCT_ROOT="$OCCT_ROOT/install" "${VTK_ARGS[@]}"
+            -C cmake.define.PYSMESH_OCCT_ROOT="$OCCT_ROOT/install"
 
       - name: Bundle every native dependency (OCCT + Boost + VTK)
         # delvewheel vendors _core.pyd's whole DLL closure into the wheel and name-mangles
@@ -195,16 +178,11 @@ jobs:
         # components (CommonCore, CommonDataModel, FiltersVerdict), so the closure stays
         # small: no rendering, no IO, no Python wrappers. The OCCT DLLs come from the occt
         # job's build, so its bin directory is searched first; Boost and VTK come from the
-        # env's Library/bin. A leg with a VTK side env searches that env before the build
-        # env, so VTK and the libraries it loads come from the env it was built in.
+        # env's Library/bin.
         run: |
-          PATHS=(--add-path "$OCCT_ROOT/install/bin")
-          if [ -n "${VTK_PREFIX:-}" ]; then
-            PATHS+=(--add-path "$VTK_PREFIX/Library/bin")
-          fi
-          PATHS+=(--add-path "$CONDA_PREFIX/Library/bin")
           for whl in dist/*.whl; do
-            delvewheel repair "${PATHS[@]}" -w dist/repaired "$whl"
+            delvewheel repair --add-path "$OCCT_ROOT/install/bin" \
+              --add-path "$CONDA_PREFIX/Library/bin" -w dist/repaired "$whl"
           done
 
       - name: Assert the repaired wheel is self-contained (OCCT + Boost + VTK, no netgen DLL, honest ABI tag)

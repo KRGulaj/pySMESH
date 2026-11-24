@@ -201,6 +201,16 @@ class UseExisting2D(Algorithm):
     The 2-D counterpart of :class:`UseExisting1D`: it creates nothing and counts as
     computed, so a 3-D algorithm meshes the solid from the script's faces. Bind the
     script's nodes and faces to the face with ``on``.
+
+    Under :class:`Netgen3D` the faces must point out of the solid: the node order of each
+    turns about the outward normal by the right-hand rule. NETGEN_3D passes them to
+    NETGEN as they are, and NETGEN fails on a reversed face ("Some edges multiple times
+    in surface mesh") or on every face reversed ("Stop meshing since too many
+    attempts"). So :meth:`~pysmesh.Mesher.compute` checks every face of a Netgen3D solid
+    that holds elements before the compute, and refuses a face whose elements point into
+    the solid or mix both orientations, naming it in ``.face_ids``. A face that two
+    solids of a compound share needs one orientation only, as NETGENPlugin reverses it
+    for one of them. The surface that :class:`Netgen1D2D` writes points out already.
     """
 
     native_name: ClassVar[str] = "UseExisting_2D"
@@ -324,6 +334,14 @@ class Netgen1D2D(Algorithm):
     :class:`NetgenParameters2D` or :class:`NetgenSimpleParameters2D`, and
     :class:`ViscousLayers2D`. An edge that another 1-D algorithm meshes, assigned on the
     edge, keeps that mesh: NETGEN builds the faces on its nodes.
+
+    A face with degenerate edges, such as the poles of a face of revolution, needs one
+    rule: either every edge of the face has a 1-D algorithm, the degenerate ones too, or
+    none has. A seam meshed by :class:`Regular1D` beside poles left to NETGEN made
+    NETGENPlugin read invalid memory and end the process. So
+    :meth:`~pysmesh.Mesher.compute` refuses that mix on a face of this algorithm or of
+    :class:`Netgen2D` before anything is meshed, and names the face and its degenerate
+    edges.
     """
 
     native_name: ClassVar[str] = "NETGEN_2D"
@@ -449,6 +467,14 @@ class Prism3D(Algorithm):
     algorithm on that face alone (``on=SubShape(SubShapeKind.FACE, face_id)``). With a
     global 2-D algorithm only, a face that is not a quadrangle marks the source. If
     every face reads as a quadrangle, Prism3D tries the faces in turn.
+
+    A 2-D algorithm that reaches a side face meshes that face before Prism3D runs, and a
+    global one reaches every face. So a global :class:`Netgen1D2D` puts triangles on the
+    side faces, and Prism3D refuses the solid: "More than 2 faces with not quadrangle
+    elements". If the prism solid is meshed after a solid that shares a face with it,
+    SMESH leaves no error text at all. In both cases :meth:`~pysmesh.Mesher.compute`
+    names the solid and the faces that take triangles. Assign :class:`Quadrangle2D` on
+    the side faces, with :class:`Regular1D` and a 1-D hypothesis on their edges.
 
     A side face whose bottom or top side has more than one edge has a composite side,
     for example where a cap edge is split under a whole one. Prism3D projects the
@@ -1432,6 +1458,24 @@ class ViscousLayers(Hypothesis):
     different ``layer_count``; :meth:`~pysmesh.Mesher.compute` raises with SMESH's
     reason before it meshes anything. To detach one of several, pass
     :meth:`~pysmesh.Mesher.unassign` an instance equal to it.
+
+    The stack is grown per solid, and its stop conditions act on the whole solid.
+    SMESH grows every layer edge of the solid one step at a time, and three rules end
+    the growth for all of them: the step ends when the nearest intersection is closer
+    than the stack still to grow; a failed smoothing step is undone for every edge;
+    each next step is limited by the smallest distance to an intersection in the solid
+    (``StdMeshers_ViscousLayers.cxx:4935-4996``). So one tight spot, such as a gap of
+    0.3 between a cylinder and a wall under a stack of 0.6, limits the stack everywhere
+    in that solid: 0.12 on average, 0.117 on the far side of the cylinder, 1.5 away. The
+    compute then succeeds with the warning "Thickness ... of viscous layers not
+    reached, average reached thickness is ...", on
+    :attr:`~pysmesh.ComputeReport.warnings`.
+    pySMESH appends to it the 5 layered faces with the lowest stack reached, each with
+    that height and the wall point where it is: the first is where to look. Splitting
+    the fluid into solids keeps a tight spot to its own solid. After such a stop,
+    :class:`Netgen1D2D3D` returned the layers alone, and
+    :meth:`~pysmesh.Mesher.compute` raises for the empty part of the solid, with the
+    same warning in the message; :class:`Netgen1D2D` with :class:`Netgen3D` fills it.
 
     Attributes:
         total_thickness: Total height of the layer stack.

@@ -133,6 +133,11 @@ class _HealOps(_SessionBase):
           solids overlap, as two bodies of the model may. A shell that touches another from
           inside is refused: a cavity and a crossing cannot be told apart there.
         * A face that sewed into no shell stays in the model beside the solids.
+        * A face that crosses itself is not found. OCCT's ``BRepCheck_Analyzer`` does not
+          test a face for self-intersection. A folded face, such as that of an open loft
+          whose stations go back along the loft, can close a shell of positive volume
+          that the classifier places. That shell is then committed as a solid. Give each
+          later :meth:`tessellate` of such a model a ``cancel``.
 
         Args:
             entities: Entities whose owning bodies are sewed. At least one.

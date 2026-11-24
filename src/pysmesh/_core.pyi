@@ -23,8 +23,9 @@ class PysmeshError(RuntimeError):
         face_ids: The offending face ids, where applicable (empty otherwise).
         bad_element_centroids: (k, 3) float64 — the centroid of each element that a
             failed mesh compute names as bad (NETGEN's intersecting triangles, its edges
-            found several times in a surface mesh), in model coordinates. ``(0, 3)``
-            when there is none.
+            found several times in a surface mesh), and of each face of the open front
+            that a NETGEN 3-D failure leaves, in model coordinates. ``(0, 3)`` when
+            there is none.
     """
 
     details: str

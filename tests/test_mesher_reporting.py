@@ -34,9 +34,28 @@ Each claim is asserted against an oracle the report itself does not produce (rep
 * **R1, an edge too short for Adaptive1D is reported.** An edge shorter than the min
   size keeps one segment shorter than the min size, against the hypothesis's bounds.
   The compute must report it as a warning on that edge. The oracle is the edge length.
+* **#39, a layer shrink failure names its face.** SMESH writes its own shape index into
+  "Can't shrink 2D mesh on face <index>". The line must give the face ordinal, and
+  ``.face_ids`` must hold it. The oracle is the face found by its area.
+* **#25, a prism under a global 2-D algorithm names its cause.** A global Netgen1D2D
+  puts triangles on the side faces of a Prism3D solid. In one solid order SMESH says
+  "More than 2 faces with not quadrangle elements"; in the other it says nothing. Both
+  must name the solid, its triangle faces and Quadrangle2D. The oracle is the face set
+  of the solid, found by geometry.
+* **#24, a failed NETGEN 2-D face gives its sizes.** NETGEN says only "Problem in
+  Surface mesh generation". The line must give the longest segment on the face's edges,
+  the smallest extent of its box and the size asked, and name the coarse edges when the
+  segment is longer than the face is wide. The oracles are the mesh nodes, the Session
+  box and the assigned size; a face that fails for another reason gets no such cause.
+* **#30, a NETGEN 3-D stop gives the open front.** "Stop meshing since too many attempts"
+  names no place. The line must give the open front of the kept mesh: its face count and
+  the box of each patch, with every centroid in ``.bad_element_centroids``. The oracle
+  is the open front of the kept mesh, computed with NumPy.
 """
 
 from __future__ import annotations
+
+import re
 
 import numpy as np
 import pytest
@@ -578,3 +597,400 @@ def test_a_failure_with_no_bad_element_has_an_empty_centroid_array() -> None:
     assert isinstance(centroids, np.ndarray)
     assert centroids.dtype == np.float64
     assert centroids.shape == (0, 3)
+
+
+# The strip of the top face that carries no layer: 0.05 wide across the 2 x 2 box.
+STRIP_LOW: float = 0.975
+STRIP_HIGH: float = 1.025
+STRIP_AREA: float = 2.0 * (STRIP_HIGH - STRIP_LOW)
+
+
+def _box_with_a_narrow_top_strip() -> ps.Shape:
+    """A 2 x 2 x 1 box whose top face is split into three strips at y 0.975 and 1.025."""
+    s = Session()
+    s.add_box(2.0, 2.0, 1.0)
+    solid = int(s.entities(ps.EntityKind.SOLID)[0])
+    for y in (STRIP_LOW, STRIP_HIGH):
+        delta = s.add_line((0.0, y, 1.0), (2.0, y, 1.0))
+        edge = [
+            int(i) for i in delta.created if s.entity_kind(int(i)) == ps.EntityKind.EDGE
+        ]
+        s.imprint([solid], edge)
+        s.remove(edge)
+    return ps.load_brep(s.brep())
+
+
+def test_a_viscous_layer_shrink_failure_names_the_face_by_its_ordinal() -> None:
+    """The face the layers cannot shrink into is named as FACE <ordinal>, in face_ids.
+
+    A 0.3 stack grows on every face but the 0.05-wide strip of the top face. The strip
+    must shrink by 0.3 from both sides, which it cannot. SMESH writes its own shape index
+    into the text (StdMeshers_ViscousLayers.cxx, "shrinking 2D mesh on face <index>").
+    The oracle is the strip itself, found by its area: 2 x 0.05.
+    """
+    shape = _box_with_a_narrow_top_strip()
+    strip = [f.id for f in shape.faces() if abs(f.area - STRIP_AREA) < 1e-9]
+    walls = tuple(f.id for f in shape.faces() if f.id not in strip)
+    with Mesher(shape) as m:
+        m.assign(ps.Netgen1D2D3D())
+        m.assign(ps.NetgenParameters(max_size=0.2, threads=4))
+        m.assign(
+            ps.ViscousLayers(
+                total_thickness=0.3,
+                layer_count=3,
+                stretch_factor=1.2,
+                boundary=walls,
+                group_name="BL",
+            )
+        )
+
+        with pytest.raises(ps.PysmeshError) as info:
+            m.compute()
+
+    named = re.findall(r"2D mesh on FACE (\d+)", info.value.details)
+    ordinals = {int(n) for n in named}
+    assert len(strip) == 1
+    assert ordinals == set(strip)
+    assert strip[0] in list(info.value.face_ids)
+
+
+def _two_boxes_sharing_a_face() -> ps.Shape:
+    """Two unit boxes side by side, fragmented: they share the face x = 1."""
+    s = Session()
+    s.add_box(1.0, 1.0, 1.0)
+    s.add_box(1.0, 1.0, 1.0, origin=(1.0, 0.0, 0.0))
+    s.fragment([int(i) for i in s.entities(ps.EntityKind.SOLID)])
+    return ps.load_brep(s.brep())
+
+
+def _faces_of_solid(shape: ps.Shape, solid: int) -> set[int]:
+    """The faces whose centroid lies in the bounding box of ``solid``."""
+    box = np.asarray(shape.solids()[solid - 1].bbox)
+    return {
+        f.id
+        for f in shape.faces()
+        if bool(np.all(np.asarray(f.centroid) >= box[:3] - 1e-9))
+        and bool(np.all(np.asarray(f.centroid) <= box[3:] + 1e-9))
+    }
+
+
+def _prism_in_a_netgen_region(shape: ps.Shape, prism: int, quad_sides: bool) -> Mesher:
+    """Global Netgen1D2D + Netgen3D, Prism3D on one solid; optionally quadrangle sides."""
+    m = Mesher(shape)
+    m.assign(ps.Netgen1D2D())
+    m.assign(ps.NetgenParameters2D(max_size=0.25, threads=4))
+    m.assign(ps.Netgen3D())
+    m.assign(ps.NetgenParameters(max_size=0.25, threads=4))
+    on = SubShape(SubShapeKind.SOLID, prism)
+    m.assign(ps.Prism3D(), on=on)
+    if quad_sides:
+        for face in _faces_of_solid(shape, prism):
+            box = shape.faces()[face - 1].bbox
+            if abs(box[5] - box[2]) > 1e-9:  # a side face: not z = const
+                m.assign(Quadrangle2D(), on=SubShape(SubShapeKind.FACE, face))
+        m.assign(Regular1D(), on=on)
+        m.assign(NumberOfSegments(count=4), on=on)
+    return m
+
+
+@pytest.mark.parametrize("prism", [1, 2])
+def test_a_prism_whose_side_faces_take_triangles_is_named_with_the_cause(
+    prism: int,
+) -> None:
+    """Both solid orders name the Prism_3D solid, its triangle faces and Quadrangle2D.
+
+    The global Netgen1D2D reaches every face of the prism solid. As the first solid,
+    Prism_3D refuses it ("More than 2 faces with not quadrangle elements: 6"). As the
+    second, SMESH left no error text at all ("failed on 0 sub-shape(s)"). The oracle is
+    the face set of the prism solid, found by geometry: the global algorithm reaches all
+    six of its faces.
+    """
+    shape = _two_boxes_sharing_a_face()
+    expected = _faces_of_solid(shape, prism)
+    m = _prism_in_a_netgen_region(shape, prism, quad_sides=False)
+
+    with m, pytest.raises(ps.PysmeshError) as info:
+        m.compute()
+
+    lines = [
+        line
+        for line in info.value.details.splitlines()
+        if line.startswith(f"SOLID {prism}:")
+    ]
+    assert len(lines) == 1
+    assert "(algorithm Prism_3D)" in lines[0]
+    assert "Assign Quadrangle2D on the side faces" in lines[0]
+    named = re.search(r"\(FACE ([0-9, ]+)\) take triangles", lines[0])
+    assert named is not None
+    assert {int(f) for f in named.group(1).split(", ")} == expected
+    assert len(expected) == 6
+
+
+@pytest.mark.parametrize("prism", [1, 2])
+def test_a_prism_with_quadrangle_side_faces_meshes_in_either_order(prism: int) -> None:
+    """Quadrangle2D on the side faces, Regular1D + 4 segments on the prism solid: no error.
+
+    Prism3D sweeps a source face through the solid, so the prism solid holds swept cells
+    only: every element there is a pentahedron or a hexahedron, and none a tetrahedron.
+    """
+    shape = _two_boxes_sharing_a_face()
+    with _prism_in_a_netgen_region(shape, prism, quad_sides=True) as m:
+        report = m.compute()
+        md = m.mesh()
+
+    in_prism = (md.element_kind == int(SubShapeKind.SOLID)) & (
+        md.element_ordinal == prism
+    )
+    swept = (int(ps.ElementType.PENTAHEDRON), int(ps.ElementType.HEXAHEDRON))
+    assert report.volumes > 0
+    assert int(in_prism.sum()) > 0
+    assert bool(np.all(np.isin(md.element_type[in_prism], swept)))
+
+
+NUMBER: str = r"([0-9]+(?:\.[0-9]+)?(?:e[+-]?[0-9]+)?)"
+SIZES_PATTERN: str = (
+    rf"FACE (\d+): .*longest segment on its edges {NUMBER}, smallest extent of its "
+    rf"box {NUMBER}, size its hypothesis asks for {NUMBER}"
+)
+COARSE_EDGES_SENTENCE: str = "The edges of this face were meshed coarser than the face"
+
+
+def _smallest_extent(box: np.ndarray) -> float:
+    """The smallest extent of an (xmin..zmax) box above 1e-7 (a plane face has one 0)."""
+    extents = np.asarray(box[3:], dtype=np.float64) - np.asarray(
+        box[:3], dtype=np.float64
+    )
+    return float(extents[extents > 1e-7].min())
+
+
+def _failure_and_mesh(m: Mesher) -> tuple[ps.PysmeshError, ps.MeshData]:
+    """Run a compute that must fail; return its error and the partial mesh it keeps."""
+    with pytest.raises(ps.PysmeshError) as info:
+        m.compute()
+    return info.value, m.mesh()
+
+
+def _longest_segment_on_face_edges(
+    shape: ps.Shape, md: ps.MeshData, face: int
+) -> float:
+    """The longest mesh segment on an edge of ``face`` (edges inside the face's box)."""
+    box = np.asarray(shape.faces()[face - 1].bbox)
+    edges = [
+        e.id
+        for e in shape.edges()
+        if bool(np.all(np.asarray(e.bbox)[:3] >= box[:3] - 1e-9))
+        and bool(np.all(np.asarray(e.bbox)[3:] <= box[3:] + 1e-9))
+    ]
+    on_edges = (
+        (md.element_type == int(ps.ElementType.EDGE))
+        & (md.element_kind == int(SubShapeKind.EDGE))
+        & np.isin(md.element_ordinal, edges)
+    )
+    ends = md.node_coords[
+        np.stack([md.nodes_of(int(i)) for i in np.flatnonzero(on_edges)])
+    ]
+    return float(np.linalg.norm(ends[:, 1] - ends[:, 0], axis=1).max())
+
+
+def test_a_narrow_face_after_coarse_neighbours_gives_its_sizes_and_the_cause() -> None:
+    """A 74 mm face whose long edges a 0.5 neighbour meshed first: three numbers, a cause.
+
+    Each face of a 2 x 0.074 x 1 slab gets its own Netgen1D2D: max_size 0.5 on the big
+    faces, 0.01 on the narrow ones. A narrow face meshed after its big neighbours finds
+    its long edges in segments longer than it is wide, and NETGEN says only "Problem in
+    Surface mesh generation". The oracles: the longest segment from the mesh nodes on the
+    face's edges, the smallest extent of the face's box from Session.bounding_boxes, and
+    the 0.01 the test assigned.
+    """
+    s = Session()
+    s.add_box(2.0, 0.074, 1.0)
+    handoff = s.export_handoff()
+    boxes = s.bounding_boxes(ps.EntityKind.FACE)
+    shape = ps.load_brep(handoff.brep)
+    narrow = {
+        f.id for f in shape.faces() if _smallest_extent(np.asarray(f.bbox)) < 0.08
+    }
+    m = Mesher(shape)
+    for face in shape.faces():
+        on = SubShape(SubShapeKind.FACE, face.id)
+        m.assign(ps.Netgen1D2D(), on=on)
+        size = 0.01 if face.id in narrow else 0.5
+        m.assign(ps.NetgenParameters2D(max_size=size, threads=4), on=on)
+
+    with m:
+        error, md = _failure_and_mesh(m)
+
+    found = [
+        (line, re.search(SIZES_PATTERN, line))
+        for line in error.details.splitlines()
+        if "Problem in Surface mesh generation" in line
+    ]
+    assert len(found) >= 1
+    for line, match in found:
+        assert match is not None
+        face, longest, extent, asked = (
+            int(match.group(1)),
+            float(match.group(2)),
+            float(match.group(3)),
+            float(match.group(4)),
+        )
+        row = int(np.flatnonzero(boxes.ids == handoff.face_id[face - 1])[0])
+        assert face in narrow
+        assert longest == pytest.approx(
+            _longest_segment_on_face_edges(shape, md, face), rel=1e-5
+        )
+        assert extent == pytest.approx(_smallest_extent(boxes.bbox[row]), rel=1e-5)
+        assert asked == pytest.approx(0.01, rel=1e-12)
+        assert longest > extent
+        assert COARSE_EDGES_SENTENCE in line
+
+
+def test_a_netgen_face_that_fails_for_another_reason_gets_no_coarse_edge_sentence() -> (
+    None
+):
+    """A disk whose circle has one segment: NETGEN 2D refuses it, and no cause is guessed.
+
+    Netgen2D reads the circle's one Regular1D segment ("Too few segments: 1"). That one
+    segment starts and ends at the circle's vertex, so its length is 0: shorter than the
+    disk's diameter 2, the closed-form smallest extent of its box.
+    """
+    s = Session()
+    circle = s.add_circle((0.0, 0.0, 0.0), (0.0, 0.0, 1.0), 1.0)
+    s.make_face(
+        [int(i) for i in circle.created if s.entity_kind(int(i)) == ps.EntityKind.EDGE]
+    )
+    m = Mesher(ps.load_brep(s.brep()))
+    m.assign(Regular1D())
+    m.assign(NumberOfSegments(count=1))
+    m.assign(ps.Netgen2D())
+    m.assign(ps.NetgenParameters2D(max_size=0.1, threads=4))
+
+    with m, pytest.raises(ps.PysmeshError) as info:
+        m.compute()
+
+    match = re.search(SIZES_PATTERN, info.value.details)
+    assert match is not None
+    assert float(match.group(2)) == pytest.approx(0.0, abs=1e-12)
+    assert float(match.group(3)) == pytest.approx(2.0, rel=1e-6)
+    assert float(match.group(4)) == pytest.approx(0.1, rel=1e-12)
+    assert COARSE_EDGES_SENTENCE not in info.value.details
+
+
+FRONT_PATTERN: str = (
+    rf"open front of the kept mesh: (\d+) face\(s\) in (\d+) patch\(es\).*"
+    rf"largest: (\d+) face\(s\) in \({NUMBER}, {NUMBER}, {NUMBER}\) to "
+    rf"\({NUMBER}, {NUMBER}, {NUMBER}\)"
+)
+
+
+# The spike: the top-face node of the unit box surface nearest the face centre, pulled
+# down to SPIKE_GAP above the bottom face.
+SPIKE_GAP: float = 0.03
+
+
+def _box_surface_with_a_spike_into_netgen_3d() -> Mesher:
+    """The outward unit box surface of NETGEN 2D, with a spike, under Netgen3D.
+
+    The spike reaches to 0.03 above the bottom face without crossing it, so no triangle
+    intersects another and every face points out of the box. NETGEN 3D's advancing
+    front (Delaunay off) fills most of the box, then cannot close the thin gap under the
+    spike and stops with "too many attempts", keeping the tetrahedra it made.
+    """
+    s = Session()
+    s.add_box(1.0, 1.0, 1.0)
+    shape = ps.load_brep(s.brep())
+    with Mesher(shape) as surface:
+        surface.assign(ps.Netgen1D2D())
+        surface.assign(ps.NetgenParameters2D(max_size=0.1, threads=4))
+        surface.compute()
+        md = surface.mesh()
+    xyz = md.node_coords.copy()
+    top = np.flatnonzero(
+        (np.abs(xyz[:, 2] - 1.0) < 1e-9) & (md.node_kind == int(SubShapeKind.FACE))
+    )
+    tip = top[np.argmin(np.hypot(xyz[top, 0] - 0.5, xyz[top, 1] - 0.5))]
+    xyz[tip, 2] = SPIKE_GAP
+    m = Mesher(shape)
+    m.assign(ps.UseExisting1D())
+    m.assign(ps.UseExisting2D())
+    m.assign(ps.Netgen3D())
+    m.assign(ps.NetgenParameters(max_size=0.1, threads=4, use_delaunay=False))
+    ids = m.add_nodes(xyz)
+    for etype, add, kind in (
+        (ps.ElementType.EDGE, m.add_segments, SubShapeKind.EDGE),
+        (ps.ElementType.TRIANGLE, m.add_triangles, SubShapeKind.FACE),
+    ):
+        rows = np.flatnonzero(md.element_type == int(etype))
+        for ordinal in np.unique(md.element_ordinal[rows]):
+            sel = rows[md.element_ordinal[rows] == ordinal]
+            nodes = np.stack([md.nodes_of(int(i)) for i in sel])
+            add(ids[nodes], on=SubShape(kind, int(ordinal)))
+    return m
+
+
+def _open_front_centroids(md: ps.MeshData) -> np.ndarray:
+    """The centroids of the tetrahedron faces that no other tetrahedron and no triangle
+    of the mesh covers, sorted row by row: the open front, computed apart from pysmesh.
+    """
+    tets = np.flatnonzero(md.element_type == int(ps.ElementType.TETRAHEDRON))
+    t = md.element_nodes[md.element_offsets[tets][:, None] + np.arange(4)]
+    faces = np.concatenate(
+        [t[:, [0, 1, 2]], t[:, [0, 1, 3]], t[:, [0, 2, 3]], t[:, [1, 2, 3]]]
+    )
+    keys, counts = np.unique(np.sort(faces, axis=1), axis=0, return_counts=True)
+    tris = np.flatnonzero(md.element_type == int(ps.ElementType.TRIANGLE))
+    covered = {
+        tuple(row)
+        for row in np.sort(
+            md.element_nodes[md.element_offsets[tris][:, None] + np.arange(3)], axis=1
+        ).tolist()
+    }
+    front = np.array([k for k in keys[counts == 1].tolist() if tuple(k) not in covered])
+    centroids = md.node_coords[front].mean(axis=1)
+    return centroids[np.lexsort(centroids.T[::-1])]
+
+
+def test_too_many_attempts_names_the_open_front_and_its_patch_boxes() -> None:
+    """The line gives the open face count and patch boxes; centroids lie in the solid.
+
+    NETGEN keeps the tetrahedra it made before the stop, so the front is the brief's:
+    the faces of tetrahedra that no other tetrahedron and no boundary triangle covers.
+    The oracle is that front, computed from the kept mesh with NumPy: its face count and
+    its centroids. Every centroid and the box of every listed patch lie in the box
+    [0, 1]^3.
+    """
+    m = _box_surface_with_a_spike_into_netgen_3d()
+
+    with m:
+        with pytest.raises(ps.PysmeshError) as info:
+            m.compute()
+        expected = _open_front_centroids(m.mesh())
+
+    details = info.value.details
+    match = re.search(FRONT_PATTERN, details)
+    centroids = info.value.bad_element_centroids
+    got = centroids[np.lexsort(centroids.T[::-1])]
+    assert "too many attempts" in details
+    assert "the whole boundary is open" not in details
+    assert match is not None
+    faces, patches, largest = (int(match.group(i)) for i in (1, 2, 3))
+    low = np.array([float(match.group(i)) for i in (4, 5, 6)])
+    high = np.array([float(match.group(i)) for i in (7, 8, 9)])
+    assert faces == len(expected) > 0
+    assert 1 <= patches and 1 <= largest <= faces
+    assert bool(np.all(low >= -1e-9)) and bool(np.all(high <= 1.0 + 1e-9))
+    assert got.shape == expected.shape
+    np.testing.assert_allclose(got, expected, atol=1e-12)
+    assert bool(np.all((centroids >= 0.0) & (centroids <= 1.0)))
+
+
+def test_a_clean_netgen_3d_compute_reports_no_front() -> None:
+    """Netgen1D2D3D on the unit box meshes it: no error and no front to report."""
+    with Mesher(_box()) as m:
+        m.assign(ps.Netgen1D2D3D())
+        m.assign(ps.NetgenParameters(max_size=0.25, threads=4))
+
+        report = m.compute()
+
+    assert report.volumes > 0
+    assert all("open front" not in w.text for w in report.warnings)

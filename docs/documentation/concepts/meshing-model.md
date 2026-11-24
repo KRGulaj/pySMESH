@@ -323,8 +323,27 @@ defeat it: the two triangles of an "Intersecting triangles" failure, and the edg
 gives the count of bad elements and the centroids of the first 5, in model coordinates.
 NETGEN can name one element several times; it is counted once.
 `.bad_element_centroids` is a `(k, 3)` float64 NumPy array of the centroid of every bad
-element of every failed sub-shape, in the order of `.details`. It is a `(0, 3)` array when
-no failure names a bad element, and on every other `PysmeshError`.
+element of every failed sub-shape, in the order of `.details`, and of every open front face
+(below). It is a `(0, 3)` array when no failure names a bad element or an open front, and
+on every other `PysmeshError`.
+
+**A NETGEN 3-D stop gives the open front.** "Stop meshing since too many attempts" names
+no place: NETGEN restarts its advancing front from every open face of the solid and stops
+the whole solid when the restarts run out. The line of that solid then gives the open front
+of the mesh that NETGEN kept: the faces of volume elements that no other volume element and
+no boundary element covers. When NETGEN kept no volume element, the whole boundary is open.
+The line gives the open face count and the box of each of the 5 largest connected patches,
+and the centroid of every open face goes to `.bad_element_centroids`. The front holds the
+place where NETGEN stopped and also every region that it had not reached yet. The cause is
+the patch that stays open when you repeat the run with the other patches fixed.
+
+**A NETGEN volume mesh must fill its solid.** NETGEN_2D3D counts its result good when it
+holds any volume element. After viscous layers that stopped early ("Thickness ... of
+viscous layers not reached") it returned the layers alone, with 8 % of the solid filled,
+and SMESH reported success. So after every compute, each solid that `Netgen3D` or
+`Netgen1D2D3D` meshed is checked for an open front, as above. A solid with one makes
+`compute()` raise: the message names the solid and its front, and gives the compute's
+warnings. The mesh is kept. `Netgen1D2D` with `Netgen3D` fills the same layers.
 
 **A missing algorithm or hypothesis is named by its state.** A sub-shape without an
 algorithm, where an enclosing algorithm needs its mesh, holds the algorithm state

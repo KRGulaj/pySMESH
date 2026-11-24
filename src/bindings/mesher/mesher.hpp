@@ -59,6 +59,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -81,6 +82,7 @@ class SMESH_Gen;
 class SMESH_Hypothesis;
 class SMESH_Mesh;
 class StdMeshers_ViscousLayerBuilder;
+class TopoDS_Face;
 
 namespace pysmesh {
 namespace mesher {
@@ -480,6 +482,27 @@ class Mesher {
   // before anything is computed.
   void refuse_unread_layers() const;
 
+  // Raise naming each face of a NETGEN_3D solid whose existing elements (injected, or kept
+  // by UseExisting_2D) do not all point out of that solid, before anything is computed.
+  // NETGENPlugin's own rule is followed: a face that two solids of a compound share needs
+  // one orientation only, and an internal face is not checked.
+  void refuse_misoriented_injected_faces() const;
+
+  // Raise naming a face meshed by NETGEN_2D or NETGEN_2D_ONLY that has a degenerate edge
+  // with no mesh and no 1-D algorithm while another of its edges has a 1-D algorithm: the
+  // mix on which NETGENPlugin read invalid memory. Before anything is computed.
+  void refuse_netgen_faces_with_unmeshed_degenerate_edges() const;
+
+  // For the "viscous layers not reached" warning of `solid`: the 5 layered faces with the
+  // lowest stack reached, each with that height and the wall node where it is, as a text
+  // to append to the warning. Empty when no layer element is found.
+  std::string layer_heights_text(const TopoDS_Shape& solid) const;
+
+  // Why the existing elements of `face` (oriented as in its solid) are not outward: "mixed:
+  // ..." when two elements run an inner edge the same way or connected parts disagree,
+  // "reversed: ..." when they all point into the solid. Empty when they point out.
+  std::string injected_face_orientation(const TopoDS_Face& face) const;
+
   // Whether a NETGEN algorithm is assigned anywhere, so that a compute must hold the
   // process-wide NETGEN lock (mesher_netgen.cpp).
   bool uses_netgen() const;
@@ -494,6 +517,49 @@ class Mesher {
   // that an upstream message names the sub-shape the way the caller does.
   std::string with_ordinals(const std::string& text) const;
 
+  // `text` with "2D mesh on face <SMESHDS index>" of the viscous-layer shrink failures
+  // written as "2D mesh on FACE <ordinal>"; each such face's ordinal is appended to `faces`.
+  std::string with_shrink_face_ordinals(const std::string& text, std::vector<int>& faces) const;
+
+  // For a SOLID meshed by Prism_3D with more than two faces that take triangles (they hold
+  // elements that are not quadrangles, or their 2-D algorithm makes triangles): a text for
+  // its failure line that names those faces and the remedy. Empty otherwise.
+  std::string prism_side_face_cause(const TopoDS_Shape& solid) const;
+
+  // For a FACE (ordinal `ordinal`) that a NETGEN 2-D algorithm `algo` failed on: a text for
+  // its failure line with the longest segment already on its edges, the smallest extent of
+  // its box and the size its hypothesis asks for, and a sentence on the cause when that
+  // segment is longer than the extent.
+  std::string netgen_face_sizes(const TopoDS_Shape& face, int ordinal,
+                                const SMESH_Algo& algo) const;
+
+  // One connected patch of an open front: its face count and its box.
+  struct Patch {
+    std::size_t faces = 0;
+    double low[3] = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(),
+                     std::numeric_limits<double>::max()};
+    double high[3] = {std::numeric_limits<double>::lowest(),
+                      std::numeric_limits<double>::lowest(),
+                      std::numeric_limits<double>::lowest()};
+  };
+
+  // The open front of the volume mesh of a solid: the faces of its volume elements that no
+  // other volume element shares and that no 2-D element on a face of the solid covers. When
+  // the solid holds no volume element, every 2-D element on its faces. `centroids` holds
+  // x y z per open face; `patches` are the open faces joined by shared nodes, the largest
+  // first.
+  struct OpenFront {
+    std::size_t faces = 0;
+    bool no_volume = false;
+    std::vector<double> centroids;
+    std::vector<Patch> patches;
+  };
+  OpenFront open_front(const TopoDS_Shape& solid) const;
+
+  // The text of a non-empty front for a failure line: the face count, the patch count and
+  // the box of each of the 5 largest patches.
+  static std::string open_front_text(const OpenFront& front);
+
   // The sub-shape where `hyp`, just assigned on `target`, met two different similar
   // hypotheses (HYP_CONCURRENT), and those hypotheses with where they are assigned.
   std::string describe_concurrency(const TopoDS_Shape& target, SMESH_Hypothesis* hyp) const;
@@ -505,6 +571,11 @@ class Mesher {
                               int& status) const;
 
   void clear_mesh();
+
+  // Raise naming each solid meshed by NETGEN_3D or NETGEN_2D3D whose volume mesh has an
+  // open front (open_front), after a compute that SMESH reports as done. The details give
+  // each such solid's front and the compute's `warnings`; the mesh is kept.
+  void refuse_unfilled_netgen_solids(const py::list& warnings) const;
 
   // The counts and the meshed sub-shapes of a successful compute, as compute() returns
   // them (mesher_core.cpp).
@@ -642,6 +713,13 @@ SMESH_Hypothesis* make_netgen(const std::string& name, Params& p, SMESH_Gen& gen
 
 // Whether `name` is a NETGEN algorithm: a compute that runs one holds netgen_mutex().
 bool is_netgen_algorithm(const std::string& name);
+
+// The element size that the hypothesis of the NETGEN algorithm `algo` asks for on `face`:
+// the local size of NetgenParameters under `entry` ("FACE:<ordinal>") when it has one, else
+// its max_size; the local length of NetgenSimpleParameters2D. Negative when no hypothesis
+// that `algo` reads there gives a size.
+double netgen_size_asked(SMESH_Mesh& mesh, const SMESH_Algo& algo, const TopoDS_Shape& face,
+                         const std::string& entry);
 
 // Whether `name` may be assigned on a mesher with no shape: NETGEN_Remesher_2D and its
 // NETGEN_RemesherParameters_2D, which remesh the triangles of the mesh itself.

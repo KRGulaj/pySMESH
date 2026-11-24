@@ -111,6 +111,12 @@ class _CheckOps(_SessionBase):
         after the other: the progress advances, and a cancel takes effect, between two
         bodies.
 
+        ``BRepCheck_Analyzer`` does not test a face for self-intersection. A face that
+        folds through itself is valid to it, and so is a solid bounded by such a face.
+        :meth:`check_boolean` reports ``BOPAlgo_SelfIntersect`` for a fold, but also for
+        a face that closes through a sharp seam, so it cannot tell the two apart. Give a
+        :meth:`tessellate` of a model that may hold a fold a ``cancel``.
+
         Args:
             entities: Entities whose owning bodies are checked. ``None`` checks every body
                 of the model.

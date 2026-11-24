@@ -400,6 +400,14 @@ class _ConstructOps(_SessionBase):
     ) -> HistoryDelta:
         """Add a B-spline edge approximating a sequence of points.
 
+        Points that lie in one plane within ``tol`` must give a curve in that plane: a
+        face or a loft cap on the edge needs it. When OCCT's fit needs more poles than
+        there are points, it interpolates the points instead, and that interpolation can
+        leave their plane: 121 points of an aerofoil in z = 2 at ``tol=1e-7`` gave a
+        curve 1.1e-3 off the plane, with poles 2.5e-3 off. Such a curve is refused, not
+        kept. The curve decides, not its poles, because ``make_face`` finds the plane of
+        an edge from points on the curve.
+
         Args:
             points: (N, 3) points the curve passes through to within ``tol``, N >= 2.
             degree_min: Lowest degree OCCT may use (>= 1).
@@ -411,7 +419,11 @@ class _ConstructOps(_SessionBase):
 
         Raises:
             PysmeshError: On fewer than two points, an invalid degree band, a non-positive
-                tolerance, or a fit that does not converge.
+                tolerance, or a fit that does not converge. Also when the points lie in
+                one plane within ``tol`` and the fitted curve leaves that plane by more
+                than ``tol``; the message gives the point count, ``tol`` and both
+                distances. Then use :meth:`add_bspline` with poles of your own,
+                :meth:`add_polyline`, a different point count, or a looser ``tol``.
         """
         return _delta(
             self._s.add_spline(_points("points", points), degree_min, degree_max, tol)
@@ -870,6 +882,20 @@ class _ConstructOps(_SessionBase):
     ) -> HistoryDelta:
         """Loft through an ordered list of section wires, consuming all of them.
 
+        **A loft that folds back over itself is refused, with one known gap.** The fold
+        check runs with and without ``solid``. It looks for a point that the loft covers
+        twice, from places half a section interval or more apart along the loft. Closed
+        sections with one trailing edge, at stations that go back along the loft (z = 0,
+        1, 0.6, 1.6), give such a point on the trailing-edge line. The two sides of a
+        seam do not count, and neither do the first and the last section of a loft that
+        closes onto itself. The gap: a smooth loft whose surface crosses itself between
+        places less than half a section interval apart passes the check. The check
+        samples each face on a grid, so a crossing smaller than the grid spacing can also
+        pass. :meth:`check_shape` does not find such a fold: OCCT's
+        ``BRepCheck_Analyzer`` does not test a face for self-intersection. Keep the
+        stations in order along the loft. Give each later :meth:`tessellate` of such a
+        model a ``cancel``: the time that ``BRepMesh`` takes on a folded face has no bound.
+
         Args:
             sections: One entity-id group per section, in sweep order. Each group must
                 resolve to one wire or single-edge body, and no body may appear twice,
@@ -910,6 +936,9 @@ class _ConstructOps(_SessionBase):
                 measured case. And, with ``solid``, if the lofted solid's boundary
                 crosses itself, naming the faces and where; a face that closes through a
                 sharp seam, as a one-edge airfoil section gives, is not a crossing.
+                Also, with or without ``solid``, if the loft folds back through itself
+                (see above): the message names the faces, the two section intervals
+                that meet, and the point where they meet.
                 Nothing is committed, and the session is left exactly as it was.
         """
         return _delta(

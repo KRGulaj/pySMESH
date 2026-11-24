@@ -140,7 +140,21 @@ class _MeshOps(_MesherBase):
                 cleared.
             PysmeshError: If any sub-mesh failed. The message names every failed sub-shape
                 with SMESH's own reason and the algorithm that reported it, and ``.face_ids``
-                carries the ordinals of the failed faces. Where the failed algorithm names
+                carries the ordinals of the failed faces. A face that viscous layers could
+                not shrink into ("Can't shrink 2D mesh on FACE k") is named by its ordinal
+                and is in ``.face_ids`` too. The line of a face that a NETGEN 2-D
+                algorithm failed on gives the longest segment already on its edges, the
+                smallest extent of its box and the size its hypothesis asks for; when that
+                segment is longer than the extent, the line says that the edges were
+                meshed coarser than the face can take. The line of a solid that a NETGEN
+                3-D algorithm failed on without naming bad elements ("Stop meshing since
+                too many attempts") gives the open front of the mesh it kept: the faces of
+                volume elements that no other volume element and no boundary element
+                covers, or the whole boundary when NETGEN kept no volume element. It gives
+                their count and the box of each of the 5 largest connected patches, and
+                their centroids go to ``.bad_element_centroids``. The front holds the
+                place where NETGEN stopped and every region that it had not reached yet.
+                Where the failed algorithm names
                 bad elements (NETGEN's intersecting triangles), the line of that
                 sub-shape gives their count and the centroids of the first 5, and
                 ``.bad_element_centroids`` is the (k, 3) float64 array of every one; it
@@ -153,6 +167,22 @@ class _MeshOps(_MesherBase):
                 sub-shape with no algorithm of its own is no error where an enclosing
                 algorithm meshes it, or where nothing needs its mesh (a solid under a
                 surface mesh).
+                Also after a compute that NETGEN reports as done, if the volume mesh of a
+                solid that :class:`Netgen3D` or :class:`Netgen1D2D3D` meshed has an open
+                front: then part of the solid is empty. :class:`Netgen1D2D3D` after
+                viscous layers that stopped early returned the layers alone. The message
+                names the solid and its open front, and gives the compute's warnings; the
+                front's centroids are in ``.bad_element_centroids``, and the mesh is
+                kept.
+                Also before anything is meshed, if a face of a solid that
+                :class:`Netgen3D` meshes holds elements whose node order does not point
+                out of that solid, all of them or some (see :class:`UseExisting2D`); the
+                message names each such face, and ``.face_ids`` holds it.
+                Also before anything is meshed, if a face of :class:`Netgen1D2D` or
+                :class:`Netgen2D` has a degenerate edge with no mesh and no 1-D algorithm
+                while another of its edges has one: NETGENPlugin read invalid memory on
+                that mix (see :class:`Netgen1D2D`). The message names the face and its
+                degenerate edges.
                 Also before anything is meshed, if a :class:`ViscousLayers` or
                 :class:`ViscousLayers2D` reaches a solid or a face whose algorithm does
                 not build layers; the message names the sub-shape and the algorithm. A
