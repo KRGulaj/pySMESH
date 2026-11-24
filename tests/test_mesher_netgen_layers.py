@@ -658,7 +658,8 @@ def _filled_volume(md: MeshData) -> float:
     The vectorised form of :func:`_cell_volume`, summed over every cell of each type.
     """
 
-    def flux(p: NDArray[np.float64], i: int, j: int, k: int) -> NDArray[np.float64]:
+    def term(p: NDArray[np.float64], i: int, j: int, k: int) -> NDArray[np.float64]:
+        """Signed volume term of the triangle (i, j, k) of each cell face, as above."""
         return np.einsum("ij,ij->i", p[:, i], np.cross(p[:, j], p[:, k])) / 6.0
 
     total = 0.0
@@ -671,10 +672,10 @@ def _filled_volume(md: MeshData) -> float:
         for face in faces:
             p = md.node_coords[nodes[:, list(face)]]
             if len(face) == 3:
-                total += float(flux(p, 0, 1, 2).sum())
+                total += float(term(p, 0, 1, 2).sum())
             else:
-                first = flux(p, 0, 1, 2) + flux(p, 0, 2, 3)
-                second = flux(p, 0, 1, 3) + flux(p, 1, 2, 3)
+                first = term(p, 0, 1, 2) + term(p, 0, 2, 3)
+                second = term(p, 0, 1, 3) + term(p, 1, 2, 3)
                 total += float((0.5 * (first + second)).sum())
     return total
 
