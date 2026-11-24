@@ -882,6 +882,16 @@ class _ConstructOps(_SessionBase):
     ) -> HistoryDelta:
         """Loft through an ordered list of section wires, consuming all of them.
 
+        **A loft that folds back over itself is not always refused.** With
+        ``solid=False``, no check for a self-crossing runs on the shell. With ``solid``,
+        that check (see Raises) leaves out the points near each face's own edges and
+        seams. So sheets that meet only along a shared seam pass it. Closed sections with
+        one trailing edge, at stations that go back along the loft (z = 0, 1, 0.6, 1.6),
+        give such sheets. :meth:`check_shape` does not find the fold either: OCCT's
+        ``BRepCheck_Analyzer`` does not test a face for self-intersection. Keep the
+        stations in order along the loft. Give each later :meth:`tessellate` of such a
+        model a ``cancel``: the time that ``BRepMesh`` takes on a folded face has no bound.
+
         Args:
             sections: One entity-id group per section, in sweep order. Each group must
                 resolve to one wire or single-edge body, and no body may appear twice,
