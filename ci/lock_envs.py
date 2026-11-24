@@ -7,25 +7,17 @@ the diff of ``ci/locks/``, and commit it with the change that needed it.
 
 Locks written (all win-64, conda-forge only):
 
-- ``ci/locks/build-py<X.Y>-win-64.txt``: the build env of each supported CPython.
-- ``ci/locks/vtk-win-64.txt``: VTK in an env of :data:`VTK_SIDE_PYTHON`, for the legs in
-  :data:`VTK_SIDE_ENV`.
+- ``ci/locks/build-py<X.Y>-win-64.txt``: the build env of each supported CPython, with
+  the pinned VTK in it.
 - ``ci/locks/novtk-requirements.txt``: the NumPy wheel of the no-VTK check, per CPython,
   with its PyPI sha256 (installed with ``pip --require-hashes``).
-
-Why a VTK side env: conda-forge builds VTK once per CPython, and it publishes a new CPython's
-VTK weeks after the CPython itself. ``_core`` links only three VTK C++ modules (CommonCore,
-CommonDataModel, FiltersVerdict). None of them, nor any DLL they load, depends on a Python
-DLL. So a leg whose CPython has no VTK build yet takes VTK from an env of another CPython.
-That env is :data:`VTK_SIDE_PYTHON`, the newest CPython with the pinned VTK. Once
-conda-forge ships the pinned VTK for a leg, remove the leg from :data:`VTK_SIDE_ENV`.
 
 Each env is created for real (the packages are downloaded and checked) and exported with
 ``conda list --explicit --sha256``. The envs are created under ``--work`` and removed after
 export, except the ones named by ``--keep``.
 
 Usage (with the miniforge base Python, no other dependency; `--only` limits the run):
-    python ci/lock_envs.py --conda <conda.exe> --work <dir> [--keep 3.13 vtk] [--only vtk]
+    python ci/lock_envs.py --conda <conda.exe> --work <dir> [--keep 3.13] [--only numpy]
 """
 
 from __future__ import annotations
@@ -46,14 +38,11 @@ LOCK_DIR: Final[Path] = ROOT / "ci" / "locks"
 
 # Keep in lockstep with `requires-python`, the classifiers and the matrix in ci.yml.
 PYTHONS: Final[tuple[str, ...]] = ("3.11", "3.12", "3.13", "3.14", "3.15")
-# CPythons for which conda-forge has no build of the pinned VTK yet (checked 2026-10-10).
-VTK_SIDE_ENV: Final[frozenset[str]] = frozenset({"3.15"})
-VTK_SIDE_PYTHON: Final[str] = "3.14"
 CHANNEL: Final[str] = "conda-forge"
 
 
-def specs() -> tuple[list[str], str]:
-    """Return the dependency specs of environment.yml without python, and the VTK pin."""
+def specs() -> list[str]:
+    """Return the dependency specs of environment.yml without python."""
     text = ENV_FILE.read_text(encoding="utf-8")
     body = text.split("dependencies:", 1)[1]
     out: list[str] = []
@@ -64,8 +53,7 @@ def specs() -> tuple[list[str], str]:
     vtk = [s for s in out if re.fullmatch(r"vtk\s*=\s*[0-9.]+", s)]
     if len(vtk) != 1:
         raise SystemExit(f"{ENV_FILE}: expected one 'vtk=<version>' spec, found {vtk}")
-    others = [s for s in out if not s.startswith("python ") and s != "python"]
-    return others, vtk[0].split("=", 1)[1].strip()
+    return [s for s in out if not s.startswith("python ") and s != "python"]
 
 
 def create_and_export(
@@ -165,13 +153,13 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--conda", required=True, help="conda executable")
     ap.add_argument("--work", required=True, type=Path, help="directory for the envs")
-    ap.add_argument("--keep", nargs="*", default=[], help="envs to keep: 3.X or vtk")
+    ap.add_argument("--keep", nargs="*", default=[], help="envs to keep: 3.X")
     ap.add_argument(
-        "--only", nargs="*", default=[], help="regenerate only these: 3.X, vtk or numpy"
+        "--only", nargs="*", default=[], help="regenerate only these: 3.X or numpy"
     )
     args = ap.parse_args()
 
-    others, vtk_pin = specs()
+    others = specs()
     LOCK_DIR.mkdir(exist_ok=True)
     args.work.mkdir(parents=True, exist_ok=True)
 
@@ -182,27 +170,12 @@ def main() -> None:
         if not wanted(py):
             continue
         packages = [f"python={py}", *others]
-        if py in VTK_SIDE_ENV:
-            packages = [s for s in packages if not s.startswith("vtk=")]
         prefix = args.work / f"build-py{py}"
         create_and_export(
             args.conda, prefix, packages, LOCK_DIR / f"build-py{py}-win-64.txt"
         )
         python_check(prefix, py)
         if py not in args.keep:
-            shutil.rmtree(prefix)
-
-    if wanted("vtk"):
-        # The vtk metapackage, as in the other legs: VTK's CMake package lists every module,
-        # the ffmpeg IO module of vtk-io-ffmpeg included, and fails without it.
-        prefix = args.work / "vtk"
-        create_and_export(
-            args.conda,
-            prefix,
-            [f"python={VTK_SIDE_PYTHON}", f"vtk={vtk_pin}"],
-            LOCK_DIR / "vtk-win-64.txt",
-        )
-        if "vtk" not in args.keep:
             shutil.rmtree(prefix)
 
     if wanted("numpy"):

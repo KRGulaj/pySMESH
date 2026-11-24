@@ -195,9 +195,9 @@ build by exact file.
 
 > **Upgrading from 3.x:** 4.0.0 removes the shared VTK requirement. Earlier
 > versions linked the host environment's VTK and refused to import unless it
-> was exactly 9.6.2. That constraint is gone. pySMESH now carries its own
-> private VTK, so it no longer cares which VTK you have, or whether you have
-> one at all. If you install with `--no-deps`, or gate on
+> was exactly the VTK they were built against. That constraint is gone. pySMESH
+> now carries its own private VTK, so it no longer cares which VTK you have, or
+> whether you have one at all. If you install with `--no-deps`, or gate on
 > `_build_info.VTK_VERSION`, that check is now obsolete and always passes.
 
 ## Quick example
@@ -653,18 +653,9 @@ CPython: every package by URL and sha256. Create yours from the same lock. After
 change to `ci/environment.yml`, regenerate the locks with `ci/lock_envs.py` and
 commit them with it.
 
-conda-forge has no VTK for CPython 3.15 yet. The 3.15 lock therefore has no VTK,
-and the 3.15 build takes VTK from `ci/locks/vtk-win-64.txt`, the same VTK
-version in a CPython 3.14 environment. `_core` links only VTK's C++ libraries,
-which load no Python DLL, and `ci/check_wheel.py` checks that.
-
 ```bash
 conda create -n pysmesh-build --file ci/locks/build-py3.13-win-64.txt
 conda activate pysmesh-build
-# For CPython 3.15 only: a VTK env, then add
-#   -C cmake.define.VTK_DIR=<vtk-env>/Library/lib/cmake/vtk-9.6 to `pip wheel`, and
-#   --add-path <vtk-env>/Library/bin before the build env's path to `delvewheel repair`.
-# conda create -p <vtk-env> --file ci/locks/vtk-win-64.txt
 
 # From an MSVC x64 developer shell. <deps> is any directory outside the checkout.
 # A second run with the same inputs reuses the install.

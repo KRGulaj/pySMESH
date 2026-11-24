@@ -25,14 +25,10 @@ dependencies:
   # Pinned so the headers compiled against and the DLLs delvewheel bundles come from one
   # environment. It is free to move on its own schedule now: bumping it changes only what
   # ships inside the wheel, and no consumer has to follow. ci/check_vtk_pin.py asserts this
-  # pin matches the binary that was actually built.
-  # conda-forge has no VTK for py3.15 yet. That leg takes VTK from ci/locks/vtk-win-64.txt
-  # (VTK_SIDE_ENV in ci/lock_envs.py), the same version from a py3.14 env: _core links only
-  # VTK's C++ libraries, which load no Python DLL.
-  - vtk=9.6.2
+  # pin matches the binary that was actually built, and that every lock carries it.
+  - vtk=9.7.2
   # --- Boost: dynamic, bundled into the wheel ---
-  # Pinned so every leg ships the same Boost. VTK used to hold it at 1.90 in every leg; the
-  # py3.15 leg has no VTK in its env and resolved 1.92.
+  # Pinned so every leg ships the same Boost.
   - libboost-devel=1.90.0
   # --- build toolchain ---
   - cmake>=3.27
