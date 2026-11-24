@@ -882,12 +882,16 @@ class _ConstructOps(_SessionBase):
     ) -> HistoryDelta:
         """Loft through an ordered list of section wires, consuming all of them.
 
-        **A loft that folds back over itself is not always refused.** With
-        ``solid=False``, no check for a self-crossing runs on the shell. With ``solid``,
-        that check (see Raises) leaves out the points near each face's own edges and
-        seams. So sheets that meet only along a shared seam pass it. Closed sections with
-        one trailing edge, at stations that go back along the loft (z = 0, 1, 0.6, 1.6),
-        give such sheets. :meth:`check_shape` does not find the fold either: OCCT's
+        **A loft that folds back over itself is refused, with one known gap.** The fold
+        check runs with and without ``solid``. It looks for a point that the loft covers
+        twice, from places half a section interval or more apart along the loft. Closed
+        sections with one trailing edge, at stations that go back along the loft (z = 0,
+        1, 0.6, 1.6), give such a point on the trailing-edge line. The two sides of a
+        seam do not count, and neither do the first and the last section of a loft that
+        closes onto itself. The gap: a smooth loft whose surface crosses itself between
+        places less than half a section interval apart passes the check. The check
+        samples each face on a grid, so a crossing smaller than the grid spacing can also
+        pass. :meth:`check_shape` does not find such a fold: OCCT's
         ``BRepCheck_Analyzer`` does not test a face for self-intersection. Keep the
         stations in order along the loft. Give each later :meth:`tessellate` of such a
         model a ``cancel``: the time that ``BRepMesh`` takes on a folded face has no bound.
@@ -932,6 +936,9 @@ class _ConstructOps(_SessionBase):
                 measured case. And, with ``solid``, if the lofted solid's boundary
                 crosses itself, naming the faces and where; a face that closes through a
                 sharp seam, as a one-edge airfoil section gives, is not a crossing.
+                Also, with or without ``solid``, if the loft folds back through itself
+                (see above): the message names the faces, the two section intervals
+                that meet, and the point where they meet.
                 Nothing is committed, and the session is left exactly as it was.
         """
         return _delta(

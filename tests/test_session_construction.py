@@ -30,6 +30,10 @@ Each claim is asserted against an oracle the operation under test does not produ
 * **#16, a spline that leaves the plane of its points.** 121 coplanar points at tol
   1e-7 gave a curve 1e-3 off their plane. It must be refused with the drift. The oracle
   is an OCCT probe that calls the fit alone.
+* **#18, a loft that folds back.** Aerofoil stations at z = 0, 1, 0.6, 1.6 gave a surface
+  that passes three times along its trailing-edge line, and every check accepted it. It
+  must be refused, naming the faces, the two section intervals and a point of that line.
+  The oracle is the geometry of the stations: every trailing edge lies at x = 1, y = 0.
 """
 
 from __future__ import annotations
@@ -787,3 +791,173 @@ def test_a_spline_through_points_off_any_plane_is_not_checked() -> None:
         np.linalg.norm(sample[None, :, :] - points[:, None, :], axis=2), axis=1
     )
     assert float(gap.max()) < 1e-3
+
+
+# ---- #18: a loft that folds back through itself ------------------------------------ #
+
+# Stations (z, chord, x of the leading edge). Every trailing edge lies at x = 1, y = 0.
+FOLD_BACK_Z: tuple[tuple[float, float, float], ...] = (
+    (0.0, 1.0, 0.0),
+    (1.0, 0.9, 0.1),
+    (0.6, 0.8, 0.2),
+    (1.6, 0.7, 0.3),
+)
+FOLD_BACK_X: tuple[tuple[float, float, float], ...] = (
+    (0.0, 1.0, 0.0),
+    (0.5, 1.0, 1.5),
+    (1.0, 1.0, -0.5),
+    (1.5, 1.0, 0.0),
+)
+NO_FOLD: tuple[tuple[float, float, float], ...] = (
+    (0.0, 1.0, 0.0),
+    (1.0, 0.9, 0.1),
+    (2.0, 0.8, 0.2),
+    (3.0, 0.7, 0.3),
+)
+# 5 stations, chord 1 - 0.1 k, twisted 4 deg more at each one about the quarter chord.
+TWISTED_WING: tuple[tuple[float, float, float, float], ...] = tuple(
+    (float(k), 1.0 - 0.1 * k, 0.05 * k, math.radians(4.0 * k)) for k in range(5)
+)
+FOLD_TEXT: str = (
+    r"FACE (\d+) between sections (\d+) and \d+ and FACE (\d+) between sections (\d+) "
+    rf"and \d+ meet at \(({NUMBER}), ({NUMBER}), ({NUMBER})\)"
+)
+
+
+def _wing_station(
+    s: Session, z: float, chord: float, x0: float, twist: float = 0.0
+) -> list[int]:
+    """A NACA 0012 spline of 81 points in the plane z, with its sharp trailing edge as
+    the start and the end of the closed curve, twisted about the quarter chord."""
+    beta = np.linspace(0.0, np.pi, 41)
+    x = 0.5 * (1.0 - np.cos(beta))
+    yt = 0.6 * (
+        0.2969 * np.sqrt(x) - 0.1260 * x - 0.3516 * x**2 + 0.2843 * x**3 - 0.1036 * x**4
+    )
+    yt[-1] = 0.0
+    p = np.vstack([np.c_[x[::-1], yt[::-1]], np.c_[x[1:], -yt[1:]]])
+    p[-1] = p[0]
+    xr = chord * (p[:, 0] - 0.25)
+    yr = chord * p[:, 1]
+    c, d = math.cos(twist), math.sin(twist)
+    points = np.c_[
+        x0 + 0.25 * chord + c * xr - d * yr, d * xr + c * yr, np.full(len(p), z)
+    ]
+    created = s.add_spline(np.ascontiguousarray(points, dtype=np.float64)).created
+    return [int(i) for i in created if s.entity_kind(i) is EntityKind.EDGE]
+
+
+@pytest.mark.parametrize(
+    ("ruled", "solid"),
+    [(False, False), (True, False), (False, True)],
+    ids=["smooth_shell", "ruled_shell", "smooth_solid"],
+)
+def test_a_loft_whose_stations_go_back_along_it_is_refused_naming_the_fold(
+    ruled: bool, solid: bool
+) -> None:
+    """The trailing edge runs z = 0 -> 1 -> 0.6 -> 1.6 along x = 1, y = 0.
+
+    So the loft covers that line twice or more between z = 0.6 and z = 1, from two
+    different section intervals. The named point lies on that line. The smooth loft
+    turns a little past the stations, so its z is checked within 0.1 of that range. The
+    ruled solid is left out: the self-interference check refuses it already.
+    """
+    s = Session()
+    sections = [_wing_station(s, *station) for station in FOLD_BACK_Z]
+    before = _state(s)
+
+    with pytest.raises(PysmeshError, match="folds back through itself") as info:
+        s.thru_sections(sections, solid=solid, ruled=ruled)
+
+    found = re.search(FOLD_TEXT, str(info.value))
+    assert found is not None, str(info.value)
+    face_a, interval_a, face_b, interval_b = (int(found.group(k)) for k in range(1, 5))
+    x, y, z = (float(found.group(k)) for k in range(5, 8))
+    assert face_a >= 1 and face_b >= 1
+    assert interval_a != interval_b
+    assert {interval_a, interval_b} <= {1, 2, 3}
+    assert x == pytest.approx(1.0, abs=1e-6)
+    assert y == pytest.approx(0.0, abs=1e-6)
+    assert 0.5 <= z <= 1.1
+    assert _state(s) == before
+
+
+@pytest.mark.parametrize(
+    ("stations", "ruled", "solid"),
+    [
+        (FOLD_BACK_X, False, False),
+        (FOLD_BACK_X, True, False),
+        (FOLD_BACK_X, False, True),
+        (FOLD_BACK_X, True, True),
+        (NO_FOLD, False, False),
+        (NO_FOLD, True, False),
+        (TWISTED_WING, False, False),
+        (TWISTED_WING, True, False),
+        (TWISTED_WING, False, True),
+    ],
+    ids=[
+        "back_x_smooth_shell",
+        "back_x_ruled_shell",
+        "back_x_smooth_solid",
+        "back_x_ruled_solid",
+        "no_fold_smooth",
+        "no_fold_ruled",
+        "twisted_smooth_shell",
+        "twisted_ruled_shell",
+        "twisted_smooth_solid",
+    ],
+)
+def test_a_loft_that_does_not_fold_back_is_committed(
+    stations: tuple[tuple[float, ...], ...], ruled: bool, solid: bool
+) -> None:
+    """Stations that rise in z, at any x, give a loft that covers no point twice.
+
+    Each plane z = c cuts such a loft in one section-like curve. The stations that go
+    back along x give a sheared tube, not a fold. The twisted wing has its sharp
+    trailing edge on the seam of each face.
+    """
+    s = Session()
+    sections = [_wing_station(s, *station) for station in stations]
+
+    delta = s.thru_sections(sections, solid=solid, ruled=ruled)
+
+    assert delta.valid is True
+    assert len(s.entities(EntityKind.SOLID)) == (1 if solid else 0)
+
+
+@pytest.mark.parametrize("solid", [False, True], ids=["shell", "solid"])
+@pytest.mark.parametrize("ruled", [True, False], ids=["ruled", "smooth"])
+def test_a_closed_ring_of_5_circles_is_not_a_fold(ruled: bool, solid: bool) -> None:
+    """The ring passes its first station again at its end: one loft parameter, cyclic."""
+    s = Session()
+    stations = [_ring_station(s, 2.0 * math.pi * k / 5) for k in range(5)]
+
+    delta = s.thru_sections([*stations, stations[0]], solid=solid, ruled=ruled)
+
+    assert delta.valid is True
+    assert len(s.entities(EntityKind.SOLID)) == (1 if solid else 0)
+
+
+@pytest.mark.parametrize("ruled", [False, True], ids=["smooth", "ruled"])
+def test_a_wrap_around_loft_closed_by_a_copy_of_its_first_generator_is_not_a_fold(
+    ruled: bool,
+) -> None:
+    """13 straight generators round a unit circle, the last a copy of the first.
+
+    The first and the last generator coincide, so the loft closes onto itself there,
+    and that line is not covered from two places along the loft.
+    """
+    s = Session()
+    sections = []
+    for p in np.linspace(0.0, 2.0 * math.pi, 13)[:-1]:
+        c, d = math.cos(float(p)), math.sin(float(p))
+        created = s.add_line((c, d, 0.0), (c, d, 1.0)).created
+        sections.append(
+            [int(i) for i in created if s.entity_kind(i) is EntityKind.EDGE]
+        )
+    sections.append(_copy_of(s, sections[0]))
+
+    delta = s.thru_sections(sections, solid=False, ruled=ruled)
+
+    assert delta.valid is True
+    assert len(s.entities(EntityKind.FACE)) == (12 if ruled else 1)
