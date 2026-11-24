@@ -1,5 +1,90 @@
 # Changelog
 
+## 5.2.2
+
+5.2.2 adds guards and clearer failures for faults that sit in SMESH, NETGEN and OCCT. pySMESH
+does not patch those libraries. It refuses a known faulty input before it reaches the fault,
+or it names the cause and the place of a failure. It also moves the bundled VTK to 9.7.2 on
+every CPython. The CPython 3.15 wheel now builds from its own VTK. No public name and no
+default changes. Every result that 5.2.1 accepts is unchanged: the golden capture matches
+5.2.1 at rtol 0.
+
+### Guards: refused before the fault
+
+Each refusal is a `PysmeshError` that names the entity. The session or the mesh is left as it
+was.
+
+- **A NETGEN 2-D face with bare degenerate edges beside a meshed edge.** Some edges of the face
+  have their own 1-D algorithm, and its degenerate edges (the poles of a revolved face) have
+  none. NETGENPlugin then read invalid memory, and the process ended with `0xC0000005` in 2
+  to 3 of 3 to 5 runs. The compute now refuses that face, and names it and its degenerate
+  edges.
+- **Injected faces with the wrong orientation under NETGEN 3-D.** NETGEN needs every boundary
+  triangle to point out of the solid. A face whose triangles point in, or mix both ways, made
+  it fail with "Some edges multiple times in surface mesh" or "too many attempts". The compute
+  now refuses such a face before NETGEN runs, and names it in `face_ids`. `UseExisting2D` and
+  `add_triangles` document the rule.
+- **A NETGEN solid that reports success but is not filled.** After viscous layers that stopped
+  early, `Netgen1D2D3D` returned the prisms alone and reported success. In the tested case
+  only 0.904 of 11.215 of the volume was meshed. Every solid that a NETGEN 3-D algorithm
+  meshes must now have a closed volume mesh. If it does not, the compute fails, and the error
+  names the solid and its open front. The check takes 0.30 s on 207 632 tetrahedra.
+- **`add_spline` through coplanar points that leaves their plane.** OCCT's fit can fall back
+  to an interpolation whose curve leaves the plane. One case had 121 points with tol 1e-7 and
+  a drift of 2e-3, and `make_face` then failed. The fit is now refused, with the measured
+  drift and the remedies.
+- **`thru_sections` that folds back through itself.** A loft that covers one point from two
+  places at least half a section interval apart is refused as a fold. The error names the
+  faces, the two section intervals and the point. It applies with `solid=True` and with
+  `solid=False`. The check added 5.2 ms at most on the tested lofts. It does not find a crossing that is closer than
+  half a section interval, or smaller than its sample grid. The docstring states both limits.
+
+### Failures that now say why and where
+
+- **NETGEN 2-D "Problem in Surface mesh generation":** the line gives the face's longest
+  boundary segment, its smallest extent and the size asked on it. When the boundary is coarser
+  than the face can take, it says so, and says that explicit segment counts on its edges avoid
+  it.
+- **NETGEN 3-D "Stop meshing since too many attempts", and other NETGEN 3-D failures that name
+  no element:** the line gives the open front of the kept mesh. That is its face count and the
+  box of each open patch. Every centroid is in `bad_element_centroids`.
+- **Prism3D in a NETGEN region:** a failure names the prism solid. If a 2-D algorithm meshed
+  its side faces first, the failure names them and the remedy (`Quadrangle2D` on the side
+  faces). This also covers the solid order where SMESH leaves no error text. The Prism3D
+  docstring states the rule.
+- **"Can't shrink 2D mesh on face N" of the viscous layers:** N was SMESH's internal shape
+  index. It is now the model face ordinal, and the face is in `face_ids`.
+- **Viscous layers "Thickness ... not reached" warning:** it now names the 5 layered faces with
+  the lowest stack, the height reached and the wall point where it is lowest. SMESH stops the
+  inflation of the whole solid at one blocked place. The `ViscousLayers` docstring explains
+  this.
+
+### Documentation
+
+- `check_shape`, `sew` and `thru_sections` state that BRepCheck does not test a face for
+  self-intersection, and that `tessellate` of a suspect model should get a `cancel`.
+
+### VTK 9.7.2 and the CPython 3.15 wheel
+
+- The bundled VTK moves from 9.6.2 to 9.7.2 on every CPython. SMESH compiles against it
+  unchanged.
+- The CPython 3.15 wheel now builds from its own environment. The workaround that took VTK
+  from a CPython 3.14 environment is removed: the `ci/locks/vtk-win-64.txt` lock, the CI step
+  and the lock tool's side-environment code.
+- All build locks are regenerated. Boost stays at 1.90.0.
+- The wheel bundles 53 DLLs, one more than before. The new one is `vtkCommonCache-9.7.dll`, a
+  VTK module under VTK's BSD-3-Clause licence. oneTBB moves from 2023.1 to 2023.2. `NOTICE.md`
+  lists both.
+
+### Wheel
+
+| | 5.2.1 | 5.2.2 |
+|---|---|---|
+| Wheel (cp313) | 42 324 216 bytes (40.4 MiB) | 43 435 583 bytes (41.4 MiB) |
+| Bundled DLLs | 52 | 53 |
+| Bundled VTK | 9.6.2, 17 DLLs | 9.7.2, 18 DLLs |
+| Tests | 3 169 passed | 3 214 passed |
+
 ## 5.2.1
 
 5.2.1 fixes eleven defects found in field use of 5.2.0. It changes one id rule: a `fuse` now
