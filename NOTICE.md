@@ -28,8 +28,8 @@ Upstream URLs, commits and the patch index are in [PROVENANCE.md](PROVENANCE.md)
 | **zlib 1.3.2** (vendored: `extern/zlib/`) | zlib | **static** in `_core.pyd` | Permissive, notice only. Built from the release archive, unmodified; it serves netgen's gzstream. This entry is the notice (copyright Jean-loup Gailly and Mark Adler). |
 | **Open CASCADE Technology (OCCT) 8.0.1** | LGPL-2.1 **with the OCCT exception** | **dynamic**, DLLs bundled into the wheel | **Modified.** `ci/build_occt.py` builds it from the upstream tag `V8_0_1` and applies the patches in `patches/occt801/`. PROVENANCE.md ("How OCCT is built") lists each patch and the build recipe. OCCT is linked dynamically, so the exception is not needed. The relinking right holds, because pySMESH is open and rebuilds from this repository. |
 | **Boost 1.90** (`filesystem`, `serialization` DLLs) | BSL-1.0 | **dynamic**, DLLs bundled into the wheel | Permissive, notice only. This entry is the notice. |
-| **VTK 9.6.2** | BSD-3-Clause | **dynamic**, DLLs bundled into the wheel | Permissive, notice only. This entry is the notice. `_core.pyd` links three VTK modules (`CommonCore`, `CommonDataModel`, `FiltersVerdict`). The wheel carries their closure: 17 VTK DLLs, which include VTK's own third-party modules (`verdict`, `kissfft`, `loguru`, `scn`, `vtksys`, `token`) under the licences that VTK carries for them. No rendering, IO or Python-wrapper module is bundled. |
-| **oneTBB 2023.1** (`tbb12.dll`) | Apache-2.0 | **dynamic**, DLL bundled into the wheel | Pulled in by the conda-forge VTK build (`vtkCommonCore`, `vtkCommonDataModel`). OCCT is built without TBB. Apache-2.0 asks for the licence and this notice; the licence text is in the oneTBB distribution. |
+| **VTK 9.7.2** | BSD-3-Clause | **dynamic**, DLLs bundled into the wheel | Permissive, notice only. This entry is the notice. `_core.pyd` links three VTK modules (`CommonCore`, `CommonDataModel`, `FiltersVerdict`). The wheel carries their closure: 18 VTK DLLs, which include VTK's own third-party modules (`verdict`, `kissfft`, `loguru`, `scn`, `vtksys`, `token`) under the licences that VTK carries for them. No rendering, IO or Python-wrapper module is bundled. |
+| **oneTBB 2023.2** (`tbb12.dll`) | Apache-2.0 | **dynamic**, DLL bundled into the wheel | Pulled in by the conda-forge VTK build (`vtkCommonCore`, `vtkCommonDataModel`). OCCT is built without TBB. Apache-2.0 asks for the licence and this notice; the licence text is in the oneTBB distribution. |
 | **{fmt} 12.1** (`fmt.dll`) | MIT | **dynamic**, DLL bundled into the wheel | Pulled in by the conda-forge VTK build. Permissive, notice only. This entry is the notice. |
 | **pugixml 1.15** (`pugixml.dll`) | MIT | **dynamic**, DLL bundled into the wheel | Pulled in by `vtkCommonDataModel`. Permissive, notice only. This entry is the notice. |
 | **Microsoft Visual C++ runtime** (`msvcp140.dll`) | Microsoft Visual C++ Redistributable terms | **dynamic**, DLL bundled into the wheel | Distributable code of the MSVC toolset. `delvewheel` bundles it so that the wheel runs on a machine without the redistributable installed. |
@@ -37,7 +37,7 @@ Upstream URLs, commits and the patch index are in [PROVENANCE.md](PROVENANCE.md)
 | **NumPy** | BSD-3-Clause | runtime, a pip dependency | Notice only. |
 
 The Boost, VTK, oneTBB, {fmt} and pugixml versions are those of the build environment
-(`ci/environment.yml`). Only VTK is pinned. `delvewheel` name-mangles every bundled DLL, so none
+(`ci/environment.yml`). VTK and Boost are pinned. `delvewheel` name-mangles every bundled DLL, so none
 of them can collide with a copy that the host process loads.
 
 ## OCCT toolkits bundled
